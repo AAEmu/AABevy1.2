@@ -42,15 +42,84 @@ fn game() -> crate::hud::data::GameData {
         73,
         vec![SlaveSkill::new(15622, 65), SlaveSkill::new(17000, 75)],
     );
-    // the cannon fire skill (10473) is `target_type_id` 11 (`BallisticPos`)
+    game
+}
+
+/// A cannon's gunner bar: the point-1 attached skill is shown (14372), the slot casts the linked
+/// mount skill (10473, `target_type_id` 11). The two extra skills make the gate visible.
+fn cannon_game() -> crate::hud::data::GameData {
+    let mut game = game();
     game.skills.insert(
-        20704,
+        14372,
+        crate::hud::data::SkillInfo {
+            target_type: 0,
+            ..default()
+        },
+    );
+    game.skills.insert(
+        10473,
         crate::hud::data::SkillInfo {
             target_type: 11,
             ..default()
         },
     );
+    game.mode_actions.gunner_skills.insert(
+        10,
+        vec![SlaveSkill::gunner(14372, 16, 10473)],
+    );
     game
+}
+
+fn cannon_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
+    let mut unit = slave_unit(id, template_id);
+    unit.kind = aa_net::model::UnitKind::Slave {
+        id: 8,
+        tl_id: 75,
+        template_id,
+        summoner_id: 100,
+    };
+    unit.model_id = 117;
+    unit
+}
+
+/// Press one driver-bar slot with a fresh world and return the commands it wrote.
+fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let mut world = World::new();
+    world.init_resource::<Messages<SkillPressed>>();
+    world.init_resource::<Messages<aa_net::NetCommand>>();
+    world.init_resource::<Messages<UseFailed>>();
+    let mut writers: SystemState<(
+        MessageWriter<SkillPressed>,
+        MessageWriter<aa_net::NetCommand>,
+        MessageWriter<UseFailed>,
+    )> = SystemState::new(&mut world);
+    let (mut pressed, mut cast, mut failed) = writers.get_mut(&mut world).unwrap();
+    let data = state.borrow();
+    let env = Env::of(&data, None, &[], None);
+    let mut target = aa_net::state::Target::default();
+    target.obj_id = Some(777);
+    use_slot(
+        &data,
+        slot,
+        &env,
+        &mut InFlight::default(),
+        &target,
+        &mut pressed,
+        &mut cast,
+        &mut failed,
+    );
+    drop(data);
+    world
+        .resource_mut::<Messages<aa_net::NetCommand>>()
+        .drain()
+        .map(|command| command.0)
+        .collect()
 }
 
 fn runtime(loaded: bool) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
@@ -425,25 +494,22 @@ fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
     Ok(())
 }
 
-/// A cannon gunner's ballistic skill goes out at the aimed spot, not at the selected unit: the
-/// server's cannon test uses `SkillCastTarget::Position` for exactly this (`flow_tests`).
+/// A cannon gunner's bar shows the point-1 attached skill (14372) but casts the linked mount
+/// skill (10473). With a published sight that BallisticPos cast goes to the aimed spot; without
+/// one it keeps the ordinary unit target. This is the real 1.2 split: the bar skill has
+/// `target_type_id` 0, the mount skill it casts has 11.
 #[test]
 fn a_manned_cannon_slot_fires_at_the_aimed_spot()
 -> Result<(), Box<dyn std::error::Error>> {
-    use crate::hud::{
-        alerts::UseFailed,
-        usable::{Env, InFlight},
-    };
-    use crate::ingame::ground_target::SkillPressed;
-    use bevy::ecs::system::SystemState;
-    let (rt, state) = runtime(true)?;
+    let (rt, state) = runtime(false)?;
+    state.borrow().game.0.set(cannon_game()).ok().unwrap();
     let mut own = crate::hud::expansion::fixture::spawn();
     own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
     crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
-        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        &Event::UnitSpawned(Box::new(cannon_unit(20, 10))),
         None,
     );
     crate::hud::enchant::dispatch(
@@ -452,49 +518,28 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot()
         &Event::UnitAttached { obj_id: 100, mount: 20, point: 1, reason: 1 },
         None,
     );
+    assert_eq!(actions(&state.borrow()), [14372], "the real gunner bar skill");
     state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
         slave: 20,
         aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
         pos: aa_net::Pos::new(130.25, 131.5, 100.0),
         rot: 0.7,
     });
-
-    let mut world = World::new();
-    world.init_resource::<Messages<SkillPressed>>();
-    world.init_resource::<Messages<aa_net::NetCommand>>();
-    world.init_resource::<Messages<UseFailed>>();
-    let mut writers: SystemState<(
-        MessageWriter<SkillPressed>,
-        MessageWriter<aa_net::NetCommand>,
-        MessageWriter<UseFailed>,
-    )> = SystemState::new(&mut world);
-    let (mut pressed, mut cast, mut failed) = writers.get_mut(&mut world).unwrap();
-    let data = state.borrow();
-    let env = Env::of(&data, None, &[], None);
-    let mut target = aa_net::state::Target::default();
-    target.obj_id = Some(777);
-    use_slot(
-        &data,
-        0,
-        &env,
-        &mut InFlight::default(),
-        &target,
-        &mut pressed,
-        &mut cast,
-        &mut failed,
-    );
-    drop(data);
-    let sent: Vec<_> = world
-        .resource_mut::<Messages<aa_net::NetCommand>>()
-        .drain()
-        .map(|command| command.0)
-        .collect();
+    let sent = press_driver_slot(&state, 0);
     let [aa_net::Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot }] = &sent[..] else {
         panic!("{sent:?}")
     };
-    assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (20704, 20, 201));
+    assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (10473, 20, 16));
     assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
     assert_eq!(*rot, 0.7);
+
+    // Not manning the cannon (no sight): the same cast keeps the selected unit.
+    state.borrow_mut().turret = None;
+    let sent = press_driver_slot(&state, 0);
+    let [aa_net::Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id }] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id), (10473, 20, 16, 777));
     Ok(())
 }
 
@@ -1316,4 +1361,54 @@ fn original_mode_bar_queries_granted_skills_hotkeys_and_clicks()
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+/// The real gunner bars: the point-1 attached skill is shown (target_type 0), the linked mount
+/// skill is cast. For a cannon that cast is BallisticPos (11), so a published sight makes it an
+/// aimed `UseMateSkillAt`; the tower deployment skill (slave 100) is not a shot and keeps the
+/// unit target.
+#[test]
+#[ignore = "requires AA_DB and AA_PAK"]
+fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if std::env::var("AA_PAK").is_err() || !std::path::Path::new(&path).exists() {
+        return;
+    }
+    let conn = Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("read the game database");
+    let tables = Tables::load(&conn).expect("mode action tables");
+    let game = crate::hud::data::GameData::load(&path).expect("skill catalog");
+    let target_type = |skill: u32| game.skills.get(&skill).map(|s| s.target_type);
+    for (template, display, mount, fire, aimed) in [
+        (10u32, 14372u32, 16u32, 10473u32, true),
+        (133, 24501, 341, 24500, true),
+        (100, 20161, 184, 20160, false),
+    ] {
+        let bar = tables.gunner_bar(template).expect("gunner bar");
+        let entry = bar.first().expect("one gunner slot");
+        assert_eq!((entry.skill, entry.mount_skill, entry.fire), (display, mount, Some(fire)));
+        assert_eq!(target_type(display), Some(0), "the bar skill is not the shot");
+        let sight = crate::ingame::turret::Sight {
+            slave: 20,
+            aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
+            pos: aa_net::Pos::new(130.25, 131.5, 100.0),
+            rot: 0.7,
+        };
+        let command = slave_cast(entry, Some(&game), Some(sight), 20, 0);
+        if aimed {
+            assert_eq!(target_type(fire), Some(11), "the cast skill is BallisticPos");
+            let aa_net::Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot } = command else {
+                panic!("template {template}: {command:?}")
+            };
+            assert_eq!((skill_id, mate_obj_id, mount_skill_id, pos, rot), (fire, 20, mount, sight.pos, sight.rot));
+        } else {
+            let aa_net::Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id } = command else {
+                panic!("template {template}: {command:?}")
+            };
+            assert_eq!((skill_id, mate_obj_id, mount_skill_id, target_obj_id), (fire, 20, mount, 0));
+        }
+    }
 }

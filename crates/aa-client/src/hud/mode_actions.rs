@@ -17,27 +17,47 @@ mod tests;
 /// The capture's Farm Wagon (slave template 60) reads Owner's Mark 20704, First Round in New Morning 20291
 /// (10 s cooldown), Sound Horn 15622, Water Plant 15450 and Create Water 15546.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct SlaveSkill {
+pub(crate) struct SlaveSkill {
+    /// The skill the bar shows (for a gunner this is the `mount_attached_skills` rider skill,
+    /// 14372/24501/20161).
     pub skill: u32,
+    /// The `mount_skills` row a slave cast carries.
     pub mount_skill: u32,
+    /// The `mount_skills.skill_id` the bar's slot actually casts. For a gunner this is the real
+    /// fire skill (10473/24500/20160), not the rider presentation skill the bar shows; `None`
+    /// for a normal slave bar, whose `skill` is cast directly.
+    pub fire: Option<u32>,
 }
 
 impl SlaveSkill {
     const fn new(skill: u32, mount_skill: u32) -> Self {
-        Self { skill, mount_skill }
+        Self { skill, mount_skill, fire: None }
+    }
+
+    const fn gunner(skill: u32, mount_skill: u32, fire: u32) -> Self {
+        Self { skill, mount_skill, fire: Some(fire) }
+    }
+
+    /// The skill the packet names (`StartSiegeWeaponSkill` sends the mount skill's own skill).
+    pub fn cast_skill(&self) -> u32 {
+        self.fire.unwrap_or(self.skill)
     }
 }
 
 #[derive(Default)]
-pub(super) struct Tables {
+pub(crate) struct Tables {
     skills: HashMap<u32, Vec<u32>>,
     /// `slave_mount_skills` per slave template id, in row order: the driver's mode bar (1.2's
     /// `GetSlaveMountSkillList`; the capture's Farm Wagon order matches the row ids).
     slave_skills: HashMap<u32, Vec<SlaveSkill>>,
+    /// A gunner's bar: `mount_attached_skills` at point 1 (what `GetSiegeWeaponSkill` shows),
+    /// with the `mount_skills.skill_id` the same slot casts. The cannon's `slave_mount_skills`
+    /// row is the fire skill (10473); its point-1 attached skill is the presentation (14372).
+    gunner_skills: HashMap<u32, Vec<SlaveSkill>>,
 }
 
 impl Tables {
-    pub(super) fn load(db: &Connection) -> rusqlite::Result<Self> {
+    pub(crate) fn load(db: &Connection) -> rusqlite::Result<Self> {
         let ids = |table: &str| -> rusqlite::Result<HashSet<u32>> {
             db.prepare(&format!("SELECT id FROM {table}"))?
                 .query_map([], |row| row.get(0))?
@@ -74,7 +94,41 @@ impl Tables {
                 .or_default()
                 .push(SlaveSkill::new(skill, mount_skill));
         }
+        // The gunner bar: the point-1 `mount_attached_skills` skill is displayed, the linked
+        // mount skill is what a cast names (`start_skill` on the server casts the attached skill
+        // after a successful mount skill).
+        let mut query = db.prepare(
+            "SELECT sm.slave_id, mas.skill_id, sm.mount_skill_id, ms.skill_id
+             FROM slave_mount_skills sm
+             JOIN mount_attached_skills mas ON mas.mount_skill_id = sm.mount_skill_id
+                 AND mas.attach_point_id = 1
+             JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+             WHERE sm.slave_id IS NOT NULL AND mas.skill_id > 0 AND ms.skill_id > 0
+             ORDER BY sm.id",
+        )?;
+        for row in query.query_map([], |row| {
+            Ok((
+                row.get::<_, u32>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, u32>(3)?,
+            ))
+        })? {
+            let (slave, skill, mount_skill, fire) = row?;
+            out.gunner_skills
+                .entry(slave)
+                .or_default()
+                .push(SlaveSkill::gunner(skill, mount_skill, fire));
+        }
         Ok(out)
+    }
+
+    /// The real gunner bar for a slave template (displayed skill, mount row, fire skill).
+    pub(crate) fn gunner_bar(&self, template: u32) -> Option<Vec<SlaveSkill>> {
+        self.gunner_skills
+            .get(&template)
+            .cloned()
+            .filter(|skills| !skills.is_empty())
     }
 
     fn has(&self, buff: u32) -> bool {
@@ -169,14 +223,18 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
 /// The slave skill bar of the slave the local player drives, from `slave_mount_skills`; `None` on foot, on a
 /// passenger seat, for a mate, or with the catalog not loaded yet.
 fn driver_skills(data: &HudData) -> Option<Vec<SlaveSkill>> {
-    let template = data.mounted.driver_slave()?.1;
-    data.game
-        .get()?
-        .mode_actions
-        .slave_skills
-        .get(&template)
-        .cloned()
-        .filter(|skills| !skills.is_empty())
+    let (_, template, kind) = data.mounted.driver_slave_kind()?;
+    let tables = &data.game.get()?.mode_actions;
+    let gunner = matches!(kind, 7 | 8)
+        .then(|| tables.gunner_bar(template))
+        .flatten();
+    gunner.or_else(|| {
+        tables
+            .slave_skills
+            .get(&template)
+            .cloned()
+            .filter(|skills| !skills.is_empty())
+    })
 }
 
 /// The mode bar's skills this frame: the driven slave's in its row order, else the received buff skills.
@@ -461,6 +519,39 @@ pub(super) fn push_slots(rt: &UiRuntime, state: &Shared) {
 /// Mode slots use the ordinary skill target/validation path, not an item or forced-self cast; while the
 /// driven slave's bar is shown, a slot is that slave's skill and goes out as a `Mount` caster
 /// (`FUN_39399630` -> `FUN_393989e0`, the same `CSStartSkill` a mate's bar sends).
+/// The packet a driven-slave bar slot writes. A gunner's bar shows `mount_attached_skills`
+/// (14372 etc.) but casts the linked mount skill (10473 etc.); when that cast skill is
+/// `BallisticPos` (target type 11) and the turret system published a sight for the same slave,
+/// the target is the aimed ground point. Every other slave skill keeps the unit/no-target cast.
+pub(crate) fn slave_cast(
+    entry: &SlaveSkill,
+    game: Option<&super::data::GameData>,
+    sight: Option<crate::ingame::turret::Sight>,
+    slave: u32,
+    target_obj_id: u32,
+) -> aa_net::Command {
+    let cast = entry.cast_skill();
+    let ballistic = game
+        .and_then(|game| game.skills.get(&cast))
+        .is_some_and(|info| info.target_type == 11);
+    if let Some(sight) = sight.filter(|sight| ballistic && sight.slave == slave) {
+        aa_net::Command::UseMateSkillAt {
+            skill_id: cast,
+            mate_obj_id: slave,
+            mount_skill_id: entry.mount_skill,
+            pos: sight.pos,
+            rot: sight.rot,
+        }
+    } else {
+        aa_net::Command::UseMateSkill {
+            skill_id: cast,
+            mate_obj_id: slave,
+            mount_skill_id: entry.mount_skill,
+            target_obj_id,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn use_slot(
     data: &HudData,
@@ -486,8 +577,10 @@ pub(super) fn use_slot(
         };
         // The player-centric range/mana/cast checks do not describe the slave; its recorded own
         // cooldown shows the refusal, while its global cooldown and an unanswered press are
-        // dropped silently, like the player's.
-        if let Some(fail) = env.mount_cooldown(slave, skill) {
+        // dropped silently, like the player's. A gunner's cooldown is on the cast skill, which
+        // the server answers (`SCSkillStarted` names 10473, not the 14372 the bar shows).
+        let cast_skill = entry.cast_skill();
+        if let Some(fail) = env.mount_cooldown(slave, cast_skill) {
             failed.write(super::alerts::UseFailed {
                 skill,
                 result: fail.result,
@@ -496,35 +589,17 @@ pub(super) fn use_slot(
             });
             return;
         }
-        if env.mount_held_back(slave, skill, flight) {
+        if env.mount_held_back(slave, cast_skill, flight) {
             return;
         }
-        // A cannon's fire skill is `target_type_id` 11 (`BallisticPos`): it needs the aimed
-        // spot, not a selected unit. The sight comes from the turret system; without one (not
-        // manning the cannon) the ordinary unit target stays. The exact aim point is
-        // capture-pending S12-C1.
-        let ballistic = data
-            .game
-            .get()
-            .and_then(|game| game.skills.get(&skill))
-            .is_some_and(|info| info.target_type == 11);
-        if let Some(sight) = data.turret.filter(|sight| ballistic && sight.slave == slave) {
-            cast.write(aa_net::NetCommand(aa_net::Command::UseMateSkillAt {
-                skill_id: skill,
-                mate_obj_id: slave,
-                mount_skill_id: entry.mount_skill,
-                pos: sight.pos,
-                rot: sight.rot,
-            }));
-        } else {
-            cast.write(aa_net::NetCommand(aa_net::Command::UseMateSkill {
-                skill_id: skill,
-                mate_obj_id: slave,
-                mount_skill_id: entry.mount_skill,
-                target_obj_id: target.obj_id.unwrap_or(0),
-            }));
-        }
-        if env.uses_gcd(skill) {
+        cast.write(aa_net::NetCommand(slave_cast(
+            entry,
+            data.game.get(),
+            data.turret,
+            slave,
+            target.obj_id.unwrap_or(0),
+        )));
+        if env.uses_gcd(cast_skill) {
             flight.sent_mount(slave, web_time::Instant::now());
         }
         return;
