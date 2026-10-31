@@ -151,6 +151,47 @@ Examples in the database: seedling 367 phase 2632 -> `sub_tree_bigfir01_grow02.c
 rice 2246 phase 4403 -> `common_plants_rice01.cgf`, growth 0.75 -> 1.0 over 9,288 s; rice phase 10155 has an empty
 model and the invisible phase groups (`ndeco_do_invisible.cgf`) draw nothing.
 
+## Planting (the 1.2 seed builder)
+
+Seeds, saplings, livestock and the other placeable items are the items with a row in `item_spawn_doodads`; using one
+enters the ground aiming in `ingame/ground_target/plant.rs`: the template's start-phase model follows the cursor
+(`plant::ghost`), and a left click sends `CSCreateDoodad` once the spot passes the rules (`plant::place`). The server
+owns the item, farm, house and labor checks; the client reproduces the builder's placement checks so the player sees
+the same ring and `SIM_DOODAD_MSG` line before the click. The rules and their evidence:
+
+| Rule | Implementation | Evidence |
+|---|---|---|
+| range | 30 m **inclusive** in 3D from the player (`MAX_RANGE`, `in_range`; the click also re-checks it, `d^2 <= 900`) | `FUN_393a8fa0` step 3 refuses only when `900.0 < d^2` (0x399d2464); F1's screen-projected sweep only brackets the boundary near 30 m (29 m valid, 30 m refused, about 1 m apart) |
+| yaw | random `[0, 2π)` for doodad groups 2, 3, 12 (crops, trees, herbs); group 40 is in the decompiled set but was not captured; the previous facing+π yaw otherwise (the decompile says the builder's rotation, which we do not model) | F3 (rice, group 12) and F4 (fig, group 2; cotton, group 3) show different `z_rot` each placement; group 5/24/40 not driven; packet ctor `FUN_397ac850` and `FUN_3983b2f0`/`FUN_3983b340` |
+| packet order | `template, x, y, z, z_rot, scale, item`; `z_rot` precedes `scale`, `scale` 1.0 | F3/F4 raw bodies; `aaemu-game/systems/npcs/doodad/packets.rs` `CSCreateDoodadPacket::read`; byte-exact in `aa-net/src/farm.rs` |
+| overlap | round groups `{2,3,5,12,40,80}` (plus group 38 and template 1219) use a 3D sphere on `r_new + r_other`; other pairs keep the flat own radius until the oriented boxes are decoded | F6 saw 277/278 next to placed crops at 2.5–4 m but did not measure the boundary; `FUN_390367d0`/`FUN_3983b360`; radius `max(sim_radius/1000, 0.1)` from `FUN_3983b280` |
+| units | the new doodad's radius against live units (3D for round groups, flat otherwise) | F6 saw 278 at 3–4 m; `FUN_393a8bd0` (physics sphere/box query) |
+| water | group 40 (marine crops) requires water; every other group refuses it. The 0.3 m depth threshold is an assumption | F5 not driven (no water inside a valid farm); F10/F11 show the area text; `FUN_393a8fa0` step 1; `FUN_3983b340` |
+| texts | area error 0x114 (decimal 276) -> `ui_texts` 277 "Can't be installed here."; 278/279 "Too close to other objects."; 280 "Terrain is too low." (reserved); 281 "Can be placed."; 2206 "Can only be placed aboveground."; 155 "Too far away."; lock 4598 "Can't place this for $1 second(s)." | captured F10/F11 "Can't be installed here.", F13/F14 "Can't place this for N second(s)."; `ui_texts` keys `DOODAD_SIM_*`, `DOODAD_NOT_ON_GROUND`, `TOO_FAR_AWAY`, `CANNOT_LOCATE_DOODAD_NOW` |
+| reuse lock | 30 s from the end of a world load and from a teleport arrival; the next use shows the remaining whole seconds and starts no builder. A send does not start it (two sends 13 s apart succeeded); cancel and other events were not shown by the raw rows | `FUN_39426520` (end of world load) calls `FUN_393a6de0`, which writes `now + _DAT_39ac7748` (30,000 ms in the client data); `FUN_393a8840` checks it and formats `CANNOT_LOCATE_DOODAD_NOW`; F3's countdown follows `SCTeleportUnit` at 19:49:27 and the next send is 38 s later |
+
+**Capture status (2026-10-30, `handoff/2026-10-30-capture-farm-cinema.md`):** F1 bracketed the range around 29/30 m and confirmed the start-phase ghost; its distances are screen projections about 1 m apart, so the decompile (d^2 <= 900, exactly 30 m allowed) sets
+the boundary. F2 (3D vs 2D) was not separable, the decompile's 3D still applies. F3/F4 settled
+the wire order, scale 1.0 and random yaw for groups 2/3/12; group 5/24/40 are not captured, the non-random yaw stays
+the previous facing+π approximation. F5 (water site) and F7 (terrain spread) were not driven. F6 is qualitative only.
+F8/F9/F12/F16/F17 were not driven or not drivable; F10/F11 settled the client area/zone refusal text (0x114 -> 277)
+and that only client-recognised farm areas pass. F13 (read with the raw rows) shows the 30 s reuse lock starting at the teleport/world load, not at a send; F14 shows
+Esc cancelling the builder but has no raw row for a lock, so the other trigger events are capture-pending. Right-click
+state-5, moving away, hotbar switching and an empty stack are open. F15 (owner bar/harvest), F18 (growth start scale)
+and the planting pose/tool/sound remain open. The house/farm-plot/template-zone/dominion checks (F8-F11), the step 0
+exemptions (templates 1218/1219 and group 37), and template 1219's sphere shape per step 5 stay as documented/open;
+the water 0.3 m depth test and the ghost's own rotation are assumptions.
+
+`examples/farm_plant_preview.rs` drives the real systems without a cursor: it presses Rice Seed 15646 (doodad 2246,
+group 12, radius 0.5 m) and checks free/too-far (30.4 m; exactly 30 m is unit-tested as allowed)/no-ground, sphere/box overlap, the literal
+1.2 refusal texts, a scripted send through `aim_input` without a send lock, the teleport/world-load 30 s lock and
+countdown, then restores the free preview and asserts the rice ghost and green ring are visible before the shot;
+without a shot flag it exits after PASS/FAIL:
+
+```
+cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 13
+```
+
 ## Doodads attached to a unit or a house (the farm wagon's storage crates)
 
 A doodad with `parent_obj_id != 0` is drawn under its parent root (`units::doodad_root_transform`,
