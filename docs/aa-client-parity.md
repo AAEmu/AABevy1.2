@@ -597,6 +597,18 @@ These checks do not establish full FMOD output or native world-scene parity. An 
 server lane is being prepared for actual composition/playback settlement; that live result
 is not yet claimed. Placed-instrument admission is under read-only audit. Mounts stay deferred.
 
+The 2026-10-30 farm/cinema capture settles the quest cinema cases. Report: 0x0d0 (component id in
+its u32) when the directing dialog opens, 0x0cf on G, the movie, 0x0ce, then
+`CSCompleteQuestContext` (row `C1-run3`: 22.22 s); Esc is ignored, input events are dropped at the
+source while physics/reporting continue (C1/C4), and the talk window is hidden and closed at the end
+(C5). A before-bubble Start sends 0x0d0 and 0x0cf in the same second and keeps the accept panel over
+the movie (C2). Progress component 5320 starts cinema 49 only from its live update, not a relog
+`QuestsLoaded`, without 0x0d0 (C6). C3 auto-complete/item rows send no cinema or 0x0d0. The
+`cinema_report` example drives the real dialog, UiRuntime, keyboard/mouse messages and packet order
+in shot mode for C1/C2/C4/C5/C6; C1b close/X and C7 the cinema17 dialog-session inference remain
+capture-pending. The full aa-client suite passes 1185 tests with 114 ignored, and aa-net's suite
+passes.
+
 ## Earlier recovery checkpoints
 
 Recovery checkpoint, 2026-10-23: the rebuilt client suite passes **604 tests, zero failures, 42 optional

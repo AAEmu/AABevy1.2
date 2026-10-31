@@ -60,7 +60,7 @@ static SHIFT: AtomicBool = AtomicBool::new(false);
 pub fn plugin(app: &mut App) {
     app.insert_resource(ScriptedDrags::from_args())
         // right after the HUD decided whether the pointer is over it, before the game looks at the mouse
-        .add_systems(PreUpdate, hold_world.after(super::input::pointer_over_ui).run_if(in_state(Screen::InGame)))
+        .add_systems(PreUpdate, hold_world.after(super::input::pointer_over_ui).in_set(super::cinema::CinemaInputRead).run_if(in_state(Screen::InGame)))
         .add_systems(
             Update,
             (track_shift, scripted_drags, bag_events, apply_requests, confirmations)

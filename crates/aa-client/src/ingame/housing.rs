@@ -28,7 +28,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<placement::Builder>()
         .init_resource::<placement::GhostJobs>()
         .init_resource::<render::DrawnHouses>()
-        .add_systems(PreUpdate, placement::input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(PreUpdate, placement::input.in_set(crate::hud::cinema::CinemaInputRead).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
         .add_systems(Update, (placement::start, placement::follow, placement::ghost).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, render::sync_houses.run_if(super::world_screens))
         .add_systems(OnExit(Screen::InGame), (render::clear, placement::clear));

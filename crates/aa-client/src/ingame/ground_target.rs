@@ -314,7 +314,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<InFlight>()
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
-        .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(PreUpdate, aim_input.in_set(AimInput).in_set(crate::hud::cinema::CinemaInputRead).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
         .add_systems(OnEnter(Screen::InGame), plant::lock_on_world_enter.run_if(resource_exists::<crate::ingame::teleport::Teleport>))
         .add_systems(Update, (dev_script, plant::lock_on_arrival, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
