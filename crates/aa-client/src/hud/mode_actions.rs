@@ -31,11 +31,19 @@ pub(crate) struct SlaveSkill {
 
 impl SlaveSkill {
     const fn new(skill: u32, mount_skill: u32) -> Self {
-        Self { skill, mount_skill, fire: None }
+        Self {
+            skill,
+            mount_skill,
+            fire: None,
+        }
     }
 
     const fn gunner(skill: u32, mount_skill: u32, fire: u32) -> Self {
-        Self { skill, mount_skill, fire: Some(fire) }
+        Self {
+            skill,
+            mount_skill,
+            fire: Some(fire),
+        }
     }
 
     /// The skill the packet names (`StartSiegeWeaponSkill` sends the mount skill's own skill).
@@ -269,8 +277,9 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
 fn driver_skills(data: &HudData) -> Option<Vec<SlaveSkill>> {
     let (slave, template, kind) = data.mounted.driver_slave_kind()?;
     let tables = &data.game.get()?.mode_actions;
-    // The engine's seat flag wins; before it reaches the HUD (the attach event can arrive
-    // first) the same template gate as `turret_seat_model` keeps a cannon's attached skill.
+    // A turret seat is this slave when the engine's seat flag names it, or, before that flag
+    // reaches the HUD (the attach event can arrive first), when the template passes the same
+    // kind/velocity/range gate as `turret_seat_model`.
     let turret = match data.turret_seat {
         Some(seated) if seated == slave => true,
         _ => tables.turret_slave(template),

@@ -63,9 +63,10 @@ fn cannon_game() -> crate::hud::data::GameData {
             ..default()
         },
     );
-    game.mode_actions.slave_skills.insert(10, vec![SlaveSkill::new(10473, 16)]);
+    game.mode_actions
+        .slave_skills
+        .insert(10, vec![SlaveSkill::new(10473, 16)]);
     game.mode_actions.attached_point1.insert((10, 16), 14372);
-    game.mode_actions.turret_slaves.insert(10);
     game
 }
 
@@ -493,13 +494,146 @@ fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
     Ok(())
 }
 
+/// A schema fixture mirroring the real rows: cotton cart 73 (kind 6, velocity 4) and galleon
+/// cannon 10 (kind 8, velocity 0), each with its `slave_mount_skills` and point-1
+/// `mount_attached_skills` rows.
+fn schema_game() -> crate::hud::data::GameData {
+    let conn = Connection::open_in_memory().expect("in-memory schema");
+    conn.execute_batch(
+        "CREATE TABLE buffs(id INTEGER);
+         CREATE TABLE skills(id INTEGER);
+         CREATE TABLE buff_skills(buff_id INTEGER, skill_id INTEGER);
+         CREATE TABLE slave_mount_skills(id INTEGER, slave_id INTEGER, mount_skill_id INTEGER);
+         CREATE TABLE mount_skills(id INTEGER, skill_id INTEGER);
+         CREATE TABLE mount_attached_skills(id INTEGER, mount_skill_id INTEGER, attach_point_id INTEGER, skill_id INTEGER);
+         CREATE TABLE slaves(id INTEGER, name TEXT, slave_kind_id INTEGER, model_id INTEGER);
+         CREATE TABLE models(id INTEGER, sub_id INTEGER, sub_type TEXT);
+         CREATE TABLE vehicle_models(id INTEGER, velocity REAL,
+             turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
+             turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
+             turret_yaw_angvel REAL, turret_pitch_angvel REAL);
+         INSERT INTO mount_skills VALUES (65, 15622), (75, 17000), (16, 10473);
+         INSERT INTO slave_mount_skills VALUES (56, 73, 65), (57, 73, 75), (25, 10, 16);
+         INSERT INTO mount_attached_skills VALUES (1, 65, 1, 15548), (2, 16, 1, 14372);
+         INSERT INTO slaves VALUES (73, 'Cotton', 7, 1008), (10, 'Cannon', 8, 117);
+         INSERT INTO models VALUES (1008, 38, 'VehicleModel'), (117, 10, 'VehicleModel');
+         INSERT INTO vehicle_models VALUES
+             (38, 4.0, -60, 60, -360, 360, 30, 10),
+             (10, 0.0, -20, 35, -22, 22, 35, 20);",
+    )
+    .expect("fixture rows");
+    let tables = Tables::load(&conn).expect("fixture tables");
+    let mut game = crate::hud::data::GameData::default();
+    game.mode_actions = tables;
+    game
+}
+
+fn schema_unit(id: u32, kind: u32, template: u32, model: u32) -> aa_net::model::Unit {
+    let mut unit = slave_unit(id, template);
+    unit.kind = aa_net::model::UnitKind::Slave {
+        id: kind,
+        tl_id: 75,
+        template_id: template,
+        summoner_id: 100,
+    };
+    unit.model_id = model;
+    unit
+}
+
+fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
+    driver_skills(&state.borrow())
+        .expect("driver bar")
+        .iter()
+        .map(|skill| (skill.skill, skill.cast_skill()))
+        .collect()
+}
+
+/// `driver_skills` on the same rows the real data has: the cart 73 keeps its mount skills, the
+/// cannon 10 shows the attached skill when the engine's seat flag names it or, before that flag
+/// arrives, when the template gate says it is a turret. A stale flag for another slave also
+/// falls back to the template gate.
+#[test]
+fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
+-> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var("AA_PAK").is_err() {
+        eprintln!("skip: no client pak");
+        return Ok(());
+    }
+    let (rt, state) = runtime(false)?;
+    state.borrow().game.0.set(schema_game()).ok().unwrap();
+    let own = crate::hud::expansion::fixture::spawn();
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let cart = schema_unit(30, 7, 73, 1008);
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitSpawned(Box::new(cart)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 30,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(bar_skills(&state), [(15622, 15622), (17000, 17000)]);
+    assert!(
+        !state
+            .borrow()
+            .game
+            .get()
+            .unwrap()
+            .mode_actions
+            .turret_slave(73),
+        "the velocity-4 cart is not in the template turret set"
+    );
+
+    let cannon = schema_unit(20, 8, 10, 117);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(cannon)),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert!(
+        state
+            .borrow()
+            .game
+            .get()
+            .unwrap()
+            .mode_actions
+            .turret_slave(10),
+        "the cannon is in the template turret set"
+    );
+    assert_eq!(bar_skills(&state), [(14372, 10473)], "template fallback");
+    state.borrow_mut().turret_seat = Some(20);
+    assert_eq!(bar_skills(&state), [(14372, 10473)], "engine seat flag");
+    state.borrow_mut().turret_seat = Some(30);
+    assert_eq!(
+        bar_skills(&state),
+        [(14372, 10473)],
+        "stale flag, template fallback"
+    );
+    Ok(())
+}
+
 /// A cannon gunner's bar shows the point-1 attached skill (14372) but casts the linked mount
 /// skill (10473). With a published sight that BallisticPos cast goes to the aimed spot; without
 /// one it keeps the ordinary unit target. This is the real 1.2 split: the bar skill has
 /// `target_type_id` 0, the mount skill it casts has 11.
 #[test]
-fn a_manned_cannon_slot_fires_at_the_aimed_spot()
--> Result<(), Box<dyn std::error::Error>> {
+fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::error::Error>> {
     let (rt, state) = runtime(false)?;
     state.borrow().game.0.set(cannon_game()).ok().unwrap();
     let mut own = crate::hud::expansion::fixture::spawn();
@@ -511,22 +645,45 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot()
         &Event::UnitSpawned(Box::new(cannon_unit(20, 10))),
         None,
     );
+    // The engine seat flag is what the real attach path has by the time the HUD rebuilds the
+    // bar; `cannon_game` does not put slave 10 in the template fallback set.
+    state.borrow_mut().turret_seat = Some(20);
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
-        &Event::UnitAttached { obj_id: 100, mount: 20, point: 1, reason: 1 },
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
         None,
     );
-    assert_eq!(actions(&state.borrow()), [14372], "the real gunner bar skill");
-    state.borrow_mut().turret_seat = Some(20);
+    assert_eq!(
+        actions(&state.borrow()),
+        [14372],
+        "the real gunner bar skill"
+    );
     state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
         slave: 20,
-        aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
+        aim: aa_net::TurretAim {
+            pitch: 0.3,
+            yaw: -0.2,
+        },
         pos: aa_net::Pos::new(130.25, 131.5, 100.0),
         rot: 0.7,
     });
     let sent = press_driver_slot(&state, 0);
-    let [aa_net::Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot }] = &sent[..] else {
+    let [
+        aa_net::Command::UseMateSkillAt {
+            skill_id,
+            mate_obj_id,
+            mount_skill_id,
+            pos,
+            rot,
+        },
+    ] = &sent[..]
+    else {
         panic!("{sent:?}")
     };
     assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (10473, 20, 16));
@@ -536,10 +693,21 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot()
     // Not manning the cannon (no sight): the same cast keeps the selected unit.
     state.borrow_mut().turret = None;
     let sent = press_driver_slot(&state, 0);
-    let [aa_net::Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id }] = &sent[..] else {
+    let [
+        aa_net::Command::UseMateSkill {
+            skill_id,
+            mate_obj_id,
+            mount_skill_id,
+            target_obj_id,
+        },
+    ] = &sent[..]
+    else {
         panic!("{sent:?}")
     };
-    assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id), (10473, 20, 16, 777));
+    assert_eq!(
+        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
+        (10473, 20, 16, 777)
+    );
     Ok(())
 }
 
@@ -1374,11 +1542,8 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
     if std::env::var("AA_PAK").is_err() || !std::path::Path::new(&path).exists() {
         return;
     }
-    let conn = Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .expect("read the game database");
+    let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("read the game database");
     let tables = Tables::load(&conn).expect("mode action tables");
     let game = crate::hud::data::GameData::load(&path).expect("skill catalog");
     let target_type = |skill: u32| game.skills.get(&skill).map(|s| s.target_type);
@@ -1389,29 +1554,61 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
     ] {
         let bar = tables.gunner_bar(template).expect("gunner bar");
         let entry = bar.first().expect("one gunner slot");
-        assert_eq!((entry.skill, entry.mount_skill, entry.fire), (display, mount, Some(fire)));
-        assert_eq!(target_type(display), Some(0), "the bar skill is not the shot");
+        assert_eq!(
+            (entry.skill, entry.mount_skill, entry.fire),
+            (display, mount, Some(fire))
+        );
+        assert_eq!(
+            target_type(display),
+            Some(0),
+            "the bar skill is not the shot"
+        );
         let sight = crate::ingame::turret::Sight {
             slave: 20,
-            aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
+            aim: aa_net::TurretAim {
+                pitch: 0.3,
+                yaw: -0.2,
+            },
             pos: aa_net::Pos::new(130.25, 131.5, 100.0),
             rot: 0.7,
         };
         let command = slave_cast(entry, Some(&game), Some(sight), 20, 0);
         if aimed {
-            assert_eq!(target_type(fire), Some(11), "the cast skill is BallisticPos");
-            let aa_net::Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot } = command else {
+            assert_eq!(
+                target_type(fire),
+                Some(11),
+                "the cast skill is BallisticPos"
+            );
+            let aa_net::Command::UseMateSkillAt {
+                skill_id,
+                mate_obj_id,
+                mount_skill_id,
+                pos,
+                rot,
+            } = command
+            else {
                 panic!("template {template}: {command:?}")
             };
-            assert_eq!((skill_id, mate_obj_id, mount_skill_id, pos, rot), (fire, 20, mount, sight.pos, sight.rot));
+            assert_eq!(
+                (skill_id, mate_obj_id, mount_skill_id, pos, rot),
+                (fire, 20, mount, sight.pos, sight.rot)
+            );
         } else {
-            let aa_net::Command::UseMateSkill { skill_id, mate_obj_id, mount_skill_id, target_obj_id } = command else {
+            let aa_net::Command::UseMateSkill {
+                skill_id,
+                mate_obj_id,
+                mount_skill_id,
+                target_obj_id,
+            } = command
+            else {
                 panic!("template {template}: {command:?}")
             };
-            assert_eq!((skill_id, mate_obj_id, mount_skill_id, target_obj_id), (fire, 20, mount, 0));
+            assert_eq!(
+                (skill_id, mate_obj_id, mount_skill_id, target_obj_id),
+                (fire, 20, mount, 0)
+            );
         }
     }
-
 }
 
 /// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a turret seat a row with
@@ -1426,15 +1623,16 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
     if !std::path::Path::new(&path).exists() {
         return;
     }
-    let conn = Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .expect("read the game database");
+    let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .expect("read the game database");
     let tables = Tables::load(&conn).expect("mode action tables");
-    let Some(db) = crate::ingame::data::Db::open() else { return };
+    let Some(db) = crate::ingame::data::Db::open() else {
+        return;
+    };
     let mut query = conn
-        .prepare("SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)")
+        .prepare(
+            "SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)",
+        )
         .expect("slave query");
     let rows = query
         .query_map([], |r| {
@@ -1459,7 +1657,11 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
             match tables.attached_point1.get(&(id, mount.mount_skill)) {
                 Some(attached) if turret => {
                     assert_eq!(entry.skill, *attached, "slave {id} {name} attached skill");
-                    assert_eq!(entry.fire, Some(mount.skill), "slave {id} {name} fire skill");
+                    assert_eq!(
+                        entry.fire,
+                        Some(mount.skill),
+                        "slave {id} {name} fire skill"
+                    );
                 }
                 _ => {
                     assert_eq!(entry.skill, mount.skill, "slave {id} {name} mount skill");
@@ -1474,18 +1676,35 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
     let cart = tables.bar(73, false).expect("cotton cart bar");
     assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
     let tank = tables.bar(53, false).expect("tank 53 bar");
-    assert!(tank.iter().any(|row| row.skill == 14332), "tank 53 keeps 14332");
+    assert!(
+        tank.iter().any(|row| row.skill == 14332),
+        "tank 53 keeps 14332"
+    );
     let ladder = tables.bar(5, false).expect("siege ladder bar");
-    assert!(ladder.iter().any(|row| row.skill == 21723), "ladder 5 keeps 21723");
+    assert!(
+        ladder.iter().any(|row| row.skill == 21723),
+        "ladder 5 keeps 21723"
+    );
     let tank54 = tables.bar(54, true).expect("tank 54 bar");
-    assert!(tank54.iter().any(|row| row.skill == 14344), "tank 54 keeps the point-2 row");
+    assert!(
+        tank54.iter().any(|row| row.skill == 14344),
+        "tank 54 keeps the point-2 row"
+    );
     for id in [37u32, 48] {
         assert!(
-            tables.bar(id, true).expect("harpoon bar").iter().any(|row| row.skill == 13750),
+            tables
+                .bar(id, true)
+                .expect("harpoon bar")
+                .iter()
+                .any(|row| row.skill == 13750),
             "harpoon {id} keeps 13750"
         );
     }
-    assert_eq!(tables.bar(90, true).expect("harpoon bar").len(), 2, "slave 90 keeps both rows");
+    assert_eq!(
+        tables.bar(90, true).expect("harpoon bar").len(),
+        2,
+        "slave 90 keeps both rows"
+    );
     for (id, display, fire, mount) in [
         (10u32, 14372u32, 10473u32, 16u32),
         (133, 24501, 24500, 341),
@@ -1496,6 +1715,10 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
             .iter()
             .find(|row| row.mount_skill == mount)
             .unwrap_or_else(|| panic!("slave {id} mount {mount}"));
-        assert_eq!((entry.skill, entry.fire), (display, Some(fire)), "slave {id}");
+        assert_eq!(
+            (entry.skill, entry.fire),
+            (display, Some(fire)),
+            "slave {id}"
+        );
     }
 }
