@@ -112,18 +112,27 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   the first of two), the vertical target `+lift_speed`, and the smoothing response `smooth_time * 0.2`.
 * Vertical smoothing (`FUN_3912d860`): `x = 2 dt / smooth_time`, `1 / (1 + x + 0.48x^2 + 0.235x^3)`; it acts only when the
   target differs by 0.01 m/s. Sliding (`FUN_3912b280`) moves at `move_normal`, no gravity, no input, for `sliding_time`.
-* Wire: the ordinary `CSMoveUnit` (type 1), no glider packet. This client sends stance `FLY` (8) with no actor flag (the
-  server's `on_actor_move` then sees it airborne), `delta_movement` `[0, forward*127, 0]`, velocity at 1/1024 m/s, and a
-  standing packet on the first ground contact. **S14-C1/C3:** the stance byte, actor flags and the landing packet are not
-  captured yet.
+* Wire: the ordinary `CSMoveUnit` (type 1), no glider packet. The real flight rows (2026-10-31 recapture rows
+  5137-5287, buff index 20) are **stance 1, actor flags 0**; move flags are **2 with `delta_movement` 0x7f while W is held**
+  (row 5124), 0 otherwise. A/D/S flag bytes are capture-pending; this client keeps flags 2 for W only. `0x04` in the earlier
+  (walking) rows is STANDING_ON_SOLID and would remove the buff on the first flight packet. At contact the server removes the
+  remove-on-land buff: **`CSRemoveBuff` with the glider buff index and reason 9** (`FUN_393888b0`; log rows 168455 and
+  177786), and the capture sends it **before** the first grounded packet. The ground end is then **stance 1, flags 6, actor
+  flags 0x14** (later grounded packets return to flags 4 / actor 0x04). Water is **stance 2, flags 0, actor flags 0** and
+  then the same remove (row 5288 / 13:39:15), not a fold stop. Velocity at 1/1024 m/s. Deploy is `CSStartSkill` 12373 cast
+  as the equipped item 14677 (item id 16777259). **S14-C1 settled for flight; S14-C3 settled; S14-C2 key flags partly open.**
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
-  item's `asset_id` (`glider_bx.chr` for 14677), attached at the character with the graph's
+  item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
+  attachment (`FUN_394e4e80`) and the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
-  `start/loop/front/back/left/right/sliding/endloop`. **S14-C5:** the attachment bone/offset is not captured; the model is
-  placed at the character's origin.
+  `start/loop/front/back/left/right/sliding/endloop`. **S14-C5 settled.**
 * Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,
-  default 0) makes a second jump in the air ask for the equipped item's skill when in a freefall or 3 m over the terrain.
-  **S14-C4:** the native gate (height, freefall, cooldown) is not in the decompile notes; the height gate is inferred.
+  default 0) makes a second jump in the air ask for the equipped item's skill. **S14-C4 settled:** `FUN_39404d50` line
+  843762 calls `FUN_39399690` on the jump edge only when the actor jump-state byte (`+0x161`) is set and the
+  `glider_start_with_double_jump` cvar (`+0x2ac`) is nonzero; there is no height or freefall gate.
+* Mouse look: with the look button held (taken as the right mouse button), yaw/pitch deltas beyond `gliding_mouse_ad` /
+  `gliding_mouse_ws` (both default 8.0; `FUN_390f7b40` lines 196255-196257) become the A/D and W/S input
+  (`FUN_39404d50` lines 843209-843230). The exact look action is still capture-pending.
 * Remote gliders: a unit under a gliding buff gets the deployed model, the stowed one is hidden, and its pose is chosen from
   the reported ground speed (`remote_pose`); turn poses need the keys, which are not on the wire.
 * Landing and obstacles: the landing/lift floor also asks the deck floor `board_deck` uses (`DeckGround`), so a moving
@@ -148,15 +157,13 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
 
 ### Capture-pending steps
 
-1. **S14-C1**: A equips 14677 and uses skill 12373 from a cliff; record 5 s of `CSMoveUnit` (0x089 type 1) in straight,
-   W, S and A/D flight and the first ground contact: stance, alertness, actor flags, fall velocity, `delta_movement`.
-2. **S14-C2**: with each key held, check which axis moves the speed tier and the reported velocity, and whether the mouse
-   adds a turn.
-3. **S14-C3**: check the first packet after touching terrain (stance FLY or relaxed, and whether 0x80 is set).
-4. **S14-C4**: option 57 on, jump off a cliff and press jump at 1, 2, 3 and 5 m: record `CSStartSkill` / `SCBuffCreated`
-   and whether a minimum height or freefall is needed; option off must not deploy.
-5. **S14-C5**: from a second client and from A, capture where the opened model hangs (bone 0x2d / `item_back_c` vs the
-   character origin) and the camera distance.
+1. **S14-C1**: settled for flight 2026-10-31 (stance 1 / actor flags 0 while flying; move flags 2 with delta 0x7f while
+   W is held, 0 otherwise; deploy is item cast 12373 with item 16777259/14677). Still capture A/D/S flag bytes.
+2. **S14-C2**: capture the exact look action; W/S speed tiers, A/D turn and the mouse cvar thresholds are settled.
+3. **S14-C3**: settled: `CSRemoveBuff` index + reason 9, then ground stance 1 / flags 6 / actor 0x14, later packets flags 4 /
+   actor 0x04; water stance 2 / flags 0 / actor 0 then the remove. The old "fold stop" (stance 2) was that water entry.
+4. **S14-C4**: settled: jump edge + actor jump-state byte + `glider_start_with_double_jump`; no height/freefall gate.
+5. **S14-C5**: settled: `item_glider` identity attachment for the opened model; `item_back_c` for the stowed one.
 6. **S14-C6**: read the live unit's attributes 7/8/9 (base + the buff's modifiers) and compare them with buff row 1029's
    `gliding_move_speed_*`.
 7. **S14-C7**: glide up under a bridge or a ship's deck: does the rise stop before the head passes through, and where?

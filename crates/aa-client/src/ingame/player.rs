@@ -840,13 +840,18 @@ pub struct SendState {
     /// The glider controller owns this frame's movement (`glide::control_glide` ran and the character flies).
     pub(crate) glide_owns: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
-    settled: bool,
+    pub(crate) settled: bool,
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
 }
 
 impl SendState {
+    /// Stops auto-run when a movie starts; the normal input path restarts it only from new keys.
+    pub(crate) fn stop_autorun(&mut self) {
+        self.autorun = AutoRun::default();
+    }
+
     /// Reports the position in the next step, moving or not (getting on and off a mount).
     pub fn send_now(&mut self) {
         self.sent_first = false;
@@ -857,9 +862,9 @@ impl SendState {
         self.since_spawn
     }
 
-    /// In 1.2's freefall (move mode 1): the glider's second-jump gate uses it.
-    pub(crate) fn in_freefall(&self) -> bool {
-        self.freefall
+    /// The air time began with a jump (the actor's jump-state byte the glider's double-jump gate reads).
+    pub(crate) fn in_jump(&self) -> bool {
+        self.took_off
     }
 
     /// The next air time started with a take-off (a deck jump-off), not a fall.

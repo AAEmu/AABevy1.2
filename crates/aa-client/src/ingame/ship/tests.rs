@@ -16,6 +16,7 @@ use super::deck::{DeckContact, DeckRide, ship_to_world};
 use super::floor::ShipFloor;
 use super::*;
 use aa_anim::ClipLibrary;
+use bevy::input::mouse::AccumulatedMouseMotion;
 use aa_net::Command;
 use aa_net::NetEvent;
 use aa_net::model::{Attachment, Movement, Unit, UnitKind};
@@ -634,6 +635,7 @@ impl DeckApp {
         app.init_resource::<Time>()
             .init_resource::<crate::settings::Actions>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<Player>()
             .init_resource::<PlayerInput>()
@@ -2105,6 +2107,7 @@ fn dismount_app() -> Option<(App, Entity)> {
     app.init_resource::<Time>()
         .init_resource::<crate::settings::Actions>()
         .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<AccumulatedMouseMotion>()
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<Player>()
         .init_resource::<PlayerInput>()
@@ -2216,6 +2219,7 @@ fn ship_get_off_app() -> Option<(App, Entity, f32, Vec3)> {
     app.init_resource::<Time>()
         .init_resource::<crate::settings::Actions>()
         .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<AccumulatedMouseMotion>()
         .init_resource::<ButtonInput<KeyCode>>()
         .insert_resource(player)
         .init_resource::<PlayerInput>()
@@ -2426,6 +2430,7 @@ fn a_glider_slide_off_a_raised_deck_falls_and_lands() {
         touched: false,
         touched_for: 0.0,
         missing: 0.0,
+        water: false,
         deck: Some(contact),
     });
     f.app

@@ -3,7 +3,9 @@
 //! The example drives `glide::track_flight`, `glide::request_deploy`, `glide::control_glide` and
 //! `player::control_player` on a deterministic 60 Hz clock over the real `main_world` terrain (AA_PAK and AA_DB are
 //! required). It injects buff 1029 as the server's `SCBuffCreated` would, removes it as `remove_on_land` would after the
-//! character touches the ground, and folds it in the air.
+//! character touches the ground, and folds it in the air. The wire check requires every flight packet to be the captured
+//! stance 1 / actor 0 shape, the touchdown to send `CSRemoveBuff` (index, reason 9) before the captured landing packet
+//! (stance 1, flags 6, actor 0x14), and the fold not to require a landing wire.
 //!
 //! It asserts: the opening climbs at 3 m/s for 0.7 s (about 2.1 m, `FUN_3912d860`'s double sign flip), 4 s of gliding
 //! at the data's 6.00 m/s forward and -1.50 m/s down, the landing slide ends within its 1.00 s and hands control back,
@@ -31,9 +33,10 @@ mod task;
 
 use std::time::Duration;
 
-use aa_net::NetCommand;
 use aa_net::state::{BuffEntry, Buffs};
+use aa_net::{Command, NetCommand};
 use bevy::ecs::system::RunSystemOnce;
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use ingame::glide::{self, Phase};
 use ingame::player::{self, LocalPlayer, Mover, PlayerInput, SendState};
@@ -86,6 +89,9 @@ struct Sim {
     buff_on: bool,
     keep_open: bool,
     done: bool,
+    glide_wire: bool,
+    landing_wire: bool,
+    remove_sent: bool,
 }
 
 #[derive(Component)]
@@ -136,6 +142,9 @@ fn main() -> AppExit {
     .init_resource::<ingame::LocalMount>()
     .init_resource::<ingame::units::Views>()
     .init_resource::<crate::settings::Actions>()
+    .init_resource::<ButtonInput<KeyCode>>()
+    .init_resource::<ButtonInput<MouseButton>>()
+    .init_resource::<AccumulatedMouseMotion>()
     .insert_resource(ingame::DevOptions::from_args())
     .add_message::<NetCommand>()
     .insert_resource(Sim {
@@ -151,6 +160,9 @@ fn main() -> AppExit {
         buff_on: false,
         keep_open,
         done: false,
+        glide_wire: false,
+        landing_wire: false,
+        remove_sent: false,
     })
     .insert_resource(ClearColor(Color::srgb(0.62, 0.74, 0.88)))
     .add_systems(Startup, stage)
@@ -261,10 +273,43 @@ fn step(world: &mut World) {
                 .expect("control_player");
             after(world, &mut sim);
         }
-        world
-            .resource_mut::<Messages<NetCommand>>()
-            .drain()
-            .for_each(drop);
+        let mut saw_remove = false;
+        for NetCommand(command) in world.resource_mut::<Messages<NetCommand>>().drain() {
+            let Command::RemoveOwnBuff { buff_index, reason } = command else {
+                if let Command::Move(movement) = command {
+                    let wire = movement.to_movement(0);
+                    match sim.stage {
+                        Stage::Climb | Stage::Glide | Stage::LandWait
+                            if wire.stance == 1 && wire.actor_flags == 0 && wire.flags & !0x02 == 0 =>
+                        {
+                            sim.glide_wire = true;
+                        }
+                        Stage::LandWait
+                            if wire.stance == 1 && wire.flags == 6 && wire.actor_flags == 0x14 =>
+                        {
+                            assert!(
+                                saw_remove || sim.remove_sent,
+                                "glider_flight: FAILED landing packet before CSRemoveBuff"
+                            );
+                            sim.landing_wire = true;
+                        }
+                        Stage::Climb | Stage::Glide | Stage::LandWait => {
+                            panic!(
+                                "glider_flight: FAILED wire in {:?}: stance {} flags {} actor 0x{:02x}",
+                                sim.stage, wire.stance, wire.flags, wire.actor_flags
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            };
+            assert_eq!(buff_index, 9, "glider_flight: wrong buff index removed");
+            assert_eq!(reason, 9, "glider_flight: glider end must use CSRemoveBuff reason 9");
+            assert!(!sim.remove_sent, "glider_flight: duplicate CSRemoveBuff");
+            sim.remove_sent = true;
+            saw_remove = true;
+        }
         if sim.time > BUDGET && !sim.done {
             let phase = world
                 .resource::<glide::Gliding>()
@@ -416,6 +461,19 @@ fn after(world: &mut World, sim: &mut Sim) {
                 info!(
                     "glider_flight: fold handed {:.2} m/s to gravity, now {vz:.2} m/s at z {z:.2}",
                     sim.fold_vz
+                );
+                assert!(
+                    sim.glide_wire,
+                    "glider_flight: FAILED wire: no captured flight packet"
+                );
+                assert!(
+                    sim.remove_sent && sim.landing_wire,
+                    "glider_flight: FAILED landing wire: remove {} / landing {}",
+                    sim.remove_sent,
+                    sim.landing_wire
+                );
+                info!(
+                    "glider_flight: wire captured: flight stance 1/actor 0; CSRemoveBuff 9; landing 1/6/0x14"
                 );
                 info!(
                     "glider_flight: PASS: startup climb, glide speeds, landing slide and in-air fold"

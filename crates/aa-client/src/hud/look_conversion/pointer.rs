@@ -419,6 +419,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         PreUpdate,
         begin
+            .in_set(super::super::cinema::CinemaInputRead)
             .after(super::super::input::pointer_over_ui)
             .before(super::super::drag::hold_world)
             .before(crate::ingame::ground_target::AimInput)
