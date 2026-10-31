@@ -46,6 +46,8 @@ pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
+#[cfg(test)]
+mod farm_audit;
 mod dev;
 pub(crate) mod cutdown;
 pub(crate) mod doodad_affordance;
@@ -91,15 +93,23 @@ use bevy::prelude::*;
 
 use crate::Screen;
 pub(crate) use dev::DevOptions;
+pub(crate) use camera::OrbitCamera;
+
 #[allow(unused_imports)] // `Motion` is for the dev examples
 pub(crate) use anim::{LocalJump, Motion};
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
+#[cfg(test)]
+pub(crate) use swim::ActorParams;
 #[cfg(test)]
 pub(crate) use mount::LocalSeat;
 pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
+
+/// The last camera writer: the movie camera owns the FOV after the normal lens systems.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CameraFinal;
 
 pub struct InGamePlugin;
 
@@ -117,6 +127,7 @@ impl Plugin for InGamePlugin {
         if !app.is_plugin_added::<aa_anim::facial::FacialPlugin>() {
             app.add_plugins(aa_anim::facial::FacialPlugin);
         }
+        app.configure_sets(Update, CameraFinal.after(cam_fov::drive_cam_fov));
         if !app.is_plugin_added::<AaWorldPlugin>() {
             app.add_plugins(AaWorldPlugin::new(WORLD));
         }

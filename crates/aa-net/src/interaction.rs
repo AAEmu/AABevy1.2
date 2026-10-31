@@ -47,6 +47,10 @@ pub enum Interact {
     /// `CSNaviOpenPortal`: open the portal of the navi doodad `doodad_obj_id` (`DoodadFuncNaviOpenPortal`, a Guide
     /// Gate). The lane only logs it.
     NaviOpenPortal { doodad_obj_id: u32 },
+    /// `CSRequestPermissionToPlayCinemaForDirectingMode` 0x0d0: ask to play the cinema of component
+    /// `component_id` through the NPC `npc_obj_id` or the doodad `doodad_obj_id`
+    /// (`systems/services/character_packets.rs:278`; capture rows `C1-click` 5336 and `C2-call` 6758).
+    CinemaPermission { component_id: u32, npc_obj_id: u32, doodad_obj_id: u32 },
     /// `CSStartedCinema` 0x0cf / `CSCompletedCinema` 0x0ce (empty): the quest cinema of the current
     /// step began / ended. The server marks the step's `ObjCinema` act playing on the first and
     /// counts it done on the second; it never starts a cinema itself.
@@ -65,8 +69,9 @@ impl Interact {
             Self::QuestTalk { .. } => cs::CSQuestTalkMadePacket,
             Self::NaviTeleport { .. } => cs::CSNaviTeleportPacket,
             Self::NaviOpenPortal { .. } => cs::CSNaviOpenPortalPacket,
-            Self::Cinema { completed: false } => 0x0cf,
-            Self::Cinema { completed: true } => 0x0ce,
+            Self::CinemaPermission { .. } => cs::CSRequestPermissionToPlayCinemaForDirectingMode,
+            Self::Cinema { completed: false } => cs::CSStartedCinemaPacket,
+            Self::Cinema { completed: true } => cs::CSCompletedCinemaPacket,
         }
     }
 
@@ -95,6 +100,9 @@ impl Interact {
             }
             Self::NaviTeleport { doodad_obj_id } | Self::NaviOpenPortal { doodad_obj_id } => {
                 w.bc(doodad_obj_id);
+            }
+            Self::CinemaPermission { component_id, npc_obj_id, doodad_obj_id } => {
+                w.u32(component_id).bc(npc_obj_id).bc(doodad_obj_id);
             }
             Self::Cinema { .. } => {}
         }
@@ -248,6 +256,12 @@ mod tests {
         assert_eq!(body(&Interact::NaviTeleport { doodad_obj_id: 0x0A0B0C }), [0x0C, 0x0B, 0x0A]);
         assert_eq!(Interact::NaviTeleport { doodad_obj_id: 1 }.opcode(), 0x0e7);
         assert_eq!(Interact::NaviOpenPortal { doodad_obj_id: 1 }.opcode(), 0x0e8);
+        // CSRequestPermissionToPlayCinemaForDirectingMode: u32 component, bc npc, bc doodad
+        // (the server's `systems/services/character_packets.rs:278` reader; capture `C1-click`
+        // sent component 5336 = d8 14 00 00 for npc d4 43)
+        let b = body(&Interact::CinemaPermission { component_id: 5336, npc_obj_id: 17364, doodad_obj_id: 0 });
+        assert_eq!(b, [0xD8, 0x14, 0, 0, 0xD4, 0x43, 0, 0, 0, 0]);
+        assert_eq!(Interact::CinemaPermission { component_id: 1, npc_obj_id: 0, doodad_obj_id: 0 }.opcode(), 0x0d0);
         // CSStartedCinema / CSCompletedCinema: empty
         assert!(body(&Interact::Cinema { completed: false }).is_empty());
         assert_eq!(Interact::Cinema { completed: false }.opcode(), 0x0cf);

@@ -104,6 +104,21 @@ impl Actions {
         )
     }
 
+    /// Drop every saved action (movie start): held keys are re-read from the button state later.
+    pub(crate) fn clear_for_movie(&mut self) {
+        self.physical.clear();
+        self.latched.clear();
+        self.pressed.clear();
+        self.tapped.clear();
+        self.mouse_latched.clear();
+        self.primed = false;
+    }
+
+    /// Rebuild the physical key map from the next frame's real button state.
+    pub(crate) fn reread_physical(&mut self) {
+        self.primed = false;
+    }
+
     fn begin(&mut self, blocked: bool) {
         self.tapped.clear();
         self.zoom_lines = 0.0;
