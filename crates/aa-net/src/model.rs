@@ -886,6 +886,8 @@ pub struct Unit {
     pub anim_action: u32,
     /// Received house posture; absent until a full unit tail or house posture report supplies it.
     pub house_posture: Option<crate::unit_msg::HousePosture>,
+    /// Type-8 posture: the stored `CSTurretState` aim of a cannon/siege slave, in its model frame.
+    pub turret: Option<crate::turret::TurretAim>,
     /// Raw lane attachment fields in the unit-state snapshot, distinct from UnitAttached notifications.
     pub state_attachments: Option<UnitStateAttachments>,
     /// What the unit sits on (a mount, a vehicle, a ship) and where, set while `UnitAttached` is in force.
@@ -1093,6 +1095,7 @@ impl Unit {
             buffs: Vec::new(),
             anim_action: 0,
             house_posture: None,
+            turret: None,
             state_attachments: None,
             attached_to: None,
             doodad_bond: None,
@@ -1141,7 +1144,9 @@ impl Unit {
                 r.skip(1)?; // activate
             }
             7 => r.skip(14)?,
-            8 => r.skip(8)?,
+            // The server's `Unit.ModelPosture` block for `ModelPostureType::TurretState`
+            // (`systems/npcs/npc/packets.rs`): `f32 pitch, f32 yaw`, the stored aim.
+            8 => self.turret = Some(crate::turret::TurretAim::read(r)?),
             other if strict => return Err(WireError::Invalid(format!("unit kind {kind_byte} model posture {other}"))),
             _ => return Ok(()),
         }
@@ -2503,6 +2508,33 @@ mod exp_tests {
         }
         for level in 1..=MAX_LEVEL {
             assert_eq!(table.level_for_total(table.total_for_level(level)), level);
+        }
+    }
+
+    /// `SCUnitState`'s posture block for a slave: the server writes the stored aim for
+    /// `ModelPostureType::TurretState` (`systems/npcs/npc/packets.rs`, `write_f32(pitch).write_f32(yaw)`).
+    #[test]
+    fn a_slave_unit_state_carries_the_stored_turret_aim() {
+        let tail = |posture: u8, pitch: f32, yaw: f32| {
+            let mut w = crate::wire::Writer::new();
+            w.raw(&[1, 2, 3]).i32(10_000).i32(0).u8(255).u8(255);
+            w.u8(posture).bool(false).f32(pitch).f32(yaw).u8(0);
+            w.u8(0).i32(0).i8(0).i8(0).i8(32).u8(0); // skills, buffs, rotation, race
+            w.pisc(&[0, 0, 0, 0]).pisc(&[0, 0, 0, 0]).pisc(&[0, 0]).u16(0);
+            w.u8(0).u8(0).u8(0); // good, bad, hidden buff lists
+            w.finish()
+        };
+        let mut unit = crate::state::tests::unit(9);
+        unit.read_tail(&mut crate::wire::Reader::new(&tail(8, 0.25, -0.5)), 2, false).unwrap();
+        assert_eq!(unit.turret, Some(crate::turret::TurretAim { pitch: 0.25, yaw: -0.5 }));
+        let mut left = crate::state::tests::unit(9);
+        left.read_tail(&mut crate::wire::Reader::new(&tail(0, 0.0, 0.0)), 2, false).unwrap();
+        assert_eq!(left.turret, None);
+        // A type-8 body shorter than its two floats cannot be read safely.
+        let bytes = tail(8, 0.25, -0.5);
+        for end in 0..bytes.len() {
+            let mut unit = crate::state::tests::unit(9);
+            assert!(unit.read_tail(&mut crate::wire::Reader::new(&bytes[..end]), 2, false).is_err(), "cut {end}");
         }
     }
 }
