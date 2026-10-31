@@ -23,9 +23,10 @@
 //!   `land_height + 0.2` that hits sets stance 5 (sliding), a miss sets stance 0; a rising velocity also keeps stance 5.
 //!   `CActor::Update` (`FUN_3911feb0`) counts `sliding_time` down and leaves stance 5 at 0.
 //! * `FUN_3912b280` is the sliding movement: `move_normal` along the facing, no gravity and no input.
-//! * The wire is the ordinary `CSMoveUnit` type 1; there is no glider packet. The stance byte and actor flags while gliding
-//!   were not found in a capture yet, so this client sends `stance::FLY` with no actor flag (airborne to the server) and
-//!   mark it capture-pending (S14-C1).
+//! * The wire is the ordinary `CSMoveUnit` type 1; there is no glider packet. The 2026-10-31 recapture
+//!   (`handoff/2026-10-31-recapture2.md` S14) settles S14-C1/C3: while gliding stance 1, move flags 0, actor flags 0x04;
+//!   the first ground packet stance 1, flags 4, actor flags 0x0E; the fold stop stance 2, flags 0, actor flags 0. Deploy is
+//!   `CSStartSkill` 12373 cast as the equipped item (14677, item id 16777259).
 //! * The animation graph (`game/animations/graphs/player_full_body.xml`) has `gliding`/`gliding_slow`/`gliding_fast`/
 //!   `gliding_sliding`, the turn poses `gliding_{left,right,front_left,...}` (TurnSpeedLH +-1.9, 2..200, -200..-2),
 //!   `gliding_start` and `gliding_end` (which fires `CleanupGlider`); the glider model's own `.cal` names
@@ -33,10 +34,10 @@
 //!
 //! **Capture-pending** (concrete capture steps are in `docs/aa-client-movement.md`):
 //!
-//! * S14-C1: the stance byte and actor flags of the gliding and landing movements.
+//! * S14-C1: settled (stance 1 / flags 0 / actor flags 0x04 while gliding).
 //! * S14-C2: which keys feed `controller+0x10` (W / S is assumed, as in the old branches, but the decompile only names the
 //!   axis).
-//! * S14-C3: the movement packet of the first ground contact (this client sends a normal standing packet).
+//! * S14-C3: settled (first ground packet stance 1 / flags 4 / actor flags 0x0E; fold stop stance 2 / flags 0).
 //! * S14-C4: the double-jump deploy gate (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`, option 57, default off): the height /
 //!   freefall gate is unknown; this client asks for the item's skill when airborne in a freefall or 3 m over the terrain.
 //! * S14-C5: where the opened model hangs (this client puts it at the character's origin, like the old branch).
@@ -557,6 +558,8 @@ pub struct Gliding {
     pub ending: f32,
     /// The buff whose flight ended while it was still in the list: it must leave before it can start another flight.
     ended: Option<u32>,
+    /// The next frame has to send the captured fold stop (stance 2, flags 0) after an in-air fold.
+    fold_stop: bool,
     params: Option<HashMap<u32, GlideParams>>,
     /// When the last deploy request went out (s).
     asked: Option<f64>,
@@ -769,6 +772,7 @@ pub fn track_flight(
                     active.buff_id,
                     distance.unwrap_or(f32::INFINITY)
                 );
+                gliding.fold_stop = true;
                 gliding.end_flight(active.buff_id);
                 state.glide_owns = false;
                 return;
@@ -811,6 +815,7 @@ pub fn track_flight(
         deck: None,
     });
     gliding.ending = 0.0;
+    gliding.fold_stop = false;
     gliding.since_sent = SEND_INTERVAL;
     gliding.sent_first = false;
     state.glide_owns = true;
@@ -881,12 +886,18 @@ pub fn request_deploy(
         "glide: second jump in the air, glider skill {} (item {})",
         glider.use_skill, item.template_id
     );
-    out.write(NetCommand(Command::UseItem {
+    out.write(NetCommand(deploy_command(item, glider.use_skill)));
+}
+
+/// The captured deploy: `CSStartSkill` 12373 with the equipped glider's item (14677) as the Item caster
+/// (`2026-10-31-recapture2.md` S14: item_id 16777259, template 14677).
+pub fn deploy_command(item: &aa_net::model::Item, skill: u32) -> Command {
+    Command::UseItem {
         item_id: item.id,
         template_id: item.template_id,
-        skill_id: glider.use_skill,
+        skill_id: skill,
         target_obj_id: 0,
-    }));
+    }
 }
 
 /// The flight: keys, turning, the move, the ground and the movement packets. Runs before `player::control_player`, which
@@ -940,6 +951,23 @@ pub fn control_glide(
         return;
     }
     let Some(mut active) = gliding.active else {
+        if gliding.fold_stop {
+            gliding.fold_stop = false;
+            // S14-C3 (settled 2026-10-31): the stop after the fold is stance 2, move flags 0, actor flags 0
+            send_move(
+                &mut out,
+                &mut gliding,
+                mover.pos,
+                mover.facing,
+                false,
+                stance::SWIM,
+                Vec3::ZERO,
+                [0; 3],
+                MoveState::Ground,
+                Some(0),
+                Some(0),
+            );
+        }
         state.glide_owns = false;
         return;
     };
@@ -1201,6 +1229,8 @@ pub fn control_glide(
                 mover.velocity,
                 [0; 3],
                 MoveState::Ground,
+                None,
+                None,
             );
         }
         if done {
@@ -1218,6 +1248,8 @@ pub fn control_glide(
                 Vec3::ZERO,
                 [0; 3],
                 MoveState::Ground,
+                None,
+                None,
             );
             gliding.end_flight(active.buff_id);
             state.glide_owns = false;
@@ -1391,7 +1423,7 @@ pub fn control_glide(
                 "glide: touched the ground at ({:.1}, {:.1}, {:.1}), asking the server to land",
                 pos.x, pos.y, pos.z
             );
-            // S14-C3: the first grounded movement (stance and flags not captured yet)
+            // S14-C3 (settled 2026-10-31): the first ground packet is stance 1, move flags 4, actor flags 0x0E
             send_move(
                 &mut out,
                 &mut gliding,
@@ -1402,6 +1434,8 @@ pub fn control_glide(
                 Vec3::ZERO,
                 [0; 3],
                 MoveState::Ground,
+                None,
+                Some(0x0E),
             );
         }
         return;
@@ -1416,10 +1450,12 @@ pub fn control_glide(
             pos,
             mover.facing,
             true,
-            stance::FLY,
+            stance::RELAXED,
             velocity,
             delta,
-            MoveState::Fall,
+            MoveState::Ground,
+            Some(0),
+            Some(0x04),
         );
     }
     gliding.active = Some(active);
@@ -1444,6 +1480,8 @@ fn send_move(
     velocity: Vec3,
     delta: [i8; 3],
     state: MoveState,
+    wire_flags: Option<u8>,
+    wire_actor_flags: Option<u8>,
 ) {
     let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
     let cmd = MoveCommand {
@@ -1457,6 +1495,8 @@ fn send_move(
             to_wire(velocity.z),
         ],
         delta_movement: delta,
+        wire_flags,
+        wire_actor_flags,
         ..MoveCommand::default()
     }
     .with_state(state);
@@ -2255,8 +2295,14 @@ mod tests {
         let Some(Command::Move(command)) = commands.first() else {
             panic!("no movement: {commands:?}")
         };
-        assert_eq!(command.stance, stance::FLY);
-        assert_eq!(command.state, MoveState::Fall);
+        let wire = command.to_movement(0);
+        assert_eq!(
+            wire.stance,
+            stance::RELAXED,
+            "S14-C1: stance 1 while gliding"
+        );
+        assert_eq!(wire.flags, 0, "S14-C1: neither moving nor stopping");
+        assert_eq!(wire.actor_flags, 0x04, "S14-C1: actor flags 0x04");
         assert!(command.moving);
         assert!(command.pos.z > 0.0);
         assert!(app.world().resource::<SendState>().glide_owns);
@@ -2953,6 +2999,27 @@ mod tests {
         assert!(
             (facing - turn).abs() < 1e-3,
             "the player's facing did not turn with the hull: {facing} vs {turn}"
+        );
+    }
+    #[test]
+    fn the_deploy_uses_the_item_caster_with_the_equipped_glider() {
+        let item = aa_net::model::Item {
+            id: 16_777_259,
+            template_id: 14_677,
+            ..Default::default()
+        };
+        let Command::UseItem {
+            item_id,
+            template_id,
+            skill_id,
+            target_obj_id,
+        } = deploy_command(&item, 12_373)
+        else {
+            panic!("the deploy is not an item use")
+        };
+        assert_eq!(
+            (item_id, template_id, skill_id, target_obj_id),
+            (16_777_259, 14_677, 12_373, 0)
         );
     }
 }

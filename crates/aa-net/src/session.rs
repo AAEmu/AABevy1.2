@@ -131,6 +131,12 @@ pub struct MoveCommand {
     /// The ship, vehicle or doodad the unit stands on (`0x20` support block). `pos` then carries
     /// the object-local point and `support.world` the world one.
     pub support: Option<crate::model::MoveSupport>,
+    /// Wire move flags override. The 1.2 glider capture sends neither moving nor stopping while flying (`0`),
+    /// and a fold stop with `0`; `None` keeps the flags from `moving`/`state`.
+    pub wire_flags: Option<u8>,
+    /// Wire actor flags override. The glider capture sends `0x04` while flying, `0x0E` on the first ground
+    /// packet and `0` on the fold stop; `None` keeps the flags from `state`.
+    pub wire_actor_flags: Option<u8>,
 }
 
 impl Default for MoveCommand {
@@ -147,6 +153,8 @@ impl Default for MoveCommand {
             in_combat: false,
             fall_vel: 0,
             support: None,
+            wire_flags: None,
+            wire_actor_flags: None,
         }
     }
 }
@@ -217,6 +225,12 @@ impl MoveCommand {
                 m.actor_flags |= actor_flags::STANDING_ON_SOLID;
             }
             m.support = Some(support.clone());
+        }
+        if let Some(flags) = self.wire_flags {
+            m.flags = flags;
+        }
+        if let Some(flags) = self.wire_actor_flags {
+            m.actor_flags = flags;
         }
         m
     }

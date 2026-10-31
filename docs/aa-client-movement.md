@@ -112,10 +112,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   the first of two), the vertical target `+lift_speed`, and the smoothing response `smooth_time * 0.2`.
 * Vertical smoothing (`FUN_3912d860`): `x = 2 dt / smooth_time`, `1 / (1 + x + 0.48x^2 + 0.235x^3)`; it acts only when the
   target differs by 0.01 m/s. Sliding (`FUN_3912b280`) moves at `move_normal`, no gravity, no input, for `sliding_time`.
-* Wire: the ordinary `CSMoveUnit` (type 1), no glider packet. This client sends stance `FLY` (8) with no actor flag (the
-  server's `on_actor_move` then sees it airborne), `delta_movement` `[0, forward*127, 0]`, velocity at 1/1024 m/s, and a
-  standing packet on the first ground contact. **S14-C1/C3:** the stance byte, actor flags and the landing packet are not
-  captured yet.
+* Wire: the ordinary `CSMoveUnit` (type 1), no glider packet, settled by the 2026-10-31 recapture summary
+  (`handoff/2026-10-31-recapture2.md` S14): while gliding **stance 1, move flags 0,
+  actor flags 0x04**; the first ground packet **stance 1, flags 4, actor flags 0x0E**; the fold stop **stance 2, flags 0,
+  actor flags 0**. `delta_movement` `[0, forward*127, 0]`, velocity at 1/1024 m/s. Deploy is `CSStartSkill` 12373 cast as
+  the equipped item 14677 (item id 16777259). **S14-C1/C3 settled; S14-C2 (key axis) remains.**
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
   item's `asset_id` (`glider_bx.chr` for 14677), attached at the character with the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
@@ -148,11 +149,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
 
 ### Capture-pending steps
 
-1. **S14-C1**: A equips 14677 and uses skill 12373 from a cliff; record 5 s of `CSMoveUnit` (0x089 type 1) in straight,
-   W, S and A/D flight and the first ground contact: stance, alertness, actor flags, fall velocity, `delta_movement`.
+1. **S14-C1**: settled 2026-10-31 (stance 1 / flags 0 / actor flags 0x04 while gliding; deploy is item cast 12373 with
+   item 16777259/14677).
 2. **S14-C2**: with each key held, check which axis moves the speed tier and the reported velocity, and whether the mouse
    adds a turn.
-3. **S14-C3**: check the first packet after touching terrain (stance FLY or relaxed, and whether 0x80 is set).
+3. **S14-C3**: settled 2026-10-31 (first ground packet stance 1 / flags 4 / actor flags 0x0E; fold stop stance 2 / flags 0).
 4. **S14-C4**: option 57 on, jump off a cliff and press jump at 1, 2, 3 and 5 m: record `CSStartSkill` / `SCBuffCreated`
    and whether a minimum height or freefall is needed; option off must not deploy.
 5. **S14-C5**: from a second client and from A, capture where the opened model hangs (bone 0x2d / `item_back_c` vs the

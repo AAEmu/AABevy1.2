@@ -31,8 +31,8 @@ mod task;
 
 use std::time::Duration;
 
-use aa_net::NetCommand;
 use aa_net::state::{BuffEntry, Buffs};
+use aa_net::{Command, NetCommand};
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use ingame::glide::{self, Phase};
@@ -86,6 +86,9 @@ struct Sim {
     buff_on: bool,
     keep_open: bool,
     done: bool,
+    glide_wire: bool,
+    landing_wire: bool,
+    fold_wire: bool,
 }
 
 #[derive(Component)]
@@ -151,6 +154,9 @@ fn main() -> AppExit {
         buff_on: false,
         keep_open,
         done: false,
+        glide_wire: false,
+        landing_wire: false,
+        fold_wire: false,
     })
     .insert_resource(ClearColor(Color::srgb(0.62, 0.74, 0.88)))
     .add_systems(Startup, stage)
@@ -261,10 +267,28 @@ fn step(world: &mut World) {
                 .expect("control_player");
             after(world, &mut sim);
         }
-        world
-            .resource_mut::<Messages<NetCommand>>()
-            .drain()
-            .for_each(drop);
+        for NetCommand(command) in world.resource_mut::<Messages<NetCommand>>().drain() {
+            let Command::Move(movement) = command else {
+                continue;
+            };
+            let wire = movement.to_movement(0);
+            match sim.stage {
+                Stage::Climb | Stage::Glide
+                    if wire.stance == 1 && wire.flags == 0 && wire.actor_flags == 0x04 =>
+                {
+                    sim.glide_wire = true;
+                }
+                Stage::LandWait | Stage::SlideWait
+                    if wire.stance == 1 && wire.flags == 4 && wire.actor_flags == 0x0E =>
+                {
+                    sim.landing_wire = true;
+                }
+                Stage::FoldFall if wire.stance == 2 && wire.flags == 0 && wire.actor_flags == 0 => {
+                    sim.fold_wire = true;
+                }
+                _ => {}
+            }
+        }
         if sim.time > BUDGET && !sim.done {
             let phase = world
                 .resource::<glide::Gliding>()
@@ -416,6 +440,16 @@ fn after(world: &mut World, sim: &mut Sim) {
                 info!(
                     "glider_flight: fold handed {:.2} m/s to gravity, now {vz:.2} m/s at z {z:.2}",
                     sim.fold_vz
+                );
+                assert!(
+                    sim.glide_wire && sim.landing_wire && sim.fold_wire,
+                    "glider_flight: FAILED wire: glide {} / landing {} / fold {} not all captured",
+                    sim.glide_wire,
+                    sim.landing_wire,
+                    sim.fold_wire
+                );
+                info!(
+                    "glider_flight: wire stance/flags captured: glide 1/0/0x04, landing 1/4/0x0E, fold 2/0/0"
                 );
                 info!(
                     "glider_flight: PASS: startup climb, glide speeds, landing slide and in-air fold"
