@@ -33,6 +33,7 @@ struct Lookups {
     npc_scale: HashMap<u32, f32>,
     weapons: HashMap<u32, Option<Weapon>>,
     backpacks: HashMap<u32, Option<Weapon>>,
+    gliders: HashMap<u32, Option<Glider>>,
     anim_actions: HashMap<u32, Option<String>>,
     anim_action_tools: HashMap<u32, [Option<Tool>; 2]>,
     mount_poses: HashMap<u32, u32>,
@@ -142,6 +143,13 @@ impl DoodadGrowth {
     }
 }
 
+/// A glider item template: the flying model and the skill the item casts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Glider {
+    pub model: String,
+    pub use_skill: u32,
+}
+
 /// How a weapon item is drawn (`item_weapons` + its `item_assets` row).
 #[derive(Clone, Debug)]
 pub struct Weapon {
@@ -248,6 +256,7 @@ impl Lookups {
             npc_scale: HashMap::new(),
             weapons: HashMap::new(),
             backpacks: HashMap::new(),
+            gliders: HashMap::new(),
             anim_actions: HashMap::new(),
             anim_action_tools: HashMap::new(),
             mount_poses: HashMap::new(),
@@ -693,6 +702,32 @@ impl Db {
             .ok();
         l.weapons.insert(item_id, weapon.clone());
         weapon
+    }
+
+    /// A glider item template (`item_backpacks.backpack_type_id = 2`): the model it opens into (`asset_id`) and the skill
+    /// using it casts (`items.use_skill_id`). The stowed look is [`Db::backpack`]'s (`asset2_id`).
+    pub fn glider(&self, item_id: u32) -> Option<Glider> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(g) = l.gliders.get(&item_id) {
+            return g.clone();
+        }
+        let glider = l
+            .conn
+            .query_row(
+                "SELECT ia.path, i.use_skill_id
+                 FROM item_backpacks b JOIN items i ON i.id = b.item_id JOIN item_assets ia ON ia.id = b.asset_id
+                 WHERE b.item_id = ?1 AND b.backpack_type_id = 2",
+                params![item_id],
+                |r| {
+                    Ok(Glider {
+                        model: norm(&r.get::<_, String>(0)?),
+                        use_skill: r.get::<_, Option<i64>>(1)?.unwrap_or(0) as u32,
+                    })
+                },
+            )
+            .ok();
+        l.gliders.insert(item_id, glider.clone());
+        glider
     }
 
     /// The model a backpack / glider item template wears on the back (`item_backpacks`): its stowed look when it has one

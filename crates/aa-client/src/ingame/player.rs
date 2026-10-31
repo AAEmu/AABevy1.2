@@ -368,6 +368,14 @@ pub fn control_player(
     let dt = time.delta_secs().min(0.1);
     // the scripted clock runs for every controller path, including the deck
     state.since_spawn += dt;
+    // a glider flies the character: `glide::control_glide` has moved it and sent its packets this frame
+    if state.glide_owns {
+        *motion = Motion::default();
+        *input_state = PlayerInput::default();
+        mover.velocity = Vec3::ZERO;
+        state.autorun = AutoRun::default();
+        return;
+    }
     // on a ship deck `ship::deck_control` walks, carries and reports the player
     // (and owns the walk / autorun / turn state while it rides); on the frame it
     // leaves the hull it has already taken that frame's step and input
@@ -829,6 +837,8 @@ pub struct SendState {
     deck_exit: bool,
     /// In a freefall ([`super::jump::freefall`]).
     freefall: bool,
+    /// The glider controller owns this frame's movement (`glide::control_glide` ran and the character flies).
+    pub(crate) glide_owns: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
     pub(crate) settled: bool,
     wait: f32,
@@ -850,6 +860,11 @@ impl SendState {
     /// The script clock the `--walk` time windows use.
     pub(crate) fn since_spawn(&self) -> f32 {
         self.since_spawn
+    }
+
+    /// The air time began with a jump (the actor's jump-state byte the glider's double-jump gate reads).
+    pub(crate) fn in_jump(&self) -> bool {
+        self.took_off
     }
 
     /// The next air time started with a take-off (a deck jump-off), not a fall.
@@ -878,6 +893,11 @@ impl SendState {
     /// Skips the collision-settle wait in the flow tests (no world cells are built there).
     #[cfg(test)]
     pub(crate) fn settle_for_test(&mut self) {
+        self.settled = true;
+    }
+
+    /// Marks the collision around the player ready (the dev examples have no cell build).
+    pub(crate) fn settle_now(&mut self) {
         self.settled = true;
     }
 }
