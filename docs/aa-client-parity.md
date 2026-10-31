@@ -25,8 +25,7 @@ axe/loot presentation remain unverified; see `aa-client-doodads.md` "Pending liv
 ## Transport checkpoint (mounts, carts, ships), 2026-10-29
 
 The older checkpoint sections below still say "mounts remain excluded"; those lines are historical and stay as
-written. This checkpoint lifts that exclusion for the merged mount and cart areas below; ship steering and deck
-standing are open PRs, not yet in main. Most slices pair a capture on the original 1.2 client (r208022) through AAEmu's
+written. This checkpoint lifts that exclusion for the mount, cart and ship areas below. Most slices pair a capture on the original 1.2 client (r208022) through AAEmu's
 client driver with a Bevy replay; the evidence is text under `tools/evidence/` (the two rendering slices below say what
 they used instead).
 
@@ -75,24 +74,25 @@ Merged:
   (`tools/evidence/mount_dismount/`). Open: reason 10 travel, right-side dismount, other players' landing, and the
   settle phase/mid-air height.
 
-Open PRs:
+Ships (merged after the checkpoint was written):
 
-- **#39 ship steering at the helm (open PR).** The helm sends `CSMoveUnit` type 4 `{throttle, steering}` on the 100 ms
+- **#39 ship steering at the helm.** The helm sends `CSMoveUnit` type 4 `{throttle, steering}` on the 100 ms
   pump, resending 0/0 at idle; throttle is ±127 and steering ramps/decays at the ship model's `steer_vel`; the server's
   type 3 decodes with the 30/32767 velocity scale. The 1.2 capture and replay cover idle, forward, reverse, left/right
   and leaving (`tools/evidence/ship_steering/`). Open: larger ships and helm/rudder visuals, the game-option steering
   factor, the sailboat/clipper capture, and remote ship smoothing; deck standing is #40.
-- **#40 ship deck standing (open PR, builds on #39).** A player on a deck sends `CSMoveUnit` type 1 with the ship
-  support block (actor flag 0x20), ship-local position, the relative facing as the primary direction and the world
-  facing as auxiliary z; a jump is 0x44/0x34. Leaving the helm keeps the player on deck, and stepping off resumes world
-  movement. The capture and replay in `tools/evidence/ship_deck/` (the full capture with #39) match structurally:
+- **#40 ship deck standing (builds on #39).** A player on a deck sends `CSMoveUnit` type 1 with the ship support block
+  (actor flag 0x20), ship-local position, the relative facing as the primary direction and the world facing as auxiliary
+  z; a jump is 0x44/0x34. Leaving the helm keeps the player on deck, and stepping off resumes world movement. The
+  capture and replay in `tools/evidence/ship_deck/` (the full capture is #39's `ship_steering/`) match structurally:
   header/actor sets, ship id, cadence and support rows. Open: hull pitch/roll, a raised helm on larger ships, two
   header-only step-off rows, and deck walking/jump values the capture cannot verify.
 
 Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
-hanging (S13), gliders (S14), vehicle state/FX (S15), cart terrain following, vehicle camera distance, walking to the
-mount before mounting, auto-walk, mount jump clips, larger ships, and the copper boiler colour. The detailed pending
-checks are in [units](aa-client-units.md) and the PR descriptions.
+hanging (S13), gliders (S14), vehicle state/FX (S15), walking to the mount before mounting, auto-walk, mount jump clips,
+larger ships, and the copper boiler colour. The detailed pending checks are in [units](aa-client-units.md) and the PR
+descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
+action bar (#44) followed with their own captures.
 
 ## Slider range-notification checkpoint, 2026-10-26
 
