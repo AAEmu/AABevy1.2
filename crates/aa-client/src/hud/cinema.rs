@@ -5,7 +5,8 @@
 //! `worlds/main_world/cinemas/<name>.xml`, then sends `CSCompletedCinema` (0x0ce) and the waiting
 //! `CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow`). Escape is ignored during the
 //! movie (capture C1-run3); the close/X button was not drivable (C1b). Keyboard and mouse events
-//! are dropped at the source while a movie plays, except while chat has the keyboard.
+//! are dropped at the source while a movie plays, except while chat has the keyboard, and for a
+//! capture-measured 2.4 s after it ends (2026-10-31 capture cases 1c/1b).
 //!
 //! The sequence itself is the camera work: the Scene node's camera track selects a Camera node and
 //! its position/rotation/FOV tracks are sampled here. A missing sequence, or an animation the pak
@@ -44,17 +45,27 @@ pub(super) fn plugin(app: &mut App) {
         (CinemaInputGate.after(bevy::input::InputSystems), CinemaInputRead.after(CinemaInputGate)),
     )
     .init_resource::<CinemaPlayer>()
-        .add_systems(OnExit(crate::Screen::InGame), reset)
-        .add_systems(
-            Update,
-            (
-                track.run_if(in_state(crate::Screen::InGame)),
-                tick_cinema.run_if(in_state(crate::Screen::InGame)),
-                cinema_ui.after(tick_cinema).run_if(in_state(crate::Screen::InGame)),
-                drive_cinema_camera.after(crate::ingame::camera::follow_player).in_set(crate::ingame::CameraFinal).run_if(in_state(crate::Screen::InGame)),
-            ),
-        )
-        .add_systems(PreUpdate, block_cinema_input.in_set(CinemaInputGate));
+    .add_systems(OnExit(crate::Screen::InGame), reset)
+    .add_systems(
+        Update,
+        (
+            track.run_if(in_state(crate::Screen::InGame)),
+            tick_cinema.run_if(in_state(crate::Screen::InGame)),
+            cinema_ui
+                .after(tick_cinema)
+                .run_if(in_state(crate::Screen::InGame)),
+            drive_cinema_camera
+                .after(crate::ingame::camera::follow_player)
+                .in_set(crate::ingame::CameraFinal)
+                .run_if(in_state(crate::Screen::InGame)),
+        ),
+    )
+    .add_systems(
+        PreUpdate,
+        (track_held_keys, block_cinema_input)
+            .chain()
+            .in_set(CinemaInputGate),
+    );
 }
 
 fn reset(mut player: ResMut<CinemaPlayer>) {
@@ -321,7 +332,12 @@ pub struct CinemaPlayer {
     hide_dialog: bool,
     played: HashSet<(u32, u32)>,
     queued: std::collections::VecDeque<Queued>,
+    /// Physically held keys, tracked from the first movie frame and through the post-movie block.
     held_keys: Vec<KeyCode>,
+    /// The first movie frame takes the held-key snapshot; later frames only apply key edges.
+    keys_tracked: bool,
+    /// Seconds the game input stays blocked after the movie (1.2 capture 1c, see [`RELEASE_BLOCK_SECS`]).
+    resume_in: Option<f32>,
 }
 
 impl CinemaPlayer {
@@ -357,6 +373,10 @@ impl CinemaPlayer {
 
     pub(crate) fn active(&self) -> bool {
         self.playing.is_some()
+    }
+
+    pub(crate) fn blocking(&self) -> bool {
+        self.playing.is_some() || self.resume_in.is_some()
     }
 }
 
@@ -465,10 +485,54 @@ fn finish(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>, end: c
     start_queued(player, net);
 }
 
+/// 1.2 keeps game input blocked after the cinema while the camera returns. In the 2026-10-31
+/// capture (case 1c, cinema 132) W was held through the end (`CSCompletedCinema` at +14.59 s) and
+/// the first moving `CSMoveUnit` came at end+2.419 s with no new input; case 1b released W at
+/// end+1.2 s and never moved. No timer for this window was found in the x2game decompile, so the
+/// value is capture-measured.
+const RELEASE_BLOCK_SECS: f32 = 2.4;
+
 pub(crate) fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>) {
-    let Some(pending) = player.playing.as_mut() else { return };
-    if let Some(end) = cinema_flow::advance(pending, time.delta_secs()) {
-        finish(&mut player, &mut net, end, "completed");
+    if let Some(pending) = player.playing.as_mut() {
+        if let Some(end) = cinema_flow::advance(pending, time.delta_secs()) {
+            finish(&mut player, &mut net, end, "completed");
+            if player.playing.is_none() {
+                player.resume_in = Some(RELEASE_BLOCK_SECS);
+            }
+        }
+        return;
+    }
+    if let Some(left) = player.resume_in.as_mut() {
+        *left -= time.delta_secs();
+        if *left <= 0.0 {
+            player.resume_in = None;
+        }
+    }
+}
+
+/// Follows the physical keyboard while a movie (and its release window) blocks game input: the
+/// first frame snapshots what is down, later frames apply the real press/release edges.
+pub(crate) fn track_held_keys(
+    mut player: ResMut<CinemaPlayer>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut keyboard: MessageReader<KeyboardInput>,
+) {
+    if player.blocking() {
+        if !player.keys_tracked {
+            player.held_keys = keys.get_pressed().copied().collect();
+            player.keys_tracked = true;
+        }
+    } else if !player.keys_tracked {
+        return;
+    }
+    for event in keyboard.read() {
+        if event.state == bevy::input::ButtonState::Pressed {
+            if !player.held_keys.contains(&event.key_code) {
+                player.held_keys.push(event.key_code);
+            }
+        } else {
+            player.held_keys.retain(|key| *key != event.key_code);
+        }
     }
 }
 
@@ -484,25 +548,21 @@ pub(crate) fn block_cinema_input(
     mut actions: ResMut<crate::settings::Actions>,
     mut send: Option<ResMut<crate::ingame::player::SendState>>,
 ) {
-    if !player.active() {
-        if !player.held_keys.is_empty() {
-            // a key released in this same frame was already processed as unpressed: re-pressing it would stick it
-            // down; Escape is not replayed as a fresh press
-            let released: Vec<KeyCode> = keyboard
-                .iter_current_update_messages()
-                .filter(|event| event.state == bevy::input::ButtonState::Released)
-                .map(|event| event.key_code)
-                .collect();
-            for key in player.held_keys.drain(..) {
-                if key != KeyCode::Escape && !released.contains(&key) {
-                    keys.press(key);
-                }
+    if !player.blocking() {
+        let held = !player.held_keys.is_empty();
+        for key in player.held_keys.drain(..) {
+            // releases have already been applied by `track_held_keys`, including one in this
+            // same frame; Escape is not replayed as a fresh press
+            if key != KeyCode::Escape {
+                keys.press(key);
             }
+        }
+        if held {
             actions.reread_physical();
         }
+        player.keys_tracked = false;
         return;
     }
-    player.held_keys = keys.get_pressed().copied().collect();
     keys.reset_all();
     mouse.reset_all();
     buttons.clear();
@@ -590,8 +650,20 @@ mod tests {
               <Track ParamId="0"><Key time="0" value="60"/><Key time="4" value="90"/></Track>
             </Node></Nodes></Sequence>"#;
         let sequence = Sequence::parse("fov", xml).unwrap();
-        let start = cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true })).unwrap();
-        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
+        let start =
+            cinema_flow::start(1, 2, "fov", 4.0, Some(Interact::Cinema { completed: true }))
+                .unwrap();
+        let mut player = CinemaPlayer {
+            playing: Some(start.pending),
+            sequence: Some(sequence),
+            restore_fov: None,
+            hide_dialog: false,
+            played: Default::default(),
+            queued: Default::default(),
+            held_keys: Default::default(),
+            keys_tracked: false,
+            resume_in: None,
+        };
         player.playing.as_mut().unwrap().elapsed = 2.0;
         let mut app = App::new();
         app.insert_resource(player)
@@ -626,11 +698,21 @@ mod tests {
             .insert_resource(super::super::HudKeyboardFocus(false))
             .insert_resource(crate::settings::Actions::default())
             .init_resource::<crate::ingame::player::SendState>()
-            .insert_resource(CinemaPlayer { playing: Some(start.pending.clone()), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .insert_resource(CinemaPlayer {
+                playing: Some(start.pending.clone()),
+                sequence: None,
+                restore_fov: None,
+                hide_dialog: false,
+                played: Default::default(),
+                queued: Default::default(),
+                held_keys: Default::default(),
+                keys_tracked: false,
+                resume_in: None,
+            })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, block_cinema_input);
+            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
@@ -687,22 +769,211 @@ mod tests {
             .insert_resource(super::super::HudKeyboardFocus(false))
             .insert_resource(crate::settings::Actions::default())
             .init_resource::<crate::ingame::player::SendState>()
-            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .insert_resource(CinemaPlayer {
+                playing: Some(start.pending),
+                sequence: None,
+                restore_fov: None,
+                hide_dialog: false,
+                played: Default::default(),
+                queued: Default::default(),
+                held_keys: Default::default(),
+                keys_tracked: false,
+                resume_in: None,
+            })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, block_cinema_input);
+            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.world_mut().resource_mut::<crate::settings::Actions>().hold_for_test("moveforward");
         app.update();
         assert!(!app.world().resource::<crate::settings::Actions>().pressed("moveforward", 0));
         assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().release(KeyCode::KeyW);
+        key_event(&mut app, KeyCode::KeyW, bevy::input::ButtonState::Released);
         app.update();
         app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
         app.update();
         assert!(!app.world().resource::<crate::settings::Actions>().pressed("moveforward", 0));
         assert!(!app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW));
+    }
+
+    fn cinema_app(player: CinemaPlayer) -> App {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(super::super::HudKeyboardFocus(false))
+            .insert_resource(crate::settings::Actions::default())
+            .init_resource::<crate::ingame::player::SendState>()
+            .insert_resource(player)
+            .insert_resource(Time::<()>::default())
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseButtonInput>()
+            .add_message::<MouseWheel>()
+            .add_message::<NetCommand>()
+            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain())
+            .add_systems(Update, tick_cinema);
+        app
+    }
+
+    fn step(app: &mut App, dt: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    fn key_event(app: &mut App, key: KeyCode, state: bevy::input::ButtonState) {
+        app.world_mut()
+            .resource_mut::<Messages<KeyboardInput>>()
+            .write(KeyboardInput {
+                key_code: key,
+                logical_key: bevy::input::keyboard::Key::Unidentified(
+                    bevy::input::keyboard::NativeKey::Unidentified,
+                ),
+                state,
+                text: None,
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+    }
+
+    fn started_movie() -> CinemaPlayer {
+        let start = cinema_flow::start(1, 2, "fov", 4.0, None).unwrap();
+        CinemaPlayer {
+            playing: Some(start.pending),
+            sequence: None,
+            restore_fov: None,
+            hide_dialog: false,
+            played: Default::default(),
+            queued: Default::default(),
+            held_keys: Default::default(),
+            keys_tracked: false,
+            resume_in: None,
+        }
+    }
+
+    fn run(app: &mut App, frames: usize) {
+        for _ in 0..frames {
+            step(app, 0.1);
+        }
+    }
+
+    #[test]
+    fn a_long_movie_replays_a_key_held_throughout_only_after_the_release_window() {
+        let mut app = cinema_app(started_movie());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        step(&mut app, 0.0);
+        for _ in 0..100 {
+            step(&mut app, 0.1);
+            if app.world().resource::<CinemaPlayer>().playing.is_none() {
+                break;
+            }
+        }
+        assert!(app.world().resource::<CinemaPlayer>().playing.is_none());
+        assert!(app.world().resource::<CinemaPlayer>().resume_in.is_some());
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW),
+            "the key stays blocked after the movie"
+        );
+        run(&mut app, 23);
+        while app.world().resource::<CinemaPlayer>().resume_in.is_some() {
+            assert!(
+                !app.world()
+                    .resource::<ButtonInput<KeyCode>>()
+                    .pressed(KeyCode::KeyW),
+                "the key stays blocked through the window"
+            );
+            step(&mut app, 0.1);
+        }
+        step(&mut app, 0.0);
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW),
+            "the key comes back when input resumes"
+        );
+    }
+
+    #[test]
+    fn a_key_released_during_the_movie_is_not_replayed() {
+        let mut app = cinema_app(started_movie());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        step(&mut app, 0.0);
+        step(&mut app, 0.1);
+        key_event(&mut app, KeyCode::KeyW, bevy::input::ButtonState::Released);
+        run(&mut app, 70);
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW)
+        );
+    }
+
+    #[test]
+    fn a_key_released_during_the_release_window_is_not_replayed() {
+        let mut app = cinema_app(started_movie());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        step(&mut app, 0.0);
+        for _ in 0..100 {
+            step(&mut app, 0.1);
+            if app.world().resource::<CinemaPlayer>().playing.is_none() {
+                break;
+            }
+        }
+        assert!(app.world().resource::<CinemaPlayer>().resume_in.is_some());
+        key_event(&mut app, KeyCode::KeyW, bevy::input::ButtonState::Released);
+        run(&mut app, 30);
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW)
+        );
+    }
+
+    #[test]
+    fn a_key_pressed_during_the_movie_is_replayed_after_the_window() {
+        let mut app = cinema_app(started_movie());
+        step(&mut app, 0.0);
+        step(&mut app, 0.1);
+        key_event(&mut app, KeyCode::KeyW, bevy::input::ButtonState::Pressed);
+        run(&mut app, 70);
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW)
+        );
+    }
+
+    #[test]
+    fn escape_is_not_replayed_after_the_movie() {
+        let mut app = cinema_app(started_movie());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        step(&mut app, 0.0);
+        run(&mut app, 70);
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW)
+        );
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::Escape)
+        );
     }
 
     #[test]
@@ -714,11 +985,21 @@ mod tests {
             .insert_resource(super::super::HudKeyboardFocus(false))
             .insert_resource(crate::settings::Actions::default())
             .init_resource::<crate::ingame::player::SendState>()
-            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .insert_resource(CinemaPlayer {
+                playing: Some(start.pending),
+                sequence: None,
+                restore_fov: None,
+                hide_dialog: false,
+                played: Default::default(),
+                queued: Default::default(),
+                held_keys: Default::default(),
+                keys_tracked: false,
+                resume_in: None,
+            })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, block_cinema_input);
+            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.update();
         app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
@@ -731,7 +1012,17 @@ mod tests {
         let xml = r#"<Sequence Name="cam" EndTime="4"><Nodes><Node Id="0" Type="2" Name="Scene"><Track ParamId="6"><Key time="0" node="Camera_1"/></Track></Node><Node Id="1" Type="3" Name="Camera_1"><Track ParamId="1"><Key time="0" value="0,0,0"/><Key time="4" value="40,0,0"/></Track></Node></Nodes></Sequence>"#;
         let sequence = Sequence::parse("cam", xml).unwrap();
         let start = cinema_flow::start(1, 2, "cam", 4.0, None).unwrap();
-        let mut player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
+        let mut player = CinemaPlayer {
+            playing: Some(start.pending),
+            sequence: Some(sequence),
+            restore_fov: None,
+            hide_dialog: false,
+            played: Default::default(),
+            queued: Default::default(),
+            held_keys: Default::default(),
+            keys_tracked: false,
+            resume_in: None,
+        };
         player.playing.as_mut().unwrap().elapsed = 2.0;
         let mut app = App::new();
         app.insert_resource(player).add_systems(Update, drive_cinema_camera);
@@ -801,7 +1092,17 @@ mod tests {
         let xml = r#"<Sequence Name="cam" EndTime="4"><Nodes><Node Id="0" Type="2" Name="Scene"><Track ParamId="6"><Key time="0" node="Camera_1"/></Track></Node><Node Id="1" Type="3" Name="Camera_1"><Track ParamId="1"><Key time="0" value="0,0,0"/></Track><Track ParamId="0"><Key time="0" value="90"/></Track></Node></Nodes></Sequence>"#;
         let sequence = Sequence::parse("cam", xml).unwrap();
         let start = cinema_flow::start(1, 2, "cam", 4.0, None).unwrap();
-        let player = CinemaPlayer { playing: Some(start.pending), sequence: Some(sequence), restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() };
+        let player = CinemaPlayer {
+            playing: Some(start.pending),
+            sequence: Some(sequence),
+            restore_fov: None,
+            hide_dialog: false,
+            played: Default::default(),
+            queued: Default::default(),
+            held_keys: Default::default(),
+            keys_tracked: false,
+            resume_in: None,
+        };
         let mut app = App::new();
         app.insert_resource(player)
             .configure_sets(Update, crate::ingame::CameraFinal.after(lens))
@@ -873,11 +1174,21 @@ mod tests {
             .insert_resource(super::super::HudKeyboardFocus(true))
             .insert_resource(crate::settings::Actions::default())
             .init_resource::<crate::ingame::player::SendState>()
-            .insert_resource(CinemaPlayer { playing: Some(start.pending), sequence: None, restore_fov: None, hide_dialog: false, played: Default::default(), queued: Default::default(), held_keys: Default::default() })
+            .insert_resource(CinemaPlayer {
+                playing: Some(start.pending),
+                sequence: None,
+                restore_fov: None,
+                hide_dialog: false,
+                played: Default::default(),
+                queued: Default::default(),
+                held_keys: Default::default(),
+                keys_tracked: false,
+                resume_in: None,
+            })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, block_cinema_input);
+            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
         app.world_mut().resource_mut::<Messages<KeyboardInput>>().write(KeyboardInput { key_code: KeyCode::KeyA, logical_key: bevy::input::keyboard::Key::Character("a".into()), state: bevy::input::ButtonState::Pressed, text: Some("a".into()), repeat: false, window: Entity::PLACEHOLDER });
         app.world_mut().resource_mut::<Messages<MouseButtonInput>>().write(MouseButtonInput { button: MouseButton::Left, state: bevy::input::ButtonState::Pressed, window: Entity::PLACEHOLDER });
         app.update();

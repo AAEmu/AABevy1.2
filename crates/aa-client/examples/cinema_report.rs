@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use hud::api::{HudBridge, HudData, Shared};
 use hud::cinema::{
     CinemaInputGate, CinemaInputRead, CinemaPlayer, block_cinema_input, cinema_ui,
-    drive_cinema_camera, tick_cinema, track,
+    drive_cinema_camera, tick_cinema, track, track_held_keys,
 };
 use hud::dialog::{Req, handle_dialog};
 use hud::{GameData, SharedGameData};
@@ -182,6 +182,7 @@ fn main() -> AppExit {
         PreUpdate,
         (
             inject_input.before(CinemaInputGate),
+            track_held_keys.before(block_cinema_input).in_set(CinemaInputGate),
             block_cinema_input.in_set(CinemaInputGate),
             aim_probe.in_set(CinemaInputRead),
         ),
