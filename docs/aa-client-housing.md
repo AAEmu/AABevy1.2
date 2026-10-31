@@ -59,21 +59,44 @@ Using a design item does not cast: `placement::start` reads the `SkillPressed` o
 A right click goes back a step (Rotate -> Position, Position -> end), Escape ends it. `BUILDER_STEP` (`0x224`) is raised
 on every step, `BUILDER_END` (`0x225`) when it ends (the build window closes with it).
 
-The checks (`39333E20`, `39334060` natively) follow the server's `systems/housing/placement.rs`: housing land, its
-group's categories, the houseless / existing-category rules against the account's other houses, and the garden squares
-of other houses (`garden_radius` sum, axis-aligned). The refused ghost wears the red of
-`materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land rules are left
-to the server.
+The spot is first snapped to the 4 m grid (`39325e30`: the footprint's lower left corner to a whole cell). The
+checks (`39333E20`, `39334060`, `39335860` natively) are the original client's, with the server's
+`systems/housing/placement.rs` as the cross-check:
+
+* a restricted category (1 and 7..=13, 15..=18) needs the centre's area group to allow the design's category; a
+  centre outside every polygon is `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` ("Building doesn't fit in this
+  area.");
+* every 4 m cell of the `n x n` footprint (`n = int((2r + 3) / 4)`, `r` the garden radius) must lie in one
+  housing polygon, else `HOUSE_CANNOT_LOCATE_INVALID_AREA` ("You can't construct a building here.");
+* the footprint must not overlap another house's snapped axis-aligned footprint (`HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE`)
+  or a unit/doodad standing in it (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`; the exact collision shapes of mask `0x1f`
+  are capture-pending);
+* terrain under the footprint's corners may vary by at most 6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`).
+
+The houseless / existing-category rules against the account's other houses are the server's. The refused ghost wears
+the red of `materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land
+rules are left to the server.
+
+The 2026-10-31 original-client capture settles the refusal texts: `HOUSE_CANNOT_LOCATE_INVALID_AREA` is "You can't
+construct a building here." and `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` is "Building doesn't fit in this area."
+The spot Bevy used to accept, (15338.53, 14632.33), crosses area 338's south-east notch; the captured valid spot is
+(15328.4, 14631.8), snapped to (15328, 14632).
 
 ## Construction
 
 A right click on a house within 6 m starts the interaction (`393BEFD0`): `CSRequestHouseTax`, then
 `HOUSE_INTERACTION_START("housing", ..)`; `housing_manager.lua` opens the construction window while the house is being
 built, the house window once it stands. Walking 10 m away ends it (`HOUSE_INTERACTION_END`). On a house under
-construction the right click also casts the stage's build skill (`housing_build_steps.skill_id`, target type
-Building) when the bag holds the stage material, else `NOT_ENOUGH_REQUIRED_ITEM`; the server takes the item and the
-labor and answers `SCHouseBuildProgress` -> `HOUSE_STEP_INFO_UPDATED`. The construction window's step list comes
-from `GetHouseConstructionStepInfo` (`consumeItemStack`, `isLaborPower`, `step`, `needActions`).
+construction the right click also casts the stage's build skill (`housing_build_steps.skill_id`): the captured
+`CSStartSkill` is 13 bytes with a plain unit target (kind 0 and the house object id; no BC-house target type), cast
+time 20.99 s, 25 labor and one stage material per action; the server answers `SCHouseBuildProgress` ->
+`HOUSE_STEP_INFO_UPDATED`. The construction window's step list comes from `GetHouseConstructionStepInfo`
+(`consumeItemStack`, `isLaborPower`, `step`, `needActions`).
+
+The client's local material check looks only at the bag, as in the capture: without a bag stack it shows
+`NOT_ENOUGH_REQUIRED_ITEM` ("Not enough <item>."), but the same click still casts when the material is equipped in
+the backpack slot (the server pays it then). One click sends at most one `Command::UseSkill`; the cast bar and labor
+bar follow the ordinary `SCSkillStarted` / `SCCharacterLaborPowerChanged` path.
 
 ## `X2House`
 
@@ -112,14 +135,25 @@ cursor ray).
 * Planting on farms is `ingame/ground_target/plant.rs` (`CSCreateDoodad`).
 * Siege / castle land rules, the house's door and stair models, house HP and repair.
 
-## Recovery live check (2026-10-23)
+## Examples
+
+* `house_build --shot` (needs `AA_PAK` and `AA_DB`): the real area-338 rules refuse (15338.53, 14632.33) and accept
+  (15328.4, 14631.8), the Start button's `CSCreateHouse` is the captured 45 bytes, and the stage-0 captured
+  `SCMyHouse`/`SCHouseState` body is drawn through `SCHouseBuildProgress` 1083 -> 1084 -> 1085 -> 1082 with the model
+  ids asserted, no blank frame and no respawn for a same-model progress.
+* `house_cast --mute` (needs `AA_DB` and the pak for the UI): one click sends one captured `CSStartSkill`; without
+  the bag material it sends none and shows "Not enough Stone Pack.", and an equipped backpack still casts.
+
+## Recovery live check (2026-10-23, superseded)
 
 On the bevy lane, Salonbevy uses Thatched Farmhouse Design 21165 (design 171), pins its ghost at
 housing area 338 in zone 179, `(15338.53, 14632.33)`, and advances through position and rotation.
 The original Start Construction window receives the server's tax quote: deposit 30, base tax 15,
 total 45 certificates, plus the three material stages (10/5/5 actions). Cancel returns to placement,
-Escape ends it, and the test character is restored to its starting position. No create-house request
-is sent in this check; construction, sale/tax settlement and furniture remain unverified live.
+Escape ends it, and the test character is restored to its starting position. That spot is the one the
+2026-10-31 capture shows the original client refusing (the south-east notch of area 338); the builder
+checks above now refuse it too. The check sent no create-house request; the 2026-10-31 capture and the
+`house_build` example cover the create and stage progress.
 
 The script passes all 20 commands with zero server errors, zero logged errors and the existing allowed
 `tab_language` Lua error. Inspected captures are `shots/resume/housing/{before,ghost,quote}.png`;

@@ -3691,6 +3691,13 @@ zero `all/current` actions for a finished house (`current_step == -1`) and
 `base_action + num_action` otherwise. Raw permission values, signed sale bits and raw
 fixed-point XY are retained.
 
+The 2026-10-31 original-client capture pins two golden bodies: `CSCreateHouse` design
+171 at (15328, 14632) is 45 bytes (`design, x i64, y i64, z f32, z_rot f32, item u64,
+money i32, ht i32, bool auto`), and the stage-0 `SCMyHouse`/`SCHouseState` body is the
+100-byte house body (model 1083, 0 of 20 actions). A build action sends a 13-byte
+`CSStartSkill`: skill 14575, caster kind 0 + unit, target kind 0 + the house BC object id,
+no skill object; the server answers `SCSkillStarted` with 20990 ms.
+
 `Houses` applies deltas only to a known timeline. A full body replaces the TL record,
 resets `demolished`, and drops any other TL with the same runtime object id. Character
 selection, world leave and disconnect clear the table and the quote. `UnitsRemoved`
