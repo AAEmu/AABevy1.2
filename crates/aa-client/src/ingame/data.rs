@@ -162,10 +162,12 @@ pub struct SkillLink {
     pub backpack_type: i64,
 }
 
-/// An `item_backpacks` row: the item's backpack type and the skill using it casts (`items.use_skill_id`).
+/// An item template's `item_backpacks` row (when it has one: `backpack_type`) and the skill using it casts
+/// (`items.use_skill_id`). `FUN_393925c0` accepts an item with no `item_backpacks` row; only a row of another type
+/// refuses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ItemBackpack {
-    pub backpack_type: i64,
+    pub backpack_type: Option<i64>,
     pub use_skill: u32,
 }
 
@@ -322,7 +324,8 @@ impl Db {
     }
 
     /// The linked-item rows the skill-use tests need, with the real 1.2 ids: glider 14901 -> slot 26 / type 2,
-    /// glider item 14677 (use skill 12373), trade-pack skill 14902 -> type 3 and item 23605, and a plain skill.
+    /// glider item 14677 (use skill 12373), instrument 14900 -> slot 18 / type 1 with the row-less lute 20480
+    /// (use skill 11951), trade-pack skill 14902 -> type 3 and item 23605, and a plain skill.
     #[cfg(test)]
     pub(crate) fn skill_link_fixture() -> Option<Db> {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -339,10 +342,13 @@ impl Db {
                 "CREATE TABLE skills(id INTEGER PRIMARY KEY, link_equip_slot_id INTEGER, link_backpack_type_id INTEGER);
                  CREATE TABLE items(id INTEGER PRIMARY KEY, use_skill_id INTEGER);
                  CREATE TABLE item_backpacks(item_id INTEGER, backpack_type_id INTEGER);
+                 INSERT INTO skills VALUES(14900, 18, 1);
                  INSERT INTO skills VALUES(14901, 26, 2);
                  INSERT INTO skills VALUES(14902, 26, 3);
                  INSERT INTO skills VALUES(18132, -1, 1);
                  INSERT INTO items VALUES(14677, 12373);
+                 INSERT INTO items VALUES(20480, 11951);
+                 INSERT INTO items VALUES(19742, 19903);
                  INSERT INTO items VALUES(23605, 0);
                  INSERT INTO item_backpacks VALUES(14677, 2);
                  INSERT INTO item_backpacks VALUES(23605, 3);",
@@ -806,7 +812,8 @@ impl Db {
     }
 
     /// An item template's `item_backpacks` row (`backpack_type_id`) and its `items.use_skill_id`: what a skill cast
-    /// through the item needs to check its type and send (`FUN_393925c0`, `FUN_397cf7a0`).
+    /// through the item needs to check its type and send (`FUN_393925c0`, `FUN_397cf7a0`). The join is a LEFT one:
+    /// an item without an `item_backpacks` row (`backpack_type` `None`) is accepted by the decompile, not refused.
     pub fn item_backpack(&self, item_id: u32) -> Option<ItemBackpack> {
         let mut l = self.lookups.lock().unwrap();
         if let Some(item) = l.backpack_items.get(&item_id) {
@@ -816,11 +823,11 @@ impl Db {
             .conn
             .query_row(
                 "SELECT b.backpack_type_id, i.use_skill_id
-                 FROM item_backpacks b JOIN items i ON i.id = b.item_id WHERE b.item_id = ?1",
+                 FROM items i LEFT JOIN item_backpacks b ON b.item_id = i.id WHERE i.id = ?1",
                 params![item_id],
                 |r| {
                     Ok(ItemBackpack {
-                        backpack_type: r.get::<_, Option<i64>>(0)?.unwrap_or(-1),
+                        backpack_type: r.get::<_, Option<i64>>(0)?,
                         use_skill: r.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as u32,
                     })
                 },

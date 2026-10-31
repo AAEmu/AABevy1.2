@@ -19,7 +19,7 @@
 
 use aa_net::state::Inventory;
 
-use super::data::Db;
+use super::data::{Db, ItemBackpack, SkillLink};
 
 /// `item_backpacks.backpack_type_id` of a glider (`item_backpacks` type 2, x2game `DAT_...` comparison in
 /// `FUN_393925c0`).
@@ -40,24 +40,72 @@ pub enum LinkedUse {
     },
 }
 
+/// The two data lookups `FUN_393925c0` makes (`skills` and `items`/`item_backpacks`), implemented by the in-game
+/// [`Db`] and by the HUD's loaded [`GameData`](crate::hud::GameData) so both use this one resolver.
+pub trait LinkSource {
+    fn skill_link(&self, skill: u32) -> Option<SkillLink>;
+    /// `None` when the item template is unknown; a known item has `backpack_type` `None` when it has no
+    /// `item_backpacks` row.
+    fn item_backpack(&self, item: u32) -> Option<ItemBackpack>;
+}
+
+impl LinkSource for Db {
+    fn skill_link(&self, skill: u32) -> Option<SkillLink> {
+        Db::skill_link(self, skill)
+    }
+
+    fn item_backpack(&self, item: u32) -> Option<ItemBackpack> {
+        Db::item_backpack(self, item)
+    }
+}
+
+impl LinkSource for crate::hud::GameData {
+    fn skill_link(&self, skill: u32) -> Option<SkillLink> {
+        self.skill_links.get(&skill).copied()
+    }
+
+    fn item_backpack(&self, item: u32) -> Option<ItemBackpack> {
+        Some(ItemBackpack {
+            backpack_type: self.item_backpack_types.get(&item).copied(),
+            use_skill: self.items.get(&item)?.use_skill,
+        })
+    }
+}
+
 /// Resolve a skill press through the equipped item (`FUN_393925c0`). Without the database the link is unknown, so the
 /// press is left alone rather than guessed.
 pub fn resolve(skill: u32, inventory: Option<&Inventory>, db: Option<&Db>) -> LinkedUse {
-    let (Some(inventory), Some(db)) = (inventory, db) else {
+    resolve_with(skill, inventory, db)
+}
+
+/// [`resolve`] over any [`LinkSource`] (the HUD keeps the same tables in memory).
+pub fn resolve_with<S: LinkSource>(
+    skill: u32,
+    inventory: Option<&Inventory>,
+    source: Option<&S>,
+) -> LinkedUse {
+    let (Some(inventory), Some(source)) = (inventory, source) else {
         return LinkedUse::Plain;
     };
-    let Some(link) = db.skill_link(skill) else {
+    let Some(link) = source.skill_link(skill) else {
         return LinkedUse::Plain;
     };
     let Some(item) = inventory.equipment.get(link.slot) else {
         return LinkedUse::Refused;
     };
-    let Some(backpack) = db.item_backpack(item.template_id) else {
-        return LinkedUse::Refused;
+    let Some(backpack) = source.item_backpack(item.template_id) else {
+        return LinkedUse::Plain;
     };
-    if backpack.backpack_type != link.backpack_type || backpack.use_skill == 0 {
+    // FUN_396a6e40(template) == 0 (no item_backpacks row) accepts the item; only a row of another
+    // backpack type refuses (x2game 743840-743842).
+    if backpack
+        .backpack_type
+        .is_some_and(|kind| kind != link.backpack_type)
+    {
         return LinkedUse::Refused;
     }
+    // FUN_397cf7a0 returns the item's static use skill; 0 is passed on, not turned into a 326 (the
+    // grade-specific reagent selection it can do is not modeled).
     LinkedUse::Converted {
         skill: backpack.use_skill,
         item_id: item.id,
@@ -69,7 +117,7 @@ pub fn resolve(skill: u32, inventory: Option<&Inventory>, db: Option<&Db>) -> Li
 /// double-jump deploy path and [`resolve`]).
 pub fn backpack_use_skill(db: &Db, template: u32, backpack_type: i64) -> Option<u32> {
     let item = db.item_backpack(template)?;
-    (item.backpack_type == backpack_type && item.use_skill != 0).then_some(item.use_skill)
+    (item.backpack_type == Some(backpack_type) && item.use_skill != 0).then_some(item.use_skill)
 }
 
 #[cfg(test)]
@@ -103,7 +151,41 @@ mod tests {
         assert_eq!(resolve(14901, Some(&empty), Some(&db)), LinkedUse::Refused);
         let pack = inventory_with(slot::BACKPACK, Some(item(0x0100_0001, 23605)));
         assert_eq!(resolve(14901, Some(&pack), Some(&db)), LinkedUse::Refused);
-        assert_eq!(resolve(14902, Some(&pack), Some(&db)), LinkedUse::Refused);
+        // F4: a matching row with use_skill 0 converts to skill 0; it is not a 326.
+        assert_eq!(
+            resolve(14902, Some(&pack), Some(&db)),
+            LinkedUse::Converted {
+                skill: 0,
+                item_id: 0x0100_0001,
+                template_id: 23605
+            }
+        );
+    }
+
+    /// F1: no `item_backpacks` row accepts the item (Play Instrument 14900 with a lute 20480/19742).
+    #[test]
+    fn an_item_without_a_backpack_row_converts() {
+        let Some(db) = Db::skill_link_fixture() else {
+            return;
+        };
+        let lute = inventory_with(aa_net::model::slot::MUSICAL, Some(item(0x0100_0002, 20480)));
+        assert_eq!(
+            resolve(14900, Some(&lute), Some(&db)),
+            LinkedUse::Converted {
+                skill: 11951,
+                item_id: 0x0100_0002,
+                template_id: 20480
+            }
+        );
+        let harp = inventory_with(aa_net::model::slot::MUSICAL, Some(item(0x0100_0003, 19742)));
+        assert_eq!(
+            resolve(14900, Some(&harp), Some(&db)),
+            LinkedUse::Converted {
+                skill: 19903,
+                item_id: 0x0100_0003,
+                template_id: 19742
+            }
+        );
     }
 
     /// (b) glider 14677 -> 12373 as an Item cast; 14902's type-3 rule also converts.

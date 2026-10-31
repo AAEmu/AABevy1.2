@@ -11,17 +11,25 @@ caster from the equipped item (owner, item id, template, grade, `made_unit_id`),
 `aa-net.md`. Thus skill 14901 "Use Glider" with glider 14677 equipped becomes `CSStartSkill` 12373 cast as item
 16777259/14677 (self target); without a glider the client shows the local 326 and sends nothing. The action bar,
 hotkeys, the skill book's slots, `/skill` and the script runner all reach `ingame::linked_skill::resolve`, so this is
-not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900.
+not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900. An item with no
+`item_backpacks` row is accepted (`FUN_396a6e40` returns 0), so 14900 with lute 20480/19742 converts; a row of
+another type is the only refusal. A matching row whose `use_skill_id` is 0 converts to skill 0 and is not a 326.
+`FUN_397cf7a0`'s grade-specific reagent selection is not modeled (the static `use_skill_id` is used). The HUD bar
+resolves the same rule for its dark state and cooldown (`FUN_393f61c0`/`FUN_3943f310`, `FUN_3943fa10` sets
+`skillUsable=0`), so a missing item darkens the slot and a linked slot shows the converted skill's timer (14900 ->
+11951, 45 s).
 
 The checkpoint also ends an active flight and removes `DeckRide` when a teleport's loading screen starts, and resets
 `Gliding` on `leave_game`: the paused glide/deck systems otherwise resumed with the old `Active` contact and pulled
-the player back to the ship (or carried the flight into the next character). Tests: `linked_skill` (the four rule
-cases), `ground_target` (the real `SkillPressed` route, local 326 and no packet), `glide` (teleport ends flight and
-deck ride) and `ingame` (logout forgets the flight); `cargo run -p aa-client --example glider_skill_press -- --mute`
-asserts the bar press against the real database. The old "gliders (S14) open" row below is the dated 2026-10-29
+the player back to the ship (or carried the flight into the next character). The teleport keeps `Gliding::ended` at the
+active buff id, like the death and mount branches, so a buff the server does not remove replays nothing after the load.
+Tests: `linked_skill` (no item, glider, wrong type, no backpack row, use skill 0), `ground_target` (the real
+`SkillPressed` route, local 326 and no packet), `usable`/`panels` (dark slot and the converted 45 s cooldown), `glide`
+(teleport ends flight/deck ride and does not restart a still-listed buff) and `ingame` (logout forgets the flight);
+`cargo run -p aa-client --example glider_skill_press -- --mute` asserts the bar press against the real database. The old "gliders (S14) open" row below is the dated 2026-10-29
 checkpoint; glider flight itself landed in #49 and this closes the bar-press G9 gap. Remaining capture-pending:
 S14-C1 A/D/S move flags, S14-C2 the look button, S14-C6 the live speed attributes, S14-C7 ceilings and S14-C8 the
-leaving tolerances, plus the grade-specific `FUN_397cf7a0` reagent selection (this uses the static `use_skill_id`).
+leaving tolerances.
 
 ## Mount-walk checkpoint, 2026-10-31
 

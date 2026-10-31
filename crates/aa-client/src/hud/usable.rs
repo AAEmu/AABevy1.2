@@ -593,20 +593,41 @@ impl Env<'_> {
             .or_else(|| self.resources(r))
     }
 
-    /// The global cooldown the skill still waits for, in milliseconds (0 for the skills that ignore it).
+    /// `FUN_393925c0` over the HUD's own tables: what the pressed skill becomes (the bar resolves the link too).
+    fn linked(&self, skill: u32) -> crate::ingame::linked_skill::LinkedUse {
+        crate::ingame::linked_skill::resolve_with(skill, self.inventory, self.game)
+    }
+
+    /// The skill the client actually casts: the equipped item's use skill for a linked skill, else the pressed one.
+    fn effective_skill(&self, skill: u32) -> u32 {
+        match self.linked(skill) {
+            crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => skill,
+            _ => skill,
+        }
+    }
+
+    fn link_refused(&self, skill: u32) -> bool {
+        matches!(self.linked(skill), crate::ingame::linked_skill::LinkedUse::Refused)
+    }
+
+    /// The global cooldown the skill still waits for, in milliseconds (0 for the skills that ignore it). A linked skill
+    /// waits for the converted skill's.
     pub fn gcd_left(&self, skill: u32) -> u32 {
+        let skill = self.effective_skill(skill);
         let (Some(game), Some(skills)) = (self.game, self.skills) else { return 0 };
         super::cooldown::gcd_at(game, skills, skill, Instant::now()).0
     }
 
-    /// The skill starts the global cooldown (it is known and does not ignore it).
+    /// The skill starts the global cooldown (it is known and does not ignore it). A linked skill uses the converted one.
     pub fn uses_gcd(&self, skill: u32) -> bool {
+        let skill = self.effective_skill(skill);
         self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd)
     }
 
     /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
     /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, or the last press has no answer yet.
     pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
+        let skill = self.effective_skill(skill);
         if self.casting(skill) {
             return true;
         }
@@ -615,16 +636,28 @@ impl Env<'_> {
 
     /// What the client refuses before it asks the server: everything that darkens the slot ([`Env::slot_blocked`]), except
     /// that a target a little over the reach is left to the server (it knows the size of the bodies), and the skill's own
-    /// cooldown (the sweep shows it, the slot stays lit).
+    /// cooldown (the sweep shows it, the slot stays lit). A linked skill is checked as the converted skill it will cast; a
+    /// missing linked item stays the shared route's 326 (not a `SkillResult`), while `slot_blocked` darkens the slot.
     pub fn precheck(&self, skill: u32) -> Option<Fail> {
+        if self.link_refused(skill) {
+            return None;
+        }
+        let skill = self.effective_skill(skill);
         self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
     }
 
     /// Why an action bar slot is dark: the result that refuses it, `None` for a lit slot. An item needs to be in the bag
-    /// and its skill usable (`combat_return`: the potions go dark while Recall is cast).
+    /// and its skill usable (`combat_return`: the potions go dark while Recall is cast). A linked skill whose item is not
+    /// equipped is dark (`FUN_3943fa10` sets `skillUsable=0`; 326 does not fit this `SkillResult` byte, so the bar uses
+    /// `URK_EQUIP_ITEM`).
     pub fn slot_blocked(&self, slot: &SlotSnap) -> Option<u8> {
         match slot.kind {
-            "skill" => self.why_not(slot.id, 0.0).map(|f| f.result),
+            "skill" => {
+                if self.link_refused(slot.id) {
+                    return Some(code::URK_EQUIP_ITEM);
+                }
+                self.why_not(self.effective_skill(slot.id), 0.0).map(|f| f.result)
+            }
             "item" if slot.count <= 0 => Some(code::NEED_REAGENT),
             "item" => {
                 let skill = self.game?.items.get(&slot.id)?.use_skill;
@@ -669,7 +702,12 @@ impl Env<'_> {
     }
 
     /// The skill's own cooldown is running (the global cooldown is not counted: [`Env::held_back`] drops those presses quietly).
+    /// A linked skill reads the converted skill's timer; a missing linked item has no cooldown of its own.
     pub fn cooldown(&self, skill: u32) -> Option<Fail> {
+        if self.link_refused(skill) {
+            return None;
+        }
+        let skill = self.effective_skill(skill);
         let info = self.game?.skills.get(&skill)?;
         let skills = self.skills?;
         // Explicit skill/tag timers are own cooldowns even when the DB duration is zero or
@@ -1045,6 +1083,49 @@ mod tests {
         assert_eq!(check(&skills), Some(fail(code::COOLDOWN_TIME)), "queries read frame-stored remaining time");
         skills.advance_native_frame(31_000);
         assert_eq!(check(&skills), None);
+    }
+
+    /// F3: the bar resolves `FUN_393925c0` too. The slot is dark without the item, and the cooldown and rules are the
+    /// converted skill's (Play Instrument 14900 -> 11951, 45 s; a lute 20480 has no `item_backpacks` row).
+    #[test]
+    fn linked_skills_use_the_converted_skill_and_dark_the_slot_without_the_item() {
+        use crate::hud::data::{ItemInfo, SkillInfo};
+
+        let mut g = GameData::default();
+        for skill in [14900, 14901] {
+            g.skills.insert(skill, SkillInfo::default());
+        }
+        for skill in [11951, 12373] {
+            g.skills.insert(skill, SkillInfo { cooldown_ms: 45_000, ..Default::default() });
+        }
+        g.skill_links.insert(14901, crate::ingame::data::SkillLink { slot: slot::BACKPACK, backpack_type: 2 });
+        g.skill_links.insert(14900, crate::ingame::data::SkillLink { slot: slot::MUSICAL, backpack_type: 1 });
+        g.item_backpack_types.insert(14677, 2);
+        g.items.insert(14677, ItemInfo { use_skill: 12373, ..Default::default() });
+        g.items.insert(20480, ItemInfo { use_skill: 11951, ..Default::default() });
+
+        let me = me();
+        let mut inv = Inventory::default();
+        inv.equipment.slots[slot::BACKPACK] = Some(aa_net::model::Item { template_id: 14677, ..Default::default() });
+        inv.equipment.slots[slot::MUSICAL] = Some(aa_net::model::Item { template_id: 20480, ..Default::default() });
+        let mut skills = Skills::default();
+        for skill in [11951, 12373] {
+            skills.last_used.insert(skill, Instant::now() - Duration::from_secs(1));
+        }
+        let e = Env { game: Some(&g), me: &me, pos: Vec3::ZERO, target: None, target_pos: None, skills: Some(&skills), buffs: &[], inventory: Some(&inv) };
+        let slot_of = |id| SlotSnap { kind: "skill", id, ..SlotSnap::default() };
+        assert_eq!(e.slot_blocked(&slot_of(14901)), None);
+        assert_eq!(e.slot_blocked(&slot_of(14900)), None, "a lute has no item_backpacks row, so it is accepted");
+        // the converted 45 s timer refuses both, though the pressed 14901/14900 have no cooldown of their own
+        assert_eq!(e.precheck(14901).map(|f| f.result), Some(code::COOLDOWN_TIME));
+        assert_eq!(e.precheck(14900).map(|f| f.result), Some(code::COOLDOWN_TIME));
+        assert_eq!(e.cooldown(14901).map(|f| f.result), Some(code::COOLDOWN_TIME));
+
+        let mut bare = inv.clone();
+        bare.equipment.slots[slot::BACKPACK] = None;
+        let e = Env { inventory: Some(&bare), ..e };
+        assert_eq!(e.slot_blocked(&slot_of(14901)), Some(code::URK_EQUIP_ITEM));
+        assert_eq!(e.precheck(14901), None, "the shared route still raises the 1.2 326");
     }
 
     /// The rules as the game database has them (skipped where the database is not installed).

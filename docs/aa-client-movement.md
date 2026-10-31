@@ -135,9 +135,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   the item's `use_skill_id` (12373 for 14677) and `FUN_39044360` makes it an Item cast (the captured deploy above). No
   glider, or another backpack type, is the local 326 `MUST_EQUIP_PROPER_ITEM` and no packet. The double-jump deploy and
   the bar press share `linked_skill::backpack_use_skill`; `request_deploy` itself is unchanged.
-* A teleport's loading screen ends the flight and removes `DeckRide` (`glide::reset_on_teleport`), and `leave_game`
-  resets `Gliding`: the paused glide/deck systems would otherwise resume with the old `Active` deck contact and pull the
-  player back to the ship (or carry the flight into the next character).
+* A teleport's loading screen ends the flight and removes `DeckRide` (`glide::reset_on_teleport`), keeping the active
+  buff id in `Gliding::ended` like the death/mount branches: the server does not remove the gliding buff on a teleport,
+  so `track_flight` must not open it again at the destination. `leave_game` resets `Gliding` (the next character starts
+  clean). Without this the paused glide/deck systems resumed with the old `Active` deck contact and pulled the player
+  back to the ship.
 * Mouse look: with the look button held (taken as the right mouse button), yaw/pitch deltas beyond `gliding_mouse_ad` /
   `gliding_mouse_ws` (both default 8.0; `FUN_390f7b40` lines 196255-196257) become the A/D and W/S input
   (`FUN_39404d50` lines 843209-843230). The exact look action is still capture-pending.

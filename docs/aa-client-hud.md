@@ -397,7 +397,9 @@ Before it sends `UseSkill` / `UseItem`, `use_slot` / `use_bag_slot` ask the same
 not sent and says why. The shared `ground_target::route` then applies the 1.2 linked-item rule (`FUN_393925c0`,
 `ingame::linked_skill`): a skill with `skills.link_equip_slot_id` (14901 "Use Glider") is cast as the equipped item's use skill
 with the item as caster, and an empty or wrong-type slot raises the local 326 `MUST_EQUIP_PROPER_ITEM` with no packet. This
-covers the action bar, hotkeys, the skill book's slots and `/skill`; the script runner uses the same helper. The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
+covers the action bar, hotkeys, the skill book's slots and `/skill`; the script runner uses the same helper. The HUD resolves
+the same rule for the slot itself (`Env::precheck`, `slot_blocked` and the slot cooldown): no matching item darkens the slot
+(`skillUsable=0`, `FUN_3943fa10`), and a linked slot shows the converted skill's cooldown (`FUN_393f61c0`/`FUN_3943f310`). The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
 2 m beyond the reach is still sent (the server knows the size of the bodies), the own cooldown is refused with the alert ("Can't be used
 right now."; any remaining time of it counts, also one as short as the global cooldown). The log has one line per change of the dark set:
 `hud: dark slots [(2, "TOO_FAR_RANGE"), (4, "TOO_FAR_RANGE")]; target Some("Solzreed Fox") at Some(11.7) m`.

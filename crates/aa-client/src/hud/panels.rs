@@ -213,6 +213,23 @@ fn skill_slot_of(game: Option<&GameData>, skill: u32, cooldown: Option<(u64, u32
     }
 }
 
+/// An action-bar skill slot: a linked skill (`FUN_393925c0`) shows the converted skill's cooldown, and with no matching
+/// item it is dark (`FUN_3943fa10` sets `skillUsable=0`). The name and icon stay the pressed skill's.
+fn action_skill_slot(game: Option<&GameData>, skills: Option<&Skills>, inventory: Option<&Inventory>, skill: u32, start: Instant) -> SlotSnap {
+    let (effective, blocked) = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
+        crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => (skill, None),
+        crate::ingame::linked_skill::LinkedUse::Refused => (skill, Some(super::usable::code::URK_EQUIP_ITEM)),
+        crate::ingame::linked_skill::LinkedUse::Plain => (skill, None),
+    };
+    let cooldown = game.and_then(|g| {
+        let skills = skills?;
+        cooldown_slot(super::cooldown::display_at(g, skills, effective, Instant::now()), start)
+    });
+    let mut slot = skill_slot_of(game, skill, cooldown);
+    slot.blocked = blocked;
+    slot
+}
+
 pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
     // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
     // ignore it waits for it), whichever ends later
@@ -311,7 +328,9 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
                     return None;
                 }
                 match slot.kind {
-                    ActionKind::Spell | ActionKind::RidePetSpell => Some(skill_slot(game, skills, slot.id as u32, start)),
+                    ActionKind::Spell | ActionKind::RidePetSpell => {
+                        Some(action_skill_slot(game, skills, inventory, slot.id as u32, start))
+                    }
                     ActionKind::ItemType | ActionKind::ItemId => {
                         let inv = inventory?;
                         let (template, grade) = match slot.item_template_id() {
@@ -819,6 +838,37 @@ mod tests {
         push(&lua, &hud, &panels, None).unwrap();
         lua.globals().set("HUD", hud).unwrap();
         assert!(lua.load("return HUD.actions[1] ~= nil and HUD.actions[49] ~= nil and HUD.actions[0] == nil").eval::<bool>().unwrap());
+    }
+
+    /// F3: a linked action slot shows the converted skill's cooldown and is dark when the item is not equipped.
+    #[test]
+    fn a_linked_action_slot_shows_the_converted_cooldown_and_goes_dark_without_the_item() {
+        let mut game = GameData::default();
+        game.skills.insert(
+            14900,
+            super::super::data::SkillInfo {
+                named: super::super::data::Named { name: "Use Instrument".into(), ..Default::default() },
+                ..Default::default()
+            },
+        );
+        game.skills.insert(11951, super::super::data::SkillInfo { cooldown_ms: 45_000, ..Default::default() });
+        game.skill_links.insert(
+            14900,
+            crate::ingame::data::SkillLink { slot: aa_net::model::slot::MUSICAL, backpack_type: 1 },
+        );
+        game.items.insert(20480, super::super::data::ItemInfo { use_skill: 11951, ..Default::default() });
+        let mut inventory = Inventory::default();
+        inventory.equipment.slots[aa_net::model::slot::MUSICAL] =
+            Some(aa_net::model::Item { id: 5, template_id: 20480, ..Default::default() });
+        let mut skills = Skills::default();
+        skills.last_used.insert(11951, Instant::now() - std::time::Duration::from_secs(1));
+        let start = Instant::now();
+        let slot = action_skill_slot(Some(&game), Some(&skills), Some(&inventory), 14900, start);
+        assert_eq!(slot.cooldown.map(|(_, total)| total), Some(45_000));
+        assert_eq!(slot.name, "Use Instrument");
+        assert_eq!(slot.blocked, None);
+        let bare = action_skill_slot(Some(&game), Some(&skills), Some(&Inventory::default()), 14900, start);
+        assert_eq!(bare.blocked, Some(super::super::usable::code::URK_EQUIP_ITEM));
     }
 
     #[test]
