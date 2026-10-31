@@ -82,13 +82,16 @@ pub struct RemoteUnit {
     pub combat: bool,
     /// Its meshes cast shadows (see [`SHADOW_RADIUS`]).
     casting: bool,
+    /// Ground speed of the last movement sample (m/s): a glider's tier is chosen from it (the movement's own stance is FLY
+    /// and its air time leaves [`Motion`] empty).
+    speed: f32,
 }
 
 impl RemoteUnit {
     fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), pos, facing: unit.yaw(),
-            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true }
+            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
     }
 
     /// The same committed movement clock is used with and without a render tree.
@@ -100,14 +103,17 @@ impl RemoteUnit {
         if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
         self.pos = pos;
         self.combat = pose.combat;
+        self.speed = pose.speed;
         self.facing = approach_angle(self.facing, pose.yaw, TURN_RATE * dt);
         (pose, airborne)
     }
 
     pub(super) fn casts_shadow(&self) -> bool { self.casting }
+    /// Ground speed of the last movement sample (m/s).
+    pub(super) fn speed(&self) -> f32 { self.speed }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
-        Self { obj_id, track: Track::new(pos, 0.0), pos, facing: 0.0, scale: 1.0, character: true, combat: false, casting: false }
+        Self { obj_id, track: Track::new(pos, 0.0), pos, facing: 0.0, scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
     }
 
     pub(super) fn scale(&self) -> f32 {
@@ -720,8 +726,10 @@ pub fn sync_views(
                     let spawned = super::doodad_model::spawn(&mut commands, &mut cry, prepared);
                     let model = spawned.entity;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
-                    let remaining_ms = (doodad.time_left as f32 - since_announced_ms).max(0.0);
-                    let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
+                    // the announced time is the whole growth duration (`total_ms`); 0 falls back to the database delay
+                    let announced_ms = growth.map_or(doodad.time_left as f32, |g| g.total_ms(doodad.time_left as f32));
+                    let remaining_ms = (announced_ms - since_announced_ms).max(0.0);
+                    let total_ms = growth.map_or(0.0, |_| announced_ms);
                     let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = doodad_root_transform(doodad, scale);
                     let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, growth, remaining_ms, total_ms, base_scale };
@@ -811,6 +819,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
             character: unit.is_character(),
             combat: false,
             casting: true,
+            speed: 0.0,
         },
     ));
     // different idle phases, so a crowd does not breathe in step
@@ -1140,7 +1149,7 @@ mod lifecycle_tests {
         let pos = Vec3::new(3.0, 4.0, 5.0);
         let mut track = Track::new(pos, 1.0);
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
-        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, pos, facing: 1.0, scale: 1.0, character: true, combat: true, casting: false }).id();
+        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, pos, facing: 1.0, scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
         app.update();

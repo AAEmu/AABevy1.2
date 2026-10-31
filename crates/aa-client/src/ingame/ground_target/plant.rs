@@ -22,8 +22,8 @@
 //! Two reuse locks exist (F13). The 30 s one (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0` line 759378) starts only at
 //! the end of a world load: `FUN_39426520` is the only caller of `FUN_393a6de0` (the enter-world step and the
 //! device-lost recovery), and no `SCTeleportUnit` handler reaches it, so a short teleport does not lock. The next use
-//! shows "Can't place this for N second(s)." (`ui_texts` 4598). A send starts a separate 2 s post-send cooldown: the builder destructor
-//! (`FUN_393a89d0` lines 760956-760960) writes `now + 2000` when its sent flag (`+0x2c`, set by `FUN_393a9340` line
+//! shows "Can't place this for N second(s)." (`ui_texts` 4598). A send starts a separate 2 s post-send cooldown: the
+//! builder destructor (`FUN_393a89d0` lines 760956-760960) writes `now + 2000` when its sent flag (`+0x2c`, set by `FUN_393a9340` line
 //! 761450) is set, and `FUN_393a9540` line 761547 refuses the next builder with error 0x163 (`OTHER_BUILD_IS_ON`).
 //!
 //! Still open: F5 water site, F6 exact radii, F8-F12 house/farm/zone/labor, F15-F18 harvest and growth. The non-round
@@ -45,7 +45,7 @@ use crate::ingame::player::{LocalPlayer, Mover};
 /// How far from the character a doodad may be placed, metres (3D). `FUN_393a8fa0` refuses only when `d^2 > 900`, so
 /// exactly 30 m is allowed; F1's projected sweep only brackets the boundary around 30 m.
 pub(crate) const MAX_RANGE: f32 = 30.0;
-/// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0` at world-load end/teleport arrival.
+/// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0` at world-load end.
 pub(crate) const PLANT_REUSE_LOCK_SECS: f64 = 30.0;
 /// The post-send cooldown: the builder destructor (`FUN_393a89d0`) writes `now + 2000` when a packet was sent.
 pub(crate) const PLANT_POST_SEND_SECS: f64 = 2.0;

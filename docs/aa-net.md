@@ -113,6 +113,14 @@ send undecoded are listed in "Small server messages" at the end, with who owns t
 | 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
 | 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
 
+A gliding character sends the same type-1 body: stance 1, actor flags 0 while flying; move flags 2 with delta 0x7f while W
+is held (2026-10-31 recapture rows 5137-5287, 5124), 0 otherwise. At contact the glider sends `CSRemoveBuff` (buff index,
+reason 9) first, then the captured touchdown packet: stance 1, flags 6 (Moving|Stopping), actor flags 0x14
+(Jumping|StandingOnSolid); later grounded packets fall back to flags 4 / actor 0x04. Water sends stance 2 / flags 0 /
+actor 0 before the remove. The wire override keeps the IN_COMBAT bit.
+`model::tests::gliding_type_1_bodies_match_the_server_unit_move_reader` pins the flight and landing bodies against the
+server's `UnitMove.Read` field walk (`aaemu-game/src/models/movement.rs:418-438`).
+
 The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
 `aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
 velocity codec and `FUN_397ae020` the quaternion writer. The goldens under
@@ -7280,6 +7288,8 @@ Source archive `native-buff-tick-index-source-20261018.txt` also captures the ad
 ### Explicit self-buff cancellation (2026-10-18)
 
 `Command::RemoveBuff { character_id, obj_id, buff_index }` submits only explicit self cancellation with native reason0. Session checks InWorld, nonzero captured persistent ID matching selected/header, nonzero current actual self runtime ID and BC24 range. Success/failure is reported by local `BuffRemovalRequested`/`BuffRemovalRequestRejected`; neither is an ACK or removes cached buffs. Session has no duplicate Buffs cache: original ordinal/descriptor admission and delayed exact-buff freshness belong to the app adapter. No automatic frame cancellation or mate/slave cancellation is enabled by this command. Raw `game::ClientMsg::RemoveBuff { obj_id, buff_index, reason }` exposes exact protocol fields.
+
+`Command::RemoveOwnBuff { buff_index, reason }` is the same `CSRemoveBuff` addressed to the current self runtime ID with the caller's reason. The glider end uses `{ buff_index, reason: 9 }` (`FUN_393888b0`, decompile line 735655; capture log rows 168455 and 177786). Session checks only InWorld and a nonzero current self runtime ID, sends the exact `game::ClientMsg::RemoveBuff`, and reports `BuffRemovalRequested` / `BuffRemovalRequestRejected` without fabricating an acknowledgement. The loopback test also pins opcode `0x55`, reason 9, index 18/20/`u32::MAX`, and failure when the connection or self ID is missing.
 
 Original `X2Ability:CancelPlayerBuff(i)` registration3943d316 names399d9818, invokes39438790 through3943bd30: strict successful numeric ScriptAnyValue4 then f32 CVTTSS2SI; wrong types return zero results. It subtracts1 with native integer wrap, resolves listKind1 (Good) via39386d70, refuses negative/out-of-range silently, resolves descriptor by actual buff template, and silently returns if absent. Descriptor byte+1a5 true emits error0xe0; otherwise sends current actor runtimeID and the selected record's instance index with reason0. That byte is `buffs.system`: loader39734dd1 reads column0x96/150 of full SELECT39a07550, parses T/t/1 into temporary[-19b] relative to record[-340]. No online/phase/clock gate is invented inside the native wrapper. Original unitframe/player.lua right-button callback calls this method with captured ONE-based Good icon ordinal, not the per-unit instance index. All native branches return zero Lua results.
 
