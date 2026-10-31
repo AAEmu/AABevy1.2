@@ -566,9 +566,6 @@ pub(super) fn push_slots(rt: &UiRuntime, state: &Shared) {
     }
 }
 
-/// Mode slots use the ordinary skill target/validation path, not an item or forced-self cast; while the
-/// driven slave's bar is shown, a slot is that slave's skill and goes out as a `Mount` caster
-/// (`FUN_39399630` -> `FUN_393989e0`, the same `CSStartSkill` a mate's bar sends).
 /// The packet a driven-slave bar slot writes. A gunner's bar shows `mount_attached_skills`
 /// (14372 etc.) but casts the linked mount skill (10473 etc.); when that cast skill is
 /// `BallisticPos` (target type 11) and the turret system published a sight for the same slave,
@@ -602,6 +599,9 @@ pub(crate) fn slave_cast(
     }
 }
 
+/// Mode slots use the ordinary skill target/validation path, not an item or forced-self cast; while the
+/// driven slave's bar is shown, a slot is that slave's skill and goes out as a `Mount` caster
+/// (`FUN_39399630` -> `FUN_393989e0`, the same `CSStartSkill` a mate's bar sends).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn use_slot(
     data: &HudData,

@@ -1847,6 +1847,7 @@ mod tests {
             drives: false,
             cart: true,
             ship: false,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));

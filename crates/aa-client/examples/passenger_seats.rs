@@ -344,6 +344,7 @@ fn fixture_unit(obj_id: u32, kind: UnitKind, name: &str, model_id: u32, pos: Vec
         attached_to: None,
         doodad_bond: None,
         house_posture: None,
+        turret: None,
         state_attachments: None,
     }
 }
