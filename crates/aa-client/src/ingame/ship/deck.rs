@@ -92,6 +92,141 @@ pub fn yaw_of(rotation: Quat) -> f32 {
         .atan2(1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z))
 }
 
+/// A ship deck under a glider's feet: the hull and the point in its frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DeckContact {
+    pub ship: u32,
+    pub local: Vec3,
+    /// The hull pose the local point was found at (updated from [`DeckGround::pose`] while the ride lasts).
+    pub root: Vec3,
+    /// The hull's full drawn rotation at that pose.
+    pub rotation: Quat,
+    /// The player's facing in the hull frame: it is carried through the landing wait and the slide, and composed
+    /// with the current hull yaw (the ship's turn turns the player, it does not steer the slide).
+    pub facing: f32,
+}
+
+impl DeckContact {
+    pub(crate) fn world(self) -> Vec3 {
+        ship_to_world(self.root, self.rotation, self.local)
+    }
+
+    /// The hull yaw of the contact, for the facing arithmetic.
+    pub(crate) fn yaw(self) -> f32 {
+        yaw_of(self.rotation)
+    }
+}
+
+/// The deck floor under a point, for a controller that is not on a deck yet (a glider landing): the same hull-floor
+/// lookup `board_deck` uses, at the drawn hull pose when it is known.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DeckGround<'w, 's> {
+    db: Option<Res<'w, Db>>,
+    units: Option<Res<'w, Units>>,
+    hull: DeckHull<'w, 's>,
+}
+
+impl DeckGround<'_, '_> {
+    /// The highest ship deck under `at` (world z). A rising glider passes over a deck; a descending one lands on a floor
+    /// it is close above, or that the fall crossed since the previous frame (`vz`, `dt`).
+    pub(crate) fn floor_at(&self, at: Vec3, vz: f32, dt: f32) -> Option<f32> {
+        self.contact(at, vz, dt).map(|contact| contact.world().z)
+    }
+
+    /// The highest ship deck under `at`, with the hull and the ship-local landing point, for a glider that must stay
+    /// attached to a moving hull through its landing and slide.
+    pub(crate) fn contact(&self, at: Vec3, vz: f32, dt: f32) -> Option<DeckContact> {
+        self.contact_within(at, vz, dt, 0.5)
+    }
+
+    /// [`contact`](Self::contact) with the highest surface `reach` metres above the feet still counting (the stop probe's
+    /// `land_height + 0.2`, or the touchdown's 0.5 m).
+    pub(crate) fn contact_within(
+        &self,
+        at: Vec3,
+        vz: f32,
+        dt: f32,
+        reach: f32,
+    ) -> Option<DeckContact> {
+        let db = self.db.as_deref()?;
+        let units = self.units.as_deref()?;
+        if vz > 0.0 {
+            return None;
+        }
+        let mut best: Option<(DeckContact, f32)> = None;
+        for unit in units.iter() {
+            if !matches!(unit.kind, UnitKind::Slave { .. }) || !db.is_ship(unit.model_id) {
+                continue;
+            }
+            let Some(bounds) = db.ship_bounds(unit.model_id) else { continue };
+            let wire = (
+                Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                Quat::from_rotation_z(unit.yaw()),
+            );
+            let (root, rotation) = self.hull.pose(unit.obj_id).unwrap_or(wire);
+            let local = world_to_ship(root, rotation, at);
+            if !in_hull_bounds(bounds, local, HULL_MARGIN) {
+                continue;
+            }
+            let Some(floor) = db.ship_floor(unit.model_id) else { continue };
+            let previous = local.z - vz * dt;
+            let next = local.z + vz * dt;
+            let height = floor
+                .height(local.x, local.y, previous.max(local.z) + 0.01)
+                .filter(|h| previous >= *h && next <= *h)
+                .or_else(|| {
+                    floor
+                        .height(local.x, local.y, local.z + reach.max(DECK_STEP))
+                        .filter(|h| (-0.05..=reach).contains(&(local.z - *h)))
+                });
+            if let Some(height) = height {
+                let contact = DeckContact {
+                    ship: unit.obj_id,
+                    local: Vec3::new(local.x, local.y, height),
+                    root,
+                    rotation,
+                    facing: 0.0,
+                };
+                let world = contact.world();
+                if best.is_none_or(|(_, best)| world.z > best) {
+                    best = Some((contact, world.z));
+                }
+            }
+        }
+        best.map(|(contact, _)| contact)
+    }
+
+    /// The drawn hull pose of `ship`, else the pose in the last movement packet.
+    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, Quat)> {
+        self.hull.pose(ship).or_else(|| {
+            self.units
+                .as_deref()
+                .and_then(|units| units.by_id.get(&ship))
+                .map(|unit| {
+                    (
+                        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                        Quat::from_rotation_z(unit.yaw()),
+                    )
+                })
+        })
+    }
+
+    /// The hull's floor mesh, if the ship is still in view.
+    pub(crate) fn ship_floor(&self, ship: u32) -> Option<std::sync::Arc<ShipFloor>> {
+        let db = self.db.as_deref()?;
+        let unit = self.units.as_deref()?.by_id.get(&ship)?;
+        db.ship_floor(unit.model_id)
+    }
+
+    /// The ship's last reported velocity (zero when it is gone).
+    pub(crate) fn ship_velocity(&self, ship: u32) -> Vec3 {
+        self.units
+            .as_deref()
+            .and_then(|units| units.by_id.get(&ship))
+            .map_or(Vec3::ZERO, ship_velocity)
+    }
+}
+
 /// The keyboard, mouse and HUD focus the deck reads, as `player::control_player` does.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct DeckInput<'w> {
@@ -101,6 +236,8 @@ pub struct DeckInput<'w> {
     typing: Option<Res<'w, crate::hud::HudKeyboardFocus>>,
     over_ui: Option<Res<'w, crate::hud::HudPointerOverUi>>,
     dev: Res<'w, crate::ingame::DevOptions>,
+    /// A glider that is touching or sliding on the hull moves the ride itself; the walker must not fight it.
+    gliding: Option<Res<'w, super::super::glide::Gliding>>,
 }
 
 /// A player standing on a ship deck (not seated).
@@ -124,6 +261,13 @@ pub struct DeckRide {
 }
 
 impl DeckRide {
+    /// The hull-local point the ride keeps (the glider's touchdown and slide update it; the
+    /// glide tests read it).
+    #[allow(dead_code)]
+    pub(crate) fn local(&self) -> Vec3 {
+        self.local
+    }
+
     /// A ride at a known hull-local floor point (a landing, not a walk).
     pub(crate) fn new(ship: u32, local: Vec3, facing: f32, last_yaw: f32) -> DeckRide {
         DeckRide {
@@ -136,6 +280,16 @@ impl DeckRide {
             airborne: false,
             since_sent: SEND_INTERVAL,
         }
+    }
+
+    /// A ride starting a deck fall (a glider slide over a lower deck): the feet stay at `local`, the floor below is
+    /// `ground`, and `deck_control` applies gravity, the landing and the fall-damage report.
+    pub(crate) fn falling(ship: u32, local: Vec3, ground: f32, facing: f32, last_yaw: f32) -> DeckRide {
+        let mut ride = DeckRide::new(ship, local, facing, last_yaw);
+        ride.ground = ground;
+        ride.airborne = true;
+        ride.vz = 0.0;
+        ride
     }
 }
 
@@ -317,6 +471,52 @@ fn walking_step(floor: Option<&ShipFloor>, x: f32, y: f32, feet: f32) -> AirStep
     }
 }
 
+/// What one glider slide step on a hull found.
+pub(crate) enum DeckSlide {
+    /// The feet moved to this ship-local floor point.
+    Moved(Vec3),
+    /// The next surface is more than the deck step down: start a deck fall at `local` onto `ground`.
+    Drop { local: Vec3, ground: f32 },
+    /// A riser, hatch or rail brush: the slide stops here.
+    Blocked,
+    /// The step carried the feet past the hull: the point and the ship-local velocity of the fall.
+    OffHull { local: Vec3, local_velocity: Vec2 },
+}
+
+/// One glider slide step in the hull frame, through the same world collision, floor lookup and walk step as
+/// `deck_control`: a wall/riser blocks, a lower deck is stepped onto, and leaving the hull reports the fall point.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn slide_step(
+    floor: Option<&ShipFloor>,
+    collision: &WorldCollision,
+    root: Vec3,
+    rotation: Quat,
+    local: Vec3,
+    local_facing: f32,
+    speed: f32,
+    dt: f32,
+) -> DeckSlide {
+    let local_velocity = deck_step(local_facing, Vec2::new(0.0, speed), 1.0);
+    let step = local_velocity * dt;
+    let world_step = deck_world_step(rotation, step);
+    let world = ship_to_world(root, rotation, local);
+    let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
+    let slid_local = world_to_ship(root, rotation, slid);
+    let (x, y) = (slid_local.x, slid_local.y);
+    match walking_step(floor, x, y, local.z) {
+        AirStep::Floor(h) => DeckSlide::Moved(Vec3::new(x, y, h)),
+        AirStep::Drop(h) => DeckSlide::Drop {
+            local: Vec3::new(x, y, local.z),
+            ground: h,
+        },
+        AirStep::Blocked => DeckSlide::Blocked,
+        AirStep::OffHull => DeckSlide::OffHull {
+            local: Vec3::new(x, y, local.z),
+            local_velocity,
+        },
+    }
+}
+
 /// The world velocity of a ship from its last received type-3 movement.
 pub fn ship_velocity(ship: &aa_net::model::Unit) -> Vec3 {
     ship.movement
@@ -330,7 +530,7 @@ pub fn ship_velocity(ship: &aa_net::model::Unit) -> Vec3 {
 /// `control_player` continues the fall from the next frame (this frame's step
 /// is already taken, so it skips this one).
 #[allow(clippy::too_many_arguments)]
-fn leave_deck(
+pub(crate) fn leave_deck(
     commands: &mut Commands,
     entity: Entity,
     mover: &mut Mover,
@@ -348,7 +548,7 @@ fn leave_deck(
     moving: bool,
     walk_off: bool,
     state: &mut SendState,
-    local_jump: &mut LocalJump,
+    local_jump: Option<&mut LocalJump>,
 ) {
     let world = ship_to_world(root, rotation, local);
     let step = rotation * Vec3::new(local_velocity.x, local_velocity.y, 0.0);
@@ -364,7 +564,9 @@ fn leave_deck(
         mover.grounded = false;
         mover.vz = vz + ship_velocity.z;
         state.take_off();
-        local_jump.rising = true;
+        if let Some(local_jump) = local_jump {
+            local_jump.rising = true;
+        }
     }
     mover.swim = None;
     mover.velocity = Vec3::new(velocity.x, velocity.y, mover.vz);
@@ -435,6 +637,7 @@ pub fn board_deck(
     net: Res<Units>,
     db: Option<Res<Db>>,
     mount: Option<Res<LocalMount>>,
+    gliding: Option<Res<super::super::glide::Gliding>>,
     stats: Option<Res<PlayerStats>>,
     hull: DeckHull,
     time: Res<Time>,
@@ -459,6 +662,7 @@ pub fn board_deck(
         .as_ref()
         .is_some_and(|p| p.unit.attached_to.is_some())
         || mount.is_some_and(|m| m.0.is_some())
+        || gliding.as_deref().is_some_and(|g| g.flying())
     {
         return;
     }
@@ -612,6 +816,9 @@ pub fn deck_control(
         With<LocalPlayer>,
     >,
 ) {
+    if input.gliding.as_deref().is_some_and(|glide| glide.flying()) {
+        return;
+    }
     let Ok((
         entity,
         player_unit,
@@ -811,7 +1018,7 @@ pub fn deck_control(
                         true,
                         false,
                         &mut state,
-                        &mut local_jump,
+                        Some(&mut local_jump),
                     );
                     return;
                 }
@@ -856,7 +1063,7 @@ pub fn deck_control(
                         true,
                         true,
                         &mut state,
-                        &mut local_jump,
+                        Some(&mut local_jump),
                     );
                     *local_jump = LocalJump::default();
                     return;

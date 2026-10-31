@@ -2193,6 +2193,132 @@ mod tests {
         assert_eq!(back.stance, stance::RELAXED);
     }
 
+    /// A gliding movement and its landing, byte for byte against the server's `UnitMove.Read`
+    /// (`aaemu-game/src/models/movement.rs:418-438`): 9-byte position (three fixed-point components), velocity 3 x i16, rotation 3 x i8,
+    /// delta movement 3 x i8, stance, alertness, actor flags, then `fallVel` only when 0x80 is set.
+    #[test]
+    fn gliding_type_1_bodies_match_the_server_unit_move_reader() {
+        let cmd = crate::session::MoveCommand {
+            pos: Pos::new(100.5, 200.25, 30.125),
+            yaw: std::f32::consts::FRAC_PI_2,
+            moving: true,
+            stance: stance::FLY,
+            velocity: [1024, -2048, 512],
+            delta_movement: [0, 127, 0],
+            ..crate::session::MoveCommand::default()
+        }
+        .with_state(crate::session::MoveState::Fall);
+        let movement = cmd.to_movement(0x1122_3344);
+        let mut w = Writer::new();
+        movement.write(&mut w);
+        let bytes = w.finish();
+        // `Movement::write`: type byte, then `u32 time`, `u8 flags`, the 9-byte position, velocity,
+        // tilt (roll/pitch), direction, delta movement, stance, alertness, actor flags.
+        assert_eq!(bytes[0], 1);
+        assert_eq!(&bytes[1..5], &0x1122_3344u32.to_le_bytes());
+        assert_eq!(bytes[5], move_flags::MOVING);
+        let body = &bytes[6..];
+        let server = ServerUnitMove::read(body);
+        assert!(
+            (server.pos.0 - 100.5).abs() < 0.01
+                && (server.pos.1 - 200.25).abs() < 0.01
+                && (server.pos.2 - 30.125).abs() < 0.01
+        );
+        assert_eq!(server.velocity, (1024, -2048, 512));
+        assert_eq!(
+            server.direction, 32,
+            "pi/2 is the 32nd of 128 direction steps"
+        );
+        assert_eq!(server.delta_movement, [0, 127, 0]);
+        assert_eq!(server.stance, stance::FLY);
+        assert_eq!(server.alertness, 0);
+        assert_eq!(server.actor_flags, 0);
+        assert_eq!(
+            body.len(),
+            9 + 6 + 3 + 3 + 3,
+            "no fall velocity block without 0x80"
+        );
+        // The server's `on_actor_move` (`skills/mod.rs:278-292`) calls this airborne.
+        assert!(
+            !(server.actor_flags
+                & (actor_flags::JUMPING
+                    | actor_flags::STANDING_ON_SOLID
+                    | actor_flags::STANDING_ON_OBJECT)
+                != 0)
+        );
+
+        // The first ground contact: a standing packet, no fall velocity (S14-C3).
+        let landing = crate::session::MoveCommand {
+            pos: Pos::new(101.0, 200.0, 30.0),
+            yaw: 0.0,
+            moving: false,
+            stance: stance::RELAXED,
+            ..crate::session::MoveCommand::default()
+        }
+        .with_state(crate::session::MoveState::Ground);
+        let movement = landing.to_movement(7);
+        let mut w = Writer::new();
+        movement.write(&mut w);
+        let bytes = w.finish();
+        assert_eq!(bytes[5], move_flags::STOPPING);
+        let server = ServerUnitMove::read(&bytes[6..]);
+        assert_eq!(server.stance, stance::RELAXED);
+        assert_eq!(server.actor_flags, actor_flags::STANDING_ON_SOLID);
+        assert_eq!(server.fall_velocity, 0);
+    }
+
+    /// The field walk of the server's `UnitMove::Read`, read from raw bytes (not through this crate's reader).
+    struct ServerUnitMove {
+        pos: (f32, f32, f32),
+        velocity: (i16, i16, i16),
+        direction: i8,
+        delta_movement: [i8; 3],
+        stance: u8,
+        alertness: u8,
+        actor_flags: u8,
+        fall_velocity: u16,
+    }
+
+    impl ServerUnitMove {
+        fn read(mut b: &[u8]) -> Self {
+            // `PacketStream::read_position`: 9 bytes (x, y 24-bit fixed point, z 18-bit), not 3 floats.
+            let position = crate::wire::decode_position(&b[..9].try_into().unwrap());
+            b = &b[9..];
+            let pos = [position.x, position.y, position.z];
+            let mut velocity = [0i16; 3];
+            for value in &mut velocity {
+                *value = i16::from_le_bytes(b[..2].try_into().unwrap());
+                b = &b[2..];
+            }
+            let direction = b[2] as i8;
+            b = &b[3..];
+            let delta_movement = [b[0] as i8, b[1] as i8, b[2] as i8];
+            b = &b[3..];
+            let stance = b[0];
+            let alertness = b[1];
+            let actor_flags = b[2];
+            b = &b[3..];
+            let fall_velocity = if actor_flags & 0x80 == 0x80 {
+                let value = u16::from_le_bytes(b[..2].try_into().unwrap());
+                b = &b[2..];
+                value
+            } else {
+                0
+            };
+            assert!(b.is_empty(), "the reader left bytes: {}", b.len());
+            Self {
+                pos: (pos[0], pos[1], pos[2]),
+                velocity: (velocity[0], velocity[1], velocity[2]),
+                direction,
+                delta_movement,
+                stance,
+                alertness,
+                actor_flags,
+                fall_velocity,
+            }
+        }
+    }
+
     /// The 2026-10-29 S10 rowboat deck capture: the exact type-1 bodies of native.json,
     /// re-encoded after the captured time is normalised to 0.
     #[test]

@@ -93,6 +93,9 @@ pub struct RemoteUnit {
     pub combat: bool,
     /// Its meshes cast shadows (see [`SHADOW_RADIUS`]).
     casting: bool,
+    /// Ground speed of the last movement sample (m/s): a glider's tier is chosen from it (the movement's own stance is FLY
+    /// and its air time leaves [`Motion`] empty).
+    speed: f32,
 }
 
 /// A remote unit's walk on a ship deck: the ship and a walking track in the hull frame (the
@@ -109,12 +112,18 @@ pub struct DeckWalk {
 #[derive(Component)]
 pub struct DeckRider;
 
+/// The last drawn pose of every hull with a vehicle track (game position, full rotation, yaw).
+/// `receive_moves` seeds a ship switch from the drawn pose (the next frame's smoothing has not
+/// run yet), not from the wire packet.
+#[derive(Resource, Default)]
+pub struct DeckHullPoses(pub HashMap<u32, (Vec3, Quat, f32)>);
+
 impl RemoteUnit {
     pub(crate) fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
             rotation: Quat::from_rotation_y(unit.yaw()), game_rotation: Quat::from_rotation_z(unit.yaw()), deck: None,
-            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true }
+            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
     }
 
     /// The same committed movement clock is used with and without a render tree.
@@ -128,6 +137,7 @@ impl RemoteUnit {
             self.rotation = cry_rot_to_bevy(pose.rot);
             self.facing = self.rotation.to_euler(EulerRot::YXZ).0;
             self.combat = false;
+            self.speed = 0.0;
             return (
                 remote::Pose { pos: pose.pos, yaw: self.facing, speed: 0.0, heading: Vec2::ZERO, airborne: false, combat: false },
                 false,
@@ -140,6 +150,7 @@ impl RemoteUnit {
         if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
         self.pos = pos;
         self.combat = pose.combat;
+        self.speed = pose.speed;
         self.facing = approach_angle(self.facing, pose.yaw, TURN_RATE * dt);
         self.rotation = Quat::from_rotation_y(self.facing);
         self.game_rotation = Quat::from_rotation_z(self.facing);
@@ -170,10 +181,13 @@ impl RemoteUnit {
     }
 
     pub(super) fn casts_shadow(&self) -> bool { self.casting }
+    /// Ground speed of the last movement sample (m/s).
+    pub(super) fn speed(&self) -> f32 { self.speed }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
-        Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0, rotation: Quat::from_rotation_y(0.0),
-            game_rotation: Quat::from_rotation_z(0.0), deck: None, scale: 1.0, character: true, combat: false, casting: false }
+        Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
+            rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None,
+            scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
     }
 
     /// The drawn pose for an example/test reader: Bevy-space position and rotation.
@@ -212,6 +226,7 @@ impl RemoteUnit {
         self.deck = None;
         self.rotation = Quat::from_rotation_y(facing);
         self.game_rotation = Quat::from_rotation_z(facing);
+        self.speed = 0.0;
     }
 }
 
@@ -937,6 +952,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
             character: unit.is_character(),
             combat: false,
             casting: true,
+            speed: 0.0,
         },
     ));
     // different idle phases, so a crowd does not breathe in step
@@ -958,6 +974,7 @@ fn unit_hash(v: u32) -> u32 {
 /// The systems that follow the movement packets and the idle poses; they run around the main chain of `sync_views`,
 /// `move_units` and `cull_units` (registered by [`super::InGamePlugin`]) and [`super::anim::drive_locomotion`].
 pub fn plugin(app: &mut App) {
+    app.init_resource::<DeckHullPoses>();
     app.add_systems(
         Update,
         (
@@ -1006,7 +1023,8 @@ fn deck_offset(movement: &Movement) -> Option<(u32, Vec3, f32)> {
 
 /// Fold source lifetime and movement in receipt order. An old report cannot
 /// enter a replacement with the same object ID; unrendered actors keep playback.
-pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, units_state: Option<Res<Units>>, mut seats: Option<ResMut<super::seating::Seats>>) {
+#[allow(clippy::too_many_arguments)]
+pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, units_state: Option<Res<Units>>, hull_poses: Option<Res<DeckHullPoses>>, mut seats: Option<ResMut<super::seating::Seats>>) {
     let now = time.elapsed_secs();
     let vehicle_now = time.elapsed_secs_f64();
     for (NetEvent(event), message_id) in events.read_with_id() {
@@ -1082,19 +1100,37 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                             // Stepping straight onto another hull: seed the new local track at
                             // the current drawn point (in the new hull's frame) and blend to
                             // the new local report, as a deck leave blends to the world.
-                            let start = units_state
+                            // Seed from the hull's drawn pose (the previous frame's smoothed
+                            // quaternion), the same source the pending pass uses; the wire
+                            // packet is only a fallback when the hull is not drawn.
+                            let start = hull_poses
                                 .as_deref()
-                                .and_then(|state| state.by_id.get(&ship))
-                                .map(|hull| {
-                                    let rotation = Quat::from_rotation_z(hull.yaw());
+                                .and_then(|poses| poses.0.get(&ship).copied())
+                                .map(|(root, rotation, _)| {
                                     (
-                                        super::ship::deck::world_to_ship(
-                                            Vec3::new(hull.pos.x, hull.pos.y, hull.pos.z),
-                                            rotation,
-                                            unit.pos,
+                                        super::ship::deck::world_to_ship(root, rotation, unit.pos),
+                                        super::cart::wrap_angle(
+                                            unit.facing - super::ship::deck::yaw_of(rotation),
                                         ),
-                                        super::cart::wrap_angle(unit.facing - hull.yaw()),
                                     )
+                                })
+                                .or_else(|| {
+                                    units_state
+                                        .as_deref()
+                                        .and_then(|state| state.by_id.get(&ship))
+                                        .map(|hull| {
+                                            let rotation = Quat::from_rotation_z(hull.yaw());
+                                            (
+                                                super::ship::deck::world_to_ship(
+                                                    Vec3::new(hull.pos.x, hull.pos.y, hull.pos.z),
+                                                    rotation,
+                                                    unit.pos,
+                                                ),
+                                                super::cart::wrap_angle(
+                                                    unit.facing - hull.yaw(),
+                                                ),
+                                            )
+                                        })
                                 })
                                 .unwrap_or((local, local_yaw));
                             let mut track = Track::new(start.0, start.1);
@@ -1164,12 +1200,28 @@ pub fn place_deck_riders(
     time: Res<Time>,
     mut views: ResMut<Views>,
     units: Option<Res<Units>>,
+    mut hull_poses: ResMut<DeckHullPoses>,
     mut riders: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (With<DeckRider>, Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     hulls: Query<&RemoteUnit, Without<DeckRider>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
+    }
+    // The drawn hull poses for this frame, for the next receive_moves ship switch and the
+    // pending riders below.
+    hull_poses.0.clear();
+    for hull in &hulls {
+        if hull.vehicle.is_some() {
+            hull_poses.0.insert(hull.obj_id, hull.hull_pose());
+        }
+    }
+    for view in views.units.values() {
+        if let Some(unit) = view.pending.as_ref()
+            && unit.vehicle.is_some()
+        {
+            hull_poses.0.insert(unit.obj_id, unit.hull_pose());
+        }
     }
     // Pending deck riders have no entity to query: sample their deck track too, so a rider
     // admitted later draws at its current composed pose and its deck clock does not jump.
@@ -1479,7 +1531,7 @@ mod lifecycle_tests {
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
         let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, vehicle: None, pos, facing: 1.0,
             rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None,
-            scale: 1.0, character: true, combat: true, casting: false }).id();
+            scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
         app.update();
@@ -1915,6 +1967,7 @@ mod deck_rider_tests {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<Views>()
+            .init_resource::<DeckHullPoses>()
             .add_message::<NetEvent>()
             .insert_resource(TerrainQuery::new("__deck_rider_test__"))
             .add_systems(Update, (receive_moves, move_units, place_deck_riders).chain());
@@ -2063,6 +2116,7 @@ mod deck_rider_tests {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<Views>()
+            .init_resource::<DeckHullPoses>()
             .add_message::<NetEvent>()
             .add_systems(Update, (receive_moves, place_deck_riders).chain());
         app
@@ -2278,9 +2332,12 @@ mod deck_rider_tests {
         let mut app = leave_app();
         let mut state = Units::default();
         state.by_id.insert(SHIP, ship_unit(SHIP, Vec3::new(100.0, 200.0, 10.0), 0.4));
-        state
-            .by_id
-            .insert(SHIP_B, ship_unit(SHIP_B, Vec3::new(110.0, 200.0, 10.0), -0.2));
+        // The wire pose lags the drawn hull (the S8 track's delay): the switch must use the
+        // drawn pose, not this packet.
+        state.by_id.insert(
+            SHIP_B,
+            ship_unit(SHIP_B, Vec3::new(112.0, 200.0, 10.0), 0.1),
+        );
         app.insert_resource(state);
         app
     }

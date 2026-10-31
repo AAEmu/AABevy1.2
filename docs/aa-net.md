@@ -113,6 +113,10 @@ send undecoded are listed in "Small server messages" at the end, with who owns t
 | 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
 | 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
 
+A gliding character sends the same type-1 body with stance `FLY` (8) and no actor flag (airborne to the server);
+`model::tests::gliding_type_1_bodies_match_the_server_unit_move_reader` pins the bytes against the server's
+`UnitMove.Read` field walk (`aaemu-game/src/models/movement.rs:418-438`).
+
 The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
 `aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
 velocity codec and `FUN_397ae020` the quaternion writer. The goldens under

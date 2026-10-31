@@ -11,7 +11,8 @@ use super::super::skill_motion::SkillMove;
 use super::super::sprint::Sprint;
 use super::super::swim::ActorParams;
 use super::super::units::{RemoteUnit, Views};
-use super::deck::{DeckRide, ship_to_world};
+use super::super::glide::{Active, Flight, GlideParams, Gliding, Phase, Pose, control_glide};
+use super::deck::{DeckContact, DeckRide, ship_to_world};
 use super::floor::ShipFloor;
 use super::*;
 use aa_anim::ClipLibrary;
@@ -642,11 +643,14 @@ impl DeckApp {
             .init_resource::<crate::ingame::DevOptions>()
             .init_resource::<Views>()
             .init_resource::<LocalJump>()
+            .init_resource::<Gliding>()
             .insert_resource(units)
             .insert_resource(db)
+            .insert_resource(TerrainQuery::new("test"))
+            .insert_resource(WaterQuery::new("test"))
             .insert_resource(WorldCollision::new("test", TerrainQuery::new("test")))
             .add_message::<NetCommand>()
-            .add_systems(Update, (board_deck, deck_control).chain());
+            .add_systems(Update, (control_glide, board_deck, deck_control).chain());
         let camera = app
             .world_mut()
             .spawn(OrbitCamera {
@@ -2368,4 +2372,93 @@ fn a_ship_get_off_lands_on_the_deck_without_a_placement() {
         app.world().get::<Mover>(player).unwrap().swim.is_none(),
         "the get-off fell into the water instead of the deck"
     );
+}
+
+#[test]
+fn a_glider_slide_off_a_raised_deck_falls_and_lands() {
+    let quad = |x0: f32, x1: f32, y0: f32, y1: f32, z: f32| {
+        [
+            [Vec3::new(x0, y0, z), Vec3::new(x1, y0, z), Vec3::new(x1, y1, z)],
+            [Vec3::new(x0, y0, z), Vec3::new(x1, y1, z), Vec3::new(x0, y1, z)],
+        ]
+    };
+    // upper deck y -3..0 at z 3, lower deck y 0..6 at z 0: a 3 m drop
+    let floor = Arc::new(ShipFloor::new(
+        quad(-2.0, 2.0, -3.0, 0.0, 3.0)
+            .into_iter()
+            .chain(quad(-2.0, 2.0, 0.0, 6.0, 0.0)),
+    ));
+    let Some(db) = Db::ship_floor_fixture(DECK_MODEL, floor.clone()) else {
+        return;
+    };
+    let root = Vec3::new(100.0, 200.0, 10.0);
+    let Some(mut f) = DeckApp::with_floor_at_height(
+        root,
+        Some(3.0),
+        db,
+        floor,
+        Vec2::new(0.0, -1.0),
+        true,
+        [0; 3],
+        0.0,
+        0.0,
+    ) else {
+        return;
+    };
+    let contact = DeckContact {
+        ship: DECK_SHIP,
+        local: Vec3::new(0.0, -1.0, 3.0),
+        root,
+        rotation: Quat::IDENTITY,
+        facing: 0.0,
+    };
+    let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+    flight.elapsed = 10.0;
+    flight.smoothed_v = -1.5;
+    flight.smoothed_dv = 0.0;
+    flight.vz = -1.5;
+    assert_eq!(flight.stop(-1.0, Some(0.0)), Phase::Sliding);
+    f.app.world_mut().resource_mut::<Gliding>().active = Some(Active {
+        flight,
+        buff_id: 1029,
+        buff_index: 1,
+        pose: Pose::Slide,
+        touched: false,
+        touched_for: 0.0,
+        missing: 0.0,
+        deck: Some(contact),
+    });
+    f.app
+        .world_mut()
+        .entity_mut(f.player)
+        .insert(DeckRide::new(DECK_SHIP, contact.local, contact.facing, contact.yaw()));
+    let mut airborne = false;
+    let mut ground_while_airborne = false;
+    let mut impact = None;
+    for _ in 0..180 {
+        f.tick(1.0 / 60.0);
+        let grounded = f.mover().grounded;
+        if !grounded {
+            airborne = true;
+        }
+        for movement in f.moves() {
+            if !grounded && movement.state == aa_net::MoveState::Ground {
+                ground_while_airborne = true;
+            }
+            if movement.fall_vel > 0 {
+                impact = Some(movement.fall_vel);
+            }
+        }
+        if impact.is_some() && f.mover().grounded {
+            break;
+        }
+    }
+    assert!(airborne, "the slide over the 3 m drop never left the upper deck");
+    assert!(
+        !ground_while_airborne,
+        "a ground packet was sent while the glider was falling"
+    );
+    assert!(impact.is_some(), "the deck landing did not report an impact");
+    assert!(f.mover().grounded, "the deck fall never landed");
+    assert!(f.deck().is_some(), "the landed glider left the deck");
 }
