@@ -136,8 +136,13 @@ bits exact; they do not establish the runtime scales below.
 * `ShipControlRequest` (type 4) writes through the same serializer (`MoveUnit::write_to`), so the
   type-4 layout exists once.
 * Received type 2 is decoded into `model::Movement::vehicle`
-  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`); `vehicle_yaw` keeps
-  its old value from the quaternion. Type 3 still keeps only `vehicle_yaw`.
+  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`) and type 3 into
+  `model::Movement::ship` (`ShipMove { rotation, angular_velocity, steering, throttle, zone_id,
+  stuck }`). Both keep the three quaternion shorts; `Movement::rotation_quat()` rebuilds
+  `[x, y, z, w]` as the 1.2 receiver does (`FUN_397c0470` cases 2 and 3) and `vehicle_yaw` keeps
+  the yaw derived from it. The full rotation is what S8 draws (a ship's bank/pitch, a cart's
+  tilt); the unit tests mirror the server's `ShipMove::write` / `VehicleMove::write` bodies byte
+  for byte.
 
 ### Live checks
 
@@ -754,9 +759,10 @@ unit tests here repeat:
 | `SCAiAggro` 0x1c4 | `AiAggro` | `bc npc`, `i32 count`, per hostile unit `bc`, three `i32` (the first is the damage it did) and a flag byte (135) |
 
 `Movement::read_typed(type, r)` reads all movement types: unit (1; `Movement::support` holds the object the unit stands on or
-hangs from, with its world position, when the actor flags say so), vehicle (2) and ship (3) (rotation shorts as a quaternion
-without the scalar -> `vehicle_yaw`, angular velocity, steering ...), ship request (4, no position) and transfer (5). The
-state resource puts a unit that stands on an object at its world position and sets the yaw of vehicles from the rotation.
+hangs from, with its world position, when the actor flags say so), vehicle (2) and ship (3) (the rotation shorts are kept in
+`vehicle` / `ship`; `rotation_quat()` rebuilds the full quaternion and `vehicle_yaw` its yaw), ship request (4, no position)
+and transfer (5). The state resource puts a unit that stands on an object at its world position and sets the yaw of vehicles
+from the rotation; the drawn pose of remote vehicles uses the full rotation (`aa-client` `ingame/vehicle_track.rs`).
 
 NPC movements: the server sends a step every 100 ms with `flags` 0, `actor_flags` 4 (running) or 5 (walking), `delta_movement`
 `[0, 127 | 63, 0]`, the stance and alertness of the NPC (`alertness` 2 = in combat) and a **velocity of a fixed 4000** (3.9 m/s

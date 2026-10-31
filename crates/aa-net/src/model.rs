@@ -1327,6 +1327,10 @@ pub struct Movement {
 /// request the server applied and its zone/stuck state (`FUN_397c0470` case 3).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ShipMove {
+    /// Quaternion `x`, `y`, `z` as the wire stores them (`1/32767` each); `w` is rebuilt from
+    /// them. The server writes them from the visual orientation (bank, ground pitch and wave
+    /// pitch on top of the hull; `ai/physics/replication.rs` `send_updated_movement_data`).
+    pub rotation: [i16; 3],
     pub angular_velocity: [f32; 3],
     /// -127 ..= 127, the same wire levels as the type-4 request.
     pub steering: i8,
@@ -1393,6 +1397,19 @@ impl Movement {
     /// Facing in radians.
     pub fn yaw(&self) -> f32 {
         self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
+    }
+
+    /// The full rotation `[x, y, z, w]` of a vehicle (type 2) or ship (type 3) movement, in game
+    /// coordinates (z up); `w` is rebuilt from the three shorts as the 1.2 receiver does
+    /// (`FUN_397c0470` cases 2 and 3). `None` for the other movement types, which carry a
+    /// direction byte instead.
+    pub fn rotation_quat(&self) -> Option<[f32; 4]> {
+        let shorts = self
+            .vehicle
+            .as_ref()
+            .map(|v| v.rotation)
+            .or_else(|| self.ship.as_ref().map(|s| s.rotation))?;
+        Some(quat_from_shorts(shorts))
     }
 
     /// The facing to draw. A unit standing on an object carries its facing relative to
@@ -1534,13 +1551,15 @@ impl Movement {
             3 => {
                 // Ship: rotation as three shorts, angular velocity, steering, throttle, zone and
                 // stuck flag.
-                m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
+                let rotation = [r.i16()?, r.i16()?, r.i16()?];
+                m.vehicle_yaw = Some(quat_yaw(quat_from_shorts(rotation)));
                 let angular_velocity = [r.f32()?, r.f32()?, r.f32()?];
                 let steering = r.i8()?;
                 let throttle = r.i8()?;
                 let zone_id = r.u16()?;
                 let stuck = r.u8()? != 0;
                 m.ship = Some(ShipMove {
+                    rotation,
                     angular_velocity,
                     steering,
                     throttle,
@@ -2521,6 +2540,115 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 5);
+    }
+
+    /// A vehicle / ship quaternion with pitch and roll, not only yaw: the receiver keeps the three
+    /// wire shorts so the full rotation reaches the drawn pose (S8).
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn vehicle_and_ship_movements_keep_the_full_rotation() {
+        // A yaw with a little pitch and roll; `w` is not on the wire.
+        let half = 0.35f32;
+        let (x, y, z) = (0.2f32, -0.1, half.sin());
+        let q = [x, y, z, (1.0 - (x * x + y * y + z * z)).sqrt()];
+        let shorts = [
+            (x / 0.000_030_518_509) as i16,
+            (y / 0.000_030_518_509) as i16,
+            (z / 0.000_030_518_509) as i16,
+        ];
+        let mut w = Writer::new();
+        w.u32(1).u8(0).position(Pos::default()).i16(0).i16(0).i16(0);
+        w.i16(shorts[0]).i16(shorts[1]).i16(shorts[2]);
+        w.f32(0.0).f32(0.0).f32(0.0).f32(0.0).u8(0);
+        let m = Movement::read_typed(2, &mut Reader::new(&w.finish())).unwrap();
+        let got = m.rotation_quat().expect("type-2 rotation");
+        for (a, b) in got.into_iter().zip(q) {
+            assert!((a - b).abs() < 2e-4, "{got:?} vs {q:?}");
+        }
+        assert_eq!(m.vehicle.as_ref().unwrap().rotation, shorts);
+
+        let mut w = Writer::new();
+        w.u32(1).u8(0).position(Pos::default()).i16(0).i16(0).i16(0);
+        w.i16(shorts[0]).i16(shorts[1]).i16(shorts[2]);
+        w.f32(0.0).f32(0.0).f32(0.0).i8(0).i8(0).u16(1).u8(0);
+        let m = Movement::read_typed(3, &mut Reader::new(&w.finish())).unwrap();
+        let got = m.rotation_quat().expect("type-3 rotation");
+        for (a, b) in got.into_iter().zip(q) {
+            assert!((a - b).abs() < 2e-4, "{got:?} vs {q:?}");
+        }
+        assert_eq!(m.ship.as_ref().unwrap().rotation, shorts);
+        assert!(Movement::unit(Pos::default(), 0.0, 0).rotation_quat().is_none());
+    }
+
+    /// The server's own writers (`aaemu-game`): `models/movement.rs`
+    /// `write_sc_one_unit_movement` writes the `bc` id, the type byte, then `MoveType.Write`
+    /// (`ShipMove::write` / `VehicleMove::write`); `packets/world.rs`
+    /// `SCOneUnitMovementPacket` forwards that body. The bytes below are built exactly like those
+    /// writers, and every one must be consumed by the receiver.
+    #[test]
+    fn server_written_vehicle_and_ship_bodies_are_read_to_the_last_byte() {
+        use crate::wire::encode_position;
+
+        let id: u32 = 0x84_C9;
+        let pos = Pos::new(10458.4, 15574.05, 229.47);
+        let time = 1_117_012u32;
+
+        // Type 2 (`VehicleMove::write`): bc id, 2, time, flags, position, velocity shorts,
+        // rotation shorts, angular velocity f32 x3, steering f32, wheel count, wheel f32 x n.
+        let mut expected: Vec<u8> = id.to_le_bytes()[..3].to_vec();
+        expected.extend_from_slice(&[2]);
+        expected.extend_from_slice(&time.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&encode_position(pos));
+        expected.extend_from_slice(&[0x2e, 0x00, 0xe0, 0xfe, 0x00, 0x00]); // velocity
+        expected.extend_from_slice(&[0x00, 0x00, 0x16, 0x00, 0x96, 0x80]); // rotation x, y, z
+        expected.extend_from_slice(&0.5f32.to_le_bytes());
+        expected.extend_from_slice(&(-0.25f32).to_le_bytes());
+        expected.extend_from_slice(&0.0f32.to_le_bytes());
+        expected.extend_from_slice(&0.75f32.to_le_bytes()); // steering
+        expected.push(2);
+        expected.extend_from_slice(&1.5f32.to_le_bytes());
+        expected.extend_from_slice(&(-2.5f32).to_le_bytes());
+        let mut r = Reader::new(&expected);
+        assert_eq!(r.bc().unwrap(), id);
+        let cart = Movement::read(&mut r).unwrap();
+        assert!(r.is_empty(), "the reader must consume the server's wheel list");
+        let vehicle = cart.vehicle.as_ref().expect("type-2 body");
+        assert_eq!((cart.move_type, cart.time, cart.flags), (2, time, 0));
+        assert_eq!(cart.velocity, [0x002e, -0x0120, 0]);
+        assert_eq!(vehicle.rotation, [0x0000, 0x0016, -0x7f6a]);
+        assert_eq!(vehicle.angular_velocity, [0.5, -0.25, 0.0]);
+        assert_eq!(vehicle.steering, 0.75);
+        assert_eq!(vehicle.wheel_ang_vel, vec![1.5, -2.5]);
+        assert!((cart.pos.x - pos.x).abs() < 0.01 && (cart.pos.y - pos.y).abs() < 0.01);
+
+        // Type 3 (`ShipMove::write`): bc id, 3, time, flags, position, velocity, rotation,
+        // angular velocity, steering i8, throttle i8, zone u16, stuck byte.
+        let mut expected: Vec<u8> = id.to_le_bytes()[..3].to_vec();
+        expected.extend_from_slice(&[3]);
+        expected.extend_from_slice(&time.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&encode_position(pos));
+        expected.extend_from_slice(&[0xff, 0xff, 0x00, 0x00, 0x01, 0x00]); // velocity
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // rotation
+        expected.extend_from_slice(&0.0f32.to_le_bytes());
+        expected.extend_from_slice(&(-0.000_646_574_66f32).to_le_bytes());
+        expected.extend_from_slice(&0.090_274_61f32.to_le_bytes());
+        expected.extend_from_slice(&(-12i8).to_le_bytes());
+        expected.extend_from_slice(&(81i8).to_le_bytes());
+        expected.extend_from_slice(&179u16.to_le_bytes());
+        expected.push(0);
+        let mut r = Reader::new(&expected);
+        assert_eq!(r.bc().unwrap(), id);
+        let ship = Movement::read(&mut r).unwrap();
+        assert!(r.is_empty(), "the reader must stop exactly at the stuck byte");
+        let body = ship.ship.as_ref().expect("type-3 body");
+        assert_eq!((ship.move_type, ship.time), (3, time));
+        assert_eq!(ship.velocity, [-1, 0, 1]);
+        assert_eq!(body.rotation, [0, 0, 0]);
+        assert_eq!(body.angular_velocity[1], -0.000_646_574_66);
+        assert_eq!(body.angular_velocity[2], 0.090_274_61);
+        assert_eq!((body.steering, body.throttle, body.zone_id, body.stuck), (-12, 81, 179, false));
     }
 
     #[test]

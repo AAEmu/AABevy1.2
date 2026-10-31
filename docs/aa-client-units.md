@@ -579,10 +579,10 @@ mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
 A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
 bridge deck over its river bed.
 
-Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps), full wheeled
-physics for the nine car models, and remote carts' tilt (they keep the received type-2 pose;
-S8). Pending live checks: the server's echo/correction of a tilted type-2 pose, `vel.z` on the
-wire over the slope, and the cart's tilt while turning on a slope.
+Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps) and full wheeled
+physics for the nine car models. Remote carts' tilt now comes from the received type-2
+quaternion (S8 below). Pending live checks: the server's echo/correction of a tilted type-2
+pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a slope.
 
 #### Wheels and spindle (S6/S7 step 3)
 
@@ -633,6 +633,103 @@ Pending live checks:
   captured type-2 `velocity` (the port does not use the wire velocity for visuals);
 * whether the leave speed check should read the wire velocity (30/32767 m/s for a type-2
   body, the controller speed for the driven cart) or the engine speed `vtable+0xa4` reads.
+
+### Remote vehicles and ships (S8)
+
+`ingame/vehicle_track.rs` is the 1.2 vehicle controller for other players' carts and ships; a
+`RemoteUnit` switches to it on its first type-2 or type-3 movement and keeps the walking
+`remote::Track` for every other unit. The receive chain was read in the 1.2 decompile
+(`<client12-decompile>/x2game.dll.c`): `FUN_390b2f30` (ships) and `FUN_390c63c0` (land
+vehicles) queue a sample per packet (`FUN_390b2980` / `FUN_390b2840`), the playback clock is
+kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_390b0040` ->
+`FUN_390ad150`/`FUN_390a16b0` applies the pose. The rules, and what backs them:
+
+* **Interpolation, not extrapolation.** The pose is the position lerp and quaternion nlerp
+  (short arc, normalised) of the two samples around the playback time; past the newest sample
+  it is held, and a single remaining sample is held at `t = 0` (`FUN_390ad150`). Unlike the
+  living-unit mode 3, the vehicle path has no velocity extrapolation.
+* **Fixed delay clock, corrected every frame.** The first sample sets
+  `offset = (server - local) - delay`; later samples compute
+  `deviation = (server - local) - offset`. A negative deviation or one over
+  `delay * 20.0` re-bases the offset and erases the queue. Otherwise `FUN_390ad150` calls
+  `FUN_39098780` once per frame: inside the dead band the offset moves 1 ms
+  (`DAT_399a28a8` = 0.001, mainly the ms-to-seconds factor), outside it by
+  `max(1 ms, 0.2 * excess)` (`_DAT_399a2ec0` = 0.2). `_DAT_399a2eb8` = 20.0 and the 0.2/1 ms
+  constants were read from the unpacked image.
+* **Hold after silence.** `FUN_390b2420` stops updating 5000 ms after the last sample arrived;
+  the drawn pose stays where it was. No sample ever keeps the announced (level) pose.
+* **20 m snap, checked before sampling.** `FUN_390b0040` compares the drawn entity with the
+  controller's model (newest sample) position before it samples; a larger distance
+  (`DAT_399a3364` = 400.0 squared) is a teleport and snaps at once, even while the playback
+  clock is still behind that sample. **S8-C5** (inferred): the port snaps to the newest sample
+  and re-bases the clock; the original resets its smoothing state (`FUN_390ae4a0`), and a
+  later capture must record the drawn poses across a >20 m ship move to settle the exact pose.
+* **Ship-only rules.** `FUN_390b2f30` drops a packet older than the newest sample by less than
+  1000 ms, and restarts the sync when the zone changes. **S8-C3** (inferred): the original
+  compares the packet's zone with the controller model's zone; the port compares it with the
+  last sample's and clears the queue and re-bases instead of shifting the queued times
+  (`FUN_390a0f10`).
+* **Full rotation, no terrain snap.** The packet's quaternion is applied to the root transform
+  and `facing` is its yaw; `move_units` does not snap a vehicle's z to the terrain (the packet
+  already carries the pose, and a ship may be over water or a shore). The first sample seeds
+  the track with its own position and rotation (not the announced level/yaw pose), and a pending
+  actor admitted later keeps that rotation (`View::admit` uses `drawn()`), so a cart is never
+  drawn flat for the playback delay.
+* **Deck riders walk in the hull frame.** A movement whose support block names a unit and
+  carries a world point has its primary position and relative facing in the hull frame (S10
+  deck standing). Each `DeckRider` keeps a walking `Track` in that frame (the same delay and
+  rules as an on-foot remote unit), and `place_deck_riders` samples it every frame and composes
+  `hull.pos + hull.rotation * local` with the smoothed hull's full quaternion. A walker
+  therefore moves continuously between packets (no 0.5-1 m packet steps), turns smoothly, and
+  stays on a pitching/moving deck instead of sliding with its old variable-delay world track.
+  `place_deck_riders` also writes `Motion` from the local track (speed and heading), so the
+  walk clip plays; `move_units` skips `DeckRider` units and `place_deck_riders` runs before
+  `drive_locomotion` so a starved world track cannot leave an idle slide. Pending actors sample
+  their deck track too, so admission draws the current composed pose. Without a drawn hull the
+  wire hull pose is used, else the last drawn pose is kept. On leaving the deck the world track
+  is seeded from the last composed pose, so the first on-foot frame does not jump; stepping onto
+  another hull seeds the new local track at the drawn point and blends (a large step is not
+  snapped).
+* **Deck standing uses the same hull rotation.** `DeckHull::pose`/`ship_to_world` carry
+  the full quaternion into `board_deck`, `deck_control` and the deck landing
+  (`deck_landing`). The shared `DeckHull::pose`, `ship_to_world`, `world_to_ship` and
+  `deck_landing` now all carry the full game rotation, so PR #49's `DeckContact`/`DeckGround`
+  callers follow pitch and roll: `pick` returns `(root, rotation)` and `ship_to_world` takes
+  that rotation. PR #49's `DeckContact.yaw: f32` and `DeckGround::pose` return type become
+  `Quat` at merge (its `let (root, yaw)` / `ship_to_world(root, yaw, local)` expressions then
+  compile unchanged). A ship-local walk step is rotated
+  into a horizontal collision step scaled so its inverse keeps the full ship-local length
+  (`deck_world_step`); dropping the rotated z made a pitched deck cos² slower.
+* **A local controller ignores its own echo.** `FUN_390c63c0` is a no-op while the unit has a
+  local vehicle controller; `receive_moves` therefore does not feed type-2/3 movements of a
+  `Driven` unit (the cart this client drives) into the track.
+* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`) as the
+  seams for the S6/S9 rudder, wheel and propeller visuals; the track interpolates
+  steering/throttle for its pose but this port has no ship rudder or wheel-speed consumer yet.
+
+`DELAY` is the one value the decompile cannot give: it comes from a runtime getter
+(`DAT_39ae4e90`, integer ms capped at 10000 in `NetActorMovementController::PrePhysicsUpdate`).
+The only default in the image is **300 ms** when that getter is null (`x2game.dll.c:756212`),
+so the port uses **0.3 s (S8-C1)** and keeps the re-base window at 20 × delay = 6 s. The
+minimum step and the dead band are **S8-C2**: `FUN_39098780` takes both from its caller
+(`DAT_39ae4e94` at runtime) and neither is read; the port uses the 1 ms nudge as the minimum
+step and a 10 ms band.
+
+Capture steps for the pending items (two clients, same cell; B drives a Farm Wagon and a
+rowboat; A is the hidden original as observer): record every `SCOneUnitMovement` type-2/3 body
+with its arrival time, and the drawn A-side entity pose per frame; compare the drawn pose with
+`(packet time) - delay` to measure `DAT_39ae4e90` (S8-C1), start A after B and record a long
+drive to see how the offset is corrected (S8-C2), drive a ship across a zone border (S8-C3) and
+make B teleport or sail more than 20 m between packets (S8-C5); for the deck paths, stand A on
+B's hull while it pitches and record A's drawn offset. The example below replays the recorded
+S6/S7 cart drive (`tests/fixtures/remote-vehicle/cart_c_left.tsv`: the original client's own
+type-2 bodies, which the server rebroadcasts unchanged) through `receive_moves` and `move_units`
+twice, pending and rendered: 44 samples, drawn path 13.80 m, no stall or jump, final pose within
+5 cm of the recording, and a cut stream (stops while moving) held at its last packet. The delay
+check uses the decompile's 300 ms literal, not the code constant. It fails non-zero when the
+interpolation, the delay, the clock offset, the hold, the rotation, the first-sample seed or the
+rendered path is broken:
+`cargo run -p aa-client --example remote_vehicle_motion -- --headless`.
 
 ## What is drawn (the census)
 
@@ -835,11 +932,19 @@ those paths, and mounting drops an existing ride.
   bounds plus 2 m, so it does not ask for the floor of every ship in view.
   Unit preparation (`prepare::build_unit`) warms both the floor and its bounds
   on the worker thread; `board_deck` only reads the caches.
-* **Ship frame.** `ship_to_world(root, yaw, local)` is world = ship * local
-  with local in the captured (right, forward, up) frame; `world_to_ship` is its
-  inverse. Each frame the player follows the authoritative type-3 hull, so a
-  moving hull carries the same deck point without the client simulating the
-  ship.
+* **Ship frame.** `ship_to_world(root, rotation, local)` is
+  world = ship + rotation * local, with local in the captured (right, forward,
+  up) frame and `rotation` the drawn hull's full game-space quaternion
+  (`DeckHull::pose`; S8 adds the server's bank and wave pitch);
+  `world_to_ship` is its inverse. PR #49's `DeckContact.yaw: f32` /
+  `DeckGround::pose` need the `Quat` at merge; its
+  `ship_to_world(root, yaw, local)` call then follows pitch and roll. Each frame the player follows
+  the authoritative type-3 hull, so a moving or pitching hull carries the
+  same deck point without the client simulating the ship. Synthetic-deck tests
+  (no pak) board a hull pitched 4 degrees with the player 4 m forward, land a
+  get-off on it, and walk off it; the stander and the exit point follow
+  `rotation * local`, not the yaw-only point. `deck_world_step` keeps the full
+  ship-local step length on a pitched/rolled deck.
 * **Input.** The deck reuses the on-foot rules (`resolve_keys`, `face_camera`,
   the mouse look): W / S and Q / E move in the character's frame, the first
   direction snaps the facing to the camera, the right button keeps it there,
@@ -871,6 +976,19 @@ those paths, and mounting drops an existing ride.
   the rail), and its first packet, sent at once, is an ordinary on-foot movement
   without 0x40/0x20 (the captured transition). A teleport also removes the
   component.
+* **Remote deck riders (S8).** Another player standing on a deck reports the
+  ship-local point and relative facing in the primary fields and the world
+  point in the support block; their own walking track is a variable delay (and
+  extrapolates), so drawing the world point slides them 1-2 m against the
+  smoothed hull. A `DeckRider` keeps a walking `Track` in the hull frame
+  (position and relative facing, same delay/rules), sampled every frame and
+  composed as `hull.pos + hull.rotation * local` with the drawn hull's full
+  quaternion (`place_deck_riders`); without a drawn hull the wire pose is used,
+  else the last drawn pose. Leaving the deck seeds the world track from the
+  composed pose. Tests drive the real `receive_moves`/`place_deck_riders` with
+  a walking rider on a moving pitched hull (no per-packet steps, smooth turn, `Motion` speed
+  and heading), a pending rider before admission, a leave frame that does not jump, and a
+  switch between two hulls that blends from the drawn point.
 * **Transport.** `aa-net` now writes the 0x20 support block from `MoveSupport`
   instead of masking it; `MoveCommand::support` carries the block. The six
   captured bodies (idle, two walking, jump, header-only 0x40, and an off-deck
