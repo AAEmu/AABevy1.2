@@ -3225,3 +3225,9 @@ Eznan Cutter helm camera is captured (doodads, 2026-10-30): camera mode 1, wante
 skill (this client follows the server's `cast`, which starts it at the cast end, so an interrupted cast
 leaves no local timer) and whether a native press during the slave's global cooldown is dropped silently
 like the player's.
+
+## Options open regression (2026-10-31)
+
+`cargo run -p aa-client --example options_hang -- --headless --mute` boots the real World-stage HUD,
+raises `open_config`, opens the original Options frame and fails if the open plus the next tick take
+more than 1 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.

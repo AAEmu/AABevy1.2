@@ -96,6 +96,14 @@ impl Animations {
         self.widgets.effective_scale(tree, id)
     }
 
+    pub(crate) fn invalidate_widget_scale(&self, id: Id) {
+        self.widgets.invalidate_scale(id);
+    }
+
+    pub(crate) fn clear_widget_scale_cache(&self) {
+        self.widgets.clear_scale_cache();
+    }
+
     pub fn widget_clip_rect(&self, tree: &crate::tree::Tree, id: Id) -> Option<Rect> {
         let mut out: Option<Rect> = None;
         let mut owner = tree.clip_start(id);

@@ -66,16 +66,16 @@ fn refresh_geometry(tree: &mut Tree, id: Id) {
 }
 
 /// Native completion and callback entry are synchronous boundaries for scale writes.
-/// Check only enrolled TextBoxes; frozen effective scales and manual heights are untouched.
-/// This pass calls no Lua, and all liveness/auto-size checks use the current tree.
+/// Only TextBoxes whose ancestor scale changed since the previous drain are checked; frozen
+/// effective scales and manual heights are untouched. This pass calls no Lua, and all
+/// liveness/auto-size checks use the current tree.
 pub(crate) fn refit_scales(lua: &mlua::Lua) {
+    let dirty = std::mem::take(&mut super::super::ui(lua).auto_textbox_dirty);
+    if dirty.is_empty() {
+        return;
+    }
     let mut u = super::super::ui(lua);
-    let previous: Vec<_> = u
-        .auto_textbox_scales
-        .iter()
-        .map(|(&id, &scale)| (id, scale))
-        .collect();
-    for (id, before) in previous {
+    for id in dirty {
         let text = if u.tree.get(id).alive {
             u.tree
                 .get(id)
@@ -88,9 +88,27 @@ pub(crate) fn refit_scales(lua: &mlua::Lua) {
             u.auto_textbox_scales.remove(&id);
             continue;
         };
+        let Some(before) = u.auto_textbox_scales.get(&id).copied() else {
+            continue;
+        };
         if u.animations.widget_scale(&u.tree, id) != before {
             let text = text.clone();
             auto_size(&mut u, id, &text);
         }
     }
+}
+
+/// Mark one node of a scaled subtree. The caller walks the children and marks each descendant,
+/// so an ancestor's change invalidates the whole cached chain exactly once.
+pub(crate) fn scale_changed(u: &mut Ui, id: Id) {
+    u.animations.invalidate_widget_scale(id);
+    if u.auto_textbox_scales.contains_key(&id) {
+        u.auto_textbox_dirty.insert(id);
+    }
+}
+
+/// A global UI-scale change reaches every enrolled TextBox.
+pub(crate) fn all_scales_changed(u: &mut Ui) {
+    u.auto_textbox_dirty
+        .extend(u.auto_textbox_scales.keys().copied());
 }

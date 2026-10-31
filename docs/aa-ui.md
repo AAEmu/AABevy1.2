@@ -9671,3 +9671,24 @@ parity completion is implied. Root owns the exclusive Git/worktree stopping lane
 * The clipboard is only the in-process buffer (and the `AAUI.GetClipboard`/`SetClipboard` hooks); there is no OS clipboard off Windows.
 * `mlua::Integer` is 32 bits on wasm32, so numbers passed to Lua events go through `lua_int` as `Value::Number` (Lua 5.1 numbers are doubles anyway).
 * `ui_texts` is read from the game database through the in-memory SQLite VFS (see aa-anim's Browser note).
+
+## Options open: incremental TextBox refit (2026-10-31)
+
+Commit `6114a22e`'s scale refit (`crates/aa-ui/src/lua/widget/textbox.rs`) ran at every anchor
+propagation node, handler call and flush. Each call scanned every enrolled auto-sized TextBox and
+re-shaped each one whose effective scale changed. Opening the original Options page (hundreds of
+auto-sized TextBoxes plus its show scale animation) therefore did (subtree nodes) x (TextBoxes)
+full font layouts in one frame: the 2026-10-31 report measured 54-77 s before the client recovered.
+
+`Ui` now keeps `auto_textbox_dirty`. `anchors::scaled` marks the scaled node and `scale_children`
+marks each child; `SetUIScale` marks every enrolled TextBox, and a chat reparent marks them all.
+`Widgets` caches each widget's effective scale, invalidates a scaled subtree's cache, and clears
+the cache on every scale write before other consumers read it. `refit_scales` drains the dirty set
+with the same liveness, auto-size and scale comparison instead of scanning the map. The refit still
+runs before `OnChangedAnchor`/`OnScale` and at handler/flush boundaries, so the synchronous height
+reads and callback order pinned by the v6-v9 tests are unchanged.
+
+`crates/aa-client/examples/options_hang.rs` boots the real World-stage HUD, raises `open_config`,
+opens `ToggleOptionFrame(true)` and ticks once; it exits non-zero when the open plus the tick take
+more than 1 s. On the local debug build this went from 28.2 s (restored per-node refit, mutation) to
+0.46 s; the release report's 54-77 s stall is the same cause.
