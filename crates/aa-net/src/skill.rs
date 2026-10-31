@@ -775,6 +775,28 @@ mod tests {
         assert!(r.is_empty());
     }
 
+    /// 2026-10-31 original-client capture: the house build action 14575 at house 39109 is a
+    /// plain unit target (kind 0), no bc-house target type, 13 bytes.
+    #[test]
+    fn captured_house_build_cast_is_a_plain_unit_target() {
+        let body = crate::game::ClientMsg::StartSkill {
+            skill_id: 14575,
+            self_obj_id: 8615,
+            caster: StartCaster::Unit,
+            target: SkillTarget::unit(39109),
+        }
+        .encode_body();
+        assert_eq!(body, [0xef, 0x38, 0, 0, 0, 0xa7, 0x21, 0, 0, 0xc5, 0x98, 0, 0]);
+        let mut r = Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 14575);
+        assert_eq!(r.u8().unwrap(), caster_kind::UNIT);
+        assert_eq!(r.bc().unwrap(), 8615);
+        let target = SkillTarget::read(&mut r).unwrap();
+        assert_eq!((target.kind, target.obj_id), (target_kind::UNIT, 39109));
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
+
     /// A ground cast (Missile Rain on the lane, 2026-10): the server's `SkillCastPositionTarget` reader takes two `<< 32` fixed point
     /// longs (1/4096 m), a float height, a float rotation and two object ids, and echoes the spot back in `SCPlotEvent` rounded to 1/4096 m.
     #[test]
