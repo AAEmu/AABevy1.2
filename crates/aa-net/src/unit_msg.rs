@@ -234,6 +234,7 @@ mod tests {
         assert_eq!(
             m.ship,
             Some(ShipMove {
+                rotation: [0, 0, 0],
                 angular_velocity: [1.0, 2.0, 3.0],
                 steering: -127,
                 throttle: 127,

@@ -76,12 +76,20 @@ pub struct DeckHull<'w, 's> {
 }
 
 impl DeckHull<'_, '_> {
-    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, f32)> {
+    /// The drawn hull position and full game-space rotation (S8: the drawn quaternion; yaw,
+    /// pitch and roll). #49's `DeckGround::pose` uses the same tuple shape.
+    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, Quat)> {
         self.views
             .unit_entity(ship)
             .and_then(|entity| self.hulls.get(entity).ok())
-            .map(|hull| (hull.pos, hull.facing))
+            .map(|hull| (hull.pos, hull.game_rotation()))
     }
+}
+
+/// The yaw of a game-space (z up) rotation quaternion, as the camera and facing use it.
+pub fn yaw_of(rotation: Quat) -> f32 {
+    (2.0 * (rotation.w * rotation.z + rotation.x * rotation.y))
+        .atan2(1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z))
 }
 
 /// A ship deck under a glider's feet: the hull and the point in its frame.
@@ -91,7 +99,8 @@ pub(crate) struct DeckContact {
     pub local: Vec3,
     /// The hull pose the local point was found at (updated from [`DeckGround::pose`] while the ride lasts).
     pub root: Vec3,
-    pub yaw: f32,
+    /// The hull's full drawn rotation at that pose.
+    pub rotation: Quat,
     /// The player's facing in the hull frame: it is carried through the landing wait and the slide, and composed
     /// with the current hull yaw (the ship's turn turns the player, it does not steer the slide).
     pub facing: f32,
@@ -99,7 +108,12 @@ pub(crate) struct DeckContact {
 
 impl DeckContact {
     pub(crate) fn world(self) -> Vec3 {
-        ship_to_world(self.root, self.yaw, self.local)
+        ship_to_world(self.root, self.rotation, self.local)
+    }
+
+    /// The hull yaw of the contact, for the facing arithmetic.
+    pub(crate) fn yaw(self) -> f32 {
+        yaw_of(self.rotation)
     }
 }
 
@@ -145,9 +159,12 @@ impl DeckGround<'_, '_> {
                 continue;
             }
             let Some(bounds) = db.ship_bounds(unit.model_id) else { continue };
-            let wire = (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw());
-            let (root, yaw) = self.hull.pose(unit.obj_id).unwrap_or(wire);
-            let local = world_to_ship(root, yaw, at);
+            let wire = (
+                Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                Quat::from_rotation_z(unit.yaw()),
+            );
+            let (root, rotation) = self.hull.pose(unit.obj_id).unwrap_or(wire);
+            let local = world_to_ship(root, rotation, at);
             if !in_hull_bounds(bounds, local, HULL_MARGIN) {
                 continue;
             }
@@ -167,7 +184,7 @@ impl DeckGround<'_, '_> {
                     ship: unit.obj_id,
                     local: Vec3::new(local.x, local.y, height),
                     root,
-                    yaw,
+                    rotation,
                     facing: 0.0,
                 };
                 let world = contact.world();
@@ -180,12 +197,17 @@ impl DeckGround<'_, '_> {
     }
 
     /// The drawn hull pose of `ship`, else the pose in the last movement packet.
-    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, f32)> {
+    pub(crate) fn pose(&self, ship: u32) -> Option<(Vec3, Quat)> {
         self.hull.pose(ship).or_else(|| {
             self.units
                 .as_deref()
                 .and_then(|units| units.by_id.get(&ship))
-                .map(|unit| (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()))
+                .map(|unit| {
+                    (
+                        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                        Quat::from_rotation_z(unit.yaw()),
+                    )
+                })
         })
     }
 
@@ -239,7 +261,9 @@ pub struct DeckRide {
 }
 
 impl DeckRide {
-    /// The hull-local point the ride keeps (the glider's touchdown and slide update it).
+    /// The hull-local point the ride keeps (the glider's touchdown and slide update it; the
+    /// glide tests read it).
+    #[allow(dead_code)]
     pub(crate) fn local(&self) -> Vec3 {
         self.local
     }
@@ -314,43 +338,41 @@ pub fn in_hull_bounds(bounds: (Vec2, Vec2), local: Vec3, margin: f32) -> bool {
         && local.y <= max.y + margin
 }
 
-/// Game yaw (0 north, counter-clockwise) to a ship-local point: `local.x` is
-/// right and `local.y` forward.
-pub fn ship_to_world(root: Vec3, yaw: f32, local: Vec3) -> Vec3 {
-    let (s, c) = yaw.sin_cos();
-    Vec3::new(
-        root.x + local.x * c - local.y * s,
-        root.y + local.x * s + local.y * c,
-        root.z + local.z,
-    )
+/// A ship-local point (right, forward, up) to a world point with the hull's full rotation
+/// (the drawn quaternion: yaw, pitch and roll).
+pub fn ship_to_world(root: Vec3, rotation: Quat, local: Vec3) -> Vec3 {
+    root + rotation * local
 }
 
 /// Inverse of [`ship_to_world`].
-pub fn world_to_ship(root: Vec3, yaw: f32, world: Vec3) -> Vec3 {
-    let (s, c) = yaw.sin_cos();
-    let d = world - root;
-    Vec3::new(d.x * c + d.y * s, -d.x * s + d.y * c, d.z)
+pub fn world_to_ship(root: Vec3, rotation: Quat, world: Vec3) -> Vec3 {
+    rotation.inverse() * (world - root)
 }
 
-/// The deck a get-off lands on: the hull floor under `at` (the seat's get-off
-/// point), as a [`DeckRide`] and the world feet point. `None` when the point is
-/// not over a ship floor, so the ordinary get-off placement runs.
+/// The deck a get-off lands on, with the drawn hull's full rotation (yaw, pitch and roll):
+/// the hull floor under `at` (the seat's get-off point), as a [`DeckRide`] and the world feet
+/// point. `None` when the point is not over a ship floor, so the ordinary get-off placement
+/// runs.
 pub(crate) fn deck_landing(
     db: &Db,
     units: &Units,
     ship: u32,
     at: Vec3,
     facing: f32,
-    drawn: Option<(Vec3, f32)>,
+    drawn: Option<(Vec3, Quat)>,
 ) -> Option<(DeckRide, Vec3)> {
     let unit = units.get(ship)?;
     if !matches!(unit.kind, UnitKind::Slave { .. }) || !db.is_ship(unit.model_id) {
         return None;
     }
     let bounds = db.ship_bounds(unit.model_id)?;
-    let wire = (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw());
-    let (root, yaw) = drawn.unwrap_or(wire);
-    let local = world_to_ship(root, yaw, at);
+    let wire = (
+        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+        Quat::from_rotation_z(unit.yaw()),
+    );
+    let (root, rotation) = drawn.unwrap_or(wire);
+    let yaw = yaw_of(rotation);
+    let local = world_to_ship(root, rotation, at);
     if !in_hull_bounds(bounds, local, HULL_MARGIN) {
         return None;
     }
@@ -359,7 +381,7 @@ pub(crate) fn deck_landing(
         .height(local.x, local.y, local.z + DECK_STEP)
         .filter(|h| local.z - h <= DECK_STEP)?;
     let local = Vec3::new(local.x, local.y, height);
-    Some((DeckRide::new(ship, local, facing - yaw, yaw), ship_to_world(root, yaw, local)))
+    Some((DeckRide::new(ship, local, facing - yaw, yaw), ship_to_world(root, rotation, local)))
 }
 
 /// The shortest signed turn from `from` to `to` (radians).
@@ -372,6 +394,20 @@ fn angle_delta(to: f32, from: f32) -> f32 {
 /// `velocity` the on-foot ground velocity (`player::ground_velocity`).
 pub fn deck_step(facing: f32, velocity: Vec2, dt: f32) -> Vec2 {
     (forward(facing) * velocity.y + right(facing) * velocity.x) * dt
+}
+
+/// The horizontal world step for a ship-local step along the deck plane. The rotated step's
+/// z is dropped by the collision slide, which would shorten a pitched or rolled walk by cos²;
+/// scale the horizontal part so the inverse transform keeps the requested ship-local length.
+pub(crate) fn deck_world_step(rotation: Quat, step: Vec2) -> Vec2 {
+    let flat = (rotation * Vec3::new(step.x, step.y, 0.0)).truncate();
+    let local = rotation.inverse() * Vec3::new(flat.x, flat.y, 0.0);
+    let length = local.truncate().length();
+    if length <= 1e-6 {
+        Vec2::ZERO
+    } else {
+        flat * (step.length() / length)
+    }
 }
 
 /// One frame of a deck jump: rises from `z` at `vz` and lands back on the
@@ -449,11 +485,12 @@ pub(crate) enum DeckSlide {
 
 /// One glider slide step in the hull frame, through the same world collision, floor lookup and walk step as
 /// `deck_control`: a wall/riser blocks, a lower deck is stepped onto, and leaving the hull reports the fall point.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn slide_step(
     floor: Option<&ShipFloor>,
     collision: &WorldCollision,
     root: Vec3,
-    yaw: f32,
+    rotation: Quat,
     local: Vec3,
     local_facing: f32,
     speed: f32,
@@ -461,11 +498,10 @@ pub(crate) fn slide_step(
 ) -> DeckSlide {
     let local_velocity = deck_step(local_facing, Vec2::new(0.0, speed), 1.0);
     let step = local_velocity * dt;
-    let (sin, cos) = yaw.sin_cos();
-    let world_step = Vec2::new(step.x * cos - step.y * sin, step.x * sin + step.y * cos);
-    let world = ship_to_world(root, yaw, local);
+    let world_step = deck_world_step(rotation, step);
+    let world = ship_to_world(root, rotation, local);
     let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
-    let slid_local = world_to_ship(root, yaw, slid);
+    let slid_local = world_to_ship(root, rotation, slid);
     let (x, y) = (slid_local.x, slid_local.y);
     match walking_step(floor, x, y, local.z) {
         AirStep::Floor(h) => DeckSlide::Moved(Vec3::new(x, y, h)),
@@ -502,6 +538,7 @@ pub(crate) fn leave_deck(
     motion: &mut Motion,
     input_state: &mut PlayerInput,
     root: Vec3,
+    rotation: Quat,
     yaw: f32,
     facing: f32,
     local: Vec3,
@@ -513,12 +550,8 @@ pub(crate) fn leave_deck(
     state: &mut SendState,
     local_jump: Option<&mut LocalJump>,
 ) {
-    let world = ship_to_world(root, yaw, local);
-    let step = ship_to_world(
-        Vec3::ZERO,
-        yaw,
-        Vec3::new(local_velocity.x, local_velocity.y, 0.0),
-    );
+    let world = ship_to_world(root, rotation, local);
+    let step = rotation * Vec3::new(local_velocity.x, local_velocity.y, 0.0);
     let velocity = step + ship_velocity;
     mover.pos = world;
     mover.facing = yaw + facing;
@@ -663,9 +696,13 @@ pub fn board_deck(
             continue;
         };
         // the drawn hull, as deck_control places the player; the wire pose is the fallback
-        let wire = (Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw());
-        let (root, yaw) = hull.pose(unit.obj_id).unwrap_or(wire);
-        let local = world_to_ship(root, yaw, mover.pos);
+        let wire = (
+            Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+            Quat::from_rotation_z(unit.yaw()),
+        );
+        let (root, rotation) = hull.pose(unit.obj_id).unwrap_or(wire);
+        let yaw = yaw_of(rotation);
+        let local = world_to_ship(root, rotation, mover.pos);
         if !in_hull_bounds(bounds, local, HULL_MARGIN) {
             continue;
         }
@@ -837,8 +874,12 @@ pub fn deck_control(
     let floor: Option<std::sync::Arc<ShipFloor>> = db.ship_floor(ship.model_id);
     // the drawn hull (the smoothed RemoteUnit), so the feet do not jitter against
     // the hull the client shows; the support block's ship-local point stays the wire one
-    let wire = (Vec3::new(ship.pos.x, ship.pos.y, ship.pos.z), ship.yaw());
-    let (root, yaw) = hull.pose(deck.ship).unwrap_or(wire);
+    let wire = (
+        Vec3::new(ship.pos.x, ship.pos.y, ship.pos.z),
+        Quat::from_rotation_z(ship.yaw()),
+    );
+    let (root, rotation) = hull.pose(deck.ship).unwrap_or(wire);
+    let yaw = yaw_of(rotation);
     let dt = time.delta_secs().min(0.1);
     if dt <= 0.0 {
         return;
@@ -938,11 +979,10 @@ pub fn deck_control(
         // collision, and the deck floor stays authoritative for the vertical step.
         // The ship's masts/cabin brushes are not static collision either: only the
         // deck floor and its risers model the ship itself.
-        let (sin, cos) = yaw.sin_cos();
-        let world_step = Vec2::new(step.x * cos - step.y * sin, step.x * sin + step.y * cos);
-        let world = ship_to_world(root, yaw, local);
+        let world_step = deck_world_step(rotation, step);
+        let world = ship_to_world(root, rotation, local);
         let slid = collision.slide(world, world_step, RADIUS, HEIGHT, STEP_UP).pos;
-        let slid_local = world_to_ship(root, yaw, slid);
+        let slid_local = world_to_ship(root, rotation, slid);
         let (x, y) = (slid_local.x, slid_local.y);
         if deck.airborne {
             match airborne_step(floor.as_deref(), x, y, local.z) {
@@ -968,6 +1008,7 @@ pub fn deck_control(
                         &mut motion,
                         &mut input_state,
                         root,
+                        rotation,
                         yaw,
                         deck.facing,
                         Vec3::new(x, y, z),
@@ -1012,6 +1053,7 @@ pub fn deck_control(
                         &mut motion,
                         &mut input_state,
                         root,
+                        rotation,
                         yaw,
                         deck.facing,
                         Vec3::new(x, y, local.z),
@@ -1041,7 +1083,7 @@ pub fn deck_control(
         }
     }
     deck.local = local;
-    let world = ship_to_world(root, yaw, local);
+    let world = ship_to_world(root, rotation, local);
     let facing = yaw + deck.facing;
     mover.pos = world;
     mover.facing = facing;
