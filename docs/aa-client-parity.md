@@ -7,10 +7,10 @@ in 3D (`FUN_393a8fa0`, `d^2 <= 900`, F1/F2). Yaw is random only for groups {2,3,
 ghost's yaw (`FUN_393a9340`, F4). The ground under the ghost box's four corners and centre may spread at most 6 m, else
 0x117; groups 37, {2,3,12,40} and {5,80} are exempt (`FUN_393a7720`/`FUN_393a73a0`, F7). The wire order is
 `template, x, y, z, z_rot, scale(1.0), item`; the area text is "Can't be installed here." (0x114 -> `ui_texts` 277).
-Two reuse locks exist (F13): the 30 s one (`_DAT_39ac7748` = 30,000 ms) starts at the end of a world load
-(`FUN_39426520`/`FUN_393a6de0`) and at a teleport arrival (F3's `SCTeleportUnit`), showing "Can't place this for N
-second(s)." (`ui_texts` 4598); a send starts the separate 2 s post-send cooldown (`FUN_393a89d0` -> `now + 2000`,
-`FUN_393a9540` error 0x163 `OTHER_BUILD_IS_ON`). The same seed pressed again still cancels the aim, also while either
+Two reuse locks exist (F13): the 30 s one (`_DAT_39ac7748` = 30,000 ms) starts only at the end of a world load
+(`FUN_39426520`, the only caller of `FUN_393a6de0`; also the game-screen OnEnter here), showing "Can't place this for N
+second(s)." (`ui_texts` 4598); a short `SCTeleportUnit` does not lock. A send starts the separate 2 s post-send
+cooldown (`FUN_393a89d0` -> `now + 2000`, `FUN_393a9540` error 0x163 `OTHER_BUILD_IS_ON`). The same seed pressed again still cancels the aim, also while either
 lock is active (maintainer 6cc6a453). `farm_plant_preview` checks the 30 m boundary, sphere/box overlap, the terrain
 spread and its exemptions, literal texts, the post-send cooldown, the 30 s lock, the ghost and ring offscreen, and
 exits after PASS/FAIL in a plain run. Still open: F5 water site, F6 exact radii, F8-F12 house/farm/zone/labor,

@@ -19,9 +19,10 @@
 //! Groups 2, 3, 12 and 40 get a random yaw; every other group sends the ghost's yaw (`FUN_393a9340` lines
 //! 761432-761439; F4 settled). The ghost is drawn with [`ghost_yaw`], and the packet carries that same yaw.
 //!
-//! Two reuse locks exist (F13). The 30 s one (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0` line 759378) starts at the
-//! end of a world load (`FUN_39426520`) and on `SCTeleportUnit` arrival (F3); the next use shows "Can't place this for
-//! N second(s)." (`ui_texts` 4598). A send starts a separate 2 s post-send cooldown: the builder destructor
+//! Two reuse locks exist (F13). The 30 s one (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0` line 759378) starts only at
+//! the end of a world load: `FUN_39426520` is the only caller of `FUN_393a6de0` (the enter-world step and the
+//! device-lost recovery), and no `SCTeleportUnit` handler reaches it, so a short teleport does not lock. The next use
+//! shows "Can't place this for N second(s)." (`ui_texts` 4598). A send starts a separate 2 s post-send cooldown: the builder destructor
 //! (`FUN_393a89d0` lines 760956-760960) writes `now + 2000` when its sent flag (`+0x2c`, set by `FUN_393a9340` line
 //! 761450) is set, and `FUN_393a9540` line 761547 refuses the next builder with error 0x163 (`OTHER_BUILD_IS_ON`).
 //!
@@ -32,7 +33,7 @@
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::farm::CreateDoodad;
 use aa_net::state::{Doodads, Units};
-use aa_net::{Command, Event, NetCommand, NetEvent, Pos};
+use aa_net::{Command, NetCommand, Pos};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::{TerrainQuery, WaterQuery, cry_to_bevy};
 use bevy::prelude::*;
@@ -210,23 +211,17 @@ pub(crate) fn lock_on_world_enter(mut lock: ResMut<PlantLock>, time: Res<Time>) 
     info!("plant: world load finished, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
 }
 
-/// A teleport arrival starts the same 30 s reuse lock: `SCTeleportUnit` (`Event::Teleported`, F3 at 19:49:27) or the
-/// end of a long load (`WorldLoadFinished`, `FUN_39426520`). Other events stay capture-pending.
-pub(crate) fn lock_on_arrival(
-    mut teleports: MessageReader<NetEvent>,
+/// The end of a world load (`WorldLoadFinished`, emitted when a long load's screen goes down). `FUN_39426520` is the
+/// only caller of `FUN_393a6de0`; a short `SCTeleportUnit` does not reach it, so only this and the game-screen OnEnter
+/// arm the 30 s lock.
+pub(crate) fn lock_on_world_load(
     mut loads: MessageReader<crate::ingame::teleport::WorldLoadFinished>,
     mut lock: ResMut<PlantLock>,
     time: Res<Time>,
 ) {
-    let mut arrived = loads.read().next().is_some();
-    for NetEvent(event) in teleports.read() {
-        if matches!(event, Event::Teleported { .. }) {
-            arrived = true;
-        }
-    }
-    if arrived {
+    if loads.read().next().is_some() {
         lock.hold(f64::from(time.elapsed_secs()));
-        info!("plant: teleport/world load finished, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
+        info!("plant: world load finished, reuse locked for {PLANT_REUSE_LOCK_SECS} s");
     }
 }
 
@@ -336,7 +331,8 @@ fn random_unit() -> f32 {
     })
 }
 
-/// Why `spot` cannot hold `shape`, or `None` (the 1.2 order: water, terrain spread, range, doodads, units).
+/// Why `spot` cannot hold `shape`, or `None` (the 1.2 order: water, terrain spread, range, doodads, units). The native
+/// `FUN_393a7720` sets 0x117 but `FUN_393a8fa0` keeps checking, so a later refusal overwrites the spread.
 ///
 /// `wet` is the water test at a spot, `shape_of` the group/radius of a template, `obstacles` the live unit positions and
 /// `ground` the terrain height at a spot.
@@ -359,9 +355,9 @@ pub(crate) fn check(
     } else if wet(spot) {
         return Some(Refusal::Area);
     }
-    if let Some(refusal) = terrain_refusal(spot, shape, &ground) {
-        return Some(refusal);
-    }
+    // `FUN_393a7720` sets 0x117 and returns into the rest of `FUN_393a8fa0`: the range/area/doodad/unit checks still run,
+    // so their code overwrites the spread
+    let spread = terrain_refusal(spot, shape, &ground);
     if !in_range(player, spot) {
         return Some(Refusal::TooFar);
     }
@@ -379,7 +375,7 @@ pub(crate) fn check(
     {
         return Some(Refusal::Unit);
     }
-    None
+    spread
 }
 
 /// Whether the new doodad overlaps `other`, testing round pairs as spheres on the sum of radii and the rest flat on
@@ -897,6 +893,77 @@ mod tests {
     }
 
     #[test]
+    fn a_later_refusal_overwrites_the_terrain_spread() {
+        let subject = Shape {
+            template: 1034,
+            group: 24,
+            radius: 0.5,
+        };
+        let cliff_at = |base: f32| move |x: f32, _y: f32| Some(if x > base { 7.0 } else { 0.0 });
+        let check_at = |spot: Vec3,
+                        doodads: &Doodads,
+                        obstacles: Vec<Vec3>,
+                        wet: bool,
+                        ground: &dyn Fn(f32, f32) -> Option<f32>| {
+            check(
+                spot,
+                Vec3::ZERO,
+                subject,
+                doodads,
+                &Units::default(),
+                obstacles.into_iter(),
+                |_| wet,
+                |_| subject,
+                ground,
+            )
+        };
+        // 40 m away with a 7 m step under the far corners: the range check runs after `FUN_393a7720` and sets 0x9a
+        assert_eq!(
+            check_at(
+                Vec3::new(40.0, 0.0, 0.0),
+                &Doodads::default(),
+                vec![],
+                false,
+                &cliff_at(39.5)
+            ),
+            Some(Refusal::TooFar)
+        );
+        // a doodad 0.4 m away overwrites it with 0x115
+        let mut doodads = Doodads::default();
+        let mut neighbour = test_doodad();
+        neighbour.obj_id = 1;
+        neighbour.template_id = 1034;
+        neighbour.pos = Pos::new(0.4, 0.0, 0.0);
+        doodads.by_id.insert(1, neighbour);
+        assert_eq!(
+            check_at(Vec3::ZERO, &doodads, vec![], false, &cliff_at(0.0)),
+            Some(Refusal::Doodad)
+        );
+        // a unit 0.4 m away overwrites it with 0x116
+        assert_eq!(
+            check_at(
+                Vec3::ZERO,
+                &Doodads::default(),
+                vec![Vec3::new(0.4, 0.0, 0.0)],
+                false,
+                &cliff_at(0.0)
+            ),
+            Some(Refusal::Unit)
+        );
+        // water is checked before the spread and stays 0x114
+        assert_eq!(
+            check_at(
+                Vec3::ZERO,
+                &Doodads::default(),
+                vec![],
+                true,
+                &cliff_at(0.0)
+            ),
+            Some(Refusal::Area)
+        );
+    }
+
+    #[test]
     fn refusals_use_the_1_2_error_codes_and_texts() {
         for (refusal, error, ui_texts, text) in [
             (Refusal::Area, 0x114, 277, "Can't be installed here."),
@@ -931,43 +998,50 @@ mod tests {
     }
 
     #[test]
-    fn a_teleport_or_world_load_starts_the_30s_lock_and_the_text() {
+    fn a_short_teleport_does_not_lock_but_a_world_load_does() {
         use std::time::Duration;
         let mut app = App::new();
-        app.add_message::<NetEvent>()
+        app.add_message::<aa_net::NetEvent>()
             .add_message::<crate::ingame::teleport::WorldLoadFinished>()
             .init_resource::<PlantLock>()
             .init_resource::<Time>()
-            .add_systems(Update, lock_on_arrival);
+            .add_systems(Update, lock_on_world_load);
 
-        app.world_mut().write_message(NetEvent(Event::Teleported {
-            pos: Pos::new(1.0, 2.0, 3.0),
-            yaw: 0.0,
-            reason: 14,
-        }));
+        // `SCTeleportUnit` never reaches `FUN_39426520`: a short hop leaves the planting usable
+        app.world_mut()
+            .write_message(aa_net::NetEvent(aa_net::Event::Teleported {
+                pos: Pos::new(1.0, 2.0, 3.0),
+                yaw: 0.0,
+                reason: 14,
+            }));
+        app.update();
+        assert!(
+            !app.world().resource::<PlantLock>().refused(0.0),
+            "a short teleport does not start the 30 s lock"
+        );
+
+        // the end of a world load (`WorldLoadFinished`) starts it and formats the text
+        app.world_mut()
+            .write_message(crate::ingame::teleport::WorldLoadFinished);
         app.update();
         let lock = app.world().resource::<PlantLock>();
-        assert!(
-            lock.refused(29.999),
-            "F3: the teleport arrival locks for 30 s"
-        );
+        assert!(lock.refused(29.999), "the world load locks for 30 s");
         assert!(!lock.refused(30.0));
         assert_eq!(
             lock_text(lock.remaining(0.1) as u64),
             "Can't place this for 29 second(s)."
         );
 
+        // the next world load re-arms it
         app.world_mut()
             .resource_mut::<Time>()
             .advance_by(Duration::from_secs(31));
-        app.update();
         app.world_mut()
             .write_message(crate::ingame::teleport::WorldLoadFinished);
         app.update();
-        let lock = app.world().resource::<PlantLock>();
         assert!(
-            lock.refused(31.0 + 29.999),
-            "the end of a world load locks too"
+            app.world().resource::<PlantLock>().refused(31.0 + 29.999),
+            "the next world load locks again"
         );
     }
 
