@@ -720,8 +720,10 @@ pub fn sync_views(
                     let spawned = super::doodad_model::spawn(&mut commands, &mut cry, prepared);
                     let model = spawned.entity;
                     let base_scale = if doodad.scale > 0.0 { doodad.scale } else { 1.0 };
-                    let remaining_ms = (doodad.time_left as f32 - since_announced_ms).max(0.0);
-                    let total_ms = growth.map_or(0.0, |g| g.total_ms(remaining_ms, true));
+                    // the announced time is the whole growth duration (`total_ms`); 0 falls back to the database delay
+                    let announced_ms = growth.map_or(doodad.time_left as f32, |g| g.total_ms(doodad.time_left as f32));
+                    let remaining_ms = (announced_ms - since_announced_ms).max(0.0);
+                    let total_ms = growth.map_or(0.0, |_| announced_ms);
                     let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = doodad_root_transform(doodad, scale);
                     let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, growth, remaining_ms, total_ms, base_scale };

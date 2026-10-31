@@ -46,6 +46,8 @@ pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
+#[cfg(test)]
+mod farm_audit;
 mod dev;
 pub(crate) mod cutdown;
 pub(crate) mod doodad_affordance;

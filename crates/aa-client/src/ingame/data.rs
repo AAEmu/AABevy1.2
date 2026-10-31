@@ -116,18 +116,18 @@ pub struct DoodadGrowth {
 }
 
 impl DoodadGrowth {
-    /// The total duration used to interpolate the scale. On a phase change the server's `time_left` is the whole
-    /// remaining time of the new phase (it already applied its growth rate and climate); a doodad first seen mid-phase
-    /// keeps the database `delay` when that is longer, so the visible size matches the part of the phase already
-    /// elapsed. Without an announced `time_left` (0) the database delay is the fallback.
-    pub fn total_ms(&self, time_left_ms: f32, first_seen: bool) -> f32 {
-        if time_left_ms <= 0.0 {
-            return self.delay_ms as f32;
-        }
-        if first_seen {
-            time_left_ms.max(self.delay_ms as f32)
-        } else {
+    /// The duration the scale is interpolated over: the `time_left` the server announced (it already applied the growth
+    /// rate and climate), or the database `delay` when it announced none (0). The original `ClientDoodad::Update`
+    /// (`0x393a4810`) reads exactly that duration and applies `start_scale` at once; a doodad first seen mid-phase
+    /// therefore starts at `start_scale` for the remaining time. The linear ramp and reaching `end_scale` exactly at the
+    /// phase change are **inferred** from `UpdateScaling`'s constant speed, not measured (F18 did not sample the
+    /// original's scale: capture-pending). The phase-change re-init is inferred too: `0x251` gates it (the clear at
+    /// `0x393a1c90` lets `Update` initialize again), also capture-pending (F18).
+    pub fn total_ms(&self, time_left_ms: f32) -> f32 {
+        if time_left_ms > 0.0 {
             time_left_ms
+        } else {
+            self.delay_ms as f32
         }
     }
 
@@ -1199,7 +1199,7 @@ mod tests {
     fn a_phase_change_grows_over_the_announced_time_left() {
         let g = DoodadGrowth { delay_ms: 10_000, start_scale: 0.6, end_scale: 1.0 };
         // the server shortened its delay by the growth rate: the new phase lasts 4,000 ms, not the database's 10,000
-        let total = g.total_ms(4_000.0, false);
+        let total = g.total_ms(4_000.0);
         assert_eq!(total, 4_000.0);
         assert!((g.scale_at(total, total) - 0.6).abs() < 1e-6);
         assert!((g.scale_at(2_000.0, total) - 0.8).abs() < 1e-6);
@@ -1208,17 +1208,19 @@ mod tests {
     }
 
     #[test]
-    fn a_doodad_first_seen_mid_phase_uses_the_longer_duration() {
+    fn a_doodad_first_seen_mid_phase_starts_at_start_scale_for_the_announced_time() {
         let g = DoodadGrowth { delay_ms: 10_000, start_scale: 0.6, end_scale: 1.0 };
-        // first seen with 4,000 ms left: the database delay is the phase's whole duration, so it is already 60% grown
-        let total = g.total_ms(4_000.0, true);
-        assert_eq!(total, 10_000.0);
-        assert!((g.scale_at(4_000.0, total) - 0.84).abs() < 1e-6);
-        // first seen with more time than the database delay (the server slowed the phase): the announced time wins
-        assert_eq!(g.total_ms(12_000.0, true), 12_000.0);
-        // no time left is known: the database delay is the fallback, and the growth is over
-        assert_eq!(g.total_ms(0.0, true), 10_000.0);
-        assert!((g.scale_at(0.0, g.total_ms(0.0, false)) - 1.0).abs() < 1e-6);
+        // The original `ClientDoodad::Update` (0x393a4810) uses the packet's time_left as the whole duration and starts
+        // at start_scale; a mid-phase remaining time is not stretched back to the database delay.
+        let total = g.total_ms(4_000.0);
+        assert_eq!(total, 4_000.0);
+        assert!((g.scale_at(total, total) - 0.6).abs() < 1e-6);
+        assert!((g.scale_at(2_000.0, total) - 0.8).abs() < 1e-6);
+        // first seen with more time than the database delay (the server slowed the phase): that time is the duration
+        assert_eq!(g.total_ms(12_000.0), 12_000.0);
+        // no announced time_left: the database delay is the duration, again from start_scale (not the end)
+        assert_eq!(g.total_ms(0.0), 10_000.0);
+        assert!((g.scale_at(g.total_ms(0.0), g.total_ms(0.0)) - 0.6).abs() < 1e-6);
         // no delay to fall back on: it is over
         assert_eq!(DoodadGrowth { delay_ms: 0, start_scale: 0.5, end_scale: 0.9 }.scale_at(0.0, 0.0), 0.9);
     }
