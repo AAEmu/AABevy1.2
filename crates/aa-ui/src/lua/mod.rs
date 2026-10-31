@@ -86,6 +86,8 @@ pub struct Ui {
     pub(crate) auto_clip_widgets: std::collections::BTreeSet<Id>,
     /// Populated auto-sized ordinary TextBoxes and their last applied effective scale.
     pub(crate) auto_textbox_scales: BTreeMap<Id, f32>,
+    /// Enrolled TextBoxes whose ancestor scale changed since the last refit.
+    pub(crate) auto_textbox_dirty: std::collections::BTreeSet<Id>,
     /// Calls to stubbed (unimplemented) methods: name -> count.
     pub stub_calls: BTreeMap<String, u32>,
     /// Widget under the mouse, keyboard focus.

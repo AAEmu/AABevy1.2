@@ -67,8 +67,12 @@ fn propagate(lua: &Lua, id: Id, notify: bool) {
 /// Native 3927b2f0 recalculates each owned child's scale recursively, propagating
 /// that child's anchors, before 3927d120 propagates the source and sends OnScale.
 pub(super) fn scaled(lua: &Lua, id: Id) {
-    ui(lua).tree.prepare_anchor_change(id);
-    ui(lua).tree.anchor_scaling(id, true);
+    {
+        let mut u = ui(lua);
+        u.tree.prepare_anchor_change(id);
+        u.tree.anchor_scaling(id, true);
+        super::widget::textbox::scale_changed(&mut u, id);
+    }
     scale_children(lua, id);
     changed(lua, id);
     ui(lua).tree.anchor_scaling(id, false);

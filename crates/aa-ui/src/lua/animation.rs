@@ -1,6 +1,7 @@
 //! Drawable timelines used by the original Lua UI. Generic Effects advance on painting;
 //! atlas frames retain their own update clock. Samples do not invalidate layout.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use mlua::{Lua, Table};
@@ -58,6 +59,8 @@ pub struct Animations {
     active: BTreeSet<Id>,
     samples: HashMap<Id, Sample>,
     widgets: widgets::Widgets,
+    /// Diagnostic/test counter: auto-TextBox comparisons made by the scale refit.
+    refit_checks: Cell<u64>,
 }
 
 impl Animations {
@@ -94,6 +97,29 @@ impl Animations {
     /// Native +68: own scale times the parent's inherited scale, in parent-first f32 order.
     pub(crate) fn widget_scale(&self, tree: &crate::tree::Tree, id: Id) -> f32 {
         self.widgets.effective_scale(tree, id)
+    }
+
+    pub(crate) fn invalidate_widget_scale(&self, id: Id) {
+        self.widgets.invalidate_scale(id);
+    }
+
+    pub(crate) fn clear_widget_scale_cache(&self) {
+        self.widgets.clear_scale_cache();
+    }
+
+    pub(crate) fn count_textbox_refit(&self) {
+        self.refit_checks.set(self.refit_checks.get() + 1);
+    }
+
+    /// Comparisons made by the auto-TextBox scale refit since the last reset.
+    #[doc(hidden)]
+    pub fn textbox_refit_checks(&self) -> u64 {
+        self.refit_checks.get()
+    }
+
+    #[doc(hidden)]
+    pub fn reset_textbox_refit_checks(&self) {
+        self.refit_checks.set(0);
     }
 
     pub fn widget_clip_rect(&self, tree: &crate::tree::Tree, id: Id) -> Option<Rect> {
