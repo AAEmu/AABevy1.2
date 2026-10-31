@@ -4,7 +4,7 @@
 //! Cases, all through the real binding:
 //! * a mate 30 m away is refused at the request ("Target is too far.", no walk, no request, no cooldown), the
 //!   `FUN_3935aa10` 25 m rule;
-//! * a mate 6 m away starts the walk, never queues `CSMountMate` while the distance is still over the 0.8 m arrival
+//! * a mate 4 m away starts the walk, never queues `CSMountMate` while the distance is still over the 0.8 m arrival
 //!   window (`FUN_390aa730`, `0x399A3240` squared), sends exactly one at the window and releases the forward key;
 //!   the ride cooldown keeps the instant stamped at the accepted request (`FUN_393642f0` line 701802), so a second
 //!   in-window press 2 s after the accept sends at once while the send itself is younger than 2 s;
@@ -33,7 +33,7 @@ use std::rc::Rc;
 const STOP: f32 = 0.8;
 const SEND_GATE: f32 = 3.0;
 /// The mate distances (m) for the walk, the in-window press and the refused request.
-const FAR: f32 = 6.0;
+const FAR: f32 = 4.0;
 const NEAR: f32 = 2.5;
 const TOO_FAR: f32 = 30.0;
 /// The native ride cooldown (`1999 < now - _DAT_3a169944`).
@@ -58,9 +58,9 @@ struct Staged {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
-    /// Waiting for the collision settle, then the refused 30 m request and the 6 m walk.
+    /// Waiting for the collision settle, then the refused 30 m request and the 4 m walk.
     Waiting,
-    /// The 6 m walk.
+    /// The 4 m walk.
     Far,
     /// Waiting for the accepted request's 2 s cooldown, then pressing again at the arrival window.
     AfterFar,
@@ -279,7 +279,7 @@ fn press(rt: &UiRuntime) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Runs the 30 m refusal, the 6 m walk, the cooldown check at the window and the 2.5 m walk through the real
+/// Runs the 30 m refusal, the 4 m walk, the cooldown check at the window and the 2.5 m walk through the real
 /// `X2Mate:MountMate` binding, `walk_to_mount`, `pets::update` and `control_player`.
 #[allow(clippy::too_many_arguments)]
 fn check(
@@ -358,17 +358,17 @@ fn check(
                 place(*staged, FAR, &mut data, &mut movers, &mut units);
             }
             if let Err(error) = press(&rt) {
-                check.fail(format!("the 6 m mount press failed: {error}"));
+                check.fail(format!("the 4 m mount press failed: {error}"));
                 return finish(&mut check, &mut exit);
             }
             {
                 let data = bridge.0.borrow();
                 if data.pets.owned.approach.is_none() {
-                    check.fail("a mate 6 m away did not start the walk".into());
+                    check.fail("a mate 4 m away did not start the walk".into());
                 }
                 check.accepted = data.pets.owned.last_ride;
                 if check.accepted.is_none() {
-                    check.fail("the accepted 6 m request did not stamp the ride cooldown".into());
+                    check.fail("the accepted 4 m request did not stamp the ride cooldown".into());
                 }
             }
             check.pressed_at = now;
@@ -480,7 +480,7 @@ fn check(
             let since_arrival = now - check.arrived_at;
             if since_arrival >= RIDE_COOLDOWN {
                 check.fail(format!(
-                    "the 6 m walk took {since_arrival:.2} s, so this press cannot separate an accept stamp from a send stamp"
+                    "the 4 m walk took {since_arrival:.2} s, so this press cannot separate an accept stamp from a send stamp"
                 ));
                 return finish(&mut check, &mut exit);
             }
@@ -575,7 +575,7 @@ fn finish(check: &mut Check, exit: &mut MessageWriter<AppExit>) {
     }
     if check.phase == Phase::Done {
         info!(
-            "mount-walk: passed: 30 m refused; 6 m walked past 3 m to {STOP} m (one CSMountMate, cooldown at the accept); 2.5 m walked to {STOP} m"
+            "mount-walk: passed: 30 m refused; 4 m walked past 3 m to {STOP} m (one CSMountMate, cooldown at the accept); 2.5 m walked to {STOP} m"
         );
         exit.write(AppExit::Success);
     }

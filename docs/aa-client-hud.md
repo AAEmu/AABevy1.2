@@ -3042,7 +3042,7 @@ pick and a teleport mid-walk (A1b). Tests: `a_far_mount_walks_to_the_pet_and_sen
 `the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input` and
 `the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range`.
 `cargo run -p aa-client --example mount_walk -- --headless --headless-fps 240`
-runs the 30 m refusal, the 6 m walk (W held, distance shrinks, no send in the
+runs the 30 m refusal, the 4 m walk (W held, distance shrinks, no send in the
 0.8..3 m band, stops across 0.8 m, one `CSMountMate`), the cooldown stamped at
 the accept (a press 2 s after the accept sends while the send is younger than
 2 s) and the 2.5 m walk through the real `X2Mate:MountMate` binding,
