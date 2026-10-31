@@ -19,6 +19,8 @@ pub fn default_login() -> String {
 }
 
 pub mod trial;
+pub mod turret;
+pub use turret::{TurretAim, TurretState};
 pub use trial::{TrialCommand, TrialCrimeRecord, TrialDefendantData, TrialEvent, TrialHistory, TrialNotice, TrialRecords, TrialRulingStatus, Trials};
 pub mod crime;
 pub mod duel;

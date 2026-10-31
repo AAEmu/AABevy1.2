@@ -122,6 +122,29 @@ other row are database data, capture-pending. The cast bar text is the skill's E
 "Gather" (captured), "Shearing Livestock", ...), the same lookup every skill uses. With the weapon drawn the gather pose puts it away at once (no holster clip), as the tool
 path already did for uprooting and watering.
 
+## Planted crops: water, fertilize, harvest
+
+An owner-planted crop uses the same generic path as any other doodad: its current phase's `doodad_funcs` rows are the
+bar, and F sends `CSStartSkill` at the doodad (`hud/doodad.rs`). There is no separate farm-bar code. On the 1.2 data a
+Rice Plant (doodad 2246, seed 15646) reads:
+
+| Phase | Bar | Skill data | Result |
+|---|---|---|---|
+| 4366 seedling | Water 13625, Uproot 13789 | 13625: `max_range` 6, 0 LP, 1500 ms, pot 14511; 13789: 4, 10 LP, 5000 ms | Water/SkillHit -> 4403, Uproot -> 4406 |
+| 4403 small rice | Uproot 13789 | as above | Growth over 9,288 s -> 10156 (climate react) |
+| 4404 grown rice | Harvest 13980 | `max_range` 4, 1 LP, 4000 ms, trowel 2656, wi 78 `CropHarvest` | Use -> 4405, then the `LootPack` 150 (pack 6473: rice, glossy rice, rice seed, straw) -> 4406 |
+| 4405 harvested | none | `Timer` 180,000 ms -> 4406 | loot is given on entering the phase |
+
+Fertilize 13788 (6 m, 1 LP, 5000 ms) is on 42-52 other plant doodads, not on rice; it arrives through the same
+`func_skill_id` path.
+
+**F15 is capture-pending.** The 2026-10-30 original-client capture planted rice and saw the seedling and the server's
+phase chain, but the planted crop's dynamic bar was not driven (`raw/F15*.json` is empty: `GetDynamicActionCount` was nil,
+`do_interaction_1` sent no `CSStartSkill`). So the bar entries, the exact reach, the labor delta and the loot delivery
+for an owner-planted crop are still unmeasured in the original; everything above is the database plus the generic
+slice-1 path. `examples/farm_harvest_bar.rs` checks the grown crop's Harvest entry at 3 m and that the bar hides at
+4.5 m, just beyond the 4 m reach, through that path.
+
 ## Phase models and growth
 
 A doodad is drawn with the model of its **current phase**, not just its template:
@@ -136,16 +159,28 @@ A doodad is drawn with the model of its **current phase**, not just its template
   build stale (checked against the server's current `func_group_id`) and it is prepared again.
 * `ingame/doodad_visual.rs` stores the drawn path, the phase, the growth, the remaining and the total milliseconds in a
   `DoodadVisual` component. The root scale is `doodad.scale * growth.scale_at(remaining, total)`; `grow` counts the
-  announced `time_left` down locally (packets do not tick it). The server's `time_left` is the authority for the total
-  duration: a phase change announces the whole remaining time of the new phase (after its growth rate and climate), so
-  the growth reaches `end_scale` exactly when the server changes phase. A doodad first seen mid-phase uses
-  `max(database delay, time_left)` so it keeps the phase's visible size; the database delay is only the fallback when no
-  `time_left` is known (0). If the next phase has a different model with its own growth, the scale restarts at that
-  phase's `start_scale`.
+  announced `time_left` down locally (packets do not tick it). The original `ClientDoodad::Update` (`0x393a4810`)
+  reads the announced `time_left` as the whole growth duration and applies `start_scale` at once; a doodad first seen
+  mid-phase also starts at `start_scale` for the announced remaining time and is **not** stretched back to the database
+  `delay`. The database delay is only the fallback when the packet announces no `time_left` (0), and that fallback also
+  starts at `start_scale` (the original resets the duration to the delay and the elapsed time to 0, not to "finished").
+  The **linear** ramp and the claim that it reaches `end_scale` exactly when the server changes phase are inferred from
+  `UpdateScaling`'s constant speed, not measured; the phase-change restart at the next phase's `start_scale` is inferred
+  from the `0x251` re-init gate (`0x393a1c90` clears it, `Update` initializes while it is clear). Both are
+  **capture-pending**: F18 did not sample the original client's model/root scale.
 * `SCDoodadPhaseChanged` restarts the growth from the packet's `time_left` and, when the phase model differs, swaps the
-  model under the doodad root in the same frame: the new model is spawned first, then the old one is despawned (no frame
-  without a model). The same path (rice phases, timer phases falling back to the almighty) is not respawned. The root
-  keeps its position and `doodad.scale`; only the scale/growth and the child model change.
+  model under the doodad root: the new model is loaded and spawned first, then the old one is despawned in the same
+  command flush, so no frame is left without a model. A phase that cannot be loaded keeps the old model. The same path
+  (rice phases, timer phases falling back to the almighty) is not respawned. The root keeps its position and
+  `doodad.scale`; only the scale/growth and the child model change. `examples/farm_growth.rs` checks the start scale, the
+  interpolation against the announced time and the model swap frame by frame (a missing model in any frame fails it).
+
+Capture status: F18 (growth visual at spawn) was **not driven quantitatively** in the 2026-10-30 capture; the rice
+seedling was visible as a seedling with `time_left` 1,032,000 ms, but the client's model/root scale was not sampled. The
+duration and the immediate `start_scale` are read in the decompile (`ClientDoodad::Update`, `0x393a4810`; 0 falls back
+to the database delay) plus `doodad_func_growths`. The linear ramp, the exact end at the phase change and the restart at
+the next phase's `start_scale` are inferred from `UpdateScaling` and the `0x251` gate, not measured: capture-pending
+(F18).
 
 Examples in the database: seedling 367 phase 2632 -> `sub_tree_bigfir01_grow02.cgf`, growth 0.6 -> 1.0 over 37,032 s;
 rice 2246 phase 4403 -> `common_plants_rice01.cgf`, growth 0.75 -> 1.0 over 9,288 s; rice phase 10155 has an empty
@@ -161,35 +196,38 @@ the same ring and `SIM_DOODAD_MSG` line before the click. The rules and their ev
 
 | Rule | Implementation | Evidence |
 |---|---|---|
-| range | 30 m **inclusive** in 3D from the player (`MAX_RANGE`, `in_range`; the click also re-checks it, `d^2 <= 900`) | `FUN_393a8fa0` step 3 refuses only when `900.0 < d^2` (0x399d2464); F1's screen-projected sweep only brackets the boundary near 30 m (29 m valid, 30 m refused, about 1 m apart) |
-| yaw | random `[0, 2π)` for doodad groups 2, 3, 12 (crops, trees, herbs); group 40 is in the decompiled set but was not captured; the previous facing+π yaw otherwise (the decompile says the builder's rotation, which we do not model) | F3 (rice, group 12) and F4 (fig, group 2; cotton, group 3) show different `z_rot` each placement; group 5/24/40 not driven; packet ctor `FUN_397ac850` and `FUN_3983b2f0`/`FUN_3983b340` |
+| range | 30 m **inclusive** in 3D from the player (`MAX_RANGE`, `in_range`; the click also re-checks it, `d^2 <= 900`) | F1/F2 settled: `FUN_393a8fa0` lines 761324-761330 refuse only when `900.0 < d^2` (0x399d2464 = 900.0), summing the x, y and z deltas; F1's screen-projected sweep only brackets the boundary near 30 m |
+| yaw | random `[0, 2π)` for doodad groups 2, 3, 12 and 40 (crops, trees, herbs, marine crops); every other group sends the ghost's yaw, drawn here with facing+π (`ghost_yaw`) | F4 settled: `FUN_393a9340` lines 761432-761439 roll `CryRandomFloat() * 6.2831855` (0x399d2460) only for the table 0x39a19304 = {2,3,12,40}; otherwise the packet carries `ghost+0x210`; F3/F4 captures show different `z_rot` each placement for groups 2/3/12; group 5/24/80 now send the ghost yaw |
+| terrain spread | the ground under the ghost box's four corners and centre may spread at most 6 m (`terrain_refusal`, `MAX_TERRAIN_SPREAD`); more is error 0x117 -> `ui_texts` 280 "Terrain is too low."; groups 37, 2, 3, 5, 12, 40 and 80 are exempt, group 24 and 38 are subject. A later range/area/doodad/unit refusal overwrites 0x117 | F7 settled: `FUN_393a7720` line 759922 refuses when `6.0 < max - min` (0x3999ecf4 = 6.0); `FUN_393a73a0` samples the four corners and the centroid; group 37 is the table at 0x399d2450, `FUN_3983b2f0` = {2,3,12,40}, `FUN_3983b320` = {5,80}. `FUN_393a8fa0` keeps checking after `FUN_393a7720`, so 0x9a/0x114/0x115/0x116 replace 0x117. The ghost model's own bounds are not decoded, so the box is the sim-radius square |
 | packet order | `template, x, y, z, z_rot, scale, item`; `z_rot` precedes `scale`, `scale` 1.0 | F3/F4 raw bodies; `aaemu-game/systems/npcs/doodad/packets.rs` `CSCreateDoodadPacket::read`; byte-exact in `aa-net/src/farm.rs` |
 | overlap | round groups `{2,3,5,12,40,80}` (plus group 38 and template 1219) use a 3D sphere on `r_new + r_other`; other pairs keep the flat own radius until the oriented boxes are decoded | F6 saw 277/278 next to placed crops at 2.5–4 m but did not measure the boundary; `FUN_390367d0`/`FUN_3983b360`; radius `max(sim_radius/1000, 0.1)` from `FUN_3983b280` |
 | units | the new doodad's radius against live units (3D for round groups, flat otherwise) | F6 saw 278 at 3–4 m; `FUN_393a8bd0` (physics sphere/box query) |
 | water | group 40 (marine crops) requires water; every other group refuses it. The 0.3 m depth threshold is an assumption | F5 not driven (no water inside a valid farm); F10/F11 show the area text; `FUN_393a8fa0` step 1; `FUN_3983b340` |
-| texts | area error 0x114 (decimal 276) -> `ui_texts` 277 "Can't be installed here."; 278/279 "Too close to other objects."; 280 "Terrain is too low." (reserved); 281 "Can be placed."; 2206 "Can only be placed aboveground."; 155 "Too far away."; lock 4598 "Can't place this for $1 second(s)." | captured F10/F11 "Can't be installed here.", F13/F14 "Can't place this for N second(s)."; `ui_texts` keys `DOODAD_SIM_*`, `DOODAD_NOT_ON_GROUND`, `TOO_FAR_AWAY`, `CANNOT_LOCATE_DOODAD_NOW` |
-| reuse lock | 30 s from the end of a world load and from a teleport arrival; the next use shows the remaining whole seconds and starts no builder. A send does not start it (two sends 13 s apart succeeded); cancel and other events were not shown by the raw rows | `FUN_39426520` (end of world load) calls `FUN_393a6de0`, which writes `now + _DAT_39ac7748` (30,000 ms in the client data); `FUN_393a8840` checks it and formats `CANNOT_LOCATE_DOODAD_NOW`; F3's countdown follows `SCTeleportUnit` at 19:49:27 and the next send is 38 s later |
+| texts | area error 0x114 (decimal 276) -> `ui_texts` 277 "Can't be installed here."; 278/279 "Too close to other objects."; 280 "Terrain is too low."; 281 "Can be placed."; 2206 "Can only be placed aboveground."; 155 "Too far away."; 30 s lock 4598 "Can't place this for $1 second(s)."; 2 s cooldown 0x163 (355) -> `ERROR_MSG` `OTHER_BUILD_IS_ON` (`ui_texts` 2303) | captured F10/F11 "Can't be installed here.", F13/F14 "Can't place this for N second(s)."; `ui_texts` keys `DOODAD_SIM_*`, `DOODAD_NOT_ON_GROUND`, `TOO_FAR_AWAY`, `CANNOT_LOCATE_DOODAD_NOW`, `OTHER_BUILD_IS_ON` |
+| reuse locks | 30 s from the end of a world load (and the game-screen OnEnter); a short `SCTeleportUnit` does not lock. The next use shows the remaining whole seconds and starts no builder. A send starts a separate 2 s post-send cooldown: the builder destructor arms it, and the next use shows error 0x163 (`OTHER_BUILD_IS_ON`) and starts no builder. The same seed pressed again while aiming still cancels the aim, also while either lock is active | F13 settled: `FUN_393a6de0` line 759378 writes `now + _DAT_39ac7748` (30,000 ms in the client data) and is called only from `FUN_39426520` line 868406, at the end of a world load (line 379128) and on device-lost recovery (line 194377), not from an `SCTeleportUnit` handler; `FUN_393a8840` line 760857 formats `CANNOT_LOCATE_DOODAD_NOW`; `FUN_393a89d0` lines 760956-760960 write `now + 2000` to `DAT_3a17a950` when the sent flag (+0x2c, set at `FUN_393a9340` line 761450) is set; `FUN_393a9540` line 761547 refuses with 0x163 and `FUN_393a6d90` reads the 2000 ms duration. F3's two sends 13 s apart only show the 30 s lock is not armed by a send |
 
-**Capture status (2026-10-30, `handoff/2026-10-30-capture-farm-cinema.md`):** F1 bracketed the range around 29/30 m and confirmed the start-phase ghost; its distances are screen projections about 1 m apart, so the decompile (d^2 <= 900, exactly 30 m allowed) sets
-the boundary. F2 (3D vs 2D) was not separable, the decompile's 3D still applies. F3/F4 settled
-the wire order, scale 1.0 and random yaw for groups 2/3/12; group 5/24/40 are not captured, the non-random yaw stays
-the previous facing+π approximation. F5 (water site) and F7 (terrain spread) were not driven. F6 is qualitative only.
-F8/F9/F12/F16/F17 were not driven or not drivable; F10/F11 settled the client area/zone refusal text (0x114 -> 277)
-and that only client-recognised farm areas pass. F13 (read with the raw rows) shows the 30 s reuse lock starting at the teleport/world load, not at a send; F14 shows
-Esc cancelling the builder but has no raw row for a lock, so the other trigger events are capture-pending. Right-click
-state-5, moving away, hotbar switching and an empty stack are open. F15 (owner bar/harvest), F18 (growth start scale)
-and the planting pose/tool/sound remain open. The house/farm-plot/template-zone/dominion checks (F8-F11), the step 0
-exemptions (templates 1218/1219 and group 37), and template 1219's sphere shape per step 5 stay as documented/open;
-the water 0.3 m depth test and the ghost's own rotation are assumptions.
+**Capture status (2026-10-30 capture + 2026-10-31 decompile):** F1/F2 are settled by `FUN_393a8fa0`
+(30 m inclusive, 3D). F3/F4 settled the wire order, scale 1.0 and random yaw for groups 2/3/12; F4 now also settles the
+random set as {2,3,12,40} and every other group as the ghost's yaw. F5 (water site) was not driven and F6 is
+qualitative only. F7 is settled by `FUN_393a7720`/`FUN_393a73a0` (6 m spread, 0x117, the group exemptions), but the
+ghost model's own box bounds are not decoded so the port uses the sim-radius square. F8/F9/F12/F16/F17 were not driven
+or not drivable; F10/F11 settled the client area/zone refusal text (0x114 -> 277) and that only client-recognised farm
+areas pass. F13 now has both locks: the 30 s lock starts at the world load (and game-screen entry), not at a send or a short teleport, and a send starts
+the separate 2 s post-send cooldown with error 0x163. F14 shows Esc cancelling the builder; right-click state-5, moving
+away, hotbar switching and an empty stack are open. F15 (owner bar/harvest), F18 (growth start scale) and the planting
+pose/tool/sound remain open. The house/farm-plot/template-zone/dominion checks (F8-F11), the step 0 exemptions
+(templates 1218/1219 and group 37), and template 1219's sphere shape per step 5 stay as documented/open; the water
+0.3 m depth test is an assumption.
 
 `examples/farm_plant_preview.rs` drives the real systems without a cursor: it presses Rice Seed 15646 (doodad 2246,
-group 12, radius 0.5 m) and checks free/too-far (30.4 m; exactly 30 m is unit-tested as allowed)/no-ground, sphere/box overlap, the literal
-1.2 refusal texts, a scripted send through `aim_input` without a send lock, the teleport/world-load 30 s lock and
-countdown, then restores the free preview and asserts the rice ghost and green ring are visible before the shot;
-without a shot flag it exits after PASS/FAIL:
+group 12, radius 0.5 m) and checks free/too-far (30.4 m; exactly 30 m is unit-tested as allowed)/no-ground, sphere/box
+overlap, the literal 1.2 refusal texts, a group 24 ghost over a 10 m cliff (0x117) against the exempt rice, a scripted
+send through `aim_input` that starts the 2 s post-send cooldown (error 0x163, no builder; usable again after 2 s), the
+world-load 30 s lock and countdown, then restores the free preview and asserts the rice ghost and green ring
+are visible before the shot; without a shot flag it exits after PASS/FAIL:
 
 ```
-cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 13
+cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 17
 ```
 
 ## Doodads attached to a unit or a house (the farm wagon's storage crates)

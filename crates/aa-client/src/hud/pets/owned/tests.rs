@@ -1688,6 +1688,7 @@ fn a_local_seat_is_read_from_the_client_seat_state() {
         drives: true,
         cart: true,
         ship: false,
+        turret: false,
         speed: Default::default(),
         lift: 0.0,
     })));

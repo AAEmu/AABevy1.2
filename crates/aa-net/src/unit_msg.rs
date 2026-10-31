@@ -71,7 +71,7 @@ impl HousePosture {
 
 /// What `SCUnitModelPostureChanged` reports: the unit's posture (`ModelPostureType`: 0 none, 1 house, 4 actor model state,
 /// 7 farm field, 8 turret) and, for an actor model state, the animation action (`anim_actions.id`) it stands in.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Posture {
     pub kind: u8,
     /// The unit still has loot to take.
@@ -81,6 +81,8 @@ pub struct Posture {
     /// Play it now (false: the unit leaves the pose).
     pub activate: bool,
     pub house: Option<HousePosture>,
+    /// Type 8: the stored `CSTurretState` aim, in the vehicle model's frame (radians).
+    pub turret: Option<crate::turret::TurretAim>,
 }
 
 impl Posture {
@@ -88,7 +90,7 @@ impl Posture {
     pub fn read(r: &mut Reader) -> Result<Self> {
         let kind = r.u8()?;
         let has_loot_left = r.bool()?;
-        let mut posture = Self { kind, has_loot_left, anim_action: 0, activate: false, house: None };
+        let mut posture = Self { kind, has_loot_left, anim_action: 0, activate: false, house: None, turret: None };
         match kind {
             0 => {}
             1 => posture.house = Some(HousePosture::read(r, has_loot_left)?), // two doors, six windows
@@ -97,7 +99,9 @@ impl Posture {
                 posture.activate = r.bool()?;
             }
             7 => r.skip(14)?, // farm field: u32, f32, i32, two flags
-            8 => r.skip(8)?,  // turret: pitch, yaw
+            // The server's `SCUnitModelPostureChangedPacket::write` for `TurretState`
+            // (`systems/npcs/npc/packets.rs`): `f32 pitch, f32 yaw`, the stored `CSTurretState` aim.
+            8 => posture.turret = Some(crate::turret::TurretAim::read(r)?),
             other => return Err(WireError::Invalid(format!("model posture {other}"))),
         }
         Ok(posture)
@@ -234,6 +238,7 @@ mod tests {
         assert_eq!(
             m.ship,
             Some(ShipMove {
+                rotation: [0, 0, 0],
                 angular_velocity: [1.0, 2.0, 3.0],
                 steering: -127,
                 throttle: 127,
@@ -318,8 +323,8 @@ mod tests {
         let mut r = Reader::new(&bytes);
         let p = Posture::read(&mut r).unwrap();
         assert!(r.is_empty());
-        assert_eq!(p, Posture { kind: 4, has_loot_left: true, anim_action: 100, activate: true, house: None });
-        for (kind, len) in [(1u8, 8usize), (7, 14), (8, 8)] {
+        assert_eq!(p, Posture { kind: 4, has_loot_left: true, anim_action: 100, activate: true, house: None, turret: None });
+        for (kind, len) in [(1u8, 8usize), (7, 14)] {
             let mut bytes = vec![kind, 0];
             bytes.extend(std::iter::repeat_n(1u8, len));
             let mut r = Reader::new(&bytes);
@@ -327,6 +332,43 @@ mod tests {
             assert!(r.is_empty(), "posture {kind}");
         }
         assert!(Posture::read(&mut Reader::new(&[9, 0])).is_err());
+    }
+
+    /// The type-8 body is the server's writer (`systems/npcs/npc/packets.rs`,
+    /// `ModelPostureType::TurretState`: `write_f32(pitch).write_f32(yaw)`), exactly the aim it
+    /// stored from `CSTurretState`. The test uses the server test's `turret_posture` bytes.
+    #[test]
+    fn the_turret_posture_is_the_servers_stored_aim() {
+        let mut bytes = vec![8, 0];
+        bytes.extend_from_slice(&0.25f32.to_le_bytes());
+        bytes.extend_from_slice(&(-0.5f32).to_le_bytes());
+        assert_eq!(bytes.len(), 10);
+        let mut r = Reader::new(&bytes);
+        let p = Posture::read(&mut r).unwrap();
+        assert!(r.is_empty());
+        assert_eq!(p.kind, 8);
+        assert_eq!(p.turret, Some(crate::turret::TurretAim { pitch: 0.25, yaw: -0.5 }));
+        for end in 0..bytes.len() {
+            assert!(Posture::read(&mut Reader::new(&bytes[..end])).is_err(), "cut {end}");
+        }
+
+        use crate::opcodes::sc;
+        let mut w = Writer::new();
+        w.bc(0x99).u8(8).bool(true).f32(0.25).f32(-0.5);
+        assert_eq!(
+            frame(sc::SCUnitModelPostureChangedPacket, &w.finish()),
+            crate::game::ServerMsg::UnitPosture {
+                obj_id: 0x99,
+                posture: Posture {
+                    kind: 8,
+                    has_loot_left: true,
+                    anim_action: 0,
+                    activate: false,
+                    house: None,
+                    turret: Some(crate::turret::TurretAim { pitch: 0.25, yaw: -0.5 }),
+                },
+            }
+        );
     }
 
     fn frame(opcode: u16, body: &[u8]) -> crate::game::ServerMsg {
@@ -395,7 +437,7 @@ mod tests {
         w.bc(7).u8(4).bool(false).u32(104).bool(true);
         assert_eq!(
             frame(sc::SCUnitModelPostureChangedPacket, &w.finish()),
-            M::UnitPosture { obj_id: 7, posture: Posture { kind: 4, has_loot_left: false, anim_action: 104, activate: true, house: None } }
+            M::UnitPosture { obj_id: 7, posture: Posture { kind: 4, has_loot_left: false, anim_action: 104, activate: true, house: None, turret: None } }
         );
         let mut w = Writer::new();
         w.bc(0x99).i32(1).bc(5).i32(77).i32(0).i32(0).u8(135);

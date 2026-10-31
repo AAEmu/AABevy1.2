@@ -131,6 +131,12 @@ pub struct MoveCommand {
     /// The ship, vehicle or doodad the unit stands on (`0x20` support block). `pos` then carries
     /// the object-local point and `support.world` the world one.
     pub support: Option<crate::model::MoveSupport>,
+    /// Wire move flags override. The 1.2 glider capture sends neither moving nor stopping while flying (`0`)
+    /// and `Moving | Stopping` (6) at the touchdown; `None` keeps the flags from `moving`/`state`.
+    pub wire_flags: Option<u8>,
+    /// Wire actor flags override. The glider capture sends `0` while flying and `Jumping | StandingOnSolid`
+    /// (`0x14`) at the touchdown; `None` keeps the flags from `state`.
+    pub wire_actor_flags: Option<u8>,
 }
 
 impl Default for MoveCommand {
@@ -147,6 +153,8 @@ impl Default for MoveCommand {
             in_combat: false,
             fall_vel: 0,
             support: None,
+            wire_flags: None,
+            wire_actor_flags: None,
         }
     }
 }
@@ -217,6 +225,13 @@ impl MoveCommand {
                 m.actor_flags |= actor_flags::STANDING_ON_SOLID;
             }
             m.support = Some(support.clone());
+        }
+        if let Some(flags) = self.wire_flags {
+            // keep the combat bit the command asked for; the captured glider flags only say moving/stopping
+            m.flags = (m.flags & move_flags::IN_COMBAT) | flags;
+        }
+        if let Some(flags) = self.wire_actor_flags {
+            m.actor_flags = flags;
         }
         m
     }
@@ -293,6 +308,12 @@ pub enum Command {
     /// 0 / object 0); otherwise it must be a nonzero 24-bit unit ID (self buffs name the mate).
     /// No local learned-skill gate or automatic target/slot/auto-use choice is imposed.
     UseMateSkill { skill_id: u32, mate_obj_id: u32, mount_skill_id: u32, target_obj_id: u32 },
+    /// Cast a slave/mate skill at a spot of the ground: the native `Position` target
+    /// (`SkillTarget::POSITION`, `long_position`, `rot`, two empty object ids). The server's
+    /// cannon test (`flow_tests::ship_cannon_gunner_seat_skill_and_leaving`) sends the same:
+    /// caster `Mount { cannon, mount_skill }` and `SkillCastTarget::Position`. Whether a cannon
+    /// uses the straight aim point or a solved ballistic one is capture-pending (S12-C1).
+    UseMateSkillAt { skill_id: u32, mate_obj_id: u32, mount_skill_id: u32, pos: Pos, rot: f32 },
     /// Cast `skill_id` at a spot of the ground (area skills).
     UseSkillAt { skill_id: u32, pos: Pos },
     /// Cancel the cast or channel of the player: `tl` is the timeline of a plain skill (`SkillStarted::tl`), `plot_tl` the one
@@ -378,6 +399,9 @@ pub enum Command {
     ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
+    /// `CSRemoveBuff` on the player's own unit, for a buff the client ends itself (the glider landing sends the buff index
+    /// and reason 9, captured 2026-10-31). The session resolves the object id from its own unit.
+    RemoveOwnBuff { buff_index: u32, reason: u8 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Player-score wire requests for this captured active character. Play/pause use skills.
@@ -391,6 +415,9 @@ pub enum Command {
     Actability(crate::actability::ActabilityCommand),
     Mate(crate::mate::MateCommand),
     Slave(crate::slave_control::SlaveCommand),
+    /// Aim the manned turret/slave `unit_id` at a pitch and yaw in its model frame, radians.
+    /// The app owns the 200 ms change-only throttle.
+    TurretState { unit_id: u32, pitch: f32, yaw: f32 },
     UnbondDoodad(crate::UnbondDoodadRequest),
     /// Legacy unscoped transport API; new app actions should capture persistent identity below.
     Auction(crate::auction::AuctionCommand),
@@ -451,6 +478,25 @@ fn mate_skill_message(
             mount_skill_id,
         },
         target: SkillTarget::unit(target_obj_id),
+    }
+}
+
+fn mate_skill_at_message(
+    skill_id: u32,
+    self_obj_id: u32,
+    mate_obj_id: u32,
+    mount_skill_id: u32,
+    pos: Pos,
+    rot: f32,
+) -> game::ClientMsg {
+    game::ClientMsg::StartSkill {
+        skill_id,
+        self_obj_id,
+        caster: StartCaster::Mount {
+            obj_id: mate_obj_id,
+            mount_skill_id,
+        },
+        target: SkillTarget::position_rot(pos, rot),
     }
 }
 
@@ -564,8 +610,10 @@ pub enum Event {
     /// `obj_id` got off its mount and stands where the mount is.
     UnitDetached { obj_id: u32, reason: u8 },
     /// An NPC took (`activate`) or left an idle pose: `anim_action` is an `anim_actions.id`, `kind` the `ModelPostureType`.
-    UnitPosture { obj_id: u32, kind: u8, anim_action: u32, activate: bool },
+    UnitPosture { obj_id: u32, kind: u8, anim_action: u32, activate: bool, turret: Option<crate::turret::TurretAim> },
     UnitPoints { obj_id: u32, hp: i32, mp: i32 },
+    /// A turret aim request was refused locally (a zero/too-large unit or a non-finite angle).
+    TurretStateRejected { unit_id: u32, pitch: f32, yaw: f32, message: String },
     EnvDamage(crate::combat_status::EnvironmentDamage),
     SetBreath { breath: u32 },
     /// Received local dive/surface report. No Lua event or breathing timer is synthesized.
@@ -1434,6 +1482,35 @@ impl Session {
                     self.emit(Event::BuffRemovalRequestRejected { character_id, obj_id, buff_index, message:message.into() });
                 }
             }
+            Command::RemoveOwnBuff { buff_index, reason } => {
+                let message = if self.phase != Phase::InWorld || self.self_obj == 0 {
+                    Some("buff removal requires an active character")
+                } else if self
+                    .send_game(game::ClientMsg::RemoveBuff {
+                        obj_id: self.self_obj,
+                        buff_index,
+                        reason,
+                    })
+                    .await
+                {
+                    self.emit(Event::BuffRemovalRequested {
+                        character_id: self.selected,
+                        obj_id: self.self_obj,
+                        buff_index,
+                    });
+                    None
+                } else {
+                    Some("buff removal was not written to the game connection")
+                };
+                if let Some(message) = message {
+                    self.emit(Event::BuffRemovalRequestRejected {
+                        character_id: self.selected,
+                        obj_id: self.self_obj,
+                        buff_index,
+                        message: message.into(),
+                    });
+                }
+            }
             Command::Portal(command) => {
                 let invalid = if self.phase != Phase::InWorld { Some("not in the world") } else { command.validate().err() };
                 if let Some(message) = invalid {
@@ -1790,6 +1867,30 @@ impl Session {
                     self.emit(Event::Mate(crate::mate::MateEvent::SkillRequested { skill_id, mate_obj_id, mount_skill_id, target_obj_id }));
                 }
             }
+            Command::TurretState { unit_id, pitch, yaw } => {
+                let valid = unit_id != 0 && unit_id <= 0xffffff && pitch.is_finite() && yaw.is_finite();
+                if !valid {
+                    self.emit(Event::TurretStateRejected { unit_id, pitch, yaw, message: "turret unit must be a nonzero 24-bit id and the aim finite".into() });
+                } else {
+                    self.send_game(game::ClientMsg::TurretState(crate::turret::TurretState::new(unit_id, pitch, yaw))).await;
+                }
+            }
+            Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot } => {
+                let error = if skill_id == 0 || mount_skill_id == 0 {
+                    Some("combat skill and mount skill IDs must be nonzero")
+                } else if mate_obj_id == 0 || mate_obj_id > 0xffffff {
+                    Some("mate caster must be nonzero 24-bit")
+                } else if !pos.x.is_finite() || !pos.y.is_finite() || !pos.z.is_finite() || !rot.is_finite() {
+                    Some("skill position and facing must be finite")
+                } else {
+                    None
+                };
+                if let Some(message) = error {
+                    self.emit(Event::Mate(crate::mate::MateEvent::SkillAtRejected { skill_id, mate_obj_id, mount_skill_id, pos, rot, message: message.into() }));
+                } else if self.phase == Phase::InWorld && self.send_game(mate_skill_at_message(skill_id, self.self_obj, mate_obj_id, mount_skill_id, pos, rot)).await {
+                    self.emit(Event::Mate(crate::mate::MateEvent::SkillAtRequested { skill_id, mate_obj_id, mount_skill_id, pos, rot }));
+                }
+            }
             Command::StopCasting { tl, plot_tl } => {
                 let obj_id = self.self_obj;
                 self.send_game(game::ClientMsg::StopCasting { tl, plot_tl, obj_id }).await;
@@ -2090,7 +2191,7 @@ impl Session {
             M::UnitAttached { obj_id, mount, point, reason } => self.emit(Event::UnitAttached { obj_id, mount, point, reason }),
             M::UnitDetached { obj_id, reason } => self.emit(Event::UnitDetached { obj_id, reason }),
             M::UnitPosture { obj_id, posture } => {
-                self.emit(Event::UnitPosture { obj_id, kind: posture.kind, anim_action: posture.anim_action, activate: posture.activate });
+                self.emit(Event::UnitPosture { obj_id, kind: posture.kind, anim_action: posture.anim_action, activate: posture.activate, turret: posture.turret });
                 if let Some(house) = posture.house {
                     self.emit(Event::Housing(crate::housing::HousingEvent::UnitPosture { obj_id, posture: house }));
                 }
@@ -2936,7 +3037,7 @@ mod tests {
         let (evt,mut events)=unbounded_channel();
         let mut session=Session::new(evt,ClientOptions::default());
         session.game_msg(Ok(game::ServerMsg::Batch(vec![game::ServerMsg::UnitPosture{obj_id:99,posture},game::ServerMsg::Snow(true)]))).await;
-        assert!(matches!(events.try_recv(),Ok(Event::UnitPosture{obj_id:99,kind:1,anim_action:0,activate:false})));
+        assert!(matches!(events.try_recv(),Ok(Event::UnitPosture{obj_id:99,kind:1,anim_action:0,activate:false,turret:None})));
         assert!(matches!(events.try_recv(),Ok(Event::Housing(HousingEvent::UnitPosture{obj_id:99,posture:house})) if house == posture.house.unwrap()));
         assert!(matches!(events.try_recv(),Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
@@ -5506,6 +5607,8 @@ mod tests {
         let request=||Command::RemoveBuff{character_id:42,obj_id:0x010203,buff_index:7};
         session.command(request()).await;
         assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
+        session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
         let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
         let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
         for (character_id,obj_id) in [(0,0x010203),(41,0x010203),(42,0),(42,0x010204),(42,0x1000000)] {
@@ -5525,8 +5628,19 @@ mod tests {
             assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequested{character_id:42,obj_id:0x010203,buff_index:i})if i==buff_index));
             assert!(events.try_recv().is_err(),"no fabricated BuffRemoved acknowledgement");
         }
+        for buff_index in [18,20,u32::MAX] {
+            session.command(Command::RemoveOwnBuff{buff_index,reason:9}).await;
+            let n=peer.read_u16_le().await.unwrap();let mut frame=vec![0;n as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(&frame[4..6],&[0x55,0]);assert_eq!(&frame[6..],game::ClientMsg::RemoveBuff{obj_id:0x010203,buff_index,reason:9}.encode_body());
+            assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequested{obj_id:0x010203,buff_index:i,..})if i==buff_index));
+            assert!(events.try_recv().is_err(),"no fabricated BuffRemoved acknowledgement");
+        }
+        let self_obj=session.self_obj;session.self_obj=0;session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));session.self_obj=self_obj;
         session.game.as_mut().unwrap().shutdown().await;session.command(request()).await;
         let mut rejected=false;while let Ok(event)=events.try_recv(){assert!(!matches!(event,Event::BuffRemovalRequested{..}));rejected|=matches!(event,Event::BuffRemovalRequestRejected{..});}assert!(rejected);
+        session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
     }
 
     #[tokio::test]
@@ -5745,6 +5859,31 @@ mod tests {
             assert!(matches!(events.try_recv(),Ok(Event::SpecialtyRatio(value)) if value==ratio));
             assert!(events.try_recv().is_err());assert!(session.game.is_none());assert_eq!(session.self_obj,0);
         }
+    }
+
+    /// A cannon's fire skill is a normal slave-bar skill with a ground target. The server's
+    /// `ship_cannon_gunner_seat_skill_and_leaving` sends exactly this shape: `Mount` caster,
+    /// `SkillCastTarget::Position { obj_id: 0, x, y, z, rot, obj_id1: 0, obj_id2: 0 }`.
+    /// The body is checked field by field against `skill::write_start_skill`.
+    #[test]
+    fn a_mate_skill_at_a_position_writes_the_native_mount_and_position_target() {
+        use crate::buff::caster_kind;
+        use crate::skill::target_kind;
+        let pos = Pos::new(130.25, 131.5, 100.0);
+        let message = mate_skill_at_message(10473, 0x11_2233, 0xaa_bbcc, 16, pos, 0.5);
+        let body = message.encode_body();
+        let mut r = crate::wire::Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 10473);
+        assert_eq!(r.u8().unwrap(), caster_kind::MOUNT);
+        assert_eq!(r.bc().unwrap(), 0xaa_bbcc);
+        assert_eq!(r.u32().unwrap(), 16);
+        assert_eq!(r.u8().unwrap(), target_kind::POSITION);
+        assert_eq!(r.long_position().unwrap(), pos);
+        assert_eq!(r.f32().unwrap(), 0.5);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
     }
 
 }

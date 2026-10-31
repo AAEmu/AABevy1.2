@@ -215,6 +215,19 @@ mod tests {
         assert_eq!(uses(&tables, 1), None, "no 'skill N' entry on the bar");
     }
 
+    /// The owner's rice phases through the generic `func_skill_id` path: the seedling (4366) offers Water
+    /// 13625 (`max_range` 6, 0 LP) and Uproot 13789 (4, 10 LP), the small phase (4403) Uproot, and the grown
+    /// phase (4404) Harvest 13980 (4, 1 LP). The 2026-10-30 capture's F15 did not drive the planted crop's
+    /// dynamic bar (`capture-results.txt`: `GetDynamicActionCount` nil), so the bar for an owner-planted crop
+    /// is capture-pending; this pins the data the generic slice-1 path reads.
+    #[test]
+    fn the_planted_rice_phases_offer_water_then_harvest() {
+        let Some(tables) = real_tables() else { return };
+        assert_eq!(uses(&tables, 4366), Some(vec![13625, 13789]), "seedling: water + uproot");
+        assert_eq!(uses(&tables, 4403), Some(vec![13789]), "small rice: uproot");
+        assert_eq!(uses(&tables, 4404), Some(vec![13980]), "grown rice: harvest");
+    }
+
     /// A natural ore vein (326) has a `DoodadFuncOreMine` with no skill at all and the legacy
     /// shear has none either; the rock pile (1354) is a `DoodadFuncFakeUse` whose fake skill id is
     /// its interaction. Before the fallback the HUD offered no action for those phases. The
