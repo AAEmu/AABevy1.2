@@ -26,7 +26,7 @@ pub fn plugin(app: &mut App) {
     data::load_in_background(super::WORLD);
     app.add_message::<BuilderSignal>()
         .init_resource::<placement::Builder>()
-        .init_resource::<placement::PlacementLock>()
+        .init_resource::<crate::ingame::ground_target::plant::PlantLock>()
         .init_resource::<placement::GhostJobs>()
         .init_resource::<render::DrawnHouses>()
         .add_systems(PreUpdate, placement::input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))

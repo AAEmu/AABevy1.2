@@ -64,8 +64,6 @@ const CLICK_SLOP: f32 = 6.0;
 const TURN: [f32; 3] = [std::f32::consts::PI / 180.0, std::f32::consts::PI / 36.0, std::f32::consts::PI / 4.0];
 /// `CSCreateHouse` at most this often (`FUN_3932FE60`: `DAT_3a167ea0 + 5000` ms).
 const CREATE_INTERVAL: f32 = 5.0;
-/// `FUN_393a6de0`: the world-load placement lock (`_DAT_39ac7748` = 30000 ms).
-const PLACEMENT_LOCK: f32 = 30.0;
 /// `materials/special/housing_build_invalid.mtl`: `Diffuse`, glowing.
 const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
 
@@ -173,40 +171,26 @@ pub enum BuilderSignal {
     Locked(u32),
 }
 
-/// `FUN_393a6de0`: the 30 s lock at the end of a world load (`FUN_39426520`); placing a design
-/// item during it shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds (recapture2 saw 22).
-#[derive(Resource, Default)]
-pub struct PlacementLock {
-    until: Option<f32>,
-}
+/// The 30 s placement lock is the farm's [`PlantLock`] (`FUN_393a6de0`); both read one timer, so
+/// a house and a seed can never disagree. This module arms it only on the world-load points;
+/// upstream's `plant::lock_on_arrival` still arms the shared lock on `Event::Teleported`, which the
+/// separate farm-plant PR fixes.
+pub(crate) use crate::ingame::ground_target::plant::PlantLock;
 
-impl PlacementLock {
-    pub fn arm(&mut self, now: f32) {
-        self.until = Some(now + PLACEMENT_LOCK);
-    }
-
-    /// The whole seconds left (the original truncates `(lock - now) / 1000`).
-    pub fn remaining(&self, now: f32) -> Option<u32> {
-        self.until
-            .filter(|until| *until > now)
-            .map(|until| (until - now) as u32)
-    }
-}
-
-/// Arms the placement lock when the world loads.
-pub fn arm_on_entry(mut lock: ResMut<PlacementLock>, time: Res<Time>) {
-    lock.arm(time.elapsed_secs());
+/// Arms the placement lock when the game screen starts (`FUN_39426520`'s end-of-load point).
+pub fn arm_on_entry(mut lock: ResMut<PlantLock>, time: Res<Time>) {
+    lock.hold(f64::from(time.elapsed_secs()));
 }
 
 /// Arms the placement lock when a world load or instance load finishes
 /// (`FUN_39426520` calls `FUN_393a6de0`); a short teleport that needs no load does not.
 pub fn arm_on_world_load(
-    mut lock: ResMut<PlacementLock>,
+    mut lock: ResMut<PlantLock>,
     time: Res<Time>,
     mut loads: MessageReader<crate::ingame::teleport::WorldLoadFinished>,
 ) {
     if loads.read().next().is_some() {
-        lock.arm(time.elapsed_secs());
+        lock.hold(f64::from(time.elapsed_secs()));
     }
 }
 
@@ -523,15 +507,16 @@ pub fn start(
     mut builder: ResMut<Builder>,
     player: Query<&Transform, With<LocalPlayer>>,
     time: Res<Time>,
-    lock: Res<PlacementLock>,
+    lock: Res<PlantLock>,
     mut signals: MessageWriter<BuilderSignal>,
     bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     for press in pressed.read() {
         let Some((item_id, template)) = press.item else { continue };
         let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied()) else { continue };
-        if let Some(seconds) = lock.remaining(time.elapsed_secs()) {
-            signals.write(BuilderSignal::Locked(seconds));
+        let now = f64::from(time.elapsed_secs());
+        if lock.refused(now) {
+            signals.write(BuilderSignal::Locked(lock.remaining(now) as u32));
             continue;
         }
         // the same item again lets go
@@ -1427,12 +1412,13 @@ mod tests {
 
     #[test]
     fn the_placement_and_create_locks_report_their_remaining_seconds() {
-        let mut lock = PlacementLock::default();
-        assert_eq!(lock.remaining(0.0), None);
-        lock.arm(10.0);
-        assert_eq!(lock.remaining(10.0), Some(30));
-        assert_eq!(lock.remaining(39.0), Some(1));
-        assert_eq!(lock.remaining(40.0), None);
+        let mut lock = PlantLock::default();
+        assert!(!lock.refused(0.0));
+        lock.hold(10.0);
+        assert_eq!(lock.remaining(10.0), 30.0);
+        assert_eq!(lock.remaining(39.0), 1.0);
+        assert!(!lock.refused(40.0));
+        assert_eq!(lock.remaining(40.0), 0.0);
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1467,7 +1453,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<NetEvent>()
             .add_message::<crate::ingame::teleport::WorldLoadFinished>()
-            .init_resource::<PlacementLock>()
+            .init_resource::<PlantLock>()
             .add_systems(Update, arm_on_world_load);
         app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::Teleported {
             pos: aa_net::wire::Pos::default(),
@@ -1475,13 +1461,14 @@ mod tests {
             reason: 0,
         }));
         app.update();
-        let now = app.world().resource::<Time>().elapsed_secs();
-        assert_eq!(app.world().resource::<PlacementLock>().remaining(now), None, "a short teleport must not lock");
+        let now = f64::from(app.world().resource::<Time>().elapsed_secs());
+        assert_eq!(app.world().resource::<PlantLock>().remaining(now), 0.0, "a short teleport must not lock");
         app.world_mut()
             .resource_mut::<Messages<crate::ingame::teleport::WorldLoadFinished>>()
             .write(crate::ingame::teleport::WorldLoadFinished);
         app.update();
-        assert_eq!(app.world().resource::<PlacementLock>().remaining(now), Some(30), "a world load must lock");
+        let remaining = app.world().resource::<PlantLock>().remaining(now);
+        assert!(remaining > 29.9 && remaining < 30.1, "a world load must lock ({remaining})");
     }
 
     #[test]
@@ -1505,9 +1492,9 @@ mod tests {
             .add_message::<SkillPressed>()
             .add_message::<BuilderSignal>()
             .init_resource::<Builder>()
-            .init_resource::<PlacementLock>()
+            .init_resource::<PlantLock>()
             .add_systems(Update, start);
-        app.world_mut().resource_mut::<PlacementLock>().arm(0.0);
+        app.world_mut().resource_mut::<PlantLock>().hold(0.0);
         app.world_mut()
             .resource_mut::<Messages<SkillPressed>>()
             .write(SkillPressed {
