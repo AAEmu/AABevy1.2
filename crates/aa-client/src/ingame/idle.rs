@@ -75,7 +75,7 @@ pub fn posture_changes(
     mut units: Query<(Option<&mut IdleClips>, &Character)>,
 ) {
     for NetEvent(event) in events.read() {
-        let Event::UnitPosture { obj_id, kind, anim_action, activate } = event else { continue };
+        let Event::UnitPosture { obj_id, kind, anim_action, activate, .. } = event else { continue };
         let Some(entity) = views.unit_entity(*obj_id) else { continue };
         let Ok((idle, character)) = units.get_mut(entity) else { continue };
         let action = if *kind == 4 && *activate { *anim_action } else { 0 };

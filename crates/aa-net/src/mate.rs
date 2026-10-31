@@ -189,7 +189,7 @@ pub struct SlaveState {
     pub db_id: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MateEvent {
     /// Sent only to the summoning owner, before the normal visible unit spawn.
     Spawned(MateSpawn),
@@ -222,6 +222,22 @@ pub enum MateEvent {
         target_obj_id: u32,
         message: String,
     },
+    /// A slave/mate skill sent at a ground position (a cannon's fire skill).
+    SkillAtRequested {
+        skill_id: u32,
+        mate_obj_id: u32,
+        mount_skill_id: u32,
+        pos: crate::wire::Pos,
+        rot: f32,
+    },
+    SkillAtRejected {
+        skill_id: u32,
+        mate_obj_id: u32,
+        mount_skill_id: u32,
+        pos: crate::wire::Pos,
+        rot: f32,
+        message: String,
+    },
 }
 
 impl MateEvent {
@@ -244,6 +260,8 @@ impl MateEvent {
             Self::RequestRejected { .. } => "MateRequestRejected",
             Self::SkillRequested { .. } => "MateSkillRequested",
             Self::SkillRejected { .. } => "MateSkillRejected",
+            Self::SkillAtRequested { .. } => "MateSkillAtRequested",
+            Self::SkillAtRejected { .. } => "MateSkillAtRejected",
         }
     }
 

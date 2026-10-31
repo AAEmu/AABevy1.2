@@ -9,17 +9,20 @@
 //!   "Too far away." (30 m 3D);
 //! * a rice 0.75 m from the spot overlaps (0.75 < 0.5 + 0.5, the old own-radius test allowed it), 0.9 m across and
 //!   0.6 m up is free (the old flat test refused it);
+//! * a group 24 ghost over a 10 m cliff is "Terrain is too low." (0x117, `FUN_393a7720`), while the same cliff under
+//!   the exempt rice (group 12) is free;
 //! * no ground under the cursor is "Can only be placed aboveground.";
-//! * a second send is not locked (F3: sends 13 s apart), but a teleport/world-load arrival locks the next use for
-//!   30 s with "Can't place this for N second(s)." (F3, `FUN_39426520`/`FUN_393a6de0`).
+//! * a send starts the 2 s post-send cooldown (`FUN_393a89d0`): the next use shows error 0x163 (`OTHER_BUILD_IS_ON`)
+//!   and starts no builder; after 2 s it is usable again. It does not start the 30 s lock, but a teleport/world-load
+//!   arrival locks the next use for 30 s with "Can't place this for N second(s)." (F3, `FUN_39426520`/`FUN_393a6de0`).
 //!
-//! Every case is checked after the systems ran; a broken range, overlap, text, ghost, ring colour or reuse lock fails
-//! the run.
+//! Every case is checked after the systems ran; a broken range, terrain spread, overlap, text, ghost, ring colour or
+//! reuse lock fails the run.
 //! The screenshot is the final free case: the rice seedling model under the cursor and the green `target_correct` ring.
 //!
-//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 13`
+//! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 17`
 //! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
-//! be after the last check (12.2 s), or the run would end before checking anything. Without a shot flag the run exits
+//! be after the last check (16.0 s), or the run would end before checking anything. Without a shot flag the run exits
 //! 0 after PASS (non-zero after FAIL).
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -67,8 +70,13 @@ const PLAYER_OBJ: u32 = 47;
 const PLAYER_AT: Vec3 = Vec3::ZERO;
 /// The staged neighbour doodad the overlap cases use.
 const NEIGHBOUR_OBJ: u32 = 900;
-/// Last check time (the lock cases run at 10.6-12.2 s); the screenshot must come after it.
-const LAST_CHECK: f32 = 12.2;
+/// Last check time (the lock cases run at 11.8-16.0 s); the screenshot must come after it.
+const LAST_CHECK: f32 = 16.0;
+
+/// A 10 m step at x > 0: the corners of the 0.5 m ghost box straddle it.
+fn cliff(x: f32, _y: f32) -> Option<f32> {
+    Some(if x > 0.0 { 10.0 } else { 0.0 })
+}
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -121,6 +129,7 @@ fn main() -> AppExit {
             plant,
         })
         .insert_resource(CaseState::default())
+        .init_resource::<plant::PlantGround>()
         .add_plugins(ingame::ground_target::plugin)
         .add_systems(Startup, (stage, player))
         .add_systems(Update, drive)
@@ -142,6 +151,10 @@ struct Case {
     spot: Option<Vec3>,
     /// The staged neighbour doodad: its spot and template (group 12 round or group 24 box).
     neighbour: Option<(Vec3, u32)>,
+    /// The shape the ghost tests (`None`: the rice seed's group 12 shape).
+    shape: Option<plant::Shape>,
+    /// A synthetic ground for the terrain-spread rule (`None`: the world's terrain, or none).
+    ground: Option<fn(f32, f32) -> Option<f32>>,
     expect: Option<plant::Refusal>,
     /// The literal 1.2 `ui_texts` line (`SIM_DOODAD_MSG`), not `Refusal::text` (which would compare with itself).
     text: &'static str,
@@ -149,11 +162,13 @@ struct Case {
     why: &'static str,
 }
 
-const CASES: [Case; 9] = [
+const CASES: [Case; 11] = [
     Case {
         at: 1.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: None,
+        shape: None,
+        ground: None,
         expect: None,
         text: "Can be placed.",
         ring_green: true,
@@ -163,6 +178,8 @@ const CASES: [Case; 9] = [
         at: 2.0,
         spot: Some(Vec3::new(0.0, 25.0, 0.0)),
         neighbour: None,
+        shape: None,
+        ground: None,
         expect: None,
         text: "Can be placed.",
         ring_green: true,
@@ -172,6 +189,8 @@ const CASES: [Case; 9] = [
         at: 3.0,
         spot: Some(Vec3::new(0.0, 30.4, 0.0)),
         neighbour: None,
+        shape: None,
+        ground: None,
         expect: Some(plant::Refusal::TooFar),
         text: "Too far away.",
         ring_green: false,
@@ -181,6 +200,8 @@ const CASES: [Case; 9] = [
         at: 4.0,
         spot: Some(Vec3::new(0.0, 29.0, 8.0)),
         neighbour: None,
+        shape: None,
+        ground: None,
         expect: Some(plant::Refusal::TooFar),
         text: "Too far away.",
         ring_green: false,
@@ -190,6 +211,8 @@ const CASES: [Case; 9] = [
         at: 5.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: Some((Vec3::new(0.75, 5.0, 0.0), RICE_DOODAD)),
+        shape: None,
+        ground: None,
         expect: Some(plant::Refusal::Doodad),
         text: "Too close to other objects.",
         ring_green: false,
@@ -199,6 +222,8 @@ const CASES: [Case; 9] = [
         at: 6.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: Some((Vec3::new(0.9, 5.0, 0.6), RICE_DOODAD)),
+        shape: None,
+        ground: None,
         expect: None,
         text: "Can be placed.",
         ring_green: true,
@@ -208,6 +233,8 @@ const CASES: [Case; 9] = [
         at: 7.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: Some((Vec3::new(0.4, 5.0, 0.0), SIGN_DOODAD)),
+        shape: None,
+        ground: None,
         expect: Some(plant::Refusal::Doodad),
         text: "Too close to other objects.",
         ring_green: false,
@@ -217,6 +244,8 @@ const CASES: [Case; 9] = [
         at: 8.0,
         spot: Some(Vec3::new(0.0, 5.0, 0.0)),
         neighbour: Some((Vec3::new(0.6, 5.0, 0.0), SIGN_DOODAD)),
+        shape: None,
+        ground: None,
         expect: None,
         text: "Can be placed.",
         ring_green: true,
@@ -226,18 +255,52 @@ const CASES: [Case; 9] = [
         at: 9.0,
         spot: None,
         neighbour: None,
+        shape: None,
+        ground: None,
         expect: Some(plant::Refusal::NoGround),
         text: "Can only be placed aboveground.",
         ring_green: false,
         why: "no ground under the cursor",
     },
+    Case {
+        at: 10.0,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: None,
+        shape: Some(plant::Shape {
+            template: SIGN_DOODAD,
+            group: 24,
+            radius: 0.5,
+        }),
+        ground: Some(cliff),
+        expect: Some(plant::Refusal::Terrain),
+        text: "Terrain is too low.",
+        ring_green: false,
+        why: "the group 24 ghost box spreads 10 m (> 6)",
+    },
+    Case {
+        at: 10.6,
+        spot: Some(Vec3::new(0.0, 5.0, 0.0)),
+        neighbour: None,
+        shape: Some(plant::Shape {
+            template: RICE_DOODAD,
+            group: 12,
+            radius: 0.5,
+        }),
+        ground: Some(cliff),
+        expect: None,
+        text: "Can be placed.",
+        ring_green: true,
+        why: "group 12 is exempt from the spread",
+    },
 ];
 
 /// The final free case the screenshot shows.
 const LAST_CASE: Case = Case {
-    at: 10.0,
+    at: 11.2,
     spot: Some(Vec3::new(0.0, 5.0, 0.0)),
     neighbour: None,
+    shape: None,
+    ground: None,
     expect: None,
     text: "Can be placed.",
     ring_green: true,
@@ -254,8 +317,10 @@ struct CaseState {
     next: usize,
     /// `aim_input` sent a `CSCreateDoodad` (read on the frame it exists).
     sent_doodad: bool,
-    /// 0: first send + second press, 1: check it is not locked, 2: teleport load, 3: check the lock and text,
-    /// 4: final preview and shot.
+    /// A `ShowError(0x163)` arrived from the post-send cooldown refusal.
+    post_send_error: bool,
+    /// 0: first send + second press, 1: check the 2 s cooldown, 2: check the refusal, 3: wait it out,
+    /// 4: a builder starts again, 5: teleport load, 6: check the 30 s lock and the final shot.
     lock_step: u8,
     failures: Vec<String>,
     done: bool,
@@ -358,8 +423,10 @@ fn drive(
     mut pressed: MessageWriter<SkillPressed>,
     mut loads: MessageWriter<ingame::teleport::WorldLoadFinished>,
     mut lock: ResMut<plant::PlantLock>,
+    mut ground: ResMut<plant::PlantGround>,
     mut script: ResMut<Script>,
     mut sent: MessageReader<NetCommand>,
+    mut errors: MessageReader<hud::ShowError>,
     ghosts: Query<&Visibility, With<plant::Ghost>>,
     reticles: Query<
         (&Visibility, &MeshMaterial3d<StandardMaterial>),
@@ -376,6 +443,11 @@ fn drive(
         .any(|NetCommand(command)| matches!(command, Command::CreateDoodad(_)))
     {
         state.sent_doodad = true;
+    }
+    for hud::ShowError(code) in errors.read() {
+        if *code == 0x163 {
+            state.post_send_error = true;
+        }
     }
     let now = time.elapsed_secs();
     let start = *state.started.get_or_insert(now);
@@ -449,12 +521,19 @@ fn drive(
     let case = CASES.get(state.next).unwrap_or(&LAST_CASE);
     if !state.applied && t >= case.at {
         state.applied = true;
+        let mut aimed = preview.plant.clone();
+        if let Some(shape) = case.shape {
+            aimed.shape = shape;
+        }
         aiming.set_plant_preview(
             preview.press,
             preview.skill,
-            preview.plant.clone(),
+            aimed,
             case.spot.map(|spot| (spot, true)),
         );
+        ground.0 = case
+            .ground
+            .map(|probe| Box::new(probe) as plant::GroundProbe);
         doodads.by_id.clear();
         if let Some((at, template_id)) = case.neighbour {
             doodads
@@ -536,8 +615,9 @@ fn drive(
     }
 }
 
-/// F3/FUN_39426520: two sends shortly after each other stay unlocked; a teleport/world-load arrival locks for 30 s
-/// and the next use shows the countdown text. The final free preview is restored for the screenshot.
+/// F13/FUN_393a89d0: a send starts the 2 s post-send cooldown, which shows error 0x163 and starts no builder; after
+/// 2 s the seed works again but it still does not start the 30 s lock. F3/FUN_39426520: a teleport/world-load arrival
+/// locks for 30 s and the next use shows the countdown text. The final free preview is restored for the screenshot.
 #[allow(clippy::too_many_arguments)]
 fn lock_cases(
     t: f32,
@@ -558,12 +638,12 @@ fn lock_cases(
     exit: &mut MessageWriter<AppExit>,
 ) {
     match state.lock_step {
-        0 if t >= 10.6 => {
+        0 if t >= 11.8 => {
             // the final case left the rice aimed at the free spot; a scripted click goes through aim_input
             script.click();
             state.lock_step = 1;
         }
-        1 if t >= 10.9 => {
+        1 if t >= 12.2 => {
             if !state.sent_doodad {
                 state
                     .failures
@@ -574,43 +654,70 @@ fn lock_cases(
                     .failures
                     .push("a send started the 30 s reuse lock; F3 shows sends 13 s apart".into());
             }
-            // the next plant a moment later: F3 shows two sends 13 s apart both succeed
+            if !lock.post_send_refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("a send did not start the 2 s post-send cooldown".into());
+            }
+            // the next plant inside the cooldown: error 0x163 and no builder
             pressed.write(preview.press);
             state.lock_step = 2;
         }
-        2 if t >= 11.4 => {
+        2 if t >= 12.6 => {
             if lock.refused(f64::from(now)) {
                 state
                     .failures
                     .push("a send started the 30 s reuse lock; F3 shows sends 13 s apart".into());
             }
+            if !lock.post_send_refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("the 2 s post-send cooldown ended before the check".into());
+            }
+            if aiming.plant().is_some() {
+                state
+                    .failures
+                    .push("the 2 s post-send cooldown started a builder".into());
+            }
+            if !state.post_send_error {
+                state
+                    .failures
+                    .push("the post-send refusal did not show error 0x163".into());
+            }
+            state.lock_step = 3;
+        }
+        3 if t >= 14.4 => {
+            if lock.post_send_refused(f64::from(now)) {
+                state
+                    .failures
+                    .push("the 2 s post-send cooldown did not end after 2 s".into());
+            }
+            // the cooldown is over: the next use starts a builder
+            pressed.write(preview.press);
+            state.lock_step = 4;
+        }
+        4 if t >= 14.8 => {
             if aiming.plant().is_none() {
                 state
                     .failures
-                    .push("the second plant was not aimed after the first send".into());
+                    .push("the seed was still refused after the 2 s cooldown".into());
             }
             aiming.cancel();
             loads.write(ingame::teleport::WorldLoadFinished);
-            state.lock_step = 3;
+            state.lock_step = 5;
         }
-        3 if t >= 11.8 => {
+        5 if t >= 15.2 => {
             if !lock.refused(f64::from(now)) {
                 state
                     .failures
                     .push("a teleport/world load did not start the 30 s reuse lock".into());
             }
+            // nothing is aimed here, so the press must be refused; the same item again would cancel an aim instead
             pressed.write(preview.press);
-            // after the lock checks, show the final free preview again for the screenshot
-            aiming.set_plant_preview(
-                preview.press,
-                preview.skill,
-                preview.plant.clone(),
-                Some((Vec3::new(0.0, 5.0, 0.0), true)),
-            );
-            state.lock_step = 4;
+            state.lock_step = 6;
         }
-        4 if t >= 12.2 => {
-            if aiming.plant().is_none() {
+        6 if t >= 15.6 => {
+            if aiming.plant().is_some() {
                 state
                     .failures
                     .push("planting within 30 s of a teleport was not locked".into());
@@ -638,6 +745,16 @@ fn lock_cases(
                     .failures
                     .push(format!("the countdown text is {text:?}, expected {want:?}"));
             }
+            // after the locked press was refused, show the final free preview again for the screenshot
+            aiming.set_plant_preview(
+                preview.press,
+                preview.skill,
+                preview.plant.clone(),
+                Some((Vec3::new(0.0, 5.0, 0.0), true)),
+            );
+            state.lock_step = 7;
+        }
+        7 if t >= 16.0 => {
             // the restored preview must be the visible rice ghost under a green ring at shot time
             match aiming.plant() {
                 Some(plant) if plant.blocked.is_none() && plant.text() == plant::CAN_BE_PLACED => {}

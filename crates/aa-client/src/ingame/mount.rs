@@ -519,6 +519,13 @@ fn bind_rider_clip(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str) -> Opt
     })
 }
 
+/// `true` when a vehicle *passenger* seat (point 2 and above) has no `attach_anims` row: it has no seated pose and
+/// its rider stands (the ship deck passengers). Point 1 keeps the mount's rider set: the data has no row that would
+/// justify standing the helm driver, whose exact pose is capture-pending (S11-C1). Creatures never take this path.
+fn vehicle_seat_stands(vehicle: bool, point: u8, has_seat_clip: bool) -> bool {
+    vehicle && point >= 2 && !has_seat_clip
+}
+
 /// A unit sitting on a mount (a remote unit, or the local player).
 #[derive(Component)]
 pub struct Rider {
@@ -528,7 +535,8 @@ pub struct Rider {
     point: u8,
     seat: Seat,
     /// A vehicle seat's own loop (`attach_anims`, e.g. the wagon driver's `fist_ac_steer_sit_idle`) instead of the
-    /// mount's rider states: the mount's speed does not change it.
+    /// mount's rider states: the mount's speed does not change it. A vehicle seat without a row stands in the normal
+    /// idle (the ship deck passengers); it is posed too, so it keeps the standing loop at any speed.
     posed: bool,
     clips: RiderClips,
     anim: RiderAnim,
@@ -561,16 +569,20 @@ impl Rider {
         let cal = Cal::shared(&character.assets.cal).ok()?;
         let bind = |name: &str| bind_rider_clip(&animator.rig, &cal, clips, name);
         // a vehicle seat's `attach_anims` row names the clip its rider sits in (the wagon driver steers); it replaces
-        // the mount's rider set. Without a row (every creature, a vehicle seat 1.2 has none for) the mount's rider
-        // states play as before.
+        // the mount's rider set. Without a row a vehicle seat has no seated pose: the ships' passengers stand on the
+        // deck (the 1.2 data has no point-2 row for them). A vehicle seat must not fall back to the mount's rider loops
+        // (that would put a deck passenger in a horse or wagon seat); creatures keep their own rider states.
+        let vehicle = db.vehicle_look(mount_model).is_some();
         let seat_clip = db
             .attach_anim(mount_model, mount.point)
             .and_then(|action| db.anim_action_clip(action))
             .and_then(|name| bind(&name));
-        let posed = seat_clip.is_some();
+        let standing = vehicle_seat_stands(vehicle, mount.point, seat_clip.is_some());
+        let posed = seat_clip.is_some() || standing;
         let states = !posed && rider_states(pose);
         let idle = match seat_clip.clone() {
             Some(clip) => clip,
+            None if standing => bind("fist_ba_relaxed_idle")?,
             None => bind(kind.idle()).or_else(|| bind("fist_ba_relaxed_idle"))?,
         };
         let run = if posed {
@@ -1198,6 +1210,9 @@ pub struct LocalSeat {
     /// The slave is a ship (`models.sub_type` `ShipModel`): the server owns its hull and `ship::drive_ship` sends
     /// the type-4 helm request instead of the cart's type-2 body.
     pub ship: bool,
+    /// The slave is a cannon or siege turret (slave kind 7/8 with a `vehicle_models` turret block): the gunner
+    /// aims it, walks nowhere and sends no vehicle movement; the server places the model.
+    pub turret: bool,
     pub speed: MountSpeed,
     /// Height of the seat over the mount's feet (m): the camera's pivot rises by it.
     pub lift: f32,
@@ -1207,13 +1222,18 @@ impl LocalMount {
     /// The mount the player drives: its object id and speed.
     pub fn driving(&self) -> Option<(u32, MountSpeed)> {
         self.0
-            .filter(|s| s.drives && !s.cart && !s.ship)
+            .filter(|s| s.drives && !s.cart && !s.ship && !s.turret)
             .map(|s| (s.mount, s.speed))
+    }
+
+    /// The cannon/siege turret the player mans (attach point 1 of a kind-7/8 slave with turret limits).
+    pub fn turret_seat(&self) -> Option<u32> {
+        self.0.filter(|s| s.turret).map(|s| s.mount)
     }
 
     /// The slave cart the player drives from attach point 1.
     pub fn cart_driver(&self) -> Option<u32> {
-        self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
+        self.0.filter(|s| s.drives && s.cart && !s.turret).map(|s| s.mount)
     }
 
     /// The ship the player drives from attach point 1 (the helm): the server simulates the hull.
@@ -1302,8 +1322,17 @@ pub fn track_local_mount(
                 (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
             let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
+            // A cannon is a kind-7/8 slave with a turret block that cannot drive. The controller
+            // type 3 is not in the database copy, so `vehicle_models.velocity == 0` stands in
+            // (S12-C6); a trebuchet or tank stays drivable. A cart is kind 6.
+            let turret = driver_seat(a.point)
+                && db.as_deref().is_some_and(|db| {
+                    net.by_id
+                        .get(&a.obj_id)
+                        .is_some_and(|unit| super::turret::turret_seat(unit, db))
+                });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship, ship, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1415,7 +1444,7 @@ pub fn track_local_mount(
         send.send_now();
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
-    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship).and_then(|s| views.unit_entity(s.mount))
+    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && !s.turret).and_then(|s| views.unit_entity(s.mount))
         && units.get(e).is_ok_and(|(_, driven)| !driven)
     {
         commands.entity(e).insert(Driven);
@@ -1479,7 +1508,7 @@ pub fn drive_mount(
         return;
     }
     let entity = views.unit_entity(s.mount);
-    if !s.drives || s.ship {
+    if !s.drives || s.ship || s.turret {
         let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
         let known = net.by_id.get(&s.mount).map(|u| (Vec3::new(u.pos.x, u.pos.y, u.pos.z), u.yaw()));
         if let Some((pos, facing)) = shown.or(known) {
@@ -1637,6 +1666,34 @@ mod tests {
     }
 
     #[test]
+    fn a_vehicle_passenger_seat_without_an_attach_anim_stands() {
+        assert!(
+            !vehicle_seat_stands(true, 1, false),
+            "the ship helm keeps the mount rider set: point 1 is not a passenger seat"
+        );
+        assert!(
+            vehicle_seat_stands(true, 2, false),
+            "a ship's deck passenger"
+        );
+        assert!(
+            vehicle_seat_stands(true, 3, false),
+            "the other passenger points too"
+        );
+        assert!(
+            !vehicle_seat_stands(true, 2, true),
+            "the red ox cart's trailer sit"
+        );
+        assert!(
+            !vehicle_seat_stands(false, 2, false),
+            "a creature keeps its rider states"
+        );
+        assert!(
+            !vehicle_seat_stands(false, 1, true),
+            "a creature never has an attach_anims row"
+        );
+    }
+
+    #[test]
     fn seat_points_use_their_own_bone_or_prefab_helper() {
         let cases = [
             (
@@ -1716,7 +1773,7 @@ mod tests {
             .spawn((RemoteUnit::fixture(7, cart_pos), placement(cart_pos, 0.0, 1.0), helpers))
             .id();
         let mut views = Views::default();
-        views.fixture_unit(7, cart);
+        views.track_unit_entity(7, cart);
         app.insert_resource(views);
         app.insert_resource(LocalMount(Some(LocalSeat {
             mount: 7,
@@ -1724,6 +1781,7 @@ mod tests {
             drives: true,
             cart: true,
             ship: false,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));
@@ -1755,6 +1813,75 @@ mod tests {
         assert!((lift - 1.35).abs() < 1e-4, "seat lift {lift}");
     }
 
+    /// A passenger seat is not the driver's: the local player sits at the body's `$passenger0` helper, and its camera
+    /// lift is that helper's height over the cart's feet.
+    #[test]
+    fn the_local_passenger_sits_on_the_vehicle_helper() {
+        use crate::ingame::units::{RemoteUnit, Views};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Units::default())
+            .add_systems(Update, pose_local_rider);
+        let cart_pos = Vec3::new(100.0, 200.0, 5.0);
+        let local = Vec3::new(0.55, 0.35, 0.9);
+        let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        helpers.0.insert(
+            "passenger0".into(),
+            bevy::math::Affine3A::from_translation(local),
+        );
+        let cart = app
+            .world_mut()
+            .spawn((
+                RemoteUnit::fixture(7, cart_pos),
+                placement(cart_pos, 0.0, 1.0),
+                helpers,
+            ))
+            .id();
+        let mut views = Views::default();
+        views.track_unit_entity(7, cart);
+        app.insert_resource(views);
+        app.insert_resource(LocalMount(Some(LocalSeat {
+            mount: 7,
+            point: 2,
+            drives: false,
+            cart: true,
+            ship: false,
+            turret: false,
+            speed: MountSpeed::default(),
+            lift: 0.0,
+        })));
+        let (mut rider, animator) = stepped_rider(riding());
+        rider.seat = Seat::Helper("passenger0".into());
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 5 },
+                Mover {
+                    pos: cart_pos,
+                    facing: 0.0,
+                    vz: 0.0,
+                    grounded: true,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                rider,
+                animator,
+            ))
+            .id();
+        app.update();
+        let placed = app.world().get::<Transform>(player).unwrap().translation;
+        let expected = cry_to_bevy(cart_pos) + cry_to_bevy(local);
+        assert!(
+            placed.distance(expected) < 1e-4,
+            "local passenger at {placed:?}, expected {expected:?}"
+        );
+        let lift = app.world().resource::<LocalMount>().0.unwrap().lift;
+        assert!((lift - 0.9).abs() < 1e-4, "passenger seat lift {lift}");
+    }
+
     #[test]
     #[ignore = "requires the game database"]
     fn the_farm_wagon_driver_sits_in_the_steering_pose() {
@@ -1784,7 +1911,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires the game database"]
-    fn a_vehicle_seat_without_a_row_keeps_the_mount_rider_set() {
+    fn a_vehicle_seat_without_a_row_has_no_mount_rider_set() {
         let Some(db) = Db::open() else { return };
         assert!(
             db.attach_anim(1008, 1).is_some(),
@@ -1793,7 +1920,22 @@ mod tests {
         assert_eq!(
             db.attach_anim(1008, 2),
             None,
-            "the wagon's passenger seat falls back to the mount's rider set (the horse loops of pose 0)"
+            "the wagon's passenger seat has no row: it must not use the pose-0 horse loops"
+        );
+        assert!(
+            db.vehicle_look(1008).is_some(),
+            "the wagon is a vehicle model, so the missing row means standing"
+        );
+        // Ships have no attach_anims rows at all: their passengers stand on the deck.
+        assert_eq!(db.attach_anim(393, 2), None);
+        assert!(db.vehicle_look(393).is_some());
+        // The red ox cart has a seated passenger row (`fist_ac_trailer_sit_idle`).
+        let action = db
+            .attach_anim(1553, 2)
+            .expect("the red ox cart's passenger row");
+        assert_eq!(
+            db.anim_action_clip(action).as_deref(),
+            Some("fist_ac_trailer_sit_idle")
         );
     }
 
@@ -2635,6 +2777,7 @@ mod tests {
                 drives: point == 1,
                 cart: false,
                 ship: false,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2651,6 +2794,7 @@ mod tests {
                 drives: point == 1,
                 cart: true,
                 ship: false,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2666,6 +2810,7 @@ mod tests {
                 drives: point == 1,
                 cart: false,
                 ship: true,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2674,6 +2819,23 @@ mod tests {
         assert_eq!(ship(1).cart_driver(), None, "a ship is not driven by the cart controller");
         assert_eq!(ship(1).driving(), None, "the server moves the hull, not the mover");
         assert_eq!(ship(2).ship_driver(), None, "a passenger does not steer");
+        let turret = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: false,
+                ship: false,
+                turret: point == 1,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
+        assert_eq!(turret(1).turret_seat(), Some(7));
+        assert_eq!(turret(1).driving(), None, "a gunner does not move the cannon");
+        assert_eq!(turret(1).cart_driver(), None);
+        assert!(!turret(1).passenger(), "the gunner keeps the slave's bar");
+        assert_eq!(turret(2).turret_seat(), None);
         assert!((seat(2).lift() - 0.35).abs() < 1e-6, "the seat 1.2 m up, less the seated drop");
         assert_eq!(LocalMount::default().driving(), None);
         assert_eq!(LocalMount::default().lift(), 0.0);
@@ -2693,7 +2855,7 @@ mod tests {
             .spawn((RemoteUnit::fixture(7, hull_pos), placement(hull_pos, 0.0, 1.0)))
             .id();
         let mut views = Views::default();
-        views.fixture_unit(7, hull);
+        views.track_unit_entity(7, hull);
         app.insert_resource(views);
         app.insert_resource(LocalMount(Some(LocalSeat {
             mount: 7,
@@ -2701,6 +2863,7 @@ mod tests {
             drives: true,
             cart: false,
             ship: true,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));
@@ -2749,6 +2912,89 @@ mod tests {
         app.update();
         let mover = app.world().get::<Mover>(player).unwrap();
         assert_eq!((mover.pos, mover.facing), (Vec3::new(130.0, 260.0, 7.0), 1.0));
+    }
+
+    /// Two remote passengers on a cart follow the cart's *drawn* transform, each from its own `$passengerN` helper, not
+    /// the last replicated point: on main the drawn vehicle transform is the vehicle entity's `Transform` (the smoothed
+    /// hull on the S8 branch replaces the same input).
+    #[test]
+    fn remote_passengers_follow_the_drawn_cart_at_their_own_helpers() {
+        use crate::ingame::units::{RemoteUnit, Views};
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Units::default())
+            .add_systems(Update, pose_riders);
+        let net_pos = Vec3::new(100.0, 200.0, 5.0);
+        let drawn = Vec3::new(112.0, 207.0, 6.0);
+        let yaw = 0.75f32;
+        let cart = app
+            .world_mut()
+            .spawn((
+                RemoteUnit::fixture(5, net_pos),
+                placement(drawn, yaw, 1.0),
+                crate::ingame::vehicle::SeatHelpers::default(),
+            ))
+            .id();
+        let second = Vec3::new(1.5, -0.4, 0.8);
+        {
+            let mut helpers = app
+                .world_mut()
+                .get_mut::<crate::ingame::vehicle::SeatHelpers>(cart)
+                .unwrap();
+            helpers.0.insert(
+                "passenger0".into(),
+                bevy::math::Affine3A::from_translation(Vec3::new(-0.6, 0.3, 1.0)),
+            );
+            helpers.0.insert(
+                "passenger1".into(),
+                bevy::math::Affine3A::from_translation(second),
+            );
+        }
+        let mut views = Views::default();
+        views.track_unit_entity(5, cart);
+        let mut riders = Vec::new();
+        for (unit, helper) in [(7u32, "passenger0"), (8, "passenger1")] {
+            let (mut rider, animator) = stepped_rider(riding());
+            rider.unit = unit;
+            rider.mount = 5;
+            rider.point = if helper == "passenger0" { 2 } else { 3 };
+            rider.seat = Seat::Helper(helper.into());
+            rider.posed = true;
+            let entity = app
+                .world_mut()
+                .spawn((
+                    RemoteUnit::fixture(unit, net_pos),
+                    Transform::default(),
+                    rider,
+                    animator,
+                ))
+                .id();
+            views.track_unit_entity(unit, entity);
+            riders.push((entity, helper));
+        }
+        app.insert_resource(views);
+        app.update();
+        for (entity, helper) in riders {
+            let local = app
+                .world()
+                .get::<crate::ingame::vehicle::SeatHelpers>(cart)
+                .unwrap()
+                .0[helper]
+                .translation;
+            let expected = placement(drawn, yaw, 1.0).transform_point(cry_to_bevy(local.into()));
+            let shown = app.world().get::<Transform>(entity).unwrap().translation;
+            let unit_pos = app.world().get::<RemoteUnit>(entity).unwrap().pos;
+            assert!(
+                shown.distance(expected) < 1e-4,
+                "{helper}: shown {shown:?}, expected {expected:?}"
+            );
+            let expected_cry = bevy_to_cry(expected);
+            assert!(
+                Vec3::new(unit_pos.x, unit_pos.y, unit_pos.z).distance(expected_cry) < 1e-4,
+                "{helper}: the unit position follows the seat too"
+            );
+        }
     }
 
     /// A rider of the test durations on an empty skeleton, and the animator [`Rider::step`] drives; the clip names
