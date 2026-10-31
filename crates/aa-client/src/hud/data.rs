@@ -14,6 +14,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use super::quests::QuestTables;
 use super::stats::StatTables;
+use crate::ingame::data::SkillLink;
 
 pub(super) mod housing;
 mod recharge;
@@ -213,6 +214,10 @@ pub struct GameData {
     pub(super) achievements: super::achievement::Tables,
     pub(super) ranking: super::ranking::Tables,
     pub skills: HashMap<u32, SkillInfo>,
+    /// `skills.link_equip_slot_id` >= 0: the item slot a skill is cast through (`FUN_393925c0`).
+    pub skill_links: HashMap<u32, SkillLink>,
+    /// `item_backpacks.backpack_type_id` of an item template (absent: the item has no backpack row).
+    pub item_backpack_types: HashMap<u32, i64>,
     /// `plot_effects.event_id` -> ms of its `GlobalCooldown` special effect (type 41): the plot steps that restart the
     /// global cooldown (Triple Slash's finishing step: 2 s).
     pub plot_gcd: HashMap<u32, u32>,
@@ -549,10 +554,16 @@ impl GameData {
                     multipliers.insert(r.get(0)?, (r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) * 100.0).round() as i64);
                 }
             }
-            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range, weapon_slot_for_autoattack_id, target_type_id FROM skills")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range, weapon_slot_for_autoattack_id, target_type_id, link_equip_slot_id, link_backpack_type_id FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
+                // `any_int` turns SQL NULL into 0 (a link to equip slot 0); the in-game Db maps it to -1
+                // (no link), so read it as an Option here too.
+                let link_slot = r.get::<_, Option<i64>>(16)?.unwrap_or(-1);
+                if link_slot >= 0 {
+                    data.skill_links.insert(id, SkillLink { slot: link_slot as usize, backpack_type: any_int(r, 17)? });
+                }
                 data.skills.insert(
                     id,
                     SkillInfo {
@@ -623,6 +634,13 @@ impl GameData {
                         pet_only: false,
                     },
                 );
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT item_id, backpack_type_id FROM item_backpacks")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.item_backpack_types.insert(r.get(0)?, any_int(r, 1)?);
             }
         }
         {

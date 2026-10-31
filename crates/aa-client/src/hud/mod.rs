@@ -111,7 +111,7 @@ mod map_quests;
 mod map_services;
 mod map_slaves;
 mod notices;
-mod panels;
+pub(crate) mod panels;
 mod party;
 mod period;
 mod portal;
@@ -146,7 +146,7 @@ mod tipitem;
 mod tips;
 mod trade;
 mod trial;
-mod usable;
+pub(crate) mod usable;
 mod user_music;
 pub(crate) use user_music::MusicItemUsed;
 

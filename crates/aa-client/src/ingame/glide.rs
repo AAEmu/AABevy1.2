@@ -848,6 +848,42 @@ pub fn track_flight(
     state.glide_owns = true;
 }
 
+/// Ends the flight and lets go of a ship deck when a teleport's loading screen starts. The glider chain and
+/// `ship::deck_control` are paused while `teleport::idle` is false, so without this the old `Active` (or a stale
+/// `DeckRide`) would pull the player back to the ship after the load.
+pub fn reset_on_teleport(
+    tp: Res<super::teleport::Teleport>,
+    mut gliding: ResMut<Gliding>,
+    mut state: ResMut<SendState>,
+    player: Query<Entity, With<LocalPlayer>>,
+    mut commands: Commands,
+    mut was_loading: Local<bool>,
+) {
+    if !tp.loading() {
+        *was_loading = false;
+        return;
+    }
+    if *was_loading {
+        return;
+    }
+    *was_loading = true;
+    if gliding.active.is_some() || gliding.ending > 0.0 {
+        info!("glide: the teleport ends the flight");
+    }
+    // Keep the buff that ended the flight, as the death and mount branches do: the server does not remove the
+    // gliding buff on a teleport, so `track_flight` must not open it again at the destination.
+    if let Some(active) = gliding.active.take() {
+        gliding.ended = Some(active.buff_id);
+    }
+    gliding.ending = 0.0;
+    gliding.since_sent = 0.0;
+    gliding.sent_first = false;
+    state.glide_owns = false;
+    for entity in &player {
+        commands.entity(entity).remove::<super::ship::DeckRide>();
+    }
+}
+
 /// A second jump in the air uses the equipped glider's item skill (option 57; S14-C4 settled: jump state + cvar).
 #[allow(clippy::too_many_arguments)]
 pub fn request_deploy(
@@ -896,19 +932,18 @@ pub fn request_deploy(
     else {
         return;
     };
-    let Some(glider) = db
+    let Some(skill) = db
         .as_deref()
-        .and_then(|db| db.glider(item.template_id))
-        .filter(|g| g.use_skill != 0)
+        .and_then(|db| super::linked_skill::backpack_use_skill(db, item.template_id, super::linked_skill::GLIDER_BACKPACK))
     else {
         return;
     };
     gliding.asked = Some(now);
     info!(
-        "glide: second jump in the air, glider skill {} (item {})",
-        glider.use_skill, item.template_id
+        "glide: second jump in the air, glider skill {skill} (item {})",
+        item.template_id
     );
-    out.write(NetCommand(deploy_command(item, glider.use_skill)));
+    out.write(NetCommand(deploy_command(item, skill)));
 }
 
 /// The captured deploy: `CSStartSkill` 12373 with the equipped glider's item (14677) as the Item caster
@@ -3368,6 +3403,133 @@ mod tests {
             "the old flat step was not shorter"
         );
     }
+    #[test]
+    fn a_teleport_does_not_restart_the_still_listed_glider_buff() {
+        // `track_flight` needs the real gliding buff rows (`GlideParams::load_all` is empty without them), so the
+        // positive half would otherwise be vacuous.
+        if !aa_cry::pak_available() || !aa_anim::GameDb::available() {
+            return;
+        }
+        use std::time::Duration;
+
+        fn run(loading: bool) -> (bool, Option<u32>, Option<u32>) {
+            let mut app = App::new();
+            let teleport = if loading {
+                crate::ingame::teleport::Teleport::loading_fixture()
+            } else {
+                crate::ingame::teleport::Teleport::default()
+            };
+            app.insert_resource(teleport)
+                .init_resource::<Time>()
+                .init_resource::<Gliding>()
+                .init_resource::<SendState>()
+                .init_resource::<Buffs>()
+                .init_resource::<crate::ingame::units::Views>()
+                .insert_resource(TerrainQuery::new("__glide_test__"))
+                .insert_resource(WorldCollision::new(
+                    "__glide_test__",
+                    TerrainQuery::new("__glide_test__"),
+                ))
+                .add_systems(Update, (reset_on_teleport, track_flight).chain());
+            app.world_mut().spawn((
+                LocalPlayer { obj_id: 7 },
+                Mover {
+                    pos: Vec3::new(0.0, 0.0, 50.0),
+                    facing: 0.0,
+                    vz: -1.0,
+                    grounded: false,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+            ));
+            {
+                let mut gliding = app.world_mut().resource_mut::<Gliding>();
+                gliding.active = Some(Active {
+                    flight: Flight::start(GlideParams::EXPERIMENTAL),
+                    buff_id: 1029,
+                    buff_index: 3,
+                    pose: Pose::Start,
+                    touched: false,
+                    touched_for: 0.0,
+                    missing: 0.0,
+                    water: false,
+                    deck: None,
+                });
+            }
+            app.world_mut().resource_mut::<Buffs>().by_unit.insert(
+                7,
+                vec![aa_net::state::BuffEntry {
+                    buff: aa_net::buff::Buff {
+                        index: 3,
+                        buff_id: 1029,
+                        duration_ms: 60_000,
+                        ..Default::default()
+                    },
+                    received: web_time::Instant::now(),
+                }],
+            );
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(0.1));
+            app.update();
+            let gliding = app.world().resource::<Gliding>();
+            (
+                gliding.active.is_some(),
+                gliding.active.as_ref().map(|a| a.buff_id),
+                gliding.ended,
+            )
+        }
+
+        // The same setup without a teleport starts the flight from the still-listed buff: the negative assertion
+        // below is not vacuous.
+        assert_eq!(
+            run(false),
+            (true, Some(1029), None),
+            "the buff did not start the flight"
+        );
+        assert_eq!(
+            run(true),
+            (false, None, Some(1029)),
+            "the still-listed buff 1029 restarted the flight after the teleport"
+        );
+    }
+
+    #[test]
+    fn a_teleport_ends_the_flight_and_the_deck_ride() {
+        let mut app = App::new();
+        app.insert_resource(crate::ingame::teleport::Teleport::loading_fixture())
+            .init_resource::<Gliding>()
+            .init_resource::<SendState>()
+            .add_systems(Update, reset_on_teleport);
+        let player = app
+            .world_mut()
+            .spawn((LocalPlayer { obj_id: 7 }, DeckRide::new(8911, Vec3::ZERO, 0.0, 0.0)))
+            .id();
+        {
+            let mut gliding = app.world_mut().resource_mut::<Gliding>();
+            gliding.active = Some(Active {
+                flight: Flight::start(GlideParams::EXPERIMENTAL),
+                buff_id: 1029,
+                buff_index: 9,
+                pose: Pose::Start,
+                touched: false,
+                touched_for: 0.0,
+                missing: 0.0,
+                water: false,
+                deck: None,
+            });
+            gliding.ending = 0.4;
+        }
+        app.world_mut().resource_mut::<SendState>().glide_owns = true;
+        app.update();
+        let gliding = app.world().resource::<Gliding>();
+        assert!(gliding.active.is_none(), "the flight survives the teleport");
+        assert_eq!(gliding.ending, 0.0, "the end clip survives the teleport");
+        assert!(!app.world().resource::<SendState>().glide_owns);
+        assert!(app.world().get::<DeckRide>(player).is_none(), "the deck ride survives the teleport");
+    }
+
     #[test]
     fn the_deploy_uses_the_item_caster_with_the_equipped_glider() {
         let item = aa_net::model::Item {
