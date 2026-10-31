@@ -212,18 +212,19 @@ pub fn phase_changes(
     let falling: HashSet<u32> = falling.iter().map(|remote| remote.obj_id).collect();
     for NetEvent(event) in events.read() {
         let updates: Vec<_> = match event {
-            Event::DoodadsSpawned(spawned) => spawned.iter().map(|d|(d.obj_id,d.func_group_id,d.time_left,true)).collect(),
-            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } => vec![(*obj_id,*func_group_id,*time_left,false)],
+            Event::DoodadsSpawned(spawned) => spawned.iter().map(|d|(d.obj_id,d.func_group_id,d.time_left)).collect(),
+            Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } => vec![(*obj_id,*func_group_id,*time_left)],
             _ => continue,
         };
-        for (obj_id,func_group_id,time_left,snapshot) in updates {
+        for (obj_id,func_group_id,time_left) in updates {
             views.doodad_announced(obj_id,time.elapsed_secs());
             let Some(entity)=views.doodad_entity(obj_id) else { views.retry_doodad(obj_id);continue };
             let Ok((_,mut visual,mut transform))=roots.get_mut(entity) else { continue };
             visual.func_group_id=func_group_id;
             visual.growth=db.doodad_growth(func_group_id);
-            visual.remaining_ms=time_left as f32;
-            visual.total_ms=visual.growth.map_or(0.0,|g|g.total_ms(visual.remaining_ms,snapshot));
+            // the announced time is the whole duration; `start_scale` applies at once (no use of the database delay)
+            visual.remaining_ms=visual.growth.map_or(time_left as f32,|g|g.total_ms(time_left as f32));
+            visual.total_ms=visual.growth.map_or(0.0,|g|g.total_ms(time_left as f32));
             if !falling.contains(&obj_id) { transform.scale=Vec3::splat(visual.base_scale*visual.growth_scale()); }
             if !swaps.contains(&obj_id) { swaps.push_back(obj_id); }
         }
