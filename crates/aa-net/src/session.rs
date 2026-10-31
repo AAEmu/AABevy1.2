@@ -131,6 +131,12 @@ pub struct MoveCommand {
     /// The ship, vehicle or doodad the unit stands on (`0x20` support block). `pos` then carries
     /// the object-local point and `support.world` the world one.
     pub support: Option<crate::model::MoveSupport>,
+    /// Wire move flags override. The 1.2 glider capture sends neither moving nor stopping while flying (`0`)
+    /// and `Moving | Stopping` (6) at the touchdown; `None` keeps the flags from `moving`/`state`.
+    pub wire_flags: Option<u8>,
+    /// Wire actor flags override. The glider capture sends `0` while flying and `Jumping | StandingOnSolid`
+    /// (`0x14`) at the touchdown; `None` keeps the flags from `state`.
+    pub wire_actor_flags: Option<u8>,
 }
 
 impl Default for MoveCommand {
@@ -147,6 +153,8 @@ impl Default for MoveCommand {
             in_combat: false,
             fall_vel: 0,
             support: None,
+            wire_flags: None,
+            wire_actor_flags: None,
         }
     }
 }
@@ -217,6 +225,13 @@ impl MoveCommand {
                 m.actor_flags |= actor_flags::STANDING_ON_SOLID;
             }
             m.support = Some(support.clone());
+        }
+        if let Some(flags) = self.wire_flags {
+            // keep the combat bit the command asked for; the captured glider flags only say moving/stopping
+            m.flags = (m.flags & move_flags::IN_COMBAT) | flags;
+        }
+        if let Some(flags) = self.wire_actor_flags {
+            m.actor_flags = flags;
         }
         m
     }
@@ -384,6 +399,9 @@ pub enum Command {
     ChangeAppellation { id: u32 },
     /// Self-only explicit cancellation; app resolves the native good-buff ordinal/system gate.
     RemoveBuff { character_id:u32, obj_id:u32, buff_index:u32 },
+    /// `CSRemoveBuff` on the player's own unit, for a buff the client ends itself (the glider landing sends the buff index
+    /// and reason 9, captured 2026-10-31). The session resolves the object id from its own unit.
+    RemoveOwnBuff { buff_index: u32, reason: u8 },
     /// Opaque per-character UI data; save does not have a server acknowledgement.
     UiData(crate::ui_data::UiDataCommand),
     /// Player-score wire requests for this captured active character. Play/pause use skills.
@@ -1462,6 +1480,35 @@ impl Session {
                 } else { Some("buff cancellation was not written to the game connection") };
                 if let Some(message) = message {
                     self.emit(Event::BuffRemovalRequestRejected { character_id, obj_id, buff_index, message:message.into() });
+                }
+            }
+            Command::RemoveOwnBuff { buff_index, reason } => {
+                let message = if self.phase != Phase::InWorld || self.self_obj == 0 {
+                    Some("buff removal requires an active character")
+                } else if self
+                    .send_game(game::ClientMsg::RemoveBuff {
+                        obj_id: self.self_obj,
+                        buff_index,
+                        reason,
+                    })
+                    .await
+                {
+                    self.emit(Event::BuffRemovalRequested {
+                        character_id: self.selected,
+                        obj_id: self.self_obj,
+                        buff_index,
+                    });
+                    None
+                } else {
+                    Some("buff removal was not written to the game connection")
+                };
+                if let Some(message) = message {
+                    self.emit(Event::BuffRemovalRequestRejected {
+                        character_id: self.selected,
+                        obj_id: self.self_obj,
+                        buff_index,
+                        message: message.into(),
+                    });
                 }
             }
             Command::Portal(command) => {
@@ -5560,6 +5607,8 @@ mod tests {
         let request=||Command::RemoveBuff{character_id:42,obj_id:0x010203,buff_index:7};
         session.command(request()).await;
         assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
+        session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
         let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let addr=listener.local_addr().unwrap().to_string();
         let(connection,accepted)=tokio::join!(GameConn::connect(&addr),listener.accept());let(mut peer,_)=accepted.unwrap();session.game=Some(connection.unwrap());
         for (character_id,obj_id) in [(0,0x010203),(41,0x010203),(42,0),(42,0x010204),(42,0x1000000)] {
@@ -5579,8 +5628,19 @@ mod tests {
             assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequested{character_id:42,obj_id:0x010203,buff_index:i})if i==buff_index));
             assert!(events.try_recv().is_err(),"no fabricated BuffRemoved acknowledgement");
         }
+        for buff_index in [18,20,u32::MAX] {
+            session.command(Command::RemoveOwnBuff{buff_index,reason:9}).await;
+            let n=peer.read_u16_le().await.unwrap();let mut frame=vec![0;n as usize];peer.read_exact(&mut frame).await.unwrap();
+            assert_eq!(&frame[4..6],&[0x55,0]);assert_eq!(&frame[6..],game::ClientMsg::RemoveBuff{obj_id:0x010203,buff_index,reason:9}.encode_body());
+            assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequested{obj_id:0x010203,buff_index:i,..})if i==buff_index));
+            assert!(events.try_recv().is_err(),"no fabricated BuffRemoved acknowledgement");
+        }
+        let self_obj=session.self_obj;session.self_obj=0;session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));session.self_obj=self_obj;
         session.game.as_mut().unwrap().shutdown().await;session.command(request()).await;
         let mut rejected=false;while let Ok(event)=events.try_recv(){assert!(!matches!(event,Event::BuffRemovalRequested{..}));rejected|=matches!(event,Event::BuffRemovalRequestRejected{..});}assert!(rejected);
+        session.command(Command::RemoveOwnBuff{buff_index:18,reason:9}).await;
+        assert!(matches!(events.try_recv(),Ok(Event::BuffRemovalRequestRejected{..})));
     }
 
     #[tokio::test]

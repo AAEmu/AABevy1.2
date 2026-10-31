@@ -65,6 +65,10 @@ pub enum Request {
     TargetByName { name: String },
     /// A received slave binding request (`SlaveCommand::{Bind,Unbind}`).
     Slave(aa_net::slave_control::SlaveCommand),
+    /// `CSStartSkill` for an interaction skill whose target is a unit (the slave's 13863 passenger
+    /// seat): a plain unit-caster request, with no learned-skill or action-bar gate. The server
+    /// owns the skill's requirements.
+    UseSkill { skill_id: u32, target_obj_id: u32 },
     ItemEffect { character_id: u32, request: aa_net::item_effect::ItemEffectRequest },
     ItemLook { character_id: u32, request: aa_net::look_conversion::ItemLookRequest },
     /// `CSStartInteraction` 0x068, for an NPC's function or a slave's interaction skill list.
@@ -1072,6 +1076,9 @@ pub fn handle_requests(
                     net.write(NetCommand(Command::ShipControl(request)));
                 }
                 net.write(NetCommand(Command::Slave(command)));
+            }
+            Request::UseSkill { skill_id, target_obj_id } => {
+                net.write(NetCommand(Command::UseSkill { skill_id, target_obj_id }));
             }
             Request::SellBackpack { obj_id } => { net.write(NetCommand(Command::SellBackpackGoods { obj_id })); }
             Request::ChatCommand(command) => { net.write(NetCommand(Command::ChatCommand(command))); }

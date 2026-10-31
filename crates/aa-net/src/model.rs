@@ -1332,6 +1332,10 @@ pub struct Movement {
 /// request the server applied and its zone/stuck state (`FUN_397c0470` case 3).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ShipMove {
+    /// Quaternion `x`, `y`, `z` as the wire stores them (`1/32767` each); `w` is rebuilt from
+    /// them. The server writes them from the visual orientation (bank, ground pitch and wave
+    /// pitch on top of the hull; `ai/physics/replication.rs` `send_updated_movement_data`).
+    pub rotation: [i16; 3],
     pub angular_velocity: [f32; 3],
     /// -127 ..= 127, the same wire levels as the type-4 request.
     pub steering: i8,
@@ -1398,6 +1402,19 @@ impl Movement {
     /// Facing in radians.
     pub fn yaw(&self) -> f32 {
         self.vehicle_yaw.unwrap_or_else(|| f32::from(self.direction) * MOVE_DIRECTION_STEP)
+    }
+
+    /// The full rotation `[x, y, z, w]` of a vehicle (type 2) or ship (type 3) movement, in game
+    /// coordinates (z up); `w` is rebuilt from the three shorts as the 1.2 receiver does
+    /// (`FUN_397c0470` cases 2 and 3). `None` for the other movement types, which carry a
+    /// direction byte instead.
+    pub fn rotation_quat(&self) -> Option<[f32; 4]> {
+        let shorts = self
+            .vehicle
+            .as_ref()
+            .map(|v| v.rotation)
+            .or_else(|| self.ship.as_ref().map(|s| s.rotation))?;
+        Some(quat_from_shorts(shorts))
     }
 
     /// The facing to draw. A unit standing on an object carries its facing relative to
@@ -1539,13 +1556,15 @@ impl Movement {
             3 => {
                 // Ship: rotation as three shorts, angular velocity, steering, throttle, zone and
                 // stuck flag.
-                m.vehicle_yaw = Some(quat_yaw(short_quat(r)?));
+                let rotation = [r.i16()?, r.i16()?, r.i16()?];
+                m.vehicle_yaw = Some(quat_yaw(quat_from_shorts(rotation)));
                 let angular_velocity = [r.f32()?, r.f32()?, r.f32()?];
                 let steering = r.i8()?;
                 let throttle = r.i8()?;
                 let zone_id = r.u16()?;
                 let stuck = r.u8()? != 0;
                 m.ship = Some(ShipMove {
+                    rotation,
                     angular_velocity,
                     steering,
                     throttle,
@@ -2179,6 +2198,153 @@ mod tests {
         assert_eq!(back.stance, stance::RELAXED);
     }
 
+    /// The 2026-10-31 recapture's glider bodies, byte for byte against the server's `UnitMove.Read`
+    /// (`aaemu-game/src/models/movement.rs:418-438`): 9-byte position (three fixed-point components), velocity 3 x i16,
+    /// rotation 3 x i8, delta movement 3 x i8, stance, alertness, actor flags, then `fallVel` only when 0x80 is set.
+    /// Flight rows 5137-5287: stance 1, actor flags 0, move flags 2 with delta 0x7f while W is held (row 5124). The captured
+    /// landing is stance 1, move flags 6, actor flags 0x14 after `CSRemoveBuff` (rows 168455 / 177786).
+    #[test]
+    fn gliding_type_1_bodies_match_the_server_unit_move_reader() {
+        let cmd = crate::session::MoveCommand {
+            pos: Pos::new(100.5, 200.25, 30.125),
+            yaw: std::f32::consts::FRAC_PI_2,
+            moving: true,
+            stance: stance::RELAXED,
+            velocity: [1024, -2048, 512],
+            delta_movement: [0, 127, 0],
+            wire_flags: Some(0),
+            wire_actor_flags: Some(0),
+            ..crate::session::MoveCommand::default()
+        }
+        .with_state(crate::session::MoveState::Ground);
+        let movement = cmd.to_movement(0x1122_3344);
+        let mut w = Writer::new();
+        movement.write(&mut w);
+        let bytes = w.finish();
+        // `Movement::write`: type byte, then `u32 time`, `u8 flags`, the 9-byte position, velocity,
+        // tilt (roll/pitch), direction, delta movement, stance, alertness, actor flags.
+        assert_eq!(bytes[0], 1);
+        assert_eq!(&bytes[1..5], &0x1122_3344u32.to_le_bytes());
+        assert_eq!(bytes[5], 0, "glide: neither moving nor stopping");
+        let body = &bytes[6..];
+        let server = ServerUnitMove::read(body);
+        assert!(
+            (server.pos.0 - 100.5).abs() < 0.01
+                && (server.pos.1 - 200.25).abs() < 0.01
+                && (server.pos.2 - 30.125).abs() < 0.01
+        );
+        assert_eq!(server.velocity, (1024, -2048, 512));
+        assert_eq!(
+            server.direction, 32,
+            "pi/2 is the 32nd of 128 direction steps"
+        );
+        assert_eq!(server.delta_movement, [0, 127, 0]);
+        assert_eq!(server.stance, stance::RELAXED);
+        assert_eq!(server.alertness, 0);
+        assert_eq!(server.actor_flags, 0);
+        assert_eq!(
+            body.len(),
+            9 + 6 + 3 + 3 + 3,
+            "no fall velocity block without 0x80"
+        );
+        // The server's `on_actor_move` (`skills/mod.rs:278-292`) sees airborne (no ground/jump bits).
+        assert_eq!(server.actor_flags, 0, "the captured flight is airborne");
+
+        // The captured touchdown: stance 1, flags Moving|Stopping (6), actor Jumping|StandingOnSolid (0x14).
+        // CSRemoveBuff precedes it; the later grounded packets fall back to flags 4 / actor 0x04 (S14-C3 settled).
+        let landing = crate::session::MoveCommand {
+            pos: Pos::new(101.0, 200.0, 30.0),
+            yaw: 0.0,
+            moving: true,
+            stance: stance::RELAXED,
+            velocity: [0, 0, 0],
+            delta_movement: [0, 127, 0],
+            wire_flags: Some(move_flags::MOVING | move_flags::STOPPING),
+            wire_actor_flags: Some(actor_flags::JUMPING | actor_flags::STANDING_ON_SOLID),
+            ..crate::session::MoveCommand::default()
+        }
+        .with_state(crate::session::MoveState::Ground);
+        let movement = landing.to_movement(7);
+        let mut w = Writer::new();
+        movement.write(&mut w);
+        let bytes = w.finish();
+        assert_eq!(bytes[5], move_flags::MOVING | move_flags::STOPPING);
+        let server = ServerUnitMove::read(&bytes[6..]);
+        assert_eq!(server.stance, stance::RELAXED);
+        assert_eq!(
+            server.actor_flags,
+            actor_flags::JUMPING | actor_flags::STANDING_ON_SOLID
+        );
+        assert_eq!(server.delta_movement, [0, 127, 0]);
+        assert_eq!(server.fall_velocity, 0);
+
+        // The override keeps the IN_COMBAT bit (the captured glider flags only say moving/stopping).
+        let combat = crate::session::MoveCommand {
+            pos: Pos::new(101.0, 200.0, 30.0),
+            yaw: 0.0,
+            moving: true,
+            stance: stance::RELAXED,
+            in_combat: true,
+            wire_flags: Some(0),
+            wire_actor_flags: Some(0),
+            ..crate::session::MoveCommand::default()
+        }
+        .with_state(crate::session::MoveState::Ground);
+        assert_eq!(combat.to_movement(9).flags, move_flags::IN_COMBAT);
+    }
+
+    /// The field walk of the server's `UnitMove::Read`, read from raw bytes (not through this crate's reader).
+    struct ServerUnitMove {
+        pos: (f32, f32, f32),
+        velocity: (i16, i16, i16),
+        direction: i8,
+        delta_movement: [i8; 3],
+        stance: u8,
+        alertness: u8,
+        actor_flags: u8,
+        fall_velocity: u16,
+    }
+
+    impl ServerUnitMove {
+        fn read(mut b: &[u8]) -> Self {
+            // `PacketStream::read_position`: 9 bytes (x, y 24-bit fixed point, z 18-bit), not 3 floats.
+            let position = crate::wire::decode_position(&b[..9].try_into().unwrap());
+            b = &b[9..];
+            let pos = [position.x, position.y, position.z];
+            let mut velocity = [0i16; 3];
+            for value in &mut velocity {
+                *value = i16::from_le_bytes(b[..2].try_into().unwrap());
+                b = &b[2..];
+            }
+            let direction = b[2] as i8;
+            b = &b[3..];
+            let delta_movement = [b[0] as i8, b[1] as i8, b[2] as i8];
+            b = &b[3..];
+            let stance = b[0];
+            let alertness = b[1];
+            let actor_flags = b[2];
+            b = &b[3..];
+            let fall_velocity = if actor_flags & 0x80 == 0x80 {
+                let value = u16::from_le_bytes(b[..2].try_into().unwrap());
+                b = &b[2..];
+                value
+            } else {
+                0
+            };
+            assert!(b.is_empty(), "the reader left bytes: {}", b.len());
+            Self {
+                pos: (pos[0], pos[1], pos[2]),
+                velocity: (velocity[0], velocity[1], velocity[2]),
+                direction,
+                delta_movement,
+                stance,
+                alertness,
+                actor_flags,
+                fall_velocity,
+            }
+        }
+    }
+
     /// The 2026-10-29 S10 rowboat deck capture: the exact type-1 bodies of native.json,
     /// re-encoded after the captured time is normalised to 0.
     #[test]
@@ -2379,6 +2545,115 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, 5);
+    }
+
+    /// A vehicle / ship quaternion with pitch and roll, not only yaw: the receiver keeps the three
+    /// wire shorts so the full rotation reaches the drawn pose (S8).
+    #[test]
+    #[allow(clippy::excessive_precision)]
+    fn vehicle_and_ship_movements_keep_the_full_rotation() {
+        // A yaw with a little pitch and roll; `w` is not on the wire.
+        let half = 0.35f32;
+        let (x, y, z) = (0.2f32, -0.1, half.sin());
+        let q = [x, y, z, (1.0 - (x * x + y * y + z * z)).sqrt()];
+        let shorts = [
+            (x / 0.000_030_518_509) as i16,
+            (y / 0.000_030_518_509) as i16,
+            (z / 0.000_030_518_509) as i16,
+        ];
+        let mut w = Writer::new();
+        w.u32(1).u8(0).position(Pos::default()).i16(0).i16(0).i16(0);
+        w.i16(shorts[0]).i16(shorts[1]).i16(shorts[2]);
+        w.f32(0.0).f32(0.0).f32(0.0).f32(0.0).u8(0);
+        let m = Movement::read_typed(2, &mut Reader::new(&w.finish())).unwrap();
+        let got = m.rotation_quat().expect("type-2 rotation");
+        for (a, b) in got.into_iter().zip(q) {
+            assert!((a - b).abs() < 2e-4, "{got:?} vs {q:?}");
+        }
+        assert_eq!(m.vehicle.as_ref().unwrap().rotation, shorts);
+
+        let mut w = Writer::new();
+        w.u32(1).u8(0).position(Pos::default()).i16(0).i16(0).i16(0);
+        w.i16(shorts[0]).i16(shorts[1]).i16(shorts[2]);
+        w.f32(0.0).f32(0.0).f32(0.0).i8(0).i8(0).u16(1).u8(0);
+        let m = Movement::read_typed(3, &mut Reader::new(&w.finish())).unwrap();
+        let got = m.rotation_quat().expect("type-3 rotation");
+        for (a, b) in got.into_iter().zip(q) {
+            assert!((a - b).abs() < 2e-4, "{got:?} vs {q:?}");
+        }
+        assert_eq!(m.ship.as_ref().unwrap().rotation, shorts);
+        assert!(Movement::unit(Pos::default(), 0.0, 0).rotation_quat().is_none());
+    }
+
+    /// The server's own writers (`aaemu-game`): `models/movement.rs`
+    /// `write_sc_one_unit_movement` writes the `bc` id, the type byte, then `MoveType.Write`
+    /// (`ShipMove::write` / `VehicleMove::write`); `packets/world.rs`
+    /// `SCOneUnitMovementPacket` forwards that body. The bytes below are built exactly like those
+    /// writers, and every one must be consumed by the receiver.
+    #[test]
+    fn server_written_vehicle_and_ship_bodies_are_read_to_the_last_byte() {
+        use crate::wire::encode_position;
+
+        let id: u32 = 0x84_C9;
+        let pos = Pos::new(10458.4, 15574.05, 229.47);
+        let time = 1_117_012u32;
+
+        // Type 2 (`VehicleMove::write`): bc id, 2, time, flags, position, velocity shorts,
+        // rotation shorts, angular velocity f32 x3, steering f32, wheel count, wheel f32 x n.
+        let mut expected: Vec<u8> = id.to_le_bytes()[..3].to_vec();
+        expected.extend_from_slice(&[2]);
+        expected.extend_from_slice(&time.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&encode_position(pos));
+        expected.extend_from_slice(&[0x2e, 0x00, 0xe0, 0xfe, 0x00, 0x00]); // velocity
+        expected.extend_from_slice(&[0x00, 0x00, 0x16, 0x00, 0x96, 0x80]); // rotation x, y, z
+        expected.extend_from_slice(&0.5f32.to_le_bytes());
+        expected.extend_from_slice(&(-0.25f32).to_le_bytes());
+        expected.extend_from_slice(&0.0f32.to_le_bytes());
+        expected.extend_from_slice(&0.75f32.to_le_bytes()); // steering
+        expected.push(2);
+        expected.extend_from_slice(&1.5f32.to_le_bytes());
+        expected.extend_from_slice(&(-2.5f32).to_le_bytes());
+        let mut r = Reader::new(&expected);
+        assert_eq!(r.bc().unwrap(), id);
+        let cart = Movement::read(&mut r).unwrap();
+        assert!(r.is_empty(), "the reader must consume the server's wheel list");
+        let vehicle = cart.vehicle.as_ref().expect("type-2 body");
+        assert_eq!((cart.move_type, cart.time, cart.flags), (2, time, 0));
+        assert_eq!(cart.velocity, [0x002e, -0x0120, 0]);
+        assert_eq!(vehicle.rotation, [0x0000, 0x0016, -0x7f6a]);
+        assert_eq!(vehicle.angular_velocity, [0.5, -0.25, 0.0]);
+        assert_eq!(vehicle.steering, 0.75);
+        assert_eq!(vehicle.wheel_ang_vel, vec![1.5, -2.5]);
+        assert!((cart.pos.x - pos.x).abs() < 0.01 && (cart.pos.y - pos.y).abs() < 0.01);
+
+        // Type 3 (`ShipMove::write`): bc id, 3, time, flags, position, velocity, rotation,
+        // angular velocity, steering i8, throttle i8, zone u16, stuck byte.
+        let mut expected: Vec<u8> = id.to_le_bytes()[..3].to_vec();
+        expected.extend_from_slice(&[3]);
+        expected.extend_from_slice(&time.to_le_bytes());
+        expected.push(0);
+        expected.extend_from_slice(&encode_position(pos));
+        expected.extend_from_slice(&[0xff, 0xff, 0x00, 0x00, 0x01, 0x00]); // velocity
+        expected.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // rotation
+        expected.extend_from_slice(&0.0f32.to_le_bytes());
+        expected.extend_from_slice(&(-0.000_646_574_66f32).to_le_bytes());
+        expected.extend_from_slice(&0.090_274_61f32.to_le_bytes());
+        expected.extend_from_slice(&(-12i8).to_le_bytes());
+        expected.extend_from_slice(&(81i8).to_le_bytes());
+        expected.extend_from_slice(&179u16.to_le_bytes());
+        expected.push(0);
+        let mut r = Reader::new(&expected);
+        assert_eq!(r.bc().unwrap(), id);
+        let ship = Movement::read(&mut r).unwrap();
+        assert!(r.is_empty(), "the reader must stop exactly at the stuck byte");
+        let body = ship.ship.as_ref().expect("type-3 body");
+        assert_eq!((ship.move_type, ship.time), (3, time));
+        assert_eq!(ship.velocity, [-1, 0, 1]);
+        assert_eq!(body.rotation, [0, 0, 0]);
+        assert_eq!(body.angular_velocity[1], -0.000_646_574_66);
+        assert_eq!(body.angular_velocity[2], 0.090_274_61);
+        assert_eq!((body.steering, body.throttle, body.zone_id, body.stuck), (-12, 81, 179, false));
     }
 
     #[test]

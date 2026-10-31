@@ -36,6 +36,11 @@ const HOLD: f32 = 0.2;
 /// The game goes on after this many seconds whatever is still loading.
 const TIMEOUT: f32 = 20.0;
 
+/// A world load finished: the loading screen is down and the arrival is logged (`FUN_39426520`'s end-of-load
+/// point). The 30 s planting reuse lock starts here (`FUN_393a6de0`); emitted after the load is taken down.
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct WorldLoadFinished;
+
 /// A teleport's loading screen.
 #[derive(Resource, Default)]
 pub struct Teleport {
@@ -43,6 +48,9 @@ pub struct Teleport {
     pending: Option<Vec3>,
     /// `SCLoadInstance` came: `CSInstanceLoaded` is owed once the destination is loaded.
     instance_loaded_owed: bool,
+    /// Jumps the local player was moved by: short hops and long loads alike. The HUD reads it to end a mount walk
+    /// (the native 1.2 reaction is capture-pending, A1b).
+    pub(crate) jumps: u64,
     load: Option<Load>,
 }
 
@@ -69,6 +77,12 @@ impl Teleport {
     pub(crate) fn loading_fixture() -> Self {
         Teleport { pending: Some(Vec3::ZERO), ..Teleport::default() }
     }
+
+    /// A teleport counter for the HUD's mount-walk tests (`jumps` is private).
+    #[cfg(test)]
+    pub(crate) fn jumps_fixture(jumps: u64) -> Self {
+        Teleport { jumps, ..Teleport::default() }
+    }
 }
 
 /// Run condition: no teleport loading screen.
@@ -78,6 +92,7 @@ pub fn idle(tp: Res<Teleport>) -> bool {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Teleport>()
+        .add_message::<WorldLoadFinished>()
         .add_systems(
             Update,
             detect
@@ -134,6 +149,8 @@ pub(crate) fn detect(
             Event::Resurrected { obj_id, pos, .. } if *obj_id == local.obj_id => (Vec3::new(pos.x, pos.y, pos.z), false),
             _ => continue,
         };
+        // a jump of any length ends a mount walk: the pet was not walked to (capture-pending, A1b)
+        tp.jumps += 1;
         if load {
             tp.instance_loaded_owed = true;
         }
@@ -199,6 +216,7 @@ fn drive(world: &mut World) {
         world.write_message(NetCommand(Command::Portal(PortalCommand::InstanceLoaded)));
     }
     info!("teleport: arrived after {:.1} s at ({:.1}, {:.1}, {:.1})", load.t, load.target.x, load.target.y, load.target.z);
+    world.write_message(WorldLoadFinished);
 }
 
 fn new_load(target: Vec3) -> Load {
@@ -403,6 +421,30 @@ mod tests {
             pos: aa_net::Pos::new(10.0, 20.0, 30.0),
             angles: [0.0; 3],
         }
+    }
+
+    #[test]
+    fn every_local_jump_advances_the_teleport_counter() {
+        let mut app = app();
+        assert_eq!(app.world().resource::<Teleport>().jumps, 0);
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: aa_net::Pos::new(11.0, 21.0, 30.0),
+            yaw: 0.0,
+            reason: 0,
+        }));
+        app.update();
+        assert_eq!(
+            app.world().resource::<Teleport>().jumps,
+            1,
+            "a short hop counts: the mount walk must not keep steering after it"
+        );
+        app.world_mut().write_message(NetEvent(Event::Resurrected {
+            obj_id: 100,
+            pos: aa_net::Pos::new(12.0, 22.0, 30.0),
+            yaw: 0.0,
+        }));
+        app.update();
+        assert_eq!(app.world().resource::<Teleport>().jumps, 2);
     }
 
     #[test]

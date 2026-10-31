@@ -46,6 +46,8 @@ pub(crate) mod cart;
 pub(crate) mod combat;
 pub(crate) mod creature;
 pub(crate) mod data;
+#[cfg(test)]
+mod farm_audit;
 mod dev;
 pub(crate) mod cutdown;
 pub(crate) mod doodad_affordance;
@@ -55,12 +57,13 @@ pub(crate) mod emote;
 pub(crate) mod enter;
 mod flow;
 mod gear_refresh;
+pub(crate) mod glide;
 #[allow(dead_code)]
 pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
 pub(crate) mod housing;
 mod idle;
-mod mount;
+pub(crate) mod mount;
 pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
@@ -80,6 +83,7 @@ mod trace;
 pub(crate) mod turret;
 pub(crate) mod units;
 pub(crate) mod vehicle;
+pub(crate) mod vehicle_track;
 pub(crate) mod warm;
 pub(crate) mod weapons;
 pub(crate) mod world_switch;
@@ -91,14 +95,22 @@ use bevy::prelude::*;
 
 use crate::Screen;
 pub(crate) use dev::DevOptions;
-pub(crate) use anim::LocalJump;
+pub(crate) use camera::OrbitCamera;
+#[allow(unused_imports)] // `Motion` is for the dev examples
+pub(crate) use anim::{LocalJump, Motion};
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
+#[cfg(test)]
+pub(crate) use swim::ActorParams;
 #[cfg(test)]
 pub(crate) use mount::LocalSeat;
 pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
 /// The world the in-game screen plays in.
 pub const WORLD: &str = "main_world";
+
+/// The last camera writer: the movie camera owns the FOV after the normal lens systems.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CameraFinal;
 
 pub struct InGamePlugin;
 
@@ -116,6 +128,7 @@ impl Plugin for InGamePlugin {
         if !app.is_plugin_added::<aa_anim::facial::FacialPlugin>() {
             app.add_plugins(aa_anim::facial::FacialPlugin);
         }
+        app.configure_sets(Update, CameraFinal.after(cam_fov::drive_cam_fov));
         if !app.is_plugin_added::<AaWorldPlugin>() {
             app.add_plugins(AaWorldPlugin::new(WORLD));
         }
@@ -147,6 +160,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<player::PlayerBuilt>()
             .init_resource::<anim::LocalJump>()
             .init_resource::<sprint::Sprint>()
+            .init_resource::<glide::Gliding>()
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
@@ -193,6 +207,10 @@ impl Plugin for InGamePlugin {
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
+                        (glide::track_flight, glide::request_deploy, glide::control_glide)
+                            .chain()
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle),
                         turret::local_aim,
                         camera::vehicle_camera,
                         ship::board_deck
@@ -212,19 +230,19 @@ impl Plugin for InGamePlugin {
                     )
                         .chain()
                         .after(crate::hud::HudInputReady),
-                    (units::sync_views, units::move_units, units::cull_units).chain(),
+                    (units::sync_views, units::move_units, units::cull_units, glide::track_remote_gliders).chain(),
                     vehicle::track_motion
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
                     vehicle::steer_spindles.after(vehicle::track_motion),
-                    anim::drive_locomotion,
+                    (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
                     quest_depth_of_field::drive.after(quest_camera::drive),
                     swim::drive_swim.after(anim::drive_locomotion),
                     player::dev_hide_part,
-                    weapons::attach_carried.in_set(weapons::InGameCarried),
+                    (weapons::attach_carried.in_set(weapons::InGameCarried), glide::show_glider).chain(),
                     warm::update,
                     sync_clock,
                     log_chat,

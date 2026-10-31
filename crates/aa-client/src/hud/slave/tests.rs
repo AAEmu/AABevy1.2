@@ -286,7 +286,7 @@ fn the_occupy_skill_out_of_three_metres_sends_nothing() {
 
 #[test]
 fn the_occupy_skill_is_only_the_first_skill_and_other_skills_do_nothing() {
-    for skills in [&[0][..], &[13863], &[19165], &[0, 12076], &[]] {
+    for skills in [&[0][..], &[19165], &[0, 12076], &[]] {
         let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
         assert_eq!(
             receive(&state, &units, &skill_list(20, skills)),
@@ -295,6 +295,147 @@ fn the_occupy_skill_is_only_the_first_skill_and_other_skills_do_nothing() {
         );
         assert!(send(&state, &units).is_empty(), "{skills:?}");
     }
+}
+
+#[test]
+fn the_seat_skills_map_to_their_attach_points() {
+    assert_eq!(SlaveSeat::of_skill(12076), Some(SlaveSeat::Driver));
+    assert_eq!(SlaveSeat::of_skill(13863), Some(SlaveSeat::Passenger));
+    assert_eq!(SlaveSeat::of_skill(19165), None, "destroy is not a seat");
+}
+
+#[test]
+fn the_passenger_skill_in_reach_sends_cs_start_skill_with_the_slave_as_target() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(2.99, 0.0, 0.0))]);
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Sent
+    );
+    let commands = send(&state, &units);
+    assert_eq!(commands.len(), 1, "{commands:?}");
+    assert!(matches!(
+        &commands[0],
+        Command::UseSkill {
+            skill_id: 13863,
+            target_obj_id: 20
+        }
+    ));
+    // The server's CSStartSkill reader: u32 skill, u8 caster kind 0 + bc, u8 target kind 0 + bc,
+    // flag 0 (13 bytes). The player is 100 in the fixture spawn.
+    let body = aa_net::game::ClientMsg::StartSkill {
+        skill_id: 13863,
+        self_obj_id: 100,
+        caster: aa_net::skill::StartCaster::Unit,
+        target: aa_net::skill::SkillTarget::unit(20),
+    }
+    .encode_body();
+    assert_eq!(
+        body,
+        [
+            0x27, 0x36, 0, 0, // 13863
+            0, 0x64, 0, 0, // caster: unit, player 100
+            0, 0x14, 0, 0, // target: unit, slave 20
+            0, // no skill object
+        ],
+        "byte for byte as the server reader consumes it"
+    );
+}
+
+#[test]
+fn the_server_attach_writer_frames_point_two_for_our_reader() {
+    // The server's SCUnitAttachedPacket writer: bc child, u8 point, bc parent, u8 reason.
+    let mut w = aa_net::wire::Writer::new();
+    w.bc(100).u8(2).bc(20).u8(0);
+    let body = w.finish();
+    assert_eq!(body.len(), 8);
+    let mut frame = vec![0xDD, 0x01, 0x0E, 0x00];
+    frame.extend(aa_net::opcodes::sc::SCUnitAttachedPacket.to_le_bytes());
+    frame.extend(&body);
+    assert_eq!(
+        aa_net::game::ServerMsg::decode(&frame).unwrap(),
+        aa_net::game::ServerMsg::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0
+        }
+    );
+}
+
+#[test]
+fn the_passenger_skill_reach_is_the_interaction_reach() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(3.0, 0.0, 0.0))]);
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Refused(0x9a)
+    );
+    assert!(send(&state, &units).is_empty());
+    let mut mate = crate::hud::expansion::fixture::spawn().unit;
+    mate.obj_id = 31;
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(3.4, 0.0, 0.0)), mate]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 31,
+            point: 1,
+            reason: 0,
+        },
+    );
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Sent,
+        "a mate seat widens the interaction reach to 3.5 m and has no mounted refusal (S11-C5)"
+    );
+}
+
+#[test]
+fn a_dead_slave_is_refused_for_the_passenger_skill_too() {
+    let mut cart = slave(20, 8, Vec3::new(1.0, 0.0, 0.0));
+    cart.dead = true;
+    let (state, units) = setup(&[cart]);
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Refused(0x144),
+        "FUN_39362f50 refuses a dead target for 13863/19165 with 0x144"
+    );
+    assert!(send(&state, &units).is_empty());
+}
+
+#[test]
+fn switching_from_a_passenger_seat_to_the_driver_seat_needs_a_detach() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+    );
+    // The occupy skill on the slave we already sit on is silent: 1.2 has no seat-change request.
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Silent
+    );
+    assert!(send(&state, &units).is_empty());
+    // Leave, then board the driver's seat with the ordinary bind route.
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+    );
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Bind { tl_id: 8 })]
+    );
 }
 
 #[test]
