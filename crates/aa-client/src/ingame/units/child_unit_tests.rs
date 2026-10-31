@@ -560,3 +560,331 @@ fn a_child_gives_up_when_its_parent_is_known_unbuildable() {
         child.why
     );
 }
+
+#[derive(Component)]
+struct ParentRoot;
+#[derive(Component)]
+struct ChildRoot;
+
+#[derive(Resource, Default)]
+struct PoseOut {
+    accessor: Option<(Vec3, f32)>,
+    global: Option<Vec3>,
+}
+
+#[derive(Resource, Default)]
+struct MoveParent(bool);
+
+fn move_parent(mut moved: ResMut<MoveParent>, mut roots: Query<&mut Transform, With<ParentRoot>>) {
+    if !moved.0 {
+        return;
+    }
+    if let Ok(mut transform) = roots.single_mut() {
+        transform.translation += Vec3::new(10.0, 0.0, 0.0);
+    }
+}
+
+fn read_attached_pose(
+    views: Res<Views>,
+    units: Res<Units>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
+    globals: Query<&GlobalTransform>,
+    children: Query<Entity, With<ChildRoot>>,
+    mut out: ResMut<PoseOut>,
+) {
+    out.accessor = units
+        .get(7)
+        .and_then(|u| unit_world_pose(u, &units, &views, &transforms, &parents));
+    out.global = children
+        .single()
+        .ok()
+        .and_then(|e| globals.get(e).ok())
+        .map(|g| g.translation());
+}
+
+fn pose_app(parent: Transform, local: Transform, parent_id: u32, child_id: u32) -> App {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+        .init_resource::<Views>()
+        .init_resource::<Units>()
+        .init_resource::<PoseOut>()
+        .init_resource::<MoveParent>()
+        .add_systems(Update, (move_parent, read_attached_pose).chain());
+    let parent_entity = app.world_mut().spawn((parent, ParentRoot)).id();
+    let child_entity = app
+        .world_mut()
+        .spawn((local, ChildOf(parent_entity), ChildRoot))
+        .id();
+    let parent_unit = slave(parent_id, Vec3::new(100.0, 200.0, 5.0), 0.0);
+    let child_unit = attached(child_id, parent_id, LOCAL, 3);
+    {
+        let mut views = app.world_mut().resource_mut::<Views>();
+        views.track_unit_entity(parent_id, parent_entity);
+        views.track_unit_entity(child_id, child_entity);
+    }
+    {
+        let mut units = app.world_mut().resource_mut::<Units>();
+        units.by_id.insert(parent_id, parent_unit);
+        units.by_id.insert(child_id, child_unit);
+    }
+    app
+}
+
+#[test]
+fn a_drawn_attached_pose_composes_a_yawed_and_pitched_parent() {
+    let yaw = std::f32::consts::FRAC_PI_2;
+    let pitch = 0.4;
+    let parent_rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch);
+    let parent = Transform::from_translation(cry_to_bevy(SHIP_AT)).with_rotation(parent_rotation);
+    let mut app = pose_app(
+        parent,
+        Transform::from_translation(cry_to_bevy(LOCAL)),
+        60,
+        7,
+    );
+    app.update();
+    let (pos, facing) = app
+        .world()
+        .resource::<PoseOut>()
+        .accessor
+        .expect("the drawn child pose");
+    let expected = bevy_to_cry(parent.transform_point(cry_to_bevy(LOCAL)));
+    assert!(pos.distance(expected) < 1e-3, "{pos:?} != {expected:?}");
+    assert!(
+        (facing - yaw).abs() < 1e-3,
+        "the child's facing {facing} does not include the parent's yaw {yaw}"
+    );
+}
+
+#[test]
+fn an_attached_child_pose_includes_the_parent_and_local_yaw() {
+    let mut units = Units::default();
+    let mut parent = slave(60, SHIP_AT, std::f32::consts::FRAC_PI_2);
+    parent.scale = 1.5;
+    units.by_id.insert(60, parent);
+    let mut child = attached(7, 60, LOCAL, 3);
+    child.rotation = [0.0, 0.0, 0.25];
+    let (pos, facing) = unit_world_pose_in(&child, &units).expect("the parent is announced");
+    let expected = bevy_to_cry(
+        placement(SHIP_AT, std::f32::consts::FRAC_PI_2, 1.5).transform_point(cry_to_bevy(LOCAL)),
+    );
+    assert!(pos.distance(expected) < 1e-3, "{pos:?} != {expected:?}");
+    assert!(
+        (facing - (std::f32::consts::FRAC_PI_2 + 0.25)).abs() < 1e-3,
+        "facing {facing} does not compose the parent's yaw and the child's local yaw"
+    );
+}
+
+#[test]
+fn a_drawn_attached_pose_reads_a_parent_moved_in_the_same_update() {
+    let parent =
+        Transform::from_translation(cry_to_bevy(SHIP_AT)).with_rotation(Quat::from_rotation_y(0.3));
+    let mut app = pose_app(
+        parent,
+        Transform::from_translation(cry_to_bevy(LOCAL)),
+        60,
+        7,
+    );
+    app.update();
+    let before = app
+        .world()
+        .resource::<PoseOut>()
+        .accessor
+        .expect("the first pose");
+    assert!(
+        app.world().resource::<PoseOut>().global.is_some(),
+        "the child has a GlobalTransform"
+    );
+    app.world_mut().resource_mut::<MoveParent>().0 = true;
+    app.update();
+    let out = app.world().resource::<PoseOut>();
+    let (pos, facing) = out.accessor.expect("the new pose");
+    let moved = Transform::from_translation(cry_to_bevy(SHIP_AT) + Vec3::new(10.0, 0.0, 0.0))
+        .with_rotation(Quat::from_rotation_y(0.3));
+    let expected = bevy_to_cry(moved.transform_point(cry_to_bevy(LOCAL)));
+    assert!(
+        pos.distance(expected) < 1e-3,
+        "the accessor lags: {pos:?} != {expected:?}"
+    );
+    assert!((facing - 0.3).abs() < 1e-3);
+    assert!(pos.distance(before.0) > 1.0, "the parent did not move");
+    let global = out.global.expect("the child's global");
+    assert!(
+        global.distance(moved.transform_point(cry_to_bevy(LOCAL))) > 1.0,
+        "GlobalTransform was already propagated inside Update; the staleness check cannot prove the lag"
+    );
+}
+
+#[test]
+fn reparent_clears_a_model_give_up() {
+    let mut app = App::new();
+    let mut views = Views::default();
+    let mut unit = attached(7, 60, LOCAL, 3);
+    views.announce_unit(&mut app.world_mut().commands(), &unit);
+    app.world_mut().flush();
+    {
+        let view = views.units.get_mut(&7).unwrap();
+        view.no_model = true;
+        view.gave_up_on_parent = true;
+        view.why = "parent 60 has no model".into();
+    }
+    {
+        let view = views.units.get_mut(&7).unwrap();
+        view.parent = Some(60);
+        unit.state_attachments = Some(UnitStateAttachments {
+            first_point: 3,
+            first_obj_id: Some(61),
+            bonding_obj_id: None,
+        });
+        view.reparent(&mut app.world_mut().commands(), &unit, Some(61));
+        assert!(!view.no_model, "a reparent keeps the old model give-up");
+        assert!(!view.gave_up_on_parent);
+        assert!(view.why.is_empty());
+    }
+}
+
+#[derive(Resource, Default)]
+struct SeedBuilds(Vec<u32>);
+
+fn seed_builds(mut views: ResMut<Views>, seed: Res<SeedBuilds>) {
+    for id in &seed.0 {
+        let Some(view) = views.units.get_mut(id) else {
+            continue;
+        };
+        if view.entity.is_some() || view.preparing || view.pending.is_none() {
+            continue;
+        }
+        view.preparing = true;
+        let generation = view.source_generation;
+        views
+            .ready
+            .push(Built::Unit(*id, generation, UnitBuild::Effects(Vec::new())));
+    }
+}
+
+fn fixture_app(units: &[Unit], order: &[u32]) -> App {
+    let db = super::super::data::Db::ship_fixture(SHIP_MODEL, "prefab://test/none")
+        .expect("the sqlite fixture database");
+    let mut app = App::new();
+    app.add_plugins(bevy::transform::TransformPlugin)
+        .add_message::<NetEvent>()
+        .insert_resource(Time::<()>::default())
+        .insert_resource(db)
+        .insert_resource(Units::default())
+        .insert_resource(Doodads::default())
+        .insert_resource(Views::default())
+        .insert_resource(SeedBuilds(units.iter().map(|u| u.obj_id).collect()))
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<StandardMaterial>>()
+        .init_resource::<Assets<Image>>()
+        .init_resource::<Assets<SkinnedMeshInverseBindposes>>()
+        .init_resource::<aa_cry::scene::CryCache>()
+        .init_resource::<aa_anim::ClipLibrary>()
+        .insert_resource(aa_world::TerrainQuery::new("__child_unit_fixture_world__"))
+        .add_systems(
+            Update,
+            (receive_moves, seed_builds, sync_views, move_units).chain(),
+        );
+    app.world_mut().spawn((
+        super::super::player::LocalPlayer { obj_id: 1 },
+        super::super::player::Mover {
+            pos: Vec3::new(12001.7, 8991.4, 0.0),
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+        Transform::default(),
+    ));
+    for unit in units {
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(unit.obj_id, unit.clone());
+    }
+    for id in order {
+        let unit = units
+            .iter()
+            .find(|u| u.obj_id == *id)
+            .expect("the announced unit");
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(unit.clone()))));
+    }
+    app
+}
+
+#[test]
+fn the_sync_draws_a_child_under_its_parent_without_the_game_pak() {
+    let ship = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL);
+    let child = {
+        let mut child = attached(7, 60, LOCAL, 3);
+        child.model_id = CANNON_MODEL;
+        child
+    };
+    let mut app = fixture_app(&[ship, child], &[60, 7]);
+    wait_for_units(&mut app, 2);
+    let ship_entity = app
+        .world()
+        .resource::<Views>()
+        .unit_entity(60)
+        .expect("the ship root");
+    let child_entity = app
+        .world()
+        .resource::<Views>()
+        .unit_entity(7)
+        .expect("the child root");
+    assert_eq!(
+        app.world()
+            .get::<ChildOf>(child_entity)
+            .map(ChildOf::parent),
+        Some(ship_entity),
+        "the fixture child is not ChildOf the ship"
+    );
+    let expected = placement(SHIP_AT, 0.0, 1.0).transform_point(cry_to_bevy(LOCAL));
+    let actual = app
+        .world()
+        .get::<GlobalTransform>(child_entity)
+        .unwrap()
+        .translation();
+    assert!(
+        actual.distance(expected) < 1e-3,
+        "child global {actual:?} != {expected:?}"
+    );
+}
+
+#[test]
+fn a_reannounced_parent_clears_the_childs_give_up() {
+    let ship = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL);
+    let child = attached(7, 60, LOCAL, 3);
+    let mut app = fixture_app(&[ship, child], &[60, 7]);
+    wait_for_units(&mut app, 2);
+    {
+        let mut views = app.world_mut().resource_mut::<Views>();
+        let view = views.units.get_mut(&7).unwrap();
+        view.no_model = true;
+        view.gave_up_on_parent = true;
+        view.why = "parent 60 has no model".into();
+    }
+    let mut parent = vehicle_unit(60, SHIP_AT, 0.0, SHIP_MODEL + 1);
+    parent.name = "the re-announced ship".into();
+    app.world_mut()
+        .resource_mut::<Units>()
+        .by_id
+        .insert(60, parent.clone());
+    app.world_mut()
+        .write_message(NetEvent(Event::UnitSpawned(Box::new(parent))));
+    app.update();
+    let views = app.world().resource::<Views>();
+    let view = views.units.get(&7).expect("the child view");
+    assert!(
+        !view.gave_up_on_parent,
+        "the re-announced parent did not clear the give-up"
+    );
+    assert!(
+        !view.no_model,
+        "the child still refuses to build after the parent came back"
+    );
+}

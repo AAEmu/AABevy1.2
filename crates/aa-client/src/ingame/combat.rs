@@ -803,7 +803,8 @@ impl Stage<'_, '_> {
             None => self
                 .net_units
                 .get(obj)
-                .map(|u| cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+                .and_then(|u| super::units::unit_world_pose_in(u, &self.net_units))
+                .map(|(pos, _)| cry_to_bevy(pos))
                 .or_else(|| {
                     self.net_doodads
                         .by_id

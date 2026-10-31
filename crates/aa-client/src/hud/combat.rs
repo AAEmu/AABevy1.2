@@ -79,7 +79,8 @@ fn show_damage(
     bridge: &HudBridge,
     units: &Units,
     views: &crate::ingame::units::Views,
-    globals: &Query<&GlobalTransform>,
+    transforms: &Query<&Transform>,
+    parents: &Query<&ChildOf>,
     player: &Player,
     game: Option<&super::data::GameData>,
 ) {
@@ -131,9 +132,7 @@ fn show_damage(
         let distance = units
             .get(d.target_obj_id)
             .and_then(|u| {
-                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
-                    globals.get(e).ok().map(crate::ingame::units::global_pose)
-                })
+                crate::ingame::units::unit_world_pose(u, &units, &views, transforms, parents)
             })
             .map_or(0.0, |(pos, _)| own_pos.distance(pos) as f64);
         debug!("hud: COMBAT_TEXT {} -> {} {} {skill_type} {hit}", d.caster_obj_id, d.target_obj_id, d.damage);
@@ -153,7 +152,8 @@ pub fn route_combat(
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
     views: Res<crate::ingame::units::Views>,
-    globals: Query<&GlobalTransform>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     player: Res<Player>,
     time: Res<Time>,
     mut over_at: Local<f64>,
@@ -227,7 +227,7 @@ pub fn route_combat(
     }
     // the blows: a number shows when the blow lands, not when the packet came
     for crate::ingame::combat::DamageLanded { damage, received } in landed.read() {
-        show_damage(damage, *received, *over_at, own, own_pos, &rt, &bridge, &units, &views, &globals, &player, game);
+        show_damage(damage, *received, *over_at, own, own_pos, &rt, &bridge, &units, &views, &transforms, &parents, &player, game);
     }
 }
 

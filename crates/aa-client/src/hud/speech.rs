@@ -169,6 +169,8 @@ struct ActorPoints<'w, 's> {
     houses: Option<Res<'w, crate::ingame::housing::render::DrawnHouses>>,
     own: Query<'w, 's, (&'static crate::ingame::player::LocalPlayer, &'static Transform)>,
     roots: Query<'w, 's, &'static GlobalTransform>,
+    transforms: Query<'w, 's, &'static Transform>,
+    parents: Query<'w, 's, &'static ChildOf>,
 }
 
 impl ActorPoints<'_, '_> {
@@ -191,9 +193,13 @@ impl ActorPoints<'_, '_> {
             if let Some(entity) = self.houses.as_ref().and_then(|houses| houses.entity(obj_id)) {
                 return self.roots.get(entity).ok().map(|root| root.translation());
             }
-        } else if let Some((pos, _)) = crate::ingame::units::unit_world_pose(unit, units, views, |e| {
-            self.roots.get(e).ok().map(crate::ingame::units::global_pose)
-        }) {
+        } else if let Some((pos, _)) = crate::ingame::units::unit_world_pose(
+            unit,
+            units,
+            views,
+            &self.transforms,
+            &self.parents,
+        ) {
             return Some(aa_world::cry_to_bevy(pos));
         }
         views.unit_point(unit, units)
@@ -341,6 +347,7 @@ fn project(
     player: Res<Player>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<super::plates::PlateRoot>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform, Without<super::plates::PlateRoot>>,
+    parents: Query<&ChildOf>,
 ) {
     let mut data = state.0.borrow_mut();
     let Some((camera, camera_transform)) = world_camera.iter().find(|(c, _)| c.is_active) else {
@@ -352,14 +359,15 @@ fn project(
     let mut pos = std::mem::take(&mut data.speech.pos);
     pos.clear();
     for (&id, &entity) in &plates.entities {
-        let Ok(root) = transforms.get(entity) else { continue };
+        let Some((world, _)) = crate::ingame::units::current_pose(entity, &transforms, &parents) else { continue };
+        let root = aa_world::cry_to_bevy(world);
         let (scale, character) = if id == own {
             (1.0, true)
         } else {
             units.get(id).map_or((1.0, false), |u| (u.scale, matches!(u.kind, UnitKind::Character { .. })))
         };
         let height = unit_height(plates.heights.get(&id).map(|h| h.0), scale, character);
-        let top = root.translation + Vec3::Y * (height + head_gap(height, super::plates::HEAD_GAP));
+        let top = root + Vec3::Y * (height + head_gap(height, super::plates::HEAD_GAP));
         let Ok(screen) = camera.world_to_viewport(&camera_global, top) else { continue };
         pos.insert(id, [screen.x.round(), screen.y.round() - if character { ABOVE_CHARACTER } else { ABOVE_NPC }]);
     }

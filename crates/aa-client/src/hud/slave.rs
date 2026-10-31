@@ -254,18 +254,16 @@ pub(super) fn track(
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
     views: Option<Res<crate::ingame::units::Views>>,
-    globals: Query<&GlobalTransform>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     rt: Option<NonSend<UiRuntime>>,
 ) {
     let world = |id: u32| {
         let unit = units.get(id)?;
         match views.as_deref() {
-            Some(views) => crate::ingame::units::unit_world_pose(unit, &units, views, |e| {
-                globals
-                    .get(e)
-                    .ok()
-                    .map(crate::ingame::units::global_pose)
-            }),
+            Some(views) => {
+                crate::ingame::units::unit_world_pose(unit, &units, views, &transforms, &parents)
+            }
             None => crate::ingame::units::unit_world_pose_in(unit, &units),
         }
     };

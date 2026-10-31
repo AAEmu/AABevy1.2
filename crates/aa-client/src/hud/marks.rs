@@ -134,25 +134,36 @@ fn options(material: &str, ramp: Option<Handle<Image>>) -> ModelOptions {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct MarkScene<'w, 's> {
+    plates: Res<'w, PlateState>,
+    units: Res<'w, Units>,
+    views: Res<'w, crate::ingame::units::Views>,
+    transforms: Query<'w, 's, &'static Transform, Without<QuestMark>>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_marks(
     mut commands: Commands,
     mut cry: CryAssets,
     mut state: ResMut<MarkState>,
     time: Res<Time>,
-    plates: Res<PlateState>,
     bridge: NonSend<HudBridge>,
-    units: Res<Units>,
-    views: Res<crate::ingame::units::Views>,
     player: Res<Player>,
     quests: Res<Quests>,
     inventory: Res<Inventory>,
     skills: Res<Skills>,
     stats: Res<PlayerStats>,
     buffs: Res<Buffs>,
-    transforms: Query<&GlobalTransform, Without<QuestMark>>,
+    scene: MarkScene,
     mut marks: Query<(&mut Transform, &mut Visibility), With<QuestMark>>,
 ) {
+    let units = &*scene.units;
+    let plates = &*scene.plates;
+    let views = &*scene.views;
+    let transforms = &scene.transforms;
+    let parents = &scene.parents;
     let Some(spawn) = player.spawn.as_ref() else { return };
     let data = bridge.0.borrow();
     let Some(game) = data.game.get() else { return };
@@ -166,10 +177,9 @@ pub fn update_marks(
         let mut wanted: HashMap<u32, Mark> = HashMap::new();
         for u in units.iter() {
             let UnitKind::Npc { template_id, .. } = u.kind else { continue };
-            let distance = crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
-                transforms.get(e).ok().map(crate::ingame::units::global_pose)
-            })
-            .map_or(f32::MAX, |(pos, _)| me.distance(pos));
+            let distance =
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
+                    .map_or(f32::MAX, |(pos, _)| me.distance(pos));
             if distance > RANGE {
                 continue;
             }
@@ -227,9 +237,7 @@ pub fn update_marks(
         let root = units
             .get(*id)
             .and_then(|u| {
-                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
-                    transforms.get(e).ok().map(crate::ingame::units::global_pose)
-                })
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
             })
             .map(|(pos, _)| aa_world::cry_to_bevy(pos));
         let Some(root) = root else { continue };

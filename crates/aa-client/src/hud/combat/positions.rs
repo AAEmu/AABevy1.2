@@ -72,7 +72,8 @@ pub(super) fn update(
     views: Res<crate::ingame::units::Views>,
     plates: Res<PlateState>,
     camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
-    transforms: Query<&GlobalTransform>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let Some(rt) = rt else { return };
@@ -109,14 +110,15 @@ pub(super) fn update(
         };
         let root = if id == own {
             entity
-                .and_then(|e| transforms.get(e).ok())
-                .map(|t| t.translation())
+                .and_then(|e| crate::ingame::units::current_pose(e, &transforms, &parents))
+                .map(|(pos, _)| aa_world::cry_to_bevy(pos))
                 .or_else(|| Some(aa_world::cry_to_bevy(own_pos)))
         } else {
             unit.and_then(|u| {
-                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
-                    transforms.get(e).ok().map(crate::ingame::units::global_pose)
-                })
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
+            })
+            .or_else(|| {
+                entity.and_then(|e| crate::ingame::units::current_pose(e, &transforms, &parents))
             })
             .map(|(pos, _)| aa_world::cry_to_bevy(pos))
         };

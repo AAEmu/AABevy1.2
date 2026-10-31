@@ -391,11 +391,10 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         target_pos = world
             .get_resource::<crate::ingame::units::Views>()
             .and_then(|views| {
-                crate::ingame::units::unit_world_pose(u, units, views, |e| {
-                    world
-                        .get::<GlobalTransform>(e)
-                        .map(crate::ingame::units::global_pose)
-                })
+                let drawn = views
+                    .unit_entity(u.obj_id)
+                    .and_then(|e| crate::ingame::units::current_pose_world(world, e));
+                drawn.or_else(|| crate::ingame::units::unit_world_pose_in(u, units))
             })
             .map(|(pos, _)| pos);
         target_radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));

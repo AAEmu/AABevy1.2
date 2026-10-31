@@ -293,6 +293,9 @@ struct View {
     entity: Option<Entity>,
     /// The model failed to build or the object has none: do not try again.
     no_model: bool,
+    /// The unit stopped waiting because its parent had no model: a later parent root (or a new
+    /// parent state) may give it one, so this give-up is cleared again.
+    gave_up_on_parent: bool,
     /// Why there is no model (for the report).
     why: String,
     /// A worker is preparing it.
@@ -352,6 +355,10 @@ impl View {
             return;
         }
         self.parent = parent;
+        // the packet frame changed: a model we gave up on as a child may be buildable in the new frame
+        self.no_model = false;
+        self.gave_up_on_parent = false;
+        self.why.clear();
         if let Some(entity) = self.entity.take() {
             commands.entity(entity).try_despawn();
         }
@@ -621,23 +628,72 @@ pub(crate) fn unit_world(unit: &Unit, units: &Units) -> Option<Vec3> {
     unit_world_pose_in(unit, units).map(|(pos, _)| pos)
 }
 
-/// A drawn root's world pose (game coordinates) and game yaw (radians, about CryEngine Z).
-pub fn global_pose(global: &GlobalTransform) -> (Vec3, f32) {
-    (bevy_to_cry(global.translation()), global.rotation().to_euler(EulerRot::YXZ).0)
+/// The current-frame world transform of an entity: its local `Transform` composed with the `Transform`
+/// of every `ChildOf` ancestor. Transform propagation writes `GlobalTransform` in `PostUpdate`, so a
+/// reader in `Update` (or in `PostUpdate` before propagation) would see the previous frame's pose and a
+/// freshly spawned root as the identity; composing the locals gives this frame's pose at any point.
+pub fn current_transform<F: bevy::ecs::query::QueryFilter>(
+    entity: Entity,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<Transform> {
+    let mut pose = *transforms.get(entity).ok()?;
+    let mut current = entity;
+    for _ in 0..MAX_PARENT_DEPTH {
+        let Ok(parent) = parents.get(current) else {
+            return Some(pose);
+        };
+        let parent = parent.parent();
+        pose = transforms.get(parent).ok()?.mul_transform(pose);
+        current = parent;
+    }
+    None
 }
 
-/// A unit's world pose: the drawn root's `GlobalTransform` when it has an entity, otherwise the
-/// parent-composed packet pose. `drawn` looks up an entity's [`global_pose`]. The facing includes
-/// the parent's rotation, so a child gun points where the ship points. `None` while an attached
-/// unit's parent is not announced.
-pub fn unit_world_pose(
+/// [`current_transform`] as a game-coordinate position and game yaw (radians about CryEngine Z).
+pub fn current_pose<F: bevy::ecs::query::QueryFilter>(
+    entity: Entity,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<(Vec3, f32)> {
+    let pose = current_transform(entity, transforms, parents)?;
+    Some((
+        bevy_to_cry(pose.translation),
+        pose.rotation.to_euler(EulerRot::YXZ).0,
+    ))
+}
+
+/// [`current_pose`] from a [`World`], for readers that are not ECS systems.
+pub(crate) fn current_pose_world(world: &World, entity: Entity) -> Option<(Vec3, f32)> {
+    let mut pose = *world.get::<Transform>(entity)?;
+    let mut current = entity;
+    for _ in 0..MAX_PARENT_DEPTH {
+        let Some(parent) = world.get::<ChildOf>(current).map(ChildOf::parent) else {
+            return Some((
+                bevy_to_cry(pose.translation),
+                pose.rotation.to_euler(EulerRot::YXZ).0,
+            ));
+        };
+        pose = world.get::<Transform>(parent)?.mul_transform(pose);
+        current = parent;
+    }
+    None
+}
+
+/// A unit's world pose: the drawn root's current `Transform` chain when it has an entity, otherwise
+/// the parent-composed packet pose. Composing the locals, not their `GlobalTransform`, gives this
+/// frame's pose for a parent moved in `Update` and a freshly spawned root before propagation. The
+/// facing includes the parent's rotation, so a child gun points where the ship points. `None` while
+/// an attached unit's parent is not announced.
+pub fn unit_world_pose<F: bevy::ecs::query::QueryFilter>(
     unit: &Unit,
     units: &Units,
     views: &Views,
-    drawn: impl FnOnce(Entity) -> Option<(Vec3, f32)>,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
 ) -> Option<(Vec3, f32)> {
     if let Some(entity) = views.unit_entity(unit.obj_id)
-        && let Some(pose) = drawn(entity)
+        && let Some(pose) = current_pose(entity, transforms, parents)
     {
         return Some(pose);
     }
@@ -854,6 +910,12 @@ pub fn sync_views(
         let view = views.units.get_mut(id).expect("announced unit source");
         // a later state attached or detached it: the packet position is in a different frame now
         view.reparent(&mut commands, unit, parent);
+        // a parent that was unbuildable when the child gave up has been re-announced or drawn: try again
+        if view.gave_up_on_parent && !parent_unbuildable {
+            view.no_model = false;
+            view.gave_up_on_parent = false;
+            view.why.clear();
+        }
         let mut parent_failed = false;
         if view.entity.is_none()
             && !view.no_model
@@ -863,6 +925,7 @@ pub fn sync_views(
         {
             let parent = parent.expect("parent checked");
             view.no_model = true;
+            view.gave_up_on_parent = true;
             view.preparing = false;
             view.why = format!("parent {parent} has no model");
             parent_failed = true;

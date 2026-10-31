@@ -94,7 +94,8 @@ pub fn update_overhead(
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
     views: Res<crate::ingame::units::Views>,
-    globals: Query<&GlobalTransform>,
+    transforms: Query<&Transform, Without<OverheadMark>>,
+    parents: Query<&ChildOf>,
     player: Res<Player>,
     world_camera: Query<(&Camera, &Transform, &Projection), (With<Camera3d>, Without<OverheadMark>, Without<crate::hud::ModelViewCamera>)>,
     texts: Query<(&Transform, &TextFont, &Text2d), Without<OverheadMark>>,
@@ -141,9 +142,7 @@ pub fn update_overhead(
         let distance = units
             .get(obj)
             .and_then(|u| {
-                crate::ingame::units::unit_world_pose(u, &units, &views, |e| {
-                    globals.get(e).ok().map(crate::ingame::units::global_pose)
-                })
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
             })
             .map(|(pos, _)| aa_world::cry_to_bevy(pos))
             .or_else(|| (obj == spawn.obj_id).then(|| aa_world::cry_to_bevy(data.pos)))
