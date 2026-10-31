@@ -44,7 +44,8 @@ mod buffs;
 pub(crate) mod api;
 pub(crate) mod cameras;
 mod cast;
-mod cinema;
+pub(crate) mod cinema;
+mod cinema_flow;
 mod chat;
 mod combat;
 mod cooldown;
@@ -52,8 +53,8 @@ mod crafting;
 mod crime;
 mod data;
 #[allow(unused_imports)] // used by the app's `main` target, not by the standalone examples
-pub(crate) use data::{install_exp_table, item_recharge_catalog, GameData};
-mod dialog;
+pub(crate) use data::{install_exp_table, item_recharge_catalog, GameData, SharedGameData};
+pub(crate) mod dialog;
 mod drag;
 mod duel;
 mod speech;
@@ -261,6 +262,11 @@ pub(crate) fn stablehand_fixture() {
 
 #[allow(dead_code)]
 pub(crate) fn owned_pet_fixture() { pets::active_fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn mount_walk_fixture() -> AppExit {
+    pets::owned::mount_walk_fixture::run()
+}
 
 #[allow(dead_code)]
 pub(crate) fn radar_fixture() { radar::fixture::run(); }
@@ -602,6 +608,7 @@ impl Plugin for HudPlugin {
                 PreUpdate,
                 (input::swallow_keys, input::pointer_over_ui)
                     .chain()
+                    .in_set(cinema::CinemaInputRead)
                     .after(bevy::input::InputSystems)
                     .run_if(in_state(Screen::InGame)),
             )

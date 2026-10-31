@@ -113,6 +113,14 @@ send undecoded are listed in "Small server messages" at the end, with who owns t
 | 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
 | 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
 
+A gliding character sends the same type-1 body: stance 1, actor flags 0 while flying; move flags 2 with delta 0x7f while W
+is held (2026-10-31 recapture rows 5137-5287, 5124), 0 otherwise. At contact the glider sends `CSRemoveBuff` (buff index,
+reason 9) first, then the captured touchdown packet: stance 1, flags 6 (Moving|Stopping), actor flags 0x14
+(Jumping|StandingOnSolid); later grounded packets fall back to flags 4 / actor 0x04. Water sends stance 2 / flags 0 /
+actor 0 before the remove. The wire override keeps the IN_COMBAT bit.
+`model::tests::gliding_type_1_bodies_match_the_server_unit_move_reader` pins the flight and landing bodies against the
+server's `UnitMove.Read` field walk (`aaemu-game/src/models/movement.rs:418-438`).
+
 The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
 `aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
 velocity codec and `FUN_397ae020` the quaternion writer. The goldens under
@@ -128,8 +136,13 @@ bits exact; they do not establish the runtime scales below.
 * `ShipControlRequest` (type 4) writes through the same serializer (`MoveUnit::write_to`), so the
   type-4 layout exists once.
 * Received type 2 is decoded into `model::Movement::vehicle`
-  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`); `vehicle_yaw` keeps
-  its old value from the quaternion. Type 3 still keeps only `vehicle_yaw`.
+  (`VehicleMove { rotation, angular_velocity, steering, wheel_ang_vel }`) and type 3 into
+  `model::Movement::ship` (`ShipMove { rotation, angular_velocity, steering, throttle, zone_id,
+  stuck }`). Both keep the three quaternion shorts; `Movement::rotation_quat()` rebuilds
+  `[x, y, z, w]` as the 1.2 receiver does (`FUN_397c0470` cases 2 and 3) and `vehicle_yaw` keeps
+  the yaw derived from it. The full rotation is what S8 draws (a ship's bank/pitch, a cart's
+  tilt); the unit tests mirror the server's `ShipMove::write` / `VehicleMove::write` bodies byte
+  for byte.
 
 ### Live checks
 
@@ -746,9 +759,10 @@ unit tests here repeat:
 | `SCAiAggro` 0x1c4 | `AiAggro` | `bc npc`, `i32 count`, per hostile unit `bc`, three `i32` (the first is the damage it did) and a flag byte (135) |
 
 `Movement::read_typed(type, r)` reads all movement types: unit (1; `Movement::support` holds the object the unit stands on or
-hangs from, with its world position, when the actor flags say so), vehicle (2) and ship (3) (rotation shorts as a quaternion
-without the scalar -> `vehicle_yaw`, angular velocity, steering ...), ship request (4, no position) and transfer (5). The
-state resource puts a unit that stands on an object at its world position and sets the yaw of vehicles from the rotation.
+hangs from, with its world position, when the actor flags say so), vehicle (2) and ship (3) (the rotation shorts are kept in
+`vehicle` / `ship`; `rotation_quat()` rebuilds the full quaternion and `vehicle_yaw` its yaw), ship request (4, no position)
+and transfer (5). The state resource puts a unit that stands on an object at its world position and sets the yaw of vehicles
+from the rotation; the drawn pose of remote vehicles uses the full rotation (`aa-client` `ingame/vehicle_track.rs`).
 
 NPC movements: the server sends a step every 100 ms with `flags` 0, `actor_flags` 4 (running) or 5 (walking), `delta_movement`
 `[0, 127 | 63, 0]`, the stance and alertness of the NPC (`alertness` 2 = in combat) and a **velocity of a fixed 4000** (3.9 m/s
@@ -7280,6 +7294,8 @@ Source archive `native-buff-tick-index-source-20261018.txt` also captures the ad
 ### Explicit self-buff cancellation (2026-10-18)
 
 `Command::RemoveBuff { character_id, obj_id, buff_index }` submits only explicit self cancellation with native reason0. Session checks InWorld, nonzero captured persistent ID matching selected/header, nonzero current actual self runtime ID and BC24 range. Success/failure is reported by local `BuffRemovalRequested`/`BuffRemovalRequestRejected`; neither is an ACK or removes cached buffs. Session has no duplicate Buffs cache: original ordinal/descriptor admission and delayed exact-buff freshness belong to the app adapter. No automatic frame cancellation or mate/slave cancellation is enabled by this command. Raw `game::ClientMsg::RemoveBuff { obj_id, buff_index, reason }` exposes exact protocol fields.
+
+`Command::RemoveOwnBuff { buff_index, reason }` is the same `CSRemoveBuff` addressed to the current self runtime ID with the caller's reason. The glider end uses `{ buff_index, reason: 9 }` (`FUN_393888b0`, decompile line 735655; capture log rows 168455 and 177786). Session checks only InWorld and a nonzero current self runtime ID, sends the exact `game::ClientMsg::RemoveBuff`, and reports `BuffRemovalRequested` / `BuffRemovalRequestRejected` without fabricating an acknowledgement. The loopback test also pins opcode `0x55`, reason 9, index 18/20/`u32::MAX`, and failure when the connection or self ID is missing.
 
 Original `X2Ability:CancelPlayerBuff(i)` registration3943d316 names399d9818, invokes39438790 through3943bd30: strict successful numeric ScriptAnyValue4 then f32 CVTTSS2SI; wrong types return zero results. It subtracts1 with native integer wrap, resolves listKind1 (Good) via39386d70, refuses negative/out-of-range silently, resolves descriptor by actual buff template, and silently returns if absent. Descriptor byte+1a5 true emits error0xe0; otherwise sends current actor runtimeID and the selected record's instance index with reason0. That byte is `buffs.system`: loader39734dd1 reads column0x96/150 of full SELECT39a07550, parses T/t/1 into temporary[-19b] relative to record[-340]. No online/phase/clock gate is invented inside the native wrapper. Original unitframe/player.lua right-button callback calls this method with captured ONE-based Good icon ordinal, not the per-unit instance index. All native branches return zero Lua results.
 

@@ -9,6 +9,9 @@ pub(super) mod owned;
 mod tests;
 use super::api::{HudBridge, HudData, Shared};
 use super::data::{any_flag, any_int};
+use crate::ingame::DevOptions;
+use crate::ingame::camera::OrbitCamera;
+use crate::ingame::player::{LocalPlayer, Mover};
 use aa_net::mate::MateCommand;
 use aa_net::model::ItemDetail;
 use aa_net::state::{Inventory, Player, Units};
@@ -50,9 +53,16 @@ impl Tables {
     }
 }
 
+/// The keys that end the walk to a mate: `FUN_390aaf30` lines 142504-142508 cancel when any of actions 1..5
+/// (`moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`; table `0x39AC8E68`) is held. Action 0
+/// `moveforward` and action 6 `jump` are not tested there.
+const MOUNT_CANCEL_ACTIONS: [&str; 5] = ["moveback", "moveleft", "moveright", "turnleft", "turnright"];
+
 #[derive(Default)]
 pub(super) struct View {
     owned: owned::View,
+    /// A walk that gave way to the other one still holds the scripted forward key: release it once.
+    release_w: bool,
     owner: u32,
     inventory: Option<Inventory>,
     service: Option<(u32, u32)>,
@@ -63,6 +73,66 @@ pub(super) struct View {
 /// A click or hotkey on pet action slot `slot` (1 based): the 1.2 slot gate and, while riding, the mate-caster cast.
 pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> Result<(), u8> {
     owned::use_skill(data, slot, target_obj_id)
+}
+
+/// One frame of the walk to the own mate before `CSMountMate` (`FUN_3909b070`): it steers the character at the pet
+/// through the normal movement path (the scripted forward key `control_player` reads, like the doodad walk) and lets
+/// [`owned::step_mount_walk`] send the request at the 0.8 m arrival window (`FUN_390aa730`). The target test is the
+/// authoritative `Panels.target` that `sync_hud` refreshes before this system, not the Lua request queue
+/// (capture-pending, A1b). Movement cancels only through `FUN_390aaf30`'s actions 1..5; holding `moveforward`
+/// (action 0) does not.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn walk_to_mount(
+    time: Res<Time>,
+    actions: Res<crate::settings::Actions>,
+    focus: Res<super::HudKeyboardFocus>,
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    mut movers: Query<&mut Mover, With<LocalPlayer>>,
+    mut cameras: Query<&mut OrbitCamera>,
+    mut dev: ResMut<DevOptions>,
+    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
+    mut walking: Local<bool>,
+) {
+    let typing = focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured());
+    let interrupted = !typing && MOUNT_CANCEL_ACTIONS.iter().any(|a| actions.pressed(a, 0));
+    let (step, release, doodad_walking) = {
+        let mut data = bridge.0.borrow_mut();
+        let release = std::mem::take(&mut data.pets.release_w);
+        // read the live jump counter here, not only the copy `sync_hud` made: a teleport may land after that
+        // refresh but before this system, and the walk must still cancel (A1b)
+        if let Some(teleport) = &teleport {
+            data.pets.owned.teleports = teleport.jumps;
+        }
+        let step = owned::step_mount_walk(&mut data, interrupted, time.elapsed_secs());
+        (step, release, data.doodad.walking())
+    };
+    if let owned::MountWalk::Toward(yaw) = step {
+        *walking = true;
+        if let Ok(mut mover) = movers.single_mut() {
+            mover.facing = yaw;
+        }
+        for mut camera in &mut cameras {
+            camera.yaw = yaw;
+        }
+        if !dev.script_keys.contains('W') {
+            dev.script_keys.push('W');
+        }
+    } else {
+        let was_walking = std::mem::take(&mut *walking);
+        // the doodad walk holds the same key: releasing it here would open a one-frame gap before it pushes W
+        if (release || was_walking) && !doodad_walking {
+            dev.script_keys.retain(|c| c != 'W');
+        }
+    }
+}
+
+/// Ends a mount walk when a doodad action or walk takes over; a cancelled walk sends nothing, but the ride cooldown
+/// stamped at its accepted request stays (`FUN_393642f0` line 701802, A4b).
+pub(super) fn cancel_mount_walk(data: &mut HudData) {
+    if owned::cancel_mount_walk(data) {
+        data.pets.release_w = true;
+    }
 }
 
 pub(super) fn refresh(world: &World, data: &mut HudData) {
@@ -277,14 +347,20 @@ pub(super) fn update(
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        update
+        (walk_to_mount, update)
+            .chain()
             .after(super::sync_hud)
+            .after(super::targeting::tab_target)
             .after(super::dialog::drive_npc)
             .before(aa_ui::UiFrame)
             .run_if(super::hud_up),
     )
     .add_systems(
         OnExit(crate::Screen::InGame),
-        |bridge: NonSend<HudBridge>| bridge.0.borrow_mut().pets = default(),
+        |bridge: NonSend<HudBridge>, mut dev: ResMut<DevOptions>| {
+            bridge.0.borrow_mut().pets = default();
+            // a mount walk cut off by leaving the world must not leave its forward key held
+            dev.script_keys.retain(|c| c != 'W');
+        },
     );
 }

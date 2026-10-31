@@ -1384,7 +1384,7 @@ pub fn track_local_mount(
                         let drawn = views
                             .unit_entity(seat.mount)
                             .and_then(|entity| units.get(entity).ok())
-                            .map(|(hull, _)| (hull.pos, hull.facing));
+                            .map(|(hull, _)| (hull.pos, hull.game_rotation()));
                         deck_landing(db, &net, seat.mount, from, mover.facing, drawn)
                     })
                 });
