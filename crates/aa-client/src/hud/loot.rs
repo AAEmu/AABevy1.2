@@ -117,6 +117,9 @@ pub fn sync_loot(
     bridge: NonSend<HudBridge>,
     loot: Res<Loot>,
     units: Res<Units>,
+    views: Res<crate::ingame::units::Views>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     player: Res<Player>,
     mut seen: Local<(u32, u32)>,
 ) {
@@ -138,7 +141,15 @@ pub fn sync_loot(
             .filter_map(|&(kind, id)| {
                 let u = units.get(id)?;
                 let radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
-                let dist = super::api::distance_to(pos, own_radius, Vec3::new(u.pos.x, u.pos.y, u.pos.z), radius);
+                let target = crate::ingame::units::unit_world_pose(
+                    u,
+                    &units,
+                    &views,
+                    &transforms,
+                    &parents,
+                )?
+                .0;
+                let dist = super::api::distance_to(pos, own_radius, target, radius);
                 in_reach(dist).then_some((dist, (kind, id)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))

@@ -339,6 +339,9 @@ struct Roster<'w, 's> {
     locals: Query<'w, 's, (Entity, &'static LocalPlayer, &'static Mover)>,
     remotes: Query<'w, 's, (Entity, &'static RemoteUnit, Has<Dead>)>,
     units: Res<'w, Units>,
+    views: Res<'w, super::units::Views>,
+    transforms: Query<'w, 's, &'static Transform>,
+    parents: Query<'w, 's, &'static ChildOf>,
     buffs: Option<Res<'w, Buffs>>,
 }
 
@@ -351,7 +354,31 @@ impl Roster<'_, '_> {
             return Some(Who { entity, pos: m.pos, yaw: m.facing, local: true, npc: false });
         }
         let (entity, r, dead) = self.remotes.iter().find(|(_, r, _)| r.obj_id == obj)?;
-        (!dead).then(|| Who { entity, pos: r.pos, yaw: r.facing, local: false, npc: !r.is_character() })
+        if dead {
+            return None;
+        }
+        // an attached slave's RemoteUnit.pos is its parent-local packet offset: resolve the drawn pose
+        let (pos, yaw) = self
+            .units
+            .get(obj)
+            .filter(|u| super::units::unit_parent(u).is_some())
+            .and_then(|u| {
+                super::units::unit_world_pose(
+                    u,
+                    &self.units,
+                    &self.views,
+                    &self.transforms,
+                    &self.parents,
+                )
+            })
+            .unwrap_or((r.pos, r.facing));
+        Some(Who {
+            entity,
+            pos,
+            yaw,
+            local: false,
+            npc: !r.is_character(),
+        })
     }
 
     /// A buff of the unit stuns, puts to sleep or roots it.
@@ -361,7 +388,12 @@ impl Roster<'_, '_> {
 
     /// Where a unit is, drawn or not.
     fn point(&self, obj: u32) -> Option<Vec3> {
-        self.who(obj).map(|w| w.pos).or_else(|| self.units.get(obj).map(|u| Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+        self.who(obj).map(|w| w.pos).or_else(|| {
+            self.units
+                .get(obj)
+                .and_then(|u| super::units::unit_world_pose_in(u, &self.units))
+                .map(|(pos, _)| pos)
+        })
     }
 }
 

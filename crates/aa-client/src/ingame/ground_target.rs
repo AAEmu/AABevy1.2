@@ -651,7 +651,13 @@ fn route(
         let again = aiming.0.as_ref().is_some_and(|a| a.press.skill == press.skill && a.press.item == press.item);
         let key = !over_ui.0;
         if key && (again || smart_option(rt.as_deref(), &script)) {
-            let spot = spot_at_cursor().or_else(|| target.obj_id.and_then(|id| units.get(id)).map(|u| Vec3::new(u.pos.x, u.pos.y, u.pos.z)));
+            let spot = spot_at_cursor().or_else(|| {
+                target
+                    .obj_id
+                    .and_then(|id| units.get(id))
+                    .and_then(|u| super::units::unit_world_pose_in(u, &units))
+                    .map(|(pos, _)| pos)
+            });
             if let Some(spot) = spot {
                 if in_range(&skill, mover.pos, spot, SEND_SLACK) {
                     cast_at(press, spot, &mut mover, &mut net, &mut flight);

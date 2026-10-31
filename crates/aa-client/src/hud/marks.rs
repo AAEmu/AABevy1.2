@@ -134,24 +134,36 @@ fn options(material: &str, ramp: Option<Handle<Image>>) -> ModelOptions {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct MarkScene<'w, 's> {
+    plates: Res<'w, PlateState>,
+    units: Res<'w, Units>,
+    views: Res<'w, crate::ingame::units::Views>,
+    transforms: Query<'w, 's, &'static Transform, Without<QuestMark>>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_marks(
     mut commands: Commands,
     mut cry: CryAssets,
     mut state: ResMut<MarkState>,
     time: Res<Time>,
-    plates: Res<PlateState>,
     bridge: NonSend<HudBridge>,
-    units: Res<Units>,
     player: Res<Player>,
     quests: Res<Quests>,
     inventory: Res<Inventory>,
     skills: Res<Skills>,
     stats: Res<PlayerStats>,
     buffs: Res<Buffs>,
-    transforms: Query<&Transform, Without<QuestMark>>,
+    scene: MarkScene,
     mut marks: Query<(&mut Transform, &mut Visibility), With<QuestMark>>,
 ) {
+    let units = &*scene.units;
+    let plates = &*scene.plates;
+    let views = &*scene.views;
+    let transforms = &scene.transforms;
+    let parents = &scene.parents;
     let Some(spawn) = player.spawn.as_ref() else { return };
     let data = bridge.0.borrow();
     let Some(game) = data.game.get() else { return };
@@ -165,7 +177,10 @@ pub fn update_marks(
         let mut wanted: HashMap<u32, Mark> = HashMap::new();
         for u in units.iter() {
             let UnitKind::Npc { template_id, .. } = u.kind else { continue };
-            if me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) > RANGE {
+            let distance =
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
+                    .map_or(f32::MAX, |(pos, _)| me.distance(pos));
+            if distance > RANGE {
                 continue;
             }
             if let Some(mark) = game.quests.mark(template_id, &facts) {
@@ -219,7 +234,12 @@ pub fn update_marks(
     }
     for (id, placed) in &state.placed {
         let Ok((mut transform, mut visibility)) = marks.get_mut(placed.entity) else { continue };
-        let root = plates.entities.get(id).and_then(|e| transforms.get(*e).ok()).map(|t| t.translation).or_else(|| units.get(*id).map(|u| aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z))));
+        let root = units
+            .get(*id)
+            .and_then(|u| {
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
+            })
+            .map(|(pos, _)| aa_world::cry_to_bevy(pos));
         let Some(root) = root else { continue };
         let scale = units.get(*id).map_or(1.0, |u| u.scale);
         let height = super::plates::unit_height(plates.heights.get(id).map(|h| h.0), scale, false);

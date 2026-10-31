@@ -346,6 +346,9 @@ pub(super) struct Measure<'w, 's> {
     skins: Query<'w, 's, &'static SkinnedMesh>,
     globals: Query<'w, 's, &'static GlobalTransform>,
     names: Query<'w, 's, &'static Name>,
+    /// Current local transforms and the hierarchy, for the unit root's this-frame pose.
+    transforms: Query<'w, 's, &'static Transform, Without<PlateRoot>>,
+    parents: Query<'w, 's, &'static ChildOf>,
 }
 
 /// A skeleton's top joint is in the head, the skin reaches a bit further (fraction of the height).
@@ -414,6 +417,22 @@ impl Measure<'_, '_> {
 pub(super) struct PlateData<'w> {
     bridge: NonSend<'w, HudBridge>,
     rt: Option<NonSend<'w, aa_ui::UiRuntime>>,
+    views: Option<Res<'w, crate::ingame::units::Views>>,
+}
+
+/// Where a plate's unit root stands (Bevy coordinates): the drawn entity's current `Transform` chain, else
+/// the packet position. An attached child's root `Transform` is parent-local, so composing the chain puts its
+/// plate on the ship rather than at its local offset.
+pub(super) fn plate_root<F: bevy::ecs::query::QueryFilter>(
+    entity: Option<Entity>,
+    net_pos: Option<Vec3>,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<Vec3> {
+    match entity.and_then(|e| crate::ingame::units::current_pose(e, transforms, parents)) {
+        Some((pos, _)) => Some(aa_world::cry_to_bevy(pos)),
+        None => net_pos.map(aa_world::cry_to_bevy),
+    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -429,7 +448,6 @@ pub fn update_plates(
     target: Res<aa_net::state::Target>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<PlateRoot>, Without<crate::hud::ModelViewCamera>)>,
     named: Query<(Entity, &Name)>,
-    transforms: Query<&Transform, Without<PlateRoot>>,
     measure: Measure,
     mut roots: Query<(&mut Transform, &mut Visibility), With<PlateRoot>>,
     mut texts: Query<(&mut Text2d, &mut TextColor), Without<Sprite>>,
@@ -448,6 +466,10 @@ pub fn update_plates(
         if v.is_finite() && (0.0..=u32::MAX as f64).contains(&v) { v as u32 } else { u32::MAX }
     });
     let data = view.bridge.0.borrow();
+    let world = |u: &aa_net::Unit| match view.views.as_deref() {
+        Some(views) => crate::ingame::units::unit_world_pose(u, &units, views, &measure.transforms, &measure.parents),
+        None => crate::ingame::units::unit_world_pose_in(u, &units),
+    };
     let game = data.game.get();
     let me = data.pos;
     let camera_global = GlobalTransform::from(*camera_transform);
@@ -490,7 +512,7 @@ pub fn update_plates(
         if u.obj_id == own {
             continue;
         }
-        let d = me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        let d = world(u).map_or(f32::MAX, |(pos, _)| me.distance(pos));
         let range = if matches!(u.kind, UnitKind::Character { .. }) { PLAYER_RANGE } else { NPC_RANGE };
         if d <= range {
             wanted.push(Wanted { id: u.obj_id, distance: d, unit: Some(u) });
@@ -532,7 +554,8 @@ pub fn update_plates(
                 entry.0
             };
             let fraction = (u.hp as f32 / max_hp.max(u.hp).max(1) as f32).clamp(0.0, 1.0);
-            (name, fraction, true, relation, u.scale, Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+            let net_pos = world(u).map(|(pos, _)| pos);
+            (name, fraction, true, relation, u.scale, net_pos)
         };
         // the selected target has the big name and the framed bar; a corpse a grey name and an empty bar
         let title_id = if own_plate { appellations.active } else { w.unit.map_or(0, |u| u.appellation) };
@@ -550,12 +573,9 @@ pub fn update_plates(
         let fraction = if dead { 0.0 } else { fraction };
         // where its feet are in the 3D scene
         let entity = state.entities.get(&w.id).copied();
-        let root_pos = match entity.and_then(|e| transforms.get(e).ok()) {
-            Some(t) => t.translation,
-            None => match net_pos {
-                Some(p) => aa_world::cry_to_bevy(p),
-                None => continue,
-            },
+        let Some(root_pos) = plate_root(entity, net_pos, &measure.transforms, &measure.parents)
+        else {
+            continue;
         };
         // how tall it is
         // measured from the meshes' bounds, which arrive part by part while the model loads: keep the
@@ -912,5 +932,83 @@ mod tests {
         assert_eq!(plate_line("", "Bob".into(), &empty_guild), "Bob\n<>");
         assert!(is_plate_line("Bob\n<>", "", "Bob", &empty_guild));
         assert!(!is_plate_line("Bob", "", "Bob", &empty_guild));
+    }
+}
+
+#[cfg(test)]
+mod attached_plate_tests {
+    use super::*;
+
+    #[derive(Component)]
+    struct ShipRoot;
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+    #[derive(Resource, Default)]
+    struct MoveShip(bool);
+
+    fn move_ship(mut moved: ResMut<MoveShip>, mut roots: Query<&mut Transform, With<ShipRoot>>) {
+        if moved.0
+            && let Ok(mut transform) = roots.single_mut()
+        {
+            transform.translation += Vec3::new(10.0, 0.0, 0.0);
+        }
+    }
+
+    fn read_plate(
+        plates: Res<PlateState>,
+        transforms: Query<&Transform>,
+        parents: Query<&ChildOf>,
+        mut seen: ResMut<Seen>,
+    ) {
+        seen.0 = plate_root(
+            plates.entities.get(&7).copied(),
+            None,
+            &transforms,
+            &parents,
+        );
+    }
+
+    #[test]
+    fn an_attached_plate_follows_its_parent_in_the_same_update() {
+        let local = Vec3::new(2.0, 3.0, 1.0);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+            .init_resource::<PlateState>()
+            .init_resource::<Seen>()
+            .init_resource::<MoveShip>()
+            .add_systems(Update, (move_ship, read_plate).chain());
+        let parent =
+            Transform::from_translation(aa_world::cry_to_bevy(Vec3::new(12000.0, 9000.0, 0.0)))
+                .with_rotation(
+                    Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_x(0.3),
+                );
+        let ship = app.world_mut().spawn((parent, ShipRoot)).id();
+        let cannon = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(aa_world::cry_to_bevy(local)),
+                ChildOf(ship),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<PlateState>()
+            .entities
+            .insert(7, cannon);
+        app.update();
+        assert!(app.world().resource::<Seen>().0.is_some());
+        app.world_mut().resource_mut::<MoveShip>().0 = true;
+        app.update();
+        let moved = Transform::from_translation(
+            aa_world::cry_to_bevy(Vec3::new(12000.0, 9000.0, 0.0)) + Vec3::new(10.0, 0.0, 0.0),
+        )
+        .with_rotation(
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_x(0.3),
+        );
+        let expected = moved.transform_point(aa_world::cry_to_bevy(local));
+        let seen = app.world().resource::<Seen>().0.expect("the plate root");
+        assert!(
+            seen.distance(expected) < 1e-3,
+            "the plate lags its parent: {seen:?} != {expected:?}"
+        );
     }
 }

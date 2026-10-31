@@ -69,9 +69,11 @@ pub(super) fn update(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    views: Res<crate::ingame::units::Views>,
     plates: Res<PlateState>,
     camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     windows: Query<&Window, With<PrimaryWindow>>,
 ) {
     let Some(rt) = rt else { return };
@@ -106,16 +108,20 @@ pub(super) fn update(
         } else {
             plates.entities.get(&id).copied()
         };
-        let root = entity
-            .and_then(|e| transforms.get(e).ok())
-            .map(|t| t.translation)
+        let root = if id == own {
+            entity
+                .and_then(|e| crate::ingame::units::current_pose(e, &transforms, &parents))
+                .map(|(pos, _)| aa_world::cry_to_bevy(pos))
+                .or_else(|| Some(aa_world::cry_to_bevy(own_pos)))
+        } else {
+            unit.and_then(|u| {
+                crate::ingame::units::unit_world_pose(u, &units, &views, &transforms, &parents)
+            })
             .or_else(|| {
-                if id == own {
-                    Some(aa_world::cry_to_bevy(own_pos))
-                } else {
-                    unit.map(|u| aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
-                }
-            });
+                entity.and_then(|e| crate::ingame::units::current_pose(e, &transforms, &parents))
+            })
+            .map(|(pos, _)| aa_world::cry_to_bevy(pos))
+        };
         let Some(root) = root else { continue };
         let character =
             id == own || unit.is_some_and(|u| matches!(u.kind, UnitKind::Character { .. }));
