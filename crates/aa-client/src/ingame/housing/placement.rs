@@ -61,14 +61,10 @@ const REACH: f32 = 200.0;
 /// A press and release further apart than this (logical pixels) is a drag, not a click.
 const CLICK_SLOP: f32 = 6.0;
 /// The wheel's turns: `builder_rotate_*_small`, `_normal`, `_large` (radians).
-const TURN: [f32; 3] = [
-    std::f32::consts::PI / 180.0,
-    std::f32::consts::PI / 36.0,
-    std::f32::consts::PI / 4.0,
-];
+const TURN: [f32; 3] = [std::f32::consts::PI / 180.0, std::f32::consts::PI / 36.0, std::f32::consts::PI / 4.0];
 /// `CSCreateHouse` at most this often (`FUN_3932FE60`: `DAT_3a167ea0 + 5000` ms).
 const CREATE_INTERVAL: f32 = 5.0;
-/// `FUN_393a6de0`: the world-load/teleport placement lock (`_DAT_39ac7748` = 30000 ms).
+/// `FUN_393a6de0`: the world-load placement lock (`_DAT_39ac7748` = 30000 ms).
 const PLACEMENT_LOCK: f32 = 30.0;
 /// `materials/special/housing_build_invalid.mtl`: `Diffuse`, glowing.
 const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
@@ -121,14 +117,7 @@ pub struct Build {
 
 impl Build {
     /// A builder already at its confirm step (dev hooks, tests and examples).
-    pub(crate) fn confirmed(
-        design: u32,
-        item_id: u64,
-        item_template: u32,
-        pos: Vec3,
-        yaw: f32,
-        total_tax: i32,
-    ) -> Build {
+    pub(crate) fn confirmed(design: u32, item_id: u64, item_template: u32, pos: Vec3, yaw: f32, total_tax: i32) -> Build {
         Build {
             design,
             item_id,
@@ -154,27 +143,14 @@ enum GhostMaterial {
 }
 
 impl GhostMaterial {
-    fn show(
-        &self,
-        commands: &mut Commands,
-        entity: Entity,
-        refused: Option<&Handle<StandardMaterial>>,
-    ) {
+    fn show(&self, commands: &mut Commands, entity: Entity, refused: Option<&Handle<StandardMaterial>>) {
         let mut entity = commands.entity(entity);
         if let Some(red) = refused {
-            entity
-                .remove::<MeshMaterial3d<IllumMaterial>>()
-                .insert(MeshMaterial3d(red.clone()));
+            entity.remove::<MeshMaterial3d<IllumMaterial>>().insert(MeshMaterial3d(red.clone()));
         } else {
             match self {
-                Self::Standard(material) => {
-                    entity.insert(MeshMaterial3d(material.clone()));
-                }
-                Self::Illum(material) => {
-                    entity
-                        .remove::<MeshMaterial3d<StandardMaterial>>()
-                        .insert(MeshMaterial3d(material.clone()));
-                }
+                Self::Standard(material) => { entity.insert(MeshMaterial3d(material.clone())); }
+                Self::Illum(material) => { entity.remove::<MeshMaterial3d<StandardMaterial>>().insert(MeshMaterial3d(material.clone())); }
             }
         }
     }
@@ -243,28 +219,17 @@ pub struct Builder {
 
 impl Builder {
     /// `X2House:NextStepFromBuildCheck`: build here (`CSCreateHouse`) and end the builder.
-    pub fn commit(
-        &mut self,
-        now: f32,
-        net: &mut MessageWriter<NetCommand>,
-        signals: &mut MessageWriter<BuilderSignal>,
-    ) {
-        let Some(b) = self.build.as_ref().filter(|b| b.stage == Stage::Confirm) else {
-            return;
-        };
+    pub fn commit(&mut self, now: f32, net: &mut MessageWriter<NetCommand>, signals: &mut MessageWriter<BuilderSignal>) {
+        let Some(b) = self.build.as_ref().filter(|b| b.stage == Stage::Confirm) else { return };
         if self.last_create.is_some_and(|t| now - t < CREATE_INTERVAL) {
-            let seconds = self
-                .last_create
-                .map_or(0, |t| (CREATE_INTERVAL - (now - t)).max(0.0) as u32);
+            let seconds = self.last_create.map_or(0, |t| (CREATE_INTERVAL - (now - t)).max(0.0) as u32);
             signals.write(BuilderSignal::Locked(seconds));
             return;
         }
         self.last_create = Some(now);
         let pos = data::get()
             .and_then(|d| d.designs.get(&b.design))
-            .map_or(b.pos.truncate(), |d| {
-                snap_spot(b.pos.truncate(), footprint_half(d.garden_radius))
-            });
+            .map_or(b.pos.truncate(), |d| snap_spot(b.pos.truncate(), footprint_half(d.garden_radius)));
         info!(
             "housing: build design {} at ({:.1}, {:.1}, {:.1}) yaw {:.2} with item {} (tax {})",
             b.design, pos.x, pos.y, b.pos.z, b.yaw, b.item_id, b.total_tax
@@ -285,11 +250,7 @@ impl Builder {
 
     /// `X2House:PrevStepFromBuildCheck`: the build window was cancelled, the ghost follows the cursor again.
     pub fn back_to_position(&mut self, signals: &mut MessageWriter<BuilderSignal>) {
-        if let Some(b) = self
-            .build
-            .as_mut()
-            .filter(|b| matches!(b.stage, Stage::Quote | Stage::Confirm))
-        {
+        if let Some(b) = self.build.as_mut().filter(|b| matches!(b.stage, Stage::Quote | Stage::Confirm)) {
             b.stage = Stage::Position;
             signals.write(BuilderSignal::Step);
         }
@@ -518,12 +479,7 @@ fn terrain_too_steep(site: Site, half: f32, height: impl Fn(f32, f32) -> Option<
 }
 
 /// The terrain under the view ray through `cursor` (game coordinates).
-fn terrain_under(
-    camera: &Camera,
-    transform: &GlobalTransform,
-    cursor: Vec2,
-    terrain: &TerrainQuery,
-) -> Option<Vec3> {
+fn terrain_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, terrain: &TerrainQuery) -> Option<Vec3> {
     let ray = camera.viewport_to_world(transform, cursor).ok()?;
     let origin = bevy_to_cry(ray.origin);
     let dir = bevy_to_cry(*ray.direction);
@@ -531,9 +487,7 @@ fn terrain_under(
     while t < REACH {
         t += 1.0;
         let p = origin + dir * t;
-        let Some(h) = terrain.height_at(p.x, p.y) else {
-            continue;
-        };
+        let Some(h) = terrain.height_at(p.x, p.y) else { continue };
         if p.z <= h {
             let (mut lo, mut hi) = (prev, t);
             for _ in 0..12 {
@@ -546,11 +500,7 @@ fn terrain_under(
                 }
             }
             let q = origin + dir * hi;
-            return Some(Vec3::new(
-                q.x,
-                q.y,
-                terrain.height_at(q.x, q.y).unwrap_or(q.z),
-            ));
+            return Some(Vec3::new(q.x, q.y, terrain.height_at(q.x, q.y).unwrap_or(q.z)));
         }
         prev = t;
     }
@@ -574,13 +524,8 @@ pub fn start(
     bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     for press in pressed.read() {
-        let Some((item_id, template)) = press.item else {
-            continue;
-        };
-        let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied())
-        else {
-            continue;
-        };
+        let Some((item_id, template)) = press.item else { continue };
+        let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied()) else { continue };
         if let Some(seconds) = lock.remaining(time.elapsed_secs()) {
             signals.write(BuilderSignal::Locked(seconds));
             continue;
@@ -593,10 +538,7 @@ pub fn start(
         }
         builder.end(&mut signals);
         rotation_mode(bridge.as_deref(), false);
-        let pos = player
-            .single()
-            .map(|t| bevy_to_cry(t.translation))
-            .unwrap_or_default();
+        let pos = player.single().map(|t| bevy_to_cry(t.translation)).unwrap_or_default();
         info!("housing: builder for design {design} (item {template})");
         builder.build = Some(Build {
             design,
@@ -638,17 +580,13 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
     let mut back = false;
     let stage = builder.build.as_ref().map(|b| b.stage);
     // Escape lets go while the ghost moves (the build window takes its own Escape)
-    if matches!(stage, Some(Stage::Position | Stage::Rotate)) && keys.just_pressed(KeyCode::Escape)
-    {
+    if matches!(stage, Some(Stage::Position | Stage::Rotate)) && keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         builder.end(&mut signals);
         rotation_mode(bridge.as_deref(), false);
         return;
     }
-    for (i, button) in [MouseButton::Left, MouseButton::Right]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, button) in [MouseButton::Left, MouseButton::Right].into_iter().enumerate() {
         if mouse.just_pressed(button) {
             pressed_at[i] = if over_ui.0 { None } else { cursor };
             if !over_ui.0 {
@@ -668,9 +606,7 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
             }
         }
     }
-    let Some(b) = builder.build.as_mut() else {
-        return;
-    };
+    let Some(b) = builder.build.as_mut() else { return };
     if back {
         match b.stage {
             Stage::Rotate => {
@@ -680,7 +616,8 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
             }
             Stage::Position => {
                 builder.end(&mut signals);
-                rotation_mode(bridge.as_deref(), false);
+                rotation_mode(bridge.as_deref(),
+            false);
             }
             Stage::Quote | Stage::Confirm => {}
         }
@@ -701,18 +638,8 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
                 signals.write(BuilderSignal::Refused(error));
                 return;
             }
-            info!(
-                "housing: tax of design {} at ({:.1}, {:.1}, {:.1})",
-                b.design, b.pos.x, b.pos.y, b.pos.z
-            );
-            net.write(NetCommand(Command::House(
-                HouseCommand::ConstructHouseTax {
-                    design_id: b.design,
-                    x: b.pos.x,
-                    y: b.pos.y,
-                    z: b.pos.z,
-                },
-            )));
+            info!("housing: tax of design {} at ({:.1}, {:.1}, {:.1})", b.design, b.pos.x, b.pos.y, b.pos.z);
+            net.write(NetCommand(Command::House(HouseCommand::ConstructHouseTax { design_id: b.design, x: b.pos.x, y: b.pos.y, z: b.pos.z })));
             b.stage = Stage::Quote;
             rotation_mode(bridge.as_deref(), false);
             signals.write(BuilderSignal::Step);
@@ -910,12 +837,7 @@ pub struct GhostJobs {
 impl Default for GhostJobs {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
-        GhostJobs {
-            tx,
-            rx: std::sync::Mutex::new(rx),
-            asked: None,
-            red: None,
-        }
+        GhostJobs { tx, rx: std::sync::Mutex::new(rx), asked: None, red: None }
     }
 }
 
@@ -933,13 +855,7 @@ pub fn ghost(
     mut builder: ResMut<Builder>,
     ghosts: Query<Entity, With<Ghost>>,
     children: Query<&Children>,
-    meshes: Query<
-        (
-            Option<&MeshMaterial3d<StandardMaterial>>,
-            Option<&MeshMaterial3d<IllumMaterial>>,
-        ),
-        With<Mesh3d>,
-    >,
+    meshes: Query<(Option<&MeshMaterial3d<StandardMaterial>>, Option<&MeshMaterial3d<IllumMaterial>>), With<Mesh3d>>,
     mut transforms: Query<&mut Transform, With<Ghost>>,
 ) {
     let Some(b) = builder.build.as_mut() else {
@@ -949,18 +865,13 @@ pub fn ghost(
         jobs.asked = None;
         return;
     };
-    let model = data::get()
-        .and_then(|d| d.designs.get(&b.design))
-        .map(|d| d.main_model);
+    let model = data::get().and_then(|d| d.designs.get(&b.design)).map(|d| d.main_model);
     if b.ghost.is_none() && jobs.asked != model {
         jobs.asked = model;
         if let Some(model) = model {
             let (loader, tx) = (cry.loader(), jobs.tx.clone());
             Workers::global().spawn(0.0, move || {
-                let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    render::prepare(&loader, model, &ModelOptions::default())
-                }))
-                .unwrap_or_default();
+                let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render::prepare(&loader, model, &ModelOptions::default()))).unwrap_or_default();
                 let _ = tx.send((model, parts));
             });
         }
@@ -974,45 +885,24 @@ pub fn ghost(
             continue;
         }
         b.model_box = render::bounds(&parts);
-        let root = commands
-            .spawn((
-                Name::new("house ghost"),
-                Ghost,
-                Transform::default(),
-                Visibility::default(),
-            ))
-            .id();
-        render::spawn_parts(
-            &mut commands,
-            &mut cry,
-            root,
-            parts,
-            &ModelOptions::default(),
-        );
+        let root = commands.spawn((Name::new("house ghost"), Ghost, Transform::default(), Visibility::default())).id();
+        render::spawn_parts(&mut commands, &mut cry, root, parts, &ModelOptions::default());
         b.ghost = Some(root);
         b.meshes.clear();
         b.shown_error = None;
     }
     let Some(root) = b.ghost else { return };
     if let Ok(mut t) = transforms.get_mut(root) {
-        *t = Transform {
-            translation: cry_to_bevy(b.pos),
-            rotation: Quat::from_rotation_y(b.yaw),
-            scale: Vec3::ONE,
-        };
+        *t = Transform { translation: cry_to_bevy(b.pos), rotation: Quat::from_rotation_y(b.yaw), scale: Vec3::ONE };
     }
     // the meshes appear a frame after the spawn commands ran
     if b.meshes.is_empty() {
-        b.meshes = children
-            .iter_descendants(root)
-            .filter_map(|e| {
+        b.meshes = children.iter_descendants(root).filter_map(|e| {
             let (standard, illum) = meshes.get(e).ok()?;
-                let own = illum
-                    .map(|m| GhostMaterial::Illum(m.0.clone()))
+            let own = illum.map(|m| GhostMaterial::Illum(m.0.clone()))
                 .or_else(|| standard.map(|m| GhostMaterial::Standard(m.0.clone())))?;
             Some((e, own))
-            })
-            .collect();
+        }).collect();
         b.shown_error = None;
     }
     if b.shown_error == Some(b.error) || b.meshes.is_empty() {
@@ -1021,14 +911,7 @@ pub fn ghost(
     b.shown_error = Some(b.error);
     let red = jobs
         .red
-        .get_or_insert_with(|| {
-            cry.materials.add(StandardMaterial {
-                base_color: INVALID,
-                emissive: INVALID.to_linear() * 2.0,
-                perceptual_roughness: 0.9,
-                ..default()
-            })
-        })
+        .get_or_insert_with(|| cry.materials.add(StandardMaterial { base_color: INVALID, emissive: INVALID.to_linear() * 2.0, perceptual_roughness: 0.9, ..default() }))
         .clone();
     for (e, own) in &b.meshes {
         own.show(&mut commands, *e, b.error.is_some().then_some(&red));
@@ -1036,9 +919,7 @@ pub fn ghost(
 }
 
 /// Leaving the game ends the builder.
-pub fn clear(
-    mut builder: ResMut<Builder>,
-    mut signals: MessageWriter<BuilderSignal>,
+pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSignal>,
     bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     builder.end(&mut signals);
@@ -1124,66 +1005,20 @@ mod tests {
         own.show(&mut state.get_mut(&mut world).unwrap(), mesh, Some(&red));
         state.apply(&mut world);
         assert!(world.get::<MeshMaterial3d<IllumMaterial>>(mesh).is_none());
-        assert_eq!(
-            world
-                .get::<MeshMaterial3d<StandardMaterial>>(mesh)
-                .unwrap()
-                .0,
-            red
-        );
+        assert_eq!(world.get::<MeshMaterial3d<StandardMaterial>>(mesh).unwrap().0, red);
         own.show(&mut state.get_mut(&mut world).unwrap(), mesh, None);
         state.apply(&mut world);
-        assert!(
-            world
-                .get::<MeshMaterial3d<StandardMaterial>>(mesh)
-                .is_none()
-        );
-        assert_eq!(
-            world.get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0,
-            original
-        );
+        assert!(world.get::<MeshMaterial3d<StandardMaterial>>(mesh).is_none());
+        assert_eq!(world.get::<MeshMaterial3d<IllumMaterial>>(mesh).unwrap().0, original);
     }
 
     fn data() -> HousingData {
         let mut d = HousingData::default();
-        d.designs.insert(
-            171,
-            Design {
-                id: 171,
-                category_id: 18,
-                garden_radius: 11.0,
-                main_model: 1082,
-                steps: vec![],
-            },
-        );
-        d.designs.insert(
-            172,
-            Design {
-                id: 172,
-                category_id: 1,
-                garden_radius: 7.5,
-                main_model: 1116,
-                steps: vec![],
-            },
-        );
-        d.land.push(Land::new(
-            338,
-            vec![
-                Vec2::new(0.0, 0.0),
-                Vec2::new(100.0, 0.0),
-                Vec2::new(100.0, 100.0),
-                Vec2::new(0.0, 100.0),
-            ],
-        ));
+        d.designs.insert(171, Design { id: 171, category_id: 18, garden_radius: 11.0, main_model: 1082, steps: vec![] });
+        d.designs.insert(172, Design { id: 172, category_id: 1, garden_radius: 7.5, main_model: 1116, steps: vec![] });
+        d.land.push(Land::new(338, vec![Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 100.0), Vec2::new(0.0, 100.0)]));
         d.area_group.insert(338, 15);
-        d.groups.insert(
-            15,
-            Group {
-                houseless: false,
-                existing_category_id: 0,
-                categories: vec![18, 10, 17],
-            },
-        );
+        d.groups.insert(15, Group { houseless: false, existing_category_id: 0, categories: vec![18, 10, 17] });
         d
     }
 

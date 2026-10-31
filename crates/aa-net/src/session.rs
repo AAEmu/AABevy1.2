@@ -1001,12 +1001,7 @@ async fn recv_stream(c: &mut Option<StreamConn>) -> net::Result<stream::ServerMs
 /// skill object (`target_obj_id` 0 means the caster).
 pub fn use_skill_message(skill_id: u32, self_obj_id: u32, target_obj_id: u32) -> game::ClientMsg {
     let target_obj_id = if target_obj_id == 0 { self_obj_id } else { target_obj_id };
-    game::ClientMsg::StartSkill {
-        skill_id,
-        self_obj_id,
-        caster: StartCaster::Unit,
-        target: SkillTarget::unit(target_obj_id),
-    }
+    game::ClientMsg::StartSkill { skill_id, self_obj_id, caster: StartCaster::Unit, target: SkillTarget::unit(target_obj_id) }
 }
 
 /// The wire body [`Command::UseSkill`] sends, through the same message the session encodes.

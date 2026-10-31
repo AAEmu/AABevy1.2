@@ -64,9 +64,7 @@ struct Current {
 
 impl Current {
     fn under_construction(&self) -> bool {
-        self.snapshot
-            .as_ref()
-            .is_some_and(|s| s.all_actions > 0 && s.current_actions < s.all_actions)
+        self.snapshot.as_ref().is_some_and(|s| s.all_actions > 0 && s.current_actions < s.all_actions)
     }
 
     /// `X2House:GetHousePermission`'s value: the server's (`0` private, `1` guild, `2` public, `3` family) plus one.
@@ -142,11 +140,7 @@ fn amount(value: &Value) -> i64 {
     match value {
         Value::Integer(n) => i64::from(*n),
         Value::Number(n) => *n as i64,
-        Value::String(s) => s
-            .to_str()
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(0),
+        Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0),
         _ => 0,
     }
 }
@@ -175,10 +169,7 @@ struct BuildAction {
 
 fn held(inventory: &Inventory, item: u32, count: i32) -> (bool, bool) {
     let total = |items: &mut dyn Iterator<Item = &aa_net::model::Item>| -> i64 {
-        items
-            .filter(|i| i.template_id == item)
-            .map(|i| i64::from(i.count))
-            .sum()
+        items.filter(|i| i.template_id == item).map(|i| i64::from(i.count)).sum()
     };
     let bag = total(&mut inventory.bag.iter().flatten()) >= i64::from(count);
     let equipped = total(&mut inventory.equipment.slots.iter().flatten()) >= i64::from(count);
@@ -188,20 +179,13 @@ fn held(inventory: &Inventory, item: u32, count: i32) -> (bool, bool) {
 fn build_action(design: &Design, actions: i32, inventory: &Inventory) -> Option<BuildAction> {
     let step = design.steps.get(design.step_at(actions)?)?;
     if step.item == 0 {
-        return Some(BuildAction {
-            skill: step.skill,
-            material: None,
-        });
+        return Some(BuildAction { skill: step.skill, material: None });
     }
     let count = step.count.max(1);
     let (in_bag, equipped) = held(inventory, step.item, count);
     Some(BuildAction {
         skill: step.skill,
-        material: Some(Material {
-            item: step.item,
-            in_bag,
-            equipped,
-        }),
+        material: Some(Material { item: step.item, in_bag, equipped }),
     })
 }
 
@@ -209,15 +193,11 @@ fn build_action(design: &Design, actions: i32, inventory: &Inventory) -> Option<
 /// `consumeItemStack`), `step` (1 based) and `needActions`; a stage without a material is labor (`isLaborPower`).
 fn steps_table(lua: &Lua, design: u32) -> mlua::Result<Table> {
     let out = lua.create_table()?;
-    let Some(d) = house_data::get().and_then(|h| h.designs.get(&design)) else {
-        return Ok(out);
-    };
+    let Some(d) = house_data::get().and_then(|h| h.designs.get(&design)) else { return Ok(out) };
     let x2item: Table = lua.globals().get("X2Item")?;
     for (i, step) in d.steps.iter().enumerate() {
         let entry = if step.item != 0 {
-            x2item
-                .call_method::<Option<Table>>("GetItemInfoByType", step.item)?
-                .unwrap_or(lua.create_table()?)
+            x2item.call_method::<Option<Table>>("GetItemInfoByType", step.item)?.unwrap_or(lua.create_table()?)
         } else {
             lua.create_table()?
         };
@@ -234,24 +214,9 @@ fn steps_table(lua: &Lua, design: u32) -> mlua::Result<Table> {
 fn date(lua: &Lua, unix: i64) -> mlua::Result<Table> {
     let out = lua.create_table()?;
     let os: Table = lua.globals().get("os")?;
-    let t = os
-        .call_function::<Option<Table>>("date", ("*t", unix.max(0)))
-        .ok()
-        .flatten();
-    for (key, source) in [
-        ("year", "year"),
-        ("month", "month"),
-        ("day", "day"),
-        ("hour", "hour"),
-        ("minute", "min"),
-        ("second", "sec"),
-    ] {
-        out.set(
-            key,
-            t.as_ref()
-                .and_then(|t| t.get::<i64>(source).ok())
-                .unwrap_or(0),
-        )?;
+    let t = os.call_function::<Option<Table>>("date", ("*t", unix.max(0))).ok().flatten();
+    for (key, source) in [("year", "year"), ("month", "month"), ("day", "day"), ("hour", "hour"), ("minute", "min"), ("second", "sec")] {
+        out.set(key, t.as_ref().and_then(|t| t.get::<i64>(source).ok()).unwrap_or(0))?;
     }
     Ok(out)
 }
@@ -282,47 +247,20 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
     macro_rules! getter {
         ($name:literal, |$v:ident| $body:expr) => {{
             let s = state.clone();
-            h.set(
-                $name,
-                lua.create_function(move |_, _: Value| {
+            h.set($name, lua.create_function(move |_, _: Value| {
                 let $v = s.0.borrow();
                 Ok($body)
-                })?,
-            )?;
+            })?)?;
         }};
     }
     getter!("IsMyHouse", |v| v.current.as_ref().is_some_and(|c| c.mine));
-    getter!("IsHouseUnderConstruction", |v| v
-        .current
-        .as_ref()
-        .is_some_and(Current::under_construction));
-    getter!("GetHouseOwnerName", |v| v
-        .current
-        .as_ref()
-        .and_then(|c| c.snapshot.as_ref())
-        .map(|s| s.owner_name.clone())
-        .unwrap_or_default());
-    getter!("GetHouseName", |v| v
-        .current
-        .as_ref()
-        .map(|c| c.name.clone())
-        .unwrap_or_default());
+    getter!("IsHouseUnderConstruction", |v| v.current.as_ref().is_some_and(Current::under_construction));
+    getter!("GetHouseOwnerName", |v| v.current.as_ref().and_then(|c| c.snapshot.as_ref()).map(|s| s.owner_name.clone()).unwrap_or_default());
+    getter!("GetHouseName", |v| v.current.as_ref().map(|c| c.name.clone()).unwrap_or_default());
     getter!("GetHouseZoneName", |v| v.zone.clone());
-    getter!("GetHouseAllowRecover", |v| v
-        .current
-        .as_ref()
-        .and_then(|c| c.snapshot.as_ref())
-        .is_some_and(|s| s.allow_recover));
-    getter!("GetHouseBaseProgress", |v| v
-        .current
-        .as_ref()
-        .and_then(|c| c.snapshot.as_ref())
-        .map_or(0, |s| s.all_actions));
-    getter!("GetHouseRemainProgress", |v| v
-        .current
-        .as_ref()
-        .and_then(|c| c.snapshot.as_ref())
-        .map_or(0, |s| (s.all_actions - s.current_actions).max(0)));
+    getter!("GetHouseAllowRecover", |v| v.current.as_ref().and_then(|c| c.snapshot.as_ref()).is_some_and(|s| s.allow_recover));
+    getter!("GetHouseBaseProgress", |v| v.current.as_ref().and_then(|c| c.snapshot.as_ref()).map_or(0, |s| s.all_actions));
+    getter!("GetHouseRemainProgress", |v| v.current.as_ref().and_then(|c| c.snapshot.as_ref()).map_or(0, |s| (s.all_actions - s.current_actions).max(0)));
     // no castles, no sieges in 1.2's housing land
     getter!("IsCastle", |_v| false);
     getter!("IsSiegePeriod", |_v| false);
@@ -336,10 +274,7 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         "GetHousePermission",
         lua.create_function(move |_, _: Value| {
             let v = s.0.borrow();
-            let always_public = v
-                .current
-                .as_ref()
-                .is_some_and(|c| template(&b, c.design, |t| t.always_public));
+            let always_public = v.current.as_ref().is_some_and(|c| template(&b, c.design, |t| t.always_public));
             Ok((v.current.as_ref().map(Current::permission), always_public))
         })?,
     )?;
@@ -349,8 +284,7 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         lua.create_function(move |_, (_, name): (Value, String)| {
             let mut v = s.0.borrow_mut();
             if let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) {
-                v.commands
-                    .push(Command::House(HouseCommand::ChangeName { tl, name }));
+                v.commands.push(Command::House(HouseCommand::ChangeName { tl, name }));
             }
             Ok(())
         })?,
@@ -360,16 +294,10 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         "SetHousePermission",
         lua.create_function(move |_, (_, permission): (Value, i64)| {
             let mut v = s.0.borrow_mut();
-            let Some(c) = v.current.as_ref().filter(|c| c.mine) else {
-                return Ok(());
-            };
+            let Some(c) = v.current.as_ref().filter(|c| c.mine) else { return Ok(()) };
             if permission != c.permission() && (1..=4).contains(&permission) {
                 let tl = c.tl_id;
-                v.commands
-                    .push(Command::House(HouseCommand::ChangePermission {
-                        tl,
-                        permission: (permission - 1) as u8,
-                    }));
+                v.commands.push(Command::House(HouseCommand::ChangePermission { tl, permission: (permission - 1) as u8 }));
             }
             Ok(())
         })?,
@@ -379,17 +307,11 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         "SetHouseAllowRecover",
         lua.create_function(move |_, (_, allow): (Value, bool)| {
             let mut v = s.0.borrow_mut();
-            let Some(c) = v.current.as_ref().filter(|c| c.mine) else {
-                return Ok(());
-            };
+            let Some(c) = v.current.as_ref().filter(|c| c.mine) else { return Ok(()) };
             // the packet toggles
-            if c.snapshot
-                .as_ref()
-                .is_some_and(|s| s.allow_recover != allow)
-            {
+            if c.snapshot.as_ref().is_some_and(|s| s.allow_recover != allow) {
                 let tl = c.tl_id;
-                v.commands
-                    .push(Command::House(HouseCommand::AllowRecover { tl }));
+                v.commands.push(Command::House(HouseCommand::AllowRecover { tl }));
             }
             Ok(())
         })?,
@@ -400,10 +322,7 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         lua.create_function(move |_, _: Value| {
             let mut v = s.0.borrow_mut();
             if let Some(obj_id) = v.current.as_ref().filter(|c| c.mine).map(|c| c.obj_id) {
-                v.commands.push(Command::UseSkill {
-                    skill_id: DEMOLISH_SKILL,
-                    target_obj_id: obj_id,
-                });
+                v.commands.push(Command::UseSkill { skill_id: DEMOLISH_SKILL, target_obj_id: obj_id });
             }
             Ok(())
         })?,
@@ -414,21 +333,12 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         "GetHouseDecoCount",
         lua.create_function(move |_, _: Value| {
             let v = s.0.borrow();
-            let limit = v
-                .current
-                .as_ref()
-                .map_or(0, |c| template(&b, c.design, |t| t.deco_limit));
+            let limit = v.current.as_ref().map_or(0, |c| template(&b, c.design, |t| t.deco_limit));
             Ok((v.current.as_ref().map_or(0, |c| c.decorations), limit))
         })?,
     )?;
-    h.set(
-        "GetActabilityDecoCount",
-        lua.create_function(|_, _: Value| Ok(0))?,
-    )?;
-    h.set(
-        "GetDecoActabilityLimitGroup",
-        lua.create_function(|lua, _: Value| lua.create_table())?,
-    )?;
+    h.set("GetActabilityDecoCount", lua.create_function(|_, _: Value| Ok(0))?)?;
+    h.set("GetDecoActabilityLimitGroup", lua.create_function(|lua, _: Value| lua.create_table())?)?;
     h.set(
         "GetDecoActabilityPoint",
         lua.create_function(|lua, _: Value| {
@@ -452,33 +362,15 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
 }
 
 /// What the HUD's static housing tables (localized names, taxes, limits) say of `design`, once loaded.
-fn template<R: Default>(
-    bridge: &Shared,
-    design: u32,
-    f: impl FnOnce(&super::data::housing::HousingTemplate) -> R,
-) -> R {
-    bridge
-        .borrow()
-        .game
-        .get()
-        .and_then(|g| g.housing.housings.get(&design))
-        .map(f)
-        .unwrap_or_default()
+fn template<R: Default>(bridge: &Shared, design: u32, f: impl FnOnce(&super::data::housing::HousingTemplate) -> R) -> R {
+    bridge.borrow().game.get().and_then(|g| g.housing.housings.get(&design)).map(f).unwrap_or_default()
 }
 
 /// The build window and the construction window: the stages, the builder's steps.
 fn install_construction(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::Result<()> {
     let b = bridge.clone();
-    h.set(
-        "GetHousingModelName",
-        lua.create_function(move |_, (_, design): (Value, u32)| {
-            Ok(template(&b, design, |t| t.name.clone()))
-        })?,
-    )?;
-    h.set(
-        "GetHousingModelConstructionInfo",
-        lua.create_function(|lua, (_, design): (Value, u32)| steps_table(lua, design))?,
-    )?;
+    h.set("GetHousingModelName", lua.create_function(move |_, (_, design): (Value, u32)| Ok(template(&b, design, |t| t.name.clone())))?)?;
+    h.set("GetHousingModelConstructionInfo", lua.create_function(|lua, (_, design): (Value, u32)| steps_table(lua, design))?)?;
     let s = state.clone();
     h.set(
         "GetHouseConstructionStepInfo",
@@ -488,38 +380,20 @@ fn install_construction(lua: &Lua, h: &Table, bridge: &Shared, state: &State) ->
         })?,
     )?;
     let s = state.clone();
-    h.set(
-        "NextStepFromBuildCheck",
-        lua.create_function(move |_, _: Value| {
+    h.set("NextStepFromBuildCheck", lua.create_function(move |_, _: Value| {
         s.0.borrow_mut().builder_next = true;
         Ok(())
-        })?,
-    )?;
+    })?)?;
     let s = state.clone();
-    h.set(
-        "PrevStepFromBuildCheck",
-        lua.create_function(move |_, _: Value| {
+    h.set("PrevStepFromBuildCheck", lua.create_function(move |_, _: Value| {
         s.0.borrow_mut().builder_prev = true;
         Ok(())
-        })?,
-    )?;
+    })?)?;
     // the build pay of the old interface: nothing to pay besides the tax
-    h.set(
-        "GetHouseBuildPay",
-        lua.create_function(|_, _: Value| Ok(0))?,
-    )?;
-    h.set(
-        "GetHouseBuildPayStr",
-        lua.create_function(|_, _: Value| Ok("0"))?,
-    )?;
-    h.set(
-        "SetHouseBuildPay",
-        lua.create_function(|_, _: Value| Ok(()))?,
-    )?;
-    h.set(
-        "CalcHouseBuildTotalPayStr",
-        lua.create_function(|_, (_, money): (Value, Value)| Ok(amount(&money).to_string()))?,
-    )?;
+    h.set("GetHouseBuildPay", lua.create_function(|_, _: Value| Ok(0))?)?;
+    h.set("GetHouseBuildPayStr", lua.create_function(|_, _: Value| Ok("0"))?)?;
+    h.set("SetHouseBuildPay", lua.create_function(|_, _: Value| Ok(()))?)?;
+    h.set("CalcHouseBuildTotalPayStr", lua.create_function(|_, (_, money): (Value, Value)| Ok(amount(&money).to_string()))?)?;
     Ok(())
 }
 
@@ -528,23 +402,14 @@ fn install_tax(lua: &Lua, h: &Table, state: &State) -> mlua::Result<()> {
     for name in ["GetCurrencyForTax", "GetCurrencyForHouseSale"] {
         h.set(name, lua.create_function(|_, _: Value| Ok(CURRENCY_GOLD))?)?;
     }
-    h.set(
-        "CountTaxItemForTax",
-        lua.create_function(|_, (_, tax): (Value, Value)| Ok(certificates_for(amount(&tax))))?,
-    )?;
+    h.set("CountTaxItemForTax", lua.create_function(|_, (_, tax): (Value, Value)| Ok(certificates_for(amount(&tax))))?)?;
     let s = state.clone();
-    h.set(
-        "CountTaxItemInBag",
-        lua.create_function(move |_, _: Value| Ok(s.0.borrow().tax_certificates))?,
-    )?;
+    h.set("CountTaxItemInBag", lua.create_function(move |_, _: Value| Ok(s.0.borrow().tax_certificates))?)?;
     h.set(
         "GetTaxItem",
         lua.create_function(|lua, _: Value| {
             let x2item: Table = lua.globals().get("X2Item")?;
-            let name = x2item
-                .call_method::<Option<Table>>("GetItemInfoByType", TAX_CERTIFICATE)?
-                .and_then(|t| t.get::<String>("name").ok())
-                .unwrap_or_default();
+            let name = x2item.call_method::<Option<Table>>("GetItemInfoByType", TAX_CERTIFICATE)?.and_then(|t| t.get::<String>("name").ok()).unwrap_or_default();
             let t = lua.create_table()?;
             t.set("name", name)?;
             t.set("itemType", TAX_CERTIFICATE)?;
@@ -562,17 +427,8 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
         lua.create_function(move |lua, _: Value| {
             let v = s.0.borrow();
             let t = lua.create_table()?;
-            let Some(c) = v.current.as_ref() else {
-                return Ok(t);
-            };
-            let (price, target, target_id) =
-                c.snapshot.as_ref().map_or((0, String::new(), 0), |s| {
-                    (
-                        i64::from(s.sell_price.max(0)),
-                        s.sell_to_name.clone(),
-                        s.sell_to_player_id,
-                    )
-                });
+            let Some(c) = v.current.as_ref() else { return Ok(t) };
+            let (price, target, target_id) = c.snapshot.as_ref().map_or((0, String::new(), 0), |s| (i64::from(s.sell_price.max(0)), s.sell_to_name.clone(), s.sell_to_player_id));
             let on_sale = price > 0;
             let sellable = template(&b, c.design, |t| t.is_sellable);
             t.set("onSale", on_sale)?;
@@ -582,10 +438,7 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
             t.set("copper", price % 100)?;
             t.set("targetName", target)?;
             t.set("canSell", c.mine && sellable && !c.under_construction())?;
-            t.set(
-                "canBuy",
-                on_sale && !c.mine && (target_id == 0 || target_id == v.me),
-            )?;
+            t.set("canBuy", on_sale && !c.mine && (target_id == 0 || target_id == v.me))?;
             Ok(t)
         })?,
     )?;
@@ -604,28 +457,17 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
     let s = state.clone();
     h.set(
         "SetHouseForSale",
-        lua.create_function(
-            move |_, (_, g, sv, c, name): (Value, Value, Value, Value, Option<String>)| {
+        lua.create_function(move |_, (_, g, sv, c, name): (Value, Value, Value, Value, Option<String>)| {
             let mut v = s.0.borrow_mut();
             let price = copper(&g, &sv, &c);
-                let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) else {
-                    return Ok(());
-                };
+            let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) else { return Ok(()) };
             if !(1..=i64::from(i32::MAX)).contains(&price) {
-                    v.notices.push(Notice {
-                        name: "HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE",
-                        arg: None,
-                    });
+                v.notices.push(Notice { name: "HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE", arg: None });
                 return Ok(());
             }
-                v.commands.push(Command::House(HouseCommand::Sell {
-                    tl,
-                    money_amount: price as u32,
-                    sell_to: name.unwrap_or_default(),
-                }));
+            v.commands.push(Command::House(HouseCommand::Sell { tl, money_amount: price as u32, sell_to: name.unwrap_or_default() }));
             Ok(())
-            },
-        )?,
+        })?,
     )?;
     let s = state.clone();
     h.set(
@@ -633,8 +475,7 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
         lua.create_function(move |_, _: Value| {
             let mut v = s.0.borrow_mut();
             if let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) {
-                v.commands
-                    .push(Command::House(HouseCommand::CancelSell { tl }));
+                v.commands.push(Command::House(HouseCommand::CancelSell { tl }));
             }
             Ok(())
         })?,
@@ -644,28 +485,13 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
         "BuyHouse",
         lua.create_function(move |_, _: Value| {
             let mut v = s.0.borrow_mut();
-            let Some((tl, price)) = v.current.as_ref().and_then(|c| {
-                c.snapshot
-                    .as_ref()
-                    .map(|s| (c.tl_id, s.sell_price.max(0) as u32))
-            }) else {
-                return Ok(());
-            };
+            let Some((tl, price)) = v.current.as_ref().and_then(|c| c.snapshot.as_ref().map(|s| (c.tl_id, s.sell_price.max(0) as u32))) else { return Ok(()) };
             if price == 0 {
-                v.notices.push(Notice {
-                    name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE",
-                    arg: None,
-                });
+                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE", arg: None });
             } else if i64::from(price) > v.money {
-                v.notices.push(Notice {
-                    name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY",
-                    arg: None,
-                });
+                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY", arg: None });
             } else {
-                v.commands.push(Command::House(HouseCommand::Buy {
-                    tl,
-                    money_amount: price,
-                }));
+                v.commands.push(Command::House(HouseCommand::Buy { tl, money_amount: price }));
             }
             Ok(())
         })?,
@@ -679,36 +505,26 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
 fn install_dev(lua: &Lua, state: &State) -> mlua::Result<()> {
     let hud: Table = lua.globals().get("HUD")?;
     let s = state.clone();
-    hud.raw_set(
-        "house_interact",
-        lua.create_function(move |_, obj_id: u32| {
+    hud.raw_set("house_interact", lua.create_function(move |_, obj_id: u32| {
         s.0.borrow_mut().interact = Some(obj_id);
         Ok(())
-        })?,
-    )?;
+    })?)?;
     let s = state.clone();
-    hud.raw_set(
-        "house_builder",
-        lua.create_function(move |_, (x, y, yaw): (f32, f32, f32)| {
+    hud.raw_set("house_builder", lua.create_function(move |_, (x, y, yaw): (f32, f32, f32)| {
         s.0.borrow_mut().pin = Some((x, y, yaw));
         Ok(())
-        })?,
-    )?;
+    })?)?;
     let s = state.clone();
-    hud.raw_set(
-        "house_builder_click",
-        lua.create_function(move |_, ()| {
+    hud.raw_set("house_builder_click", lua.create_function(move |_, ()| {
         s.0.borrow_mut().clicks += 1;
         Ok(())
-        })?,
-    )?;
+    })?)?;
     Ok(())
 }
 
 fn notice(rt: &UiRuntime, notice: &Notice) {
     let args: Vec<String> = notice.arg.iter().cloned().collect();
-    let text = super::alerts::localized_args(rt, "ERROR_MSG", notice.name, &args)
-        .unwrap_or_else(|| notice.name.to_owned());
+    let text = super::alerts::localized_args(rt, "ERROR_MSG", notice.name, &args).unwrap_or_else(|| notice.name.to_owned());
     rt.fire_event("SYSMSG", text);
 }
 
@@ -718,12 +534,7 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
         Signal::Start => rt.fire_event("HOUSE_INTERACTION_START", ("housing", "housing")),
         Signal::End => rt.fire_event("HOUSE_INTERACTION_END", ()),
         Signal::Tax => {
-            let tax = state
-                .0
-                .borrow()
-                .current
-                .as_ref()
-                .and_then(|c| c.tax.clone());
+            let tax = state.0.borrow().current.as_ref().and_then(|c| c.tax.clone());
             let Some(tax) = tax else { return };
             let Ok(due) = date(lua, tax.due) else { return };
             let item = tax_item(lua).then_some(TAX_CERTIFICATE);
@@ -777,14 +588,8 @@ fn pick(ray: Ray3d, units: &Units) -> Option<u32> {
     let data = house_data::get()?;
     let mut best: Option<(f32, u32)> = None;
     for u in units.iter() {
-        let UnitKind::Housing { template_id, .. } = u.kind else {
-            continue;
-        };
-        let radius = data
-            .designs
-            .get(&template_id)
-            .map_or(5.0, |d| d.garden_radius.max(3.0))
-            * PICK_SHARE;
+        let UnitKind::Housing { template_id, .. } = u.kind else { continue };
+        let radius = data.designs.get(&template_id).map_or(5.0, |d| d.garden_radius.max(3.0)) * PICK_SHARE;
         // the house's middle: a few metres over its floor
         let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
         let along = (centre - ray.origin).dot(*ray.direction);
@@ -800,59 +605,19 @@ fn pick(ray: Ray3d, units: &Units) -> Option<u32> {
 }
 
 fn garden(template_id: u32) -> f32 {
-    house_data::get()
-        .and_then(|d| d.designs.get(&template_id))
-        .map_or(5.0, |d| d.garden_radius)
+    house_data::get().and_then(|d| d.designs.get(&template_id)).map_or(5.0, |d| d.garden_radius)
 }
 
 /// The facts of house unit `obj_id` the window reads.
-fn current_of(
-    obj_id: u32,
-    units: &Units,
-    houses: &Houses,
-    doodads: &Doodads,
-    me: u32,
-    tax: Option<HouseTaxInfo>,
-) -> Option<Current> {
+fn current_of(obj_id: u32, units: &Units, houses: &Houses, doodads: &Doodads, me: u32, tax: Option<HouseTaxInfo>) -> Option<Current> {
     let unit = units.get(obj_id)?;
-    let UnitKind::Housing {
-        tl_id, template_id, ..
-    } = unit.kind
-    else {
-        return None;
-    };
-    let snapshot = houses
-        .by_tl_id
-        .get(&tl_id)
-        .filter(|h| !h.demolished)
-        .map(|h| h.snapshot.clone());
-    let name = if unit.name.is_empty() {
-        snapshot
-            .as_ref()
-            .map(|s| s.name.clone())
-            .unwrap_or_default()
-    } else {
-        unit.name.clone()
-    };
-    let mine = snapshot
-        .as_ref()
-        .is_some_and(|s| s.owner_id == me && me != 0);
-    let decorations = aa_net::housing_attachments(doodads, units)
-        .filter(|a| a.house_obj_id == obj_id)
-        .count() as u32;
-    let tax = tax
-        .filter(|t| t.tl_id == tl_id)
-        .or_else(|| houses.by_tl_id.get(&tl_id).and_then(|h| h.tax.clone()));
-    Some(Current {
-        obj_id,
-        tl_id,
-        design: template_id,
-        snapshot,
-        name,
-        mine,
-        tax,
-        decorations,
-    })
+    let UnitKind::Housing { tl_id, template_id, .. } = unit.kind else { return None };
+    let snapshot = houses.by_tl_id.get(&tl_id).filter(|h| !h.demolished).map(|h| h.snapshot.clone());
+    let name = if unit.name.is_empty() { snapshot.as_ref().map(|s| s.name.clone()).unwrap_or_default() } else { unit.name.clone() };
+    let mine = snapshot.as_ref().is_some_and(|s| s.owner_id == me && me != 0);
+    let decorations = aa_net::housing_attachments(doodads, units).filter(|a| a.house_obj_id == obj_id).count() as u32;
+    let tax = tax.filter(|t| t.tl_id == tl_id).or_else(|| houses.by_tl_id.get(&tl_id).and_then(|h| h.tax.clone()));
+    Some(Current { obj_id, tl_id, design: template_id, snapshot, name, mine, tax, decorations })
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -860,21 +625,13 @@ pub(crate) struct Pointer<'w, 's> {
     mouse: Res<'w, ButtonInput<MouseButton>>,
     over_ui: Res<'w, HudPointerOverUi>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
-    cameras: Query<
-        'w,
-        's,
-        (&'static Camera, &'static GlobalTransform),
-        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
-    >,
+    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 }
 
 impl Pointer<'_, '_> {
     /// The view ray of a right click released over the 3D view.
     fn right_click(&self, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<Ray3d> {
-        if blocked {
-            *pressed_at = None;
-            return None;
-        }
+        if blocked { *pressed_at = None; return None; }
         let cursor = self.windows.single().ok()?.cursor_position();
         if self.mouse.just_pressed(MouseButton::Right) {
             *pressed_at = if self.over_ui.0 { None } else { cursor };
@@ -902,10 +659,7 @@ pub(crate) fn sync(
     inventory: Res<Inventory>,
     pointer: Pointer,
     // the builder's signals are read and written here: a reader and a writer of one message conflict
-    (mut builder, mut builder_signals): (
-        ResMut<Builder>,
-        ParamSet<(MessageWriter<BuilderSignal>, MessageReader<BuilderSignal>)>,
-    ),
+    (mut builder, mut builder_signals): (ResMut<Builder>, ParamSet<(MessageWriter<BuilderSignal>, MessageReader<BuilderSignal>)>),
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
@@ -922,32 +676,17 @@ pub(crate) fn sync(
     };
     let (me, pos, money, zone) = {
         let d = bridge.0.borrow();
-        (
-            d.character_id,
-            d.pos,
-            d.snapshot.money,
-            d.snapshot.zone.clone(),
-        )
+        (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = pointer
-        .right_click(&mut pressed_at, blocked)
-        .and_then(|ray| pick(ray, &units));
+    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units));
     let mut v = state.0.borrow_mut();
     let mut last_tax = v.last_tax.take();
     v.pointer_picked = picked;
     v.me = me;
     v.money = money;
     v.zone = zone;
-    let count = |t: u32| {
-        inventory
-            .bag
-            .iter()
-            .flatten()
-            .filter(|i| i.template_id == t)
-            .map(|i| i64::from(i.count))
-            .sum::<i64>()
-    };
+    let count = |t: u32| inventory.bag.iter().flatten().filter(|i| i.template_id == t).map(|i| i64::from(i.count)).sum::<i64>();
     v.tax_certificates = count(TAX_CERTIFICATE) + count(BOUND_TAX_CERTIFICATE);
     v.appraisals = count(APPRAISAL_CERTIFICATE);
 
@@ -957,10 +696,7 @@ pub(crate) fn sync(
             BuilderSignal::Step => v.signals.push(Signal::BuilderStep),
             BuilderSignal::End => v.signals.push(Signal::BuilderEnd),
             BuilderSignal::Refused(name) => v.notices.push(Notice { name, arg: None }),
-            BuilderSignal::Locked(seconds) => v.notices.push(Notice {
-                name: "CANNOT_LOCATE_DOODAD_NOW",
-                arg: Some(seconds.to_string()),
-            }),
+            BuilderSignal::Locked(seconds) => v.notices.push(Notice { name: "CANNOT_LOCATE_DOODAD_NOW", arg: Some(seconds.to_string()) }),
         }
     }
     if let Some((x, y, yaw)) = v.pin.take() {
@@ -1010,30 +746,12 @@ pub(crate) fn sync(
                 last_tax = Some(info.clone());
                 v.signals.push(Signal::Tax);
             }
-            HousingEvent::BuildProgress { tl_id, .. } if ours(tl_id) => {
-                v.signals.push(Signal::Step)
-            }
-            HousingEvent::PermissionChanged { tl_id, .. } if ours(tl_id) => {
-                v.signals.push(Signal::Permission)
-            }
-            HousingEvent::RecoverToggle { tl_id, .. }
-            | HousingEvent::OwnerNameChanged { tl_id, .. }
-                if ours(tl_id) =>
-            {
-                v.signals.push(Signal::InfoUpdated)
-            }
-            HousingEvent::SetForSale(sale) if ours(&sale.tl_id) => {
-                v.signals.extend([Signal::SetSell, Signal::InfoUpdated])
-            }
-            HousingEvent::ResetForSale { tl_id, .. } if ours(tl_id) => {
-                v.signals.extend([Signal::CancelSell, Signal::InfoUpdated])
-            }
-            HousingEvent::Sold {
-                tl_id,
-                new_owner_id,
-                house_name,
-                ..
-            } => {
+            HousingEvent::BuildProgress { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::Step),
+            HousingEvent::PermissionChanged { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::Permission),
+            HousingEvent::RecoverToggle { tl_id, .. } | HousingEvent::OwnerNameChanged { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::InfoUpdated),
+            HousingEvent::SetForSale(sale) if ours(&sale.tl_id) => v.signals.extend([Signal::SetSell, Signal::InfoUpdated]),
+            HousingEvent::ResetForSale { tl_id, .. } if ours(tl_id) => v.signals.extend([Signal::CancelSell, Signal::InfoUpdated]),
+            HousingEvent::Sold { tl_id, new_owner_id, house_name, .. } => {
                 if *new_owner_id == me && me != 0 {
                     v.signals.push(Signal::Bought);
                 } else if ours(tl_id) {
@@ -1046,14 +764,7 @@ pub(crate) fn sync(
     }
 
     let game = bridge.0.borrow().game.clone();
-    interact_and_refresh(
-        &mut v,
-        None,
-        (&units, &houses, &doodads, &inventory),
-        (pos, me),
-        &mut last_tax,
-        &game,
-    );
+    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax, &game);
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -1104,10 +815,7 @@ fn interact_and_refresh(
                             .and_then(|g| g.items.get(&material.item))
                             .map(|i| i.named.name.clone())
                             .unwrap_or_default();
-                        v.notices.push(Notice {
-                            name: "NOT_ENOUGH_REQUIRED_ITEM",
-                            arg: Some(name),
-                        });
+                        v.notices.push(Notice { name: "NOT_ENOUGH_REQUIRED_ITEM", arg: Some(name) });
                         // the local check looks at the bag only; an equipped backpack still casts
                         cast = material.equipped;
                     }
@@ -1247,16 +955,9 @@ pub(super) fn own_house_icons(houses: &Houses, me: u32) -> Vec<(f32, f32, &'stat
         .values()
         .filter(|h| !h.demolished && me != 0 && h.snapshot.owner_id == me)
         .map(|h| {
-            let category = data
-                .and_then(|d| d.designs.get(&h.snapshot.template_id))
-                .map_or(0, |d| d.category_id);
+            let category = data.and_then(|d| d.designs.get(&h.snapshot.template_id)).map_or(0, |d| d.category_id);
             let pos = h.snapshot.position();
-            (
-                pos.x,
-                pos.y,
-                map_icon_kind(category),
-                h.snapshot.name.clone(),
-            )
+            (pos.x, pos.y, map_icon_kind(category), h.snapshot.name.clone())
         })
         .collect();
     out.sort_by(|a, b| a.3.cmp(&b.3).then(a.0.total_cmp(&b.0)));
@@ -1266,19 +967,8 @@ pub(super) fn own_house_icons(houses: &Houses, me: u32) -> Vec<(f32, f32, &'stat
 pub fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        sync.after(super::sync_hud)
-            .before(aa_ui::UiFrame)
-            .run_if(in_state(Screen::InGame))
-            .run_if(super::hud_up),
-    )
-    .add_systems(
-        Update,
-        pointer_interaction
-            .after(super::PointerFinished)
-            .after(sync)
-            .run_if(in_state(Screen::InGame))
-            .run_if(super::hud_up),
-    );
+        sync.after(super::sync_hud).before(aa_ui::UiFrame).run_if(in_state(Screen::InGame)).run_if(super::hud_up),
+    ).add_systems(Update, pointer_interaction.after(super::PointerFinished).after(sync).run_if(in_state(Screen::InGame)).run_if(super::hud_up));
 }
 
 #[cfg(test)]
