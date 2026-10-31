@@ -443,12 +443,18 @@ and explicit controls").
   its sphere, so it does not block clicks past it; seated, a click only inside the ridden wagon's
   loose box therefore does not target it (a documented deviation: 1.2's ridden pick is tight,
   landing on 4 of 44 sweep points, `captures/2026-10-28b/summary.txt:36`; its exact shape is
-  capture-pending). The box is measured in the drawn root's local frame and composed with the
-  root's current `Transform` chain on every read, so a wagon that drives or turns is picked where
-  it is now; only a fully built tree (every static mesh has its bounds) is cached, and the cache
-  lasts until the root or model changes. A box is not measured until the root's `GlobalTransform`
-  agrees with that chain (and never on the spawn frame), so an unpropagated root cannot cache a box
-  at the origin. Left click, the right click, the Tab candidates and the talk distances use the
+  capture-pending). Two consequences of the loose box remain until a capture gives 1.2's tighter
+  pick shape: the 1.0 m child rule mostly helps near-horizontal clicks at the hull side, because
+  from an elevated camera the ray enters the ship's box through the top or the yards, so a cannon
+  clicked outside its sphere goes to the ship; and a unit seen through the empty space between
+  masts or sails loses to the loose box. The box is measured in the drawn root's local frame and
+  composed with the root's current `Transform` chain on every read, so a wagon that drives or
+  turns is picked where it is now; the root and mesh `GlobalTransform`s come from the same
+  propagation (last frame's while a vehicle moves), so their relative box is still correct. Only a
+  fully built tree (every static mesh has its bounds) is cached, and the cache lasts until the root
+  or model changes; nothing is measured on the spawn frame, the frame a mesh is added, or while a
+  mesh's `GlobalTransform` is still the identity but its own `Transform` chain is not. Left click,
+  the right click, the Tab candidates and the talk distances use the
   unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
   parent-composed position, and `Tab` and the talk checks measure from the manned slave's world
   position (`hud/slave.rs::player_centre`). The rule that an own vehicle may be targeted is

@@ -14,10 +14,14 @@
 //! A box that contains the camera is ignored (a camera on deck sits inside the ship's box and would
 //! otherwise pick the ship on every click); an attached child (a cannon) wins over its parent only
 //! when its entry is within 1.0 m of the parent's entry, and the slave the player rides gets no box
-//! at all, only its sphere. Making the box hug the hull would need the mesh geometry or a hull
-//! material/mesh marker, neither of which the draw tree carries; the capture's own pick landed on
-//! only 4 of 44 sweep points (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick
-//! shape stays capture-pending.
+//! at all, only its sphere. Two consequences of the loose box remain: the 1.0 m child rule mostly
+//! helps near-horizontal clicks at the hull side, because from an elevated camera the ray enters the
+//! ship's box through the top or the yards, so a cannon clicked outside its sphere goes to the ship;
+//! and a unit seen through the empty space between masts or sails loses to the loose box. Making
+//! the box hug the hull would need the mesh geometry or a hull material/mesh marker, neither of
+//! which the draw tree carries; the capture's own pick landed on only 4 of 44 sweep points
+//! (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick shape stays
+//! capture-pending.
 
 use std::collections::HashMap;
 
@@ -291,12 +295,15 @@ struct CachedBox {
 /// (plates measure heights the same way) in the root's local frame, cached per unit until the root
 /// or its model changes, and composed with the root's current `Transform` chain on every read, so
 /// a moving or turning vehicle is picked where it is now. Only a fully built tree is cached: while
-/// any mesh still lacks its bounds the box is not ready.
+/// any mesh still lacks its bounds, or was spawned this frame, the box is not ready. The measurement
+/// uses the root and mesh `GlobalTransform`s from the same propagation (last frame's while a
+/// vehicle moves), so their relative box is correct even before this frame's propagation.
 #[derive(SystemParam)]
 pub(crate) struct ModelBoxes<'w, 's> {
     views: Option<Res<'w, Views>>,
     roots: Query<'w, 's, (Entity, &'static RemoteUnit)>,
     added: Query<'w, 's, (), Added<RemoteUnit>>,
+    added_meshes: Query<'w, 's, (), Added<Mesh3d>>,
     globals: Query<'w, 's, &'static GlobalTransform>,
     transforms: Query<'w, 's, &'static Transform>,
     parents: Query<'w, 's, &'static ChildOf>,
@@ -331,12 +338,11 @@ impl ModelBoxes<'_, '_> {
     }
 
     /// The model box of a vehicle, if it is drawn and its tree is fully built. The box is measured
-    /// in the root's local frame and placed by the root's current `Transform` chain (not last
-    /// frame's `GlobalTransform`). Measuring waits until the root's `GlobalTransform` agrees with
-    /// that chain: a freshly spawned root has the identity until propagation, and measuring from it
-    /// would cache a box at the origin. The spawn frame itself is skipped too (its mesh
-    /// `GlobalTransform`s are equally unpropagated). A unit that is not a vehicle has no box at all
-    /// (its tree's Aabbs are weapons, attachments or effects).
+    /// in the root's local frame and placed by the root's current `Transform` chain, so a moving
+    /// vehicle is picked where it is now. The spawn frame is skipped (the root's and its meshes'
+    /// `GlobalTransform`s are not propagated yet), as is a frame that added a mesh to the tree or
+    /// still has a mesh at the identity while its own chain is not. A unit that is not a vehicle has
+    /// no box at all (its tree's Aabbs are weapons, attachments or effects).
     pub(crate) fn get(&mut self, unit: &Unit) -> Option<PickBox> {
         if !matches!(unit.kind, UnitKind::Slave { .. }) {
             return None;
@@ -351,9 +357,6 @@ impl ModelBoxes<'_, '_> {
                     return None;
                 }
                 let root = *self.globals.get(entity).ok()?;
-                if !root.affine().abs_diff_eq(current.compute_affine(), 1e-4) {
-                    return None;
-                }
                 let local = self.measure(entity, &root)?;
                 if self.cache.len() >= CACHE_LIMIT {
                     self.cache.clear();
@@ -396,12 +399,33 @@ impl ModelBoxes<'_, '_> {
             if self.foreign.contains(entity) {
                 continue;
             }
-            let is_mesh = self.meshes.contains(entity) && !self.skinned.contains(entity);
+            let is_mesh = self.meshes.contains(entity);
             if is_mesh {
+                // a mesh spawned this frame has no propagated global yet; measuring it now would
+                // cache a box from its transform alone
+                if self.added_meshes.contains(entity) {
+                    return None;
+                }
+                if let Ok(global) = self.globals.get(entity)
+                    && *global == GlobalTransform::IDENTITY
+                    && let Some(current) = crate::ingame::units::current_transform(
+                        entity,
+                        &self.transforms,
+                        &self.parents,
+                    )
+                    && !current
+                        .compute_affine()
+                        .abs_diff_eq(bevy::math::Affine3A::IDENTITY, 1e-6)
+                {
+                    return None;
+                }
+            }
+            let is_static_mesh = is_mesh && !self.skinned.contains(entity);
+            if is_static_mesh {
                 meshes += 1;
             }
             if let Ok((aabb, global)) = self.bounds.get(entity) {
-                if is_mesh {
+                if is_static_mesh {
                     measured += 1;
                 }
                 let (centre, half) = (Vec3::from(aabb.center), Vec3::from(aabb.half_extents));
@@ -1266,16 +1290,78 @@ mod tests {
         );
     }
 
+    #[derive(Resource)]
+    struct MovingRoot(Entity);
+
+    fn move_root(root: Res<MovingRoot>, mut roots: Query<&mut Transform>) {
+        if let Ok(mut transform) = roots.get_mut(root.0) {
+            // move before the pick: the root's and meshes' globals are still last frame's
+            transform.translation.x += 1.0;
+        }
+    }
+
     #[test]
-    fn a_box_is_not_measured_from_a_stale_global_transform() {
+    fn a_moving_vehicle_is_measured_from_the_previous_frame_globals() {
+        let unit = unit_at(Vec3::ZERO);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TransformPlugin))
+            .init_resource::<Views>()
+            .insert_resource(CachedUnit(unit.clone()))
+            .init_resource::<BoxOut>()
+            .add_systems(Update, (move_root, read_box).chain());
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-2.0), Vec3::splat(2.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            ChildOf(root),
+        ));
+        app.world_mut().insert_resource(MovingRoot(root));
+        app.update();
+        assert_eq!(
+            app.world().resource::<BoxOut>().0,
+            None,
+            "the spawn frame is skipped"
+        );
+        // this frame moves the root to x=2 while its globals (root and mesh) are still at x=1
+        app.update();
+        let model = app
+            .world()
+            .resource::<BoxOut>()
+            .0
+            .expect("a moving vehicle is still measured");
+        assert!(
+            model.centre.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-4),
+            "the box follows the current Transform: {model:?}"
+        );
+        let units = units_with(&[unit]);
+        assert_eq!(
+            pick_unit(
+                &down(Vec3::new(3.5, 10.0, 0.0)),
+                &units,
+                0,
+                None,
+                |_| true,
+                |_, _| (None, Some(model))
+            ),
+            Some(20),
+            "the moving wagon's rear is picked"
+        );
+    }
+
+    #[test]
+    fn a_mesh_added_to_the_tree_skips_measuring_for_that_frame() {
         let unit = unit_at(Vec3::ZERO);
         let mut app = box_app(unit.clone());
         let root = app
             .world_mut()
-            .spawn((
-                Transform::from_translation(Vec3::new(20.0, 0.0, 0.0)),
-                RemoteUnit::announced(&unit),
-            ))
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
             .id();
         app.world_mut()
             .resource_mut::<Views>()
@@ -1284,45 +1370,44 @@ mod tests {
             Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
             Transform::default(),
             GlobalTransform::default(),
+            Mesh3d::default(),
             ChildOf(root),
         ));
+        // the spawn frame does not measure; the next one does
         app.update();
         app.update();
-        assert!(
-            app.world()
-                .resource::<BoxOut>()
-                .0
-                .expect("the box")
-                .centre
-                .abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-4)
+        assert_eq!(
+            app.world().resource::<BoxOut>().0.expect("the hull").half,
+            Vec3::splat(1.0)
         );
-        // a new model forces a remeasure, while the root's propagated global is still the old
-        // identity (as before the first propagation); the current Transform chain says (20, 0, 0)
+        // a new mesh and a new model force a remeasure; the new mesh is Added this frame
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
+            Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+            GlobalTransform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+            Mesh3d::default(),
+            ChildOf(root),
+        ));
         let mut changed = unit;
         changed.model_id = 999;
         app.world_mut().resource_mut::<CachedUnit>().0 = changed.clone();
         app.world_mut()
             .entity_mut(root)
-            .insert((RemoteUnit::announced(&changed), GlobalTransform::default()));
-        // keep the root's Transform marked changed so propagation refreshes its global next frame
-        app.world_mut()
-            .get_mut::<Transform>(root)
-            .unwrap()
-            .translation = Vec3::new(20.0, 0.0, 0.0);
+            .insert(RemoteUnit::announced(&changed));
         app.update();
         assert_eq!(
             app.world().resource::<BoxOut>().0,
             None,
-            "a stale global transform must not be measured"
+            "a mesh added this frame is not measured yet"
         );
         app.update();
-        assert!(
+        assert_eq!(
             app.world()
                 .resource::<BoxOut>()
                 .0
-                .expect("the remeasured box")
-                .centre
-                .abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-4)
+                .expect("the full box")
+                .half,
+            Vec3::new(6.0, 1.0, 1.0)
         );
     }
 

@@ -141,8 +141,11 @@ Ships (merged after the checkpoint was written):
   deck is inside a ship's box (masts and sails), which would otherwise be picked on every click. The slave the
   player rides or is attached to gets no box, only its sphere. Boxes are measured in the drawn root's local frame
   and composed with its current `Transform` chain on every read, so a moving or turning vehicle is picked where it
-  is now; only a fully built tree is cached, until its root or model changes, and nothing is measured while the
-  root's `GlobalTransform` disagrees with that chain or on its spawn frame. Left click, the right click's
+  is now (the root and mesh globals come from the same propagation, last frame's while it moves); only a fully
+  built tree is cached, until its root or model changes, and nothing is measured on the spawn frame, the frame a
+  mesh is added, or while a mesh global is still unpropagated. The loose box still sends a cannon click from an
+  elevated camera (the ray enters through the top or the yards) and a unit seen between masts or sails to the
+  ship. Left click, the right click's
   NPC/vehicle pick and `Tab` and the talk checks measure from the unit's current world pose (`unit_world_pose`),
   so an attached cannon uses its parent-composed position. 1.2's own vehicle targeting is
   `captures/2026-10-28b/summary.txt:36`, case e `bound`: a right click on the slave you ride sends
