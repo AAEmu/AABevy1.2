@@ -77,6 +77,7 @@ mod swim;
 pub(crate) mod teleport;
 mod tools;
 mod trace;
+pub(crate) mod turret;
 pub(crate) mod units;
 pub(crate) mod vehicle;
 pub(crate) mod warm;
@@ -92,7 +93,6 @@ use crate::Screen;
 pub(crate) use dev::DevOptions;
 pub(crate) use anim::LocalJump;
 pub(crate) use mount::{LocalMount, MountReason, driver_seat, track_local_mount};
-#[cfg(test)]
 pub(crate) use mount::LocalSeat;
 pub(crate) use ship::{ShipDrive, leave_before_unbind};
 
@@ -173,6 +173,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(attachments::plugin)
             .add_plugins(gear_refresh::plugin)
             .add_plugins(seating::plugin)
+            .add_plugins(turret::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
             .add_plugins(teleport::plugin)
@@ -191,6 +192,7 @@ impl Plugin for InGamePlugin {
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
+                        turret::local_aim,
                         camera::vehicle_camera,
                         ship::board_deck
                             .run_if(in_state(Screen::InGame))
@@ -297,6 +299,7 @@ fn leave_game(
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(mount::LocalMount::default());
+    commands.remove_resource::<turret::Sight>();
     commands.insert_resource(camera::VehicleCamera::default());
     commands.insert_resource(cart::CartDrive::default());
     commands.insert_resource(mount::MountReason::default());

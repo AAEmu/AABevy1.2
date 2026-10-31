@@ -85,7 +85,7 @@ pub struct RemoteUnit {
 }
 
 impl RemoteUnit {
-    fn announced(unit: &Unit) -> Self {
+    pub fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), pos, facing: unit.yaw(),
             scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true }

@@ -41,6 +41,8 @@ struct Lookups {
     attach_anims: HashMap<(u32, u8), Option<u32>>,
     ships: HashMap<u32, bool>,
     ship_steer: HashMap<u32, f32>,
+    /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
+    turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -254,6 +256,7 @@ impl Lookups {
             attach_anims: HashMap::new(),
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
+            turrets: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
         }
@@ -459,6 +462,60 @@ impl Db {
             .get(&model_id)
             .copied()
             .flatten()
+    }
+
+    /// The turret block of a vehicle model: its `vehicle_models` pitch/yaw range and rates, or
+    /// `None` when the model is no vehicle or the row is incomplete (a text value in an angle
+    /// column; skip the row rather than treat it as zero).
+    pub fn turret_limits(&self, model_id: u32) -> Option<super::turret::TurretLimits> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(limits) = l.turrets.get(&model_id) {
+            return *limits;
+        }
+        use rusqlite::types::Value;
+        let row = l
+            .conn
+            .query_row(
+                "SELECT v.turret_pitch_angle_min, v.turret_pitch_angle_max,                         v.turret_yaw_angle_min, v.turret_yaw_angle_max,                         v.turret_yaw_angvel, v.turret_pitch_angvel, v.installed_turret                  FROM models m JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'                  WHERE m.id = ?1",
+                params![model_id],
+                |r| {
+                    Ok((
+                        r.get::<_, Value>(0)?, r.get::<_, Value>(1)?, r.get::<_, Value>(2)?,
+                        r.get::<_, Value>(3)?, r.get::<_, Value>(4)?, r.get::<_, Value>(5)?,
+                        r.get::<_, Value>(6)?,
+                    ))
+                },
+            )
+            .ok();
+        let real = |value: Value| match value {
+            Value::Real(v) => Some(v as f32),
+            Value::Integer(v) => Some(v as f32),
+            Value::Text(text) => text.trim().parse::<f32>().ok(),
+            _ => None,
+        };
+        let flag = |value: Value| match value {
+            Value::Integer(v) => Some(v != 0),
+            Value::Real(v) => Some(v != 0.0),
+            Value::Text(text) => match text.trim().to_ascii_lowercase().as_str() {
+                "t" | "true" => Some(true),
+                "f" | "false" => Some(false),
+                other => other.parse::<f32>().ok().map(|v| v != 0.0),
+            },
+            _ => None,
+        };
+        let limits = row.and_then(|(pitch_min, pitch_max, yaw_min, yaw_max, yaw_rate, pitch_rate, installed)| {
+            Some(super::turret::TurretLimits::from_degrees(
+                real(pitch_min)?,
+                real(pitch_max)?,
+                real(yaw_min)?,
+                real(yaw_max)?,
+                real(yaw_rate)?,
+                real(pitch_rate)?,
+                flag(installed)?,
+            )?)
+        });
+        l.turrets.insert(model_id, limits);
+        limits
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,

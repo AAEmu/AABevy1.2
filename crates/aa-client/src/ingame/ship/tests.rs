@@ -180,6 +180,7 @@ fn no_helm_frame_follows_the_leave_request() {
         drives: true,
         cart: false,
         ship: true,
+        turret: false,
         speed: Default::default(),
         lift: 0.0,
     }));
@@ -549,6 +550,7 @@ fn deck_ship_unit(root: Vec3, yaw: f32, velocity: [i16; 3]) -> Unit {
         buffs: Vec::new(),
         anim_action: 0,
         house_posture: None,
+        turret: None,
         state_attachments: None,
         attached_to: None,
         doodad_bond: None,
@@ -1812,6 +1814,7 @@ fn a_mounted_player_does_not_board_or_keeps_the_ride() {
             drives,
             cart: false,
             ship,
+            turret: false,
             speed: Default::default(),
             lift: 0.0,
         }));
@@ -2006,6 +2009,7 @@ fn ship_get_off_app() -> Option<(App, Entity, f32, Vec3)> {
             drives: true,
             cart: false,
             ship: true,
+            turret: false,
             speed: Default::default(),
             lift: 0.0,
         })))
