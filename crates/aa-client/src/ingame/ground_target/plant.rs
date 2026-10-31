@@ -9,27 +9,32 @@
 //! ([`check`]) and the packet ([`place`]).
 //!
 //! The placement rules are the 1.2 seed builder's (`FUN_393a8fa0` and its helpers, see `docs/research/porting` notes):
-//! the spot must be within 30 m in 3D of the player (d^2 <= 900; F1 puts the boundary near 30 m, the decompile sets
-//! it exactly), the doodad keeps
-//! `max(sim_radius / 1000, 0.1)` m of room, round doodads (crops, trees, herbs, livestock, marine crops, group 38,
-//! template 1219) overlap as spheres on the sum of their radii, marine crops need water while every other group
-//! refuses it, and every refusal has its own `ui_texts` line. Groups 2, 3 and 12 get a random yaw (F3/F4); group 40
-//! is in the decompiled set but was not captured. The others keep the previous facing+pi yaw (the decompile only
-//! says the builder's rotation, which we do not model: F4/F14).
+//! the spot must be within 30 m in 3D of the player (`FUN_393a8fa0` lines 761324-761330 refuse only when `900.0 <
+//! d^2`, so exactly 30 m is allowed; F1/F2 settled), the ground under the ghost's four corners and centre may not
+//! spread more than 6 m (`FUN_393a7720` line 759922, `FUN_393a73a0`; error 0x117, F7 settled; groups 37, 2, 3, 5, 12,
+//! 40 and 80 are exempt), the doodad keeps `max(sim_radius / 1000, 0.1)` m of room, round doodads (crops, trees,
+//! herbs, livestock, marine crops, group 38, template 1219) overlap as spheres on the sum of their radii, marine crops
+//! need water while every other group refuses it, and every refusal has its own `ui_texts` line.
 //!
-//! The 30 s planting reuse lock (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0`) starts at the end of a world load
-//! (`FUN_39426520`) and on `SCTeleportUnit` arrival (F3); the next use shows "Can't place this for N second(s)."
-//! (`ui_texts` 4598). A send does not start it (F3: two sends 13 s apart); the cancel path has no raw lock row and
-//! is capture-pending. Still open: F2 (2D vs 3D boundary), group 5/24/40 rotations, F5 water
-//! site, F6 exact radii, F7 terrain spread, F8-F12 house/farm/zone/labor, F15-F18 harvest and growth. The non-round
-//! shape keeps the flat own radius until F6 decodes the oriented boxes; the water 0.3 m depth test is an assumption.
+//! Groups 2, 3, 12 and 40 get a random yaw; every other group sends the ghost's yaw (`FUN_393a9340` lines
+//! 761432-761439; F4 settled). The ghost is drawn with [`ghost_yaw`], and the packet carries that same yaw.
+//!
+//! Two reuse locks exist (F13). The 30 s one (`_DAT_39ac7748` = 30,000 ms, `FUN_393a6de0` line 759378) starts at the
+//! end of a world load (`FUN_39426520`) and on `SCTeleportUnit` arrival (F3); the next use shows "Can't place this for
+//! N second(s)." (`ui_texts` 4598). A send starts a separate 2 s post-send cooldown: the builder destructor
+//! (`FUN_393a89d0` lines 760956-760960) writes `now + 2000` when its sent flag (`+0x2c`, set by `FUN_393a9340` line
+//! 761450) is set, and `FUN_393a9540` line 761547 refuses the next builder with error 0x163 (`OTHER_BUILD_IS_ON`).
+//!
+//! Still open: F5 water site, F6 exact radii, F8-F12 house/farm/zone/labor, F15-F18 harvest and growth. The non-round
+//! shape keeps the flat own radius until F6 decodes the oriented boxes; the water 0.3 m depth test is an assumption,
+//! and the spread box is the sim-radius square because the ghost model's own bounds are not decoded.
 
 use aa_cry::scene::{CryAssets, ModelOptions, spawn_loaded};
 use aa_net::farm::CreateDoodad;
 use aa_net::state::{Doodads, Units};
 use aa_net::{Command, Event, NetCommand, NetEvent, Pos};
 use aa_world::coords::cry_rot_to_bevy;
-use aa_world::{WaterQuery, cry_to_bevy};
+use aa_world::{TerrainQuery, WaterQuery, cry_to_bevy};
 use bevy::prelude::*;
 
 use super::{Aim, Aiming, GroundSkill, Mode, SkillPressed};
@@ -41,11 +46,19 @@ use crate::ingame::player::{LocalPlayer, Mover};
 pub(crate) const MAX_RANGE: f32 = 30.0;
 /// The planting reuse lock: 30,000 ms `_DAT_39ac7748`, set by `FUN_393a6de0` at world-load end/teleport arrival.
 pub(crate) const PLANT_REUSE_LOCK_SECS: f64 = 30.0;
+/// The post-send cooldown: the builder destructor (`FUN_393a89d0`) writes `now + 2000` when a packet was sent.
+pub(crate) const PLANT_POST_SEND_SECS: f64 = 2.0;
+/// The error the builder start shows during the post-send cooldown (`FUN_393a9540` line 761547).
+pub(crate) const PLANT_POST_SEND_ERROR: i16 = 0x163;
+/// The largest terrain spread under the ghost box (`_DAT_3999ecf4` = 6.0, `FUN_393a7720` line 759922).
+pub(crate) const MAX_TERRAIN_SPREAD: f32 = 6.0;
+/// Groups exempt from the terrain-spread check: 37 (`0x399d2450`) and {2,3,12,40} / {5,80} (`FUN_3983b2f0`/`320`).
+pub(crate) const SPREAD_EXEMPT_GROUPS: [u32; 7] = [2, 3, 5, 12, 37, 40, 80];
 /// The groups whose doodads overlap as spheres (`FUN_3983b360`), plus template 1219 and group 38.
 pub(crate) const ROUND_GROUPS: [u32; 6] = [2, 3, 5, 12, 40, 80];
 const SPHERE_TEMPLATE: u32 = 1219;
 const SPHERE_GROUP: u32 = 38;
-/// Crops, trees, herbs and marine crops get a random yaw; other groups keep the previous facing+pi yaw (`FUN_393a9340`).
+/// Crops, trees, herbs and marine crops get a random yaw; other groups send the ghost's yaw (`FUN_393a9340`).
 pub(crate) const RANDOM_YAW_GROUPS: [u32; 4] = [2, 3, 12, 40];
 const MARINE_CROPS: u32 = 40;
 /// The all-clear line (`ui_texts` 281).
@@ -60,8 +73,7 @@ pub(crate) enum Refusal {
     Doodad,
     /// `DOODAD_SIM_TOO_CLOSE_TO_OTHER_UNIT` (0x116).
     Unit,
-    /// `DOODAD_SIM_LOW_TERRAIN` (0x117): reserved for the capture-pending 6 m spread.
-    #[allow(dead_code)]
+    /// `DOODAD_SIM_LOW_TERRAIN` (0x117): the ground under the ghost box spreads more than 6 m (`FUN_393a7720`).
     Terrain,
     /// `DOODAD_NOT_ON_GROUND` (0x145): no ground under the cursor.
     NoGround,
@@ -141,11 +153,12 @@ impl Plant {
     }
 }
 
-/// The 30 s planting reuse lock: world-load end (`FUN_39426520`) and teleport arrival (F3) start it; a send does not
-/// (two sends 13 s apart succeeded). Cancel and other trigger events are capture-pending.
+/// The two planting reuse locks. The 30 s one starts at the end of a world load (`FUN_393a6de0`); the 2 s one is armed
+/// when the builder is destroyed after a send (`FUN_393a89d0` lines 760956-760960). They are independent.
 #[derive(Resource, Default)]
 pub(crate) struct PlantLock {
     until: f64,
+    post_send_until: f64,
 }
 
 impl PlantLock {
@@ -153,7 +166,7 @@ impl PlantLock {
         now < self.until
     }
 
-    /// Seconds left on the lock (`0` when it is over).
+    /// Seconds left on the 30 s lock (`0` when it is over).
     pub(crate) fn remaining(&self, now: f64) -> f64 {
         (self.until - now).max(0.0)
     }
@@ -161,7 +174,29 @@ impl PlantLock {
     pub(crate) fn hold(&mut self, now: f64) {
         self.until = self.until.max(now + PLANT_REUSE_LOCK_SECS);
     }
+
+    /// The builder was destroyed after a `CSCreateDoodad`: the 2 s post-send cooldown (`now + 2000`).
+    pub(crate) fn hold_post_send(&mut self, now: f64) {
+        self.post_send_until = now + PLANT_POST_SEND_SECS;
+    }
+
+    /// The builder was destroyed without a send: the destructor clears the cooldown (`DAT_3a17a950 = 0`).
+    pub(crate) fn clear_post_send(&mut self) {
+        self.post_send_until = 0.0;
+    }
+
+    pub(crate) fn post_send_refused(&self, now: f64) -> bool {
+        now < self.post_send_until
+    }
 }
+
+/// A terrain-height probe (`x`, `y`) -> height, for examples and tests without a heightmap.
+pub(crate) type GroundProbe = Box<dyn Fn(f32, f32) -> Option<f32> + Send + Sync>;
+
+/// Ground heights for the terrain-spread rule. The game reads the world's [`TerrainQuery`]; examples and tests without a
+/// heightmap insert a probe instead.
+#[derive(Resource, Default)]
+pub(crate) struct PlantGround(pub(crate) Option<GroundProbe>);
 
 /// The captured `CANNOT_LOCATE_DOODAD_NOW` line with the whole seconds left (`FUN_393a8840`'s `%u`).
 pub(crate) fn lock_text(remaining_secs: u64) -> String {
@@ -236,15 +271,47 @@ pub(crate) fn random_yaw(group: u32) -> bool {
     RANDOM_YAW_GROUPS.contains(&group)
 }
 
-/// The yaw the packet carries: `random` in `0..1` makes the 1.2 random turn, otherwise the previous facing+pi yaw.
-/// The decompile says only that non-random groups keep the builder's rotation; we do not model that rotation, so this
-/// stays the pre-existing behaviour until F4/F14 (capture-pending).
+/// The yaw the ghost model is drawn with (it faces the player). `FUN_393a9340` sends the ghost's yaw (`ghost+0x210`)
+/// for every group that does not roll a random one.
+pub(crate) fn ghost_yaw(facing: f32) -> f32 {
+    facing + std::f32::consts::PI
+}
+
+/// The yaw the packet carries: `random` in `0..1` makes the 1.2 random turn, otherwise the ghost's yaw.
 pub(crate) fn placement_yaw(group: u32, facing: f32, random: f32) -> f32 {
     if random_yaw(group) {
         random.rem_euclid(1.0) * std::f32::consts::TAU
     } else {
-        facing + std::f32::consts::PI
+        ghost_yaw(facing)
     }
+}
+
+/// Whether a doodad of `group` is exempt from the 4-corner terrain-spread rule (`FUN_393a7720`).
+pub(crate) fn spread_exempt(group: u32) -> bool {
+    SPREAD_EXEMPT_GROUPS.contains(&group)
+}
+
+/// The terrain-spread refusal (`FUN_393a7720` line 759922): `FUN_393a73a0` samples the ground at the ghost box's four
+/// corners and centre; a spread of more than 6.0 m between the lowest and highest sample is `DOODAD_SIM_LOW_TERRAIN`
+/// (0x117). Groups 37, 2, 3, 5, 12, 40 and 80 are exempt. The box here is the sim-radius square; the ghost model's own
+/// bounds are not decoded. `None` when the ground is unknown.
+pub(crate) fn terrain_refusal(
+    spot: Vec3,
+    shape: Shape,
+    ground: &impl Fn(f32, f32) -> Option<f32>,
+) -> Option<Refusal> {
+    if spread_exempt(shape.group) {
+        return None;
+    }
+    let r = shape.radius;
+    let mut min = f32::INFINITY;
+    let mut max = f32::NEG_INFINITY;
+    for (dx, dy) in [(-r, -r), (r, -r), (r, r), (-r, r), (0.0, 0.0)] {
+        let height = ground(spot.x + dx, spot.y + dy)?;
+        min = min.min(height);
+        max = max.max(height);
+    }
+    (max - min > MAX_TERRAIN_SPREAD).then_some(Refusal::Terrain)
 }
 
 /// A random number in `0..1` for [`placement_yaw`] (no extra dependency; seeded once from the clock).
@@ -269,9 +336,10 @@ fn random_unit() -> f32 {
     })
 }
 
-/// Why `spot` cannot hold `shape`, or `None` (the 1.2 order: water, range, doodads, units).
+/// Why `spot` cannot hold `shape`, or `None` (the 1.2 order: water, terrain spread, range, doodads, units).
 ///
-/// `wet` is the water test at a spot, `shape_of` the group/radius of a template and `obstacles` the live unit positions.
+/// `wet` is the water test at a spot, `shape_of` the group/radius of a template, `obstacles` the live unit positions and
+/// `ground` the terrain height at a spot.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn check(
     spot: Vec3,
@@ -282,6 +350,7 @@ pub(crate) fn check(
     obstacles: impl Iterator<Item = Vec3>,
     wet: impl Fn(Vec3) -> bool,
     shape_of: impl Fn(u32) -> Shape,
+    ground: impl Fn(f32, f32) -> Option<f32>,
 ) -> Option<Refusal> {
     if shape.group == MARINE_CROPS {
         if !wet(spot) {
@@ -289,6 +358,9 @@ pub(crate) fn check(
         }
     } else if wet(spot) {
         return Some(Refusal::Area);
+    }
+    if let Some(refusal) = terrain_refusal(spot, shape, &ground) {
+        return Some(refusal);
     }
     if !in_range(player, spot) {
         return Some(Refusal::TooFar);
@@ -340,6 +412,8 @@ pub(crate) fn validate(
     mover: Query<&Mover, With<LocalPlayer>>,
     db: Option<Res<Db>>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
+    terrain: Option<Res<TerrainQuery>>,
+    probe: Option<Res<PlantGround>>,
     mut shown: Local<Option<&'static str>>,
 ) {
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
@@ -351,6 +425,11 @@ pub(crate) fn validate(
             .as_deref()
             .and_then(|w| w.water_at(spot))
             .is_some_and(|(height, _)| height > spot.z + 0.3)
+    };
+    let probe = probe.as_deref().and_then(|p| p.0.as_deref());
+    let ground = |x: f32, y: f32| match probe {
+        Some(probe) => probe(x, y),
+        None => terrain.as_deref().and_then(|t| t.height_at(x, y)),
     };
     let shape_of = |template: u32| {
         let (group, radius) = db
@@ -383,6 +462,7 @@ pub(crate) fn validate(
                         obstacles,
                         wet,
                         shape_of,
+                        ground,
                     );
                     // the ring is red for a spot that is not free
                     *ok &= plant.blocked.is_none();
@@ -507,9 +587,7 @@ pub(crate) fn ghost(
         return;
     }
     let Some((_, Some(_))) = *drawn else { return };
-    let facing = player
-        .single()
-        .map_or(0.0, |m| m.facing + std::f32::consts::PI);
+    let facing = player.single().map_or(0.0, |m| ghost_yaw(m.facing));
     for (_, mut transform, mut visibility) in &mut ghosts {
         match spot {
             Some((spot, _)) => {
@@ -536,6 +614,7 @@ mod tests {
             std::iter::empty(),
             |_| false,
             |_| shape,
+            |_, _| None,
         )
     }
 
@@ -598,6 +677,7 @@ mod tests {
                 std::iter::empty(),
                 |_| false,
                 shape_of,
+                |_, _| None,
             )
         };
         assert_eq!(
@@ -642,6 +722,7 @@ mod tests {
                 std::iter::empty(),
                 |_| false,
                 shape_of,
+                |_, _| None,
             )
         };
         assert_eq!(
@@ -667,6 +748,7 @@ mod tests {
                 [unit].into_iter(),
                 |_| false,
                 |_| rice(),
+                |_, _| None,
             )
         };
         assert_eq!(check_at(Vec3::ZERO), Some(Refusal::Unit));
@@ -681,6 +763,7 @@ mod tests {
                 [far].into_iter(),
                 |_| false,
                 |_| rice(),
+                |_, _| None,
             )
         };
         assert_eq!(check_at(Vec3::ZERO), None);
@@ -700,6 +783,7 @@ mod tests {
                 std::iter::empty(),
                 wet,
                 |_| shape,
+                |_, _| None,
             )
         };
         assert_eq!(
@@ -733,14 +817,83 @@ mod tests {
             assert!(random_yaw(group), "group {group}");
             assert!((placement_yaw(group, 1.0, 0.25) - std::f32::consts::TAU * 0.25).abs() < 1e-6);
         }
+        assert_eq!(ghost_yaw(1.0), 1.0 + std::f32::consts::PI);
         for group in [5, 24, 37, 38, 80] {
             assert!(!random_yaw(group), "group {group}");
             assert_eq!(
                 placement_yaw(group, 1.0, 0.25),
-                1.0 + std::f32::consts::PI,
-                "group {group} keeps the previous facing+pi yaw"
+                ghost_yaw(1.0),
+                "group {group} sends the ghost's yaw"
             );
         }
+    }
+
+    #[test]
+    fn a_terrain_spread_over_six_metres_refuses_unless_the_group_is_exempt() {
+        let spot = Vec3::ZERO;
+        let subject = Shape {
+            template: 1034,
+            group: 24,
+            radius: 0.5,
+        };
+        let cliff = |x: f32, _y: f32| Some(if x > 0.0 { 7.0 } else { 0.0 });
+        assert_eq!(
+            terrain_refusal(spot, subject, &cliff),
+            Some(Refusal::Terrain),
+            "7 m under the corners is more than 6"
+        );
+        // `6.0 < max - min` is strict: exactly 6 m is allowed
+        let six = |x: f32, _y: f32| Some(if x > 0.0 { 6.0 } else { 0.0 });
+        assert_eq!(terrain_refusal(spot, subject, &six), None);
+        for group in SPREAD_EXEMPT_GROUPS {
+            assert_eq!(
+                terrain_refusal(spot, Shape { group, ..subject }, &cliff),
+                None,
+                "group {group} is exempt"
+            );
+        }
+        for group in [24, 38] {
+            assert_eq!(
+                terrain_refusal(spot, Shape { group, ..subject }, &cliff),
+                Some(Refusal::Terrain),
+                "group {group} is subject to the spread"
+            );
+        }
+        assert_eq!(
+            terrain_refusal(spot, subject, &|_, _| None),
+            None,
+            "unknown ground cannot judge"
+        );
+        // the rule is wired into the placement check
+        assert_eq!(
+            check(
+                spot,
+                Vec3::ZERO,
+                subject,
+                &Doodads::default(),
+                &Units::default(),
+                std::iter::empty(),
+                |_| false,
+                |_| subject,
+                cliff,
+            ),
+            Some(Refusal::Terrain)
+        );
+        assert_eq!(
+            check(
+                spot,
+                Vec3::ZERO,
+                rice(),
+                &Doodads::default(),
+                &Units::default(),
+                std::iter::empty(),
+                |_| false,
+                |_| rice(),
+                cliff,
+            ),
+            None,
+            "group 12 is exempt"
+        );
     }
 
     #[test]
@@ -838,6 +991,17 @@ mod tests {
     }
 
     #[test]
+    fn a_send_starts_the_2s_post_send_cooldown_and_a_cancel_clears_it() {
+        let mut lock = PlantLock::default();
+        lock.hold_post_send(10.0);
+        assert!(lock.post_send_refused(11.999), "2 s, strict end");
+        assert!(!lock.post_send_refused(12.0));
+        assert!(!lock.refused(10.0), "the 2 s cooldown is not the 30 s lock");
+        lock.clear_post_send();
+        assert!(!lock.post_send_refused(10.0));
+    }
+
+    #[test]
     fn a_doodad_keeps_its_room() {
         let mut doodads = Doodads::default();
         doodads.by_id.insert(
@@ -865,6 +1029,7 @@ mod tests {
                 std::iter::empty(),
                 |_| false,
                 shape_of,
+                |_, _| None,
             )
         };
         assert_eq!(check_at(Vec3::new(10.3, 10.0, 5.0)), Some(Refusal::Doodad));
