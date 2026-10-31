@@ -26,6 +26,8 @@ struct Lookups {
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
+    /// `(group id, sim radius in metres)` of a doodad template.
+    doodad_shapes: HashMap<u32, (u32, f32)>,
     doodad_visuals: HashMap<(u32, u32), Option<String>>,
     doodad_growths: HashMap<u32, Option<DoodadGrowth>>,
     npc_scale: HashMap<u32, f32>,
@@ -240,6 +242,7 @@ impl Lookups {
             actor_files: HashMap::new(),
             doodad_models: HashMap::new(),
             doodad_phase_models: HashMap::new(),
+            doodad_shapes: HashMap::new(),
             doodad_visuals: HashMap::new(),
             doodad_growths: HashMap::new(),
             npc_scale: HashMap::new(),
@@ -791,20 +794,37 @@ impl Db {
             .map(|d| d as u32)
     }
 
-    /// The model a new doodad of `template_id` has (the model of its start phase, group kind 1) and the room it keeps
-    /// around it (`sim_radius`, metres).
-    pub fn doodad_start(&self, template_id: u32) -> (Option<String>, f32) {
-        let (group, radius) = {
-            let l = self.lookups.lock().unwrap();
+    /// The model a new doodad of `template_id` has (the model of its start phase, group kind 1), its doodad group and
+    /// the room it keeps around it (`sim_radius`, metres, at least 0.1).
+    pub fn doodad_start(&self, template_id: u32) -> (Option<String>, u32, f32) {
+        let (group, (group_id, radius)) = {
+            let mut l = self.lookups.lock().unwrap();
             let group = l
                 .conn
                 .query_row("SELECT id FROM doodad_func_groups WHERE doodad_almighty_id = ?1 AND doodad_func_group_kind_id = 1 ORDER BY id LIMIT 1", params![template_id], |r| r.get::<_, i64>(0))
                 .ok();
-            let radius = l.conn.query_row("SELECT sim_radius FROM doodad_almighties WHERE id = ?1", params![template_id], |r| r.get::<_, Option<i64>>(0)).ok().flatten().unwrap_or(0);
-            (group, radius as f32 / 1000.0)
+            let shape = if let Some(shape) = l.doodad_shapes.get(&template_id) {
+                *shape
+            } else {
+                let shape = shape_of(&l.conn, template_id);
+                l.doodad_shapes.insert(template_id, shape);
+                shape
+            };
+            (group, shape)
         };
         let model = group.map_or_else(|| self.doodad_model(template_id), |g| self.doodad_phase_model(template_id, g as u32));
-        (model, radius)
+        (model, group_id, radius)
+    }
+
+    /// The doodad group and simulation radius (`max(sim_radius / 1000, 0.1)` m) of a template.
+    pub fn doodad_shape(&self, template_id: u32) -> (u32, f32) {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(shape) = l.doodad_shapes.get(&template_id) {
+            return *shape;
+        }
+        let shape = shape_of(&l.conn, template_id);
+        l.doodad_shapes.insert(template_id, shape);
+        shape
     }
 
     /// How a phase grows (`doodad_phase_funcs` -> `doodad_func_growths`), `None` when it does not.
@@ -833,6 +853,20 @@ impl Db {
         l.doodad_growths.insert(func_group_id, growth);
         growth
     }
+}
+
+/// `doodad_almighties.group_id` and the simulation radius: `max(sim_radius * 0.001, 0.1)` m, as the 1.2 client's
+/// `FUN_3983b280`.
+fn shape_of(conn: &Connection, template_id: u32) -> (u32, f32) {
+    let row = conn
+        .query_row(
+            "SELECT group_id, sim_radius FROM doodad_almighties WHERE id = ?1",
+            params![template_id],
+            |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+        )
+        .ok()
+        .unwrap_or((0, 0));
+    (row.0.max(0) as u32, (row.1 as f32 * 0.001).max(0.1))
 }
 
 /// `doodad_almighties.model` as a pak path.

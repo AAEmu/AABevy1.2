@@ -830,13 +830,18 @@ pub struct SendState {
     /// In a freefall ([`super::jump::freefall`]).
     freefall: bool,
     /// The collision around the character is built (or the wait for it ran out), see [`COLLISION_WAIT`].
-    settled: bool,
+    pub(crate) settled: bool,
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
 }
 
 impl SendState {
+    /// Stops auto-run when a movie starts; the normal input path restarts it only from new keys.
+    pub(crate) fn stop_autorun(&mut self) {
+        self.autorun = AutoRun::default();
+    }
+
     /// Reports the position in the next step, moving or not (getting on and off a mount).
     pub fn send_now(&mut self) {
         self.sent_first = false;
