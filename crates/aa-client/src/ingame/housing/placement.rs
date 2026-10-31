@@ -45,7 +45,7 @@ use aa_net::Houses;
 use aa_net::housing::HouseCommand;
 use aa_net::model::UnitKind;
 use aa_net::state::{Doodads, Units};
-use aa_net::{Command, Event, NetCommand, NetEvent};
+use aa_net::{Command, NetCommand};
 use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -106,6 +106,9 @@ pub struct Build {
     pub error: Option<&'static str>,
     /// The quote's total tax (copper), sent back with `CSCreateHouse`.
     pub total_tax: i32,
+    /// The z sent with `CSConstructHouseTax`; `CSCreateHouse` reuses it so both carry one z
+    /// (the capture's 0x56 and 0x57 both show 173.05162, `37 0d 2d 43`).
+    quote_z: Option<f32>,
     /// The finished model's local AABB (cry space), once the ghost's parts are prepared
     /// (`FUN_3908d400`; the terrain check and the spot's z use it).
     pub(crate) model_box: Option<(Vec3, Vec3)>,
@@ -127,6 +130,7 @@ impl Build {
             yaw,
             error: None,
             total_tax,
+            quote_z: None,
             model_box: None,
             ghost: None,
             meshes: Vec::new(),
@@ -169,8 +173,8 @@ pub enum BuilderSignal {
     Locked(u32),
 }
 
-/// `FUN_393a6de0`: the 30 s lock after a world load or teleport; placing a design item during it
-/// shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds (recapture2 saw 22).
+/// `FUN_393a6de0`: the 30 s lock at the end of a world load (`FUN_39426520`); placing a design
+/// item during it shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds (recapture2 saw 22).
 #[derive(Resource, Default)]
 pub struct PlacementLock {
     until: Option<f32>,
@@ -194,16 +198,15 @@ pub fn arm_on_entry(mut lock: ResMut<PlacementLock>, time: Res<Time>) {
     lock.arm(time.elapsed_secs());
 }
 
-/// Arms the placement lock after a teleport (`FUN_39017730` runs the same `FUN_393a6de0`).
-pub fn arm_on_teleport(
+/// Arms the placement lock when a world load or instance load finishes
+/// (`FUN_39426520` calls `FUN_393a6de0`); a short teleport that needs no load does not.
+pub fn arm_on_world_load(
     mut lock: ResMut<PlacementLock>,
     time: Res<Time>,
-    mut events: MessageReader<NetEvent>,
+    mut loads: MessageReader<crate::ingame::teleport::WorldLoadFinished>,
 ) {
-    for NetEvent(event) in events.read() {
-        if matches!(event, Event::Teleported { .. }) {
-            lock.arm(time.elapsed_secs());
-        }
+    if loads.read().next().is_some() {
+        lock.arm(time.elapsed_secs());
     }
 }
 
@@ -227,6 +230,7 @@ impl Builder {
             return;
         }
         self.last_create = Some(now);
+        let z = b.quote_z.unwrap_or(b.pos.z);
         let pos = data::get()
             .and_then(|d| d.designs.get(&b.design))
             .map_or(b.pos.truncate(), |d| snap_spot(b.pos.truncate(), footprint_half(d.garden_radius)));
@@ -238,7 +242,7 @@ impl Builder {
             design_id: b.design,
             x: pos.x,
             y: pos.y,
-            z: b.pos.z,
+            z,
             z_rot: b.yaw,
             item_id: b.item_id,
             money_amount: b.total_tax,
@@ -549,6 +553,7 @@ pub fn start(
             yaw: 0.0,
             error: None,
             total_tax: 0,
+            quote_z: None,
             model_box: None,
             ghost: None,
             meshes: Vec::new(),
@@ -639,6 +644,7 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
                 return;
             }
             info!("housing: tax of design {} at ({:.1}, {:.1}, {:.1})", b.design, b.pos.x, b.pos.y, b.pos.z);
+            b.quote_z = Some(b.pos.z);
             net.write(NetCommand(Command::House(HouseCommand::ConstructHouseTax { design_id: b.design, x: b.pos.x, y: b.pos.y, z: b.pos.z })));
             b.stage = Stage::Quote;
             rotation_mode(bridge.as_deref(), false);
@@ -929,6 +935,7 @@ pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSig
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aa_net::{Event, NetEvent};
     #[test]
     fn refused_rotate_click_reasserts_builder_after_mode_bar_promotion() {
         use crate::hud::api::{HudBridge, HudData};
@@ -954,6 +961,7 @@ mod tests {
                     yaw: 0.,
                     error: Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"),
                     total_tax: 0,
+                    quote_z: None,
                     model_box: None,
                     ghost: None,
                     meshes: Vec::new(),
@@ -1206,32 +1214,23 @@ mod tests {
 
     #[test]
     fn the_terrain_check_uses_the_rotated_model_box_and_returns_the_lowest_sample() {
+        // asymmetric box: a sign error in the yaw would swap the two quarter turns
         let base = Site {
             pos: Vec2::splat(50.0),
             yaw: 0.0,
-            model_box: Some((Vec3::new(-4.0, -2.0, -5.0), Vec3::new(4.0, 2.0, 5.0))),
+            model_box: Some((Vec3::new(-5.0, -1.0, -5.0), Vec3::new(3.0, 4.0, 10.0))),
         };
-        let height = |x: f32, _y: f32| Some((x - 50.0) * 1.5);
-        // unrotated the 8 m model box spans 12 m of a 1.5 slope: refused
-        assert!(terrain_too_steep(base, 14.0, height));
-        // a quarter turn uses the box's 4 m y extent: exactly 6 m, allowed
-        let turned = Site {
-            yaw: std::f32::consts::FRAC_PI_2,
-            ..base
-        };
-        assert!(!terrain_too_steep(turned, 14.0, height));
+        let height = |x: f32, _y: f32| Some((x * x + x) * 0.01224);
+        assert!(terrain_too_steep(base, 14.0, height), "unrotated");
+        let turned = Site { yaw: std::f32::consts::FRAC_PI_2, ..base };
+        assert!(!terrain_too_steep(turned, 14.0, height), "+90 degrees stays under 6 m");
+        let mirrored = Site { yaw: -std::f32::consts::FRAC_PI_2, ..base };
+        assert!(terrain_too_steep(mirrored, 14.0, height), "-90 degrees goes over 6 m");
         let (min, max) = terrain_samples(turned, 14.0, height).unwrap();
-        assert_eq!((min, max), (-3.0, 3.0));
-        assert_eq!(lowest_sample(turned, 14.0, height), Some(-3.0));
+        assert!((min - 26.462_88).abs() < 0.001 && (max - 32.460_48).abs() < 0.001);
+        assert!((lowest_sample(turned, 14.0, height).unwrap() - 26.462_88).abs() < 0.001);
         // without a model box the footprint (28 m here) is sampled as before
-        assert!(terrain_too_steep(
-            Site {
-                model_box: None,
-                ..turned
-            },
-            14.0,
-            height
-        ));
+        assert!(terrain_too_steep(Site { model_box: None, ..turned }, 14.0, height));
         // a corner without terrain leaves the check to the server
         assert!(!terrain_too_steep(base, 14.0, |_, _| None));
     }
@@ -1373,6 +1372,60 @@ mod tests {
     }
 
     #[test]
+    fn the_tax_and_create_use_one_z() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<HudPointerOverUi>()
+            .add_message::<NetCommand>()
+            .add_message::<BuilderSignal>()
+            .insert_resource(Builder {
+                build: Some(Build {
+                    design: 171,
+                    item_id: 1,
+                    item_template: 21_165,
+                    stage: Stage::Rotate,
+                    pos: Vec3::new(15328.0, 14632.0, 173.05162),
+                    yaw: 0.0,
+                    error: None,
+                    total_tax: 0,
+                    quote_z: None,
+                    model_box: None,
+                    ghost: None,
+                    meshes: Vec::new(),
+                    shown_error: None,
+                }),
+                clicks: 1,
+                ..default()
+            })
+            .add_systems(Update, input);
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        let NetCommand(Command::House(HouseCommand::ConstructHouseTax { z, .. })) = &commands[0] else {
+            panic!("not a tax: {commands:?}");
+        };
+        assert_eq!(*z, 173.05162);
+        assert_eq!(app.world().resource::<Builder>().build.as_ref().unwrap().quote_z, Some(173.05162));
+        // a later z rewrite (the model box arriving) must not change the create's z
+        app.add_systems(
+            Update,
+            |mut builder: ResMut<Builder>, mut net: MessageWriter<NetCommand>, mut signals: MessageWriter<BuilderSignal>| {
+                let Some(build) = builder.build.as_mut() else { return };
+                build.stage = Stage::Confirm;
+                build.pos.z = 100.0;
+                builder.commit(10.0, &mut net, &mut signals);
+            },
+        );
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        let NetCommand(Command::House(HouseCommand::CreateHouse { z, .. })) = &commands[0] else {
+            panic!("not a create: {commands:?}");
+        };
+        assert_eq!(*z, 173.05162, "CSCreateHouse reuses the tax z");
+    }
+
+    #[test]
     fn the_placement_and_create_locks_report_their_remaining_seconds() {
         let mut lock = PlacementLock::default();
         assert_eq!(lock.remaining(0.0), None);
@@ -1409,25 +1462,26 @@ mod tests {
     }
 
     #[test]
-    fn a_teleport_arms_the_placement_lock() {
+    fn a_short_teleport_does_not_lock_but_a_world_load_does() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<NetEvent>()
+            .add_message::<crate::ingame::teleport::WorldLoadFinished>()
             .init_resource::<PlacementLock>()
-            .add_systems(Update, arm_on_teleport);
-        app.world_mut()
-            .resource_mut::<Messages<NetEvent>>()
-            .write(NetEvent(Event::Teleported {
-                pos: aa_net::wire::Pos::default(),
-                yaw: 0.0,
-                reason: 0,
-            }));
+            .add_systems(Update, arm_on_world_load);
+        app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::Teleported {
+            pos: aa_net::wire::Pos::default(),
+            yaw: 0.0,
+            reason: 0,
+        }));
         app.update();
         let now = app.world().resource::<Time>().elapsed_secs();
-        assert_eq!(
-            app.world().resource::<PlacementLock>().remaining(now),
-            Some(30)
-        );
+        assert_eq!(app.world().resource::<PlacementLock>().remaining(now), None, "a short teleport must not lock");
+        app.world_mut()
+            .resource_mut::<Messages<crate::ingame::teleport::WorldLoadFinished>>()
+            .write(crate::ingame::teleport::WorldLoadFinished);
+        app.update();
+        assert_eq!(app.world().resource::<PlacementLock>().remaining(now), Some(30), "a world load must lock");
     }
 
     #[test]

@@ -58,9 +58,10 @@ Using a design item does not cast: `placement::start` reads the `SkillPressed` o
    the quoted tax, at most once per 5 s; a second press shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds)
    and the builder ends; Cancel (`PrevStepFromBuildCheck`) returns to Position.
 
-A world load or teleport arms the 30 s placement lock (`FUN_393a6de0`, `_DAT_39ac7748` = 30000 ms): using a design
-item during it shows `CANNOT_LOCATE_DOODAD_NOW` with the seconds left (the recapture2 "22 second(s)") and does not
-start the builder.
+The end of a world load or instance load (`FUN_39426520`, including `SCLoadInstance`) arms the 30 s placement lock
+(`FUN_393a6de0`, `_DAT_39ac7748` = 30000 ms; teleport.rs raises `WorldLoadFinished` then): using a design item during
+it shows `CANNOT_LOCATE_DOODAD_NOW` with the seconds left (the recapture2 "22 second(s)") and does not start the
+builder. A short teleport that needs no load does not arm it.
 
 A right click goes back a step (Rotate -> Position, Position -> end), Escape ends it. `BUILDER_STEP` (`0x224`) is raised
 on every step, `BUILDER_END` (`0x225`) when it ends (the build window closes with it).
@@ -81,7 +82,8 @@ checks (`39333E20`, `39334060`, `39335860` natively) are the original client's, 
   of mask `0x1f` are capture-pending). The player's own mount, mate and slave are skipped (the server's
   `player_owned`), and so is every doodad attached to a house;
 * terrain over the ghost's rotated model box (its four corners and centre, `FUN_39326c10`) may vary by at most
-  6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`), and the spot's z is the lowest of those samples.
+  6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`), and the spot's z is the lowest of those samples. `CSConstructHouseTax`
+  and `CSCreateHouse` both carry that one z; the capture shows 173.05162 (`37 0d 2d 43`) in both.
 
 The houseless / existing-category rules against the account's other houses are the server's. The refused ghost wears
 the red of `materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land
