@@ -316,7 +316,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.in_set(AimInput).in_set(crate::hud::cinema::CinemaInputRead).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
         .add_systems(OnEnter(Screen::InGame), plant::lock_on_world_enter.run_if(resource_exists::<crate::ingame::teleport::Teleport>))
-        .add_systems(Update, (dev_script, plant::lock_on_arrival, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(Update, (dev_script, plant::lock_on_world_load, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
@@ -611,6 +611,20 @@ fn route(
                 }
                 continue;
             }
+            // the 2 s post-send cooldown (FUN_393a89d0 -> now + 2000, FUN_393a9540 error 0x163); like the 30 s lock,
+            // it refuses a new aim only, so the same item again still cancels the current one
+            if !again
+                && lock
+                    .as_deref()
+                    .is_some_and(|lock| lock.post_send_refused(now))
+            {
+                info!(
+                    "plant: post-send cooldown, error 0x163 ({})",
+                    plant::PLANT_POST_SEND_ERROR
+                );
+                refused.write(crate::hud::ShowError(plant::PLANT_POST_SEND_ERROR));
+                continue;
+            }
             crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
             aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant), fixed_spot: false });
             continue;
@@ -713,6 +727,8 @@ fn aim_input(
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut net: MessageWriter<NetCommand>,
     mut flight: ResMut<InFlight>,
+    mut lock: Option<ResMut<plant::PlantLock>>,
+    time: Option<Res<Time>>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
 ) {
     let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
@@ -744,6 +760,12 @@ fn aim_input(
         }
     }
     if cancel {
+        if aim.plant.is_some() {
+            // the builder destructor without a send clears the post-send cooldown (`FUN_393a89d0`)
+            if let Some(lock) = lock.as_mut() {
+                lock.clear_post_send();
+            }
+        }
         info!("ground: aiming skill {} cancelled", aim.press.skill);
         aiming.0 = None;
         return;
@@ -754,9 +776,15 @@ fn aim_input(
     let Ok(mut mover) = player.single_mut() else { return };
     if let Some(plant) = aim.plant.as_ref() {
         // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free.
-        // F3: two sends 13 s apart both succeeded, so a send does not start the reuse lock.
+        // A send ends the builder (and with it arms the 2 s post-send cooldown; F3's two sends 13 s apart only show
+        // that the 30 s world-load lock is not armed by a send).
         match aim.spot {
-            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => aiming.0 = None,
+            Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => {
+                if let Some(lock) = lock.as_mut() {
+                    lock.hold_post_send(f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs)));
+                }
+                aiming.0 = None;
+            }
             Some(_) => info!("plant: that spot cannot be used"),
             None => info!("plant: no ground under the cursor"),
         }
@@ -1020,6 +1048,153 @@ mod tests {
         app.update();
         assert!(pending(&app));
         assert_eq!(app.world().resource::<Sent>().0.len(), 2);
+    }
+
+    #[test]
+    fn a_sent_seed_starts_the_2s_post_send_cooldown_with_error_0x163() {
+        use std::time::Duration;
+        let Some(db) = crate::ingame::data::Db::open() else {
+            return;
+        };
+        let press = SkillPressed {
+            skill: 25536,
+            item: Some((1, 15646)),
+            target_obj_id: 0,
+            gcd: false,
+        };
+        let (skill, rice) = plant::begin(&press, &db).expect("the rice seed places doodad 2246");
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .insert_resource(db)
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Sent>()
+            .init_resource::<Errors>()
+            .init_resource::<plant::PlantLock>()
+            .init_resource::<Time>()
+            .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems))
+            .add_systems(Update, (route, collect, collect_errors).chain());
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 1 },
+            Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        app.world_mut().resource_mut::<Aiming>().set_plant_preview(
+            press,
+            skill,
+            rice,
+            Some((Vec3::new(0.0, 5.0, 0.0), true)),
+        );
+        app.world_mut().resource_mut::<Script>().click();
+        app.update();
+        assert!(
+            app.world().resource::<Aiming>().0.is_none(),
+            "the send ends the builder"
+        );
+        assert!(
+            app.world()
+                .resource::<Sent>()
+                .0
+                .iter()
+                .any(|c| matches!(c, Command::CreateDoodad(_)))
+        );
+        assert!(
+            app.world()
+                .resource::<plant::PlantLock>()
+                .post_send_refused(0.0),
+            "the send arms 2 s"
+        );
+        // a use during the cooldown: error 0x163, no builder
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_none());
+        assert_eq!(app.world().resource::<Errors>().0, [0x163]);
+        // exactly 2 s after the send the next use starts a builder again
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs(2));
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_some());
+    }
+
+    #[test]
+    fn the_same_seed_again_cancels_the_aim_under_either_lock() {
+        let Some(db) = crate::ingame::data::Db::open() else {
+            return;
+        };
+        let press = SkillPressed {
+            skill: 25536,
+            item: Some((1, 15646)),
+            target_obj_id: 0,
+            gcd: false,
+        };
+        let (skill, rice) = plant::begin(&press, &db).expect("the rice seed places doodad 2246");
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .insert_resource(db)
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .init_resource::<Errors>()
+            .init_resource::<plant::PlantLock>()
+            .init_resource::<Time>()
+            .add_systems(Update, (route, collect, collect_errors).chain());
+        let aim = |app: &mut App| {
+            app.world_mut().resource_mut::<Aiming>().set_plant_preview(
+                press,
+                skill,
+                rice.clone(),
+                Some((Vec3::new(0.0, 5.0, 0.0), true)),
+            );
+        };
+        // the 30 s world-load lock refuses a new aim but lets the same seed cancel
+        app.world_mut().resource_mut::<plant::PlantLock>().hold(0.0);
+        aim(&mut app);
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_none());
+        assert!(app.world().resource::<Errors>().0.is_empty());
+        // the 2 s post-send cooldown behaves the same
+        *app.world_mut().resource_mut::<plant::PlantLock>() = plant::PlantLock::default();
+        app.world_mut()
+            .resource_mut::<plant::PlantLock>()
+            .hold_post_send(0.0);
+        aim(&mut app);
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_none());
+        assert!(app.world().resource::<Errors>().0.is_empty());
     }
 
     #[test]
