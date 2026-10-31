@@ -511,14 +511,19 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 * **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
   completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
   follows 0x0ce; the client sends no cancel. Bevy drops `KeyboardInput`, `MouseButtonInput`,
-  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:540`); with chat focused only
+  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:556`); with chat focused only
   keyboard text is left, while the mouse and the button mirrors stay gated. Saved `Actions` and
   auto-run are cleared. The 2026-10-31 capture (`2026-10-31-cinemacap` cases 1c/1b) shows that 1.2
   then keeps game input blocked for about 2.4 s after the movie: a key still physically held is
-  replayed only after that window, while a key released during the movie or the window is not
-  replayed (capture-measured; no matching x2game timer was found). Escape is never replayed. It
-  ends with 0x0ce then the quest request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is
-  left alone: no 1.2 row covers it. The close/X button was not drivable (C1b, open).
+  replayed only after that window as a held action (no tap edge, so movement starts and its physical
+  release stops it), while a key released during the movie or the window is not replayed
+  (capture-measured; no matching x2game timer was found). Escape is never replayed. Held mouse
+  buttons (RMB mouselook, LMB+RMB forward) are tracked and replayed the same way; the capture held
+  only W, so mouse handling is inferred, not captured. The HUD is restored at the movie end; the
+  capture still shows the original's ending/loading screen at end+0.7 s and the HUD at end+11 s, so
+  the original's HUD return within that range is unverified. It ends with 0x0ce then the quest
+  request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no 1.2 row covers
+  it. The close/X button was not drivable (C1b, open).
 * **0x0d0.** The u32 body is the component id, not the quest id: `C1-click` sends 5336 = `d8 14`
   and `C2-call` sends 6758 = `66 1a`. It is sent when the directing dialog opens for a Start/Ready
   component with a cinema, after `CSInteractNPC` (`C1-click`: 19:57:33), not at G. The
@@ -545,17 +550,17 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
   `CSStartedCinema` in the same second (20:23:39), `CSCompletedCinema` 12 s later, and no 0x0d0.
   Bevy starts a Progress component's `cinema_id` only from a live `QuestUpdated`; a
   `QuestsLoaded` relog does not replay it. Dropping or completing a quest forgets its played
-  entries, so re-accepting plays the movie again (`cinema.rs:349`).
+  entries, so re-accepting plays the movie again (`cinema.rs:353`).
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:305`, `cinema.rs:591`); the movie camera is in the
+after the movie (`cinema.rs:307`, `cinema.rs:617`); the movie camera is in the
 final `CameraFinal` set after `cam_fov`, so a quest or buff lens cannot win. Only the world camera
 (its `OrbitCamera` marker) is driven, not preview cameras. Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
-(`cinema.rs:231`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:420`). The `ObjCinema` act steps remain only tracked
-(`cinema.rs:76`).
+(`cinema.rs:233`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:424`). The `ObjCinema` act steps remain only tracked
+(`cinema.rs:78`).
 
 Still capture-pending: **C1b** the close/X button during a movie; **C7** whether the cinema17 repro
 runs 1-2 confirmed the same dialog opened at 16:20:59/16:29:42. Chat typing during a movie is also

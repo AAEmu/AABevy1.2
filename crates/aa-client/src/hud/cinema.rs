@@ -6,7 +6,9 @@
 //! `CSStartQuestContext` / `CSCompleteQuestContext` (`cinema_flow`). Escape is ignored during the
 //! movie (capture C1-run3); the close/X button was not drivable (C1b). Keyboard and mouse events
 //! are dropped at the source while a movie plays, except while chat has the keyboard, and for a
-//! capture-measured 2.4 s after it ends (2026-10-31 capture cases 1c/1b).
+//! capture-measured 2.4 s after it ends (2026-10-31 capture cases 1c/1b). Keys still down are
+//! replayed as held actions after the window; mouse buttons are replayed the same way, inferred
+//! from the key behaviour because the capture did not hold them (`docs/aa-client-parity.md`).
 //!
 //! The sequence itself is the camera work: the Scene node's camera track selects a Camera node and
 //! its position/rotation/FOV tracks are sampled here. A missing sequence, or an animation the pak
@@ -62,7 +64,7 @@ pub(super) fn plugin(app: &mut App) {
     )
     .add_systems(
         PreUpdate,
-        (track_held_keys, block_cinema_input)
+        (track_held_input, block_cinema_input)
             .chain()
             .in_set(CinemaInputGate),
     );
@@ -332,10 +334,12 @@ pub struct CinemaPlayer {
     hide_dialog: bool,
     played: HashSet<(u32, u32)>,
     queued: std::collections::VecDeque<Queued>,
-    /// Physically held keys, tracked from the first movie frame and through the post-movie block.
+    /// Physically held keys and mouse buttons, tracked from the first movie frame and through the
+    /// post-movie block.
     held_keys: Vec<KeyCode>,
-    /// The first movie frame takes the held-key snapshot; later frames only apply key edges.
-    keys_tracked: bool,
+    held_mouse: Vec<MouseButton>,
+    /// The first movie frame takes the held-input snapshot; later frames only apply its edges.
+    input_tracked: bool,
     /// Seconds the game input stays blocked after the movie (1.2 capture 1c, see [`RELEASE_BLOCK_SECS`]).
     resume_in: Option<f32>,
 }
@@ -510,19 +514,22 @@ pub(crate) fn tick_cinema(time: Res<Time>, mut player: ResMut<CinemaPlayer>, mut
     }
 }
 
-/// Follows the physical keyboard while a movie (and its release window) blocks game input: the
-/// first frame snapshots what is down, later frames apply the real press/release edges.
-pub(crate) fn track_held_keys(
+/// Follows the physical keyboard and mouse while a movie (and its release window) blocks game
+/// input: the first frame snapshots what is down, later frames apply the real press/release edges.
+pub(crate) fn track_held_input(
     mut player: ResMut<CinemaPlayer>,
     keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
     mut keyboard: MessageReader<KeyboardInput>,
+    mut buttons: MessageReader<MouseButtonInput>,
 ) {
     if player.blocking() {
-        if !player.keys_tracked {
+        if !player.input_tracked {
             player.held_keys = keys.get_pressed().copied().collect();
-            player.keys_tracked = true;
+            player.held_mouse = mouse.get_pressed().copied().collect();
+            player.input_tracked = true;
         }
-    } else if !player.keys_tracked {
+    } else if !player.input_tracked {
         return;
     }
     for event in keyboard.read() {
@@ -532,6 +539,15 @@ pub(crate) fn track_held_keys(
             }
         } else {
             player.held_keys.retain(|key| *key != event.key_code);
+        }
+    }
+    for event in buttons.read() {
+        if event.state == bevy::input::ButtonState::Pressed {
+            if !player.held_mouse.contains(&event.button) {
+                player.held_mouse.push(event.button);
+            }
+        } else {
+            player.held_mouse.retain(|button| *button != event.button);
         }
     }
 }
@@ -549,18 +565,25 @@ pub(crate) fn block_cinema_input(
     mut send: Option<ResMut<crate::ingame::player::SendState>>,
 ) {
     if !player.blocking() {
-        let held = !player.held_keys.is_empty();
+        let mut held = Vec::new();
         for key in player.held_keys.drain(..) {
-            // releases have already been applied by `track_held_keys`, including one in this
+            // releases have already been applied by `track_held_input`, including one in this
             // same frame; Escape is not replayed as a fresh press
             if key != KeyCode::Escape {
                 keys.press(key);
+                held.push(key);
             }
         }
-        if held {
-            actions.reread_physical();
+        let held_mouse: Vec<MouseButton> = player.held_mouse.drain(..).collect();
+        for button in &held_mouse {
+            mouse.press(*button);
         }
-        player.keys_tracked = false;
+        if !held.is_empty() || !held_mouse.is_empty() {
+            // hold, not tap: the movement systems read `pressed`, and the release edge still comes
+            // from the physical key/button
+            actions.replay_held(held, held_mouse);
+        }
+        player.input_tracked = false;
         return;
     }
     keys.reset_all();
@@ -576,6 +599,9 @@ pub(crate) fn block_cinema_input(
     }
 }
 
+/// The talk window is hidden with the HUD while the movie plays and restored when it ends. The
+/// 2026-10-31 capture shows the original still on its ending/loading screen at end+0.7 s and the
+/// HUD at end+11 s, so when the original brings the HUD back is not pinned (unverified).
 pub(crate) fn cinema_ui(rt: Option<NonSend<aa_ui::UiRuntime>>, bridge: Option<NonSend<super::api::HudBridge>>, mut player: ResMut<CinemaPlayer>) {
     let Some(bridge) = bridge else { return };
     let mut data = bridge.0.borrow_mut();
@@ -661,7 +687,8 @@ mod tests {
             played: Default::default(),
             queued: Default::default(),
             held_keys: Default::default(),
-            keys_tracked: false,
+            held_mouse: Default::default(),
+            input_tracked: false,
             resume_in: None,
         };
         player.playing.as_mut().unwrap().elapsed = 2.0;
@@ -706,13 +733,14 @@ mod tests {
                 played: Default::default(),
                 queued: Default::default(),
                 held_keys: Default::default(),
-                keys_tracked: false,
+                held_mouse: Default::default(),
+                input_tracked: false,
                 resume_in: None,
             })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
+            .add_systems(PreUpdate, (track_held_input, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::Escape);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
@@ -777,13 +805,14 @@ mod tests {
                 played: Default::default(),
                 queued: Default::default(),
                 held_keys: Default::default(),
-                keys_tracked: false,
+                held_mouse: Default::default(),
+                input_tracked: false,
                 resume_in: None,
             })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
+            .add_systems(PreUpdate, (track_held_input, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.world_mut().resource_mut::<crate::settings::Actions>().hold_for_test("moveforward");
         app.update();
@@ -811,9 +840,37 @@ mod tests {
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
             .add_message::<NetCommand>()
-            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain())
+            .add_systems(PreUpdate, (track_held_input, block_cinema_input).chain())
             .add_systems(Update, tick_cinema);
         app
+    }
+
+    /// The real `settings::update` with an isolated default keymap, for the movement-action tests.
+    /// Needs the game pak only for `default_binding.g`.
+    fn settings_app(player: CinemaPlayer) -> Option<(App, std::path::PathBuf)> {
+        if !aa_world::pak_available() {
+            return None;
+        }
+        let rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).ok()?;
+        rt.lua
+            .globals()
+            .set("NET", rt.lua.create_table().ok()?)
+            .ok()?;
+        rt.lua
+            .globals()
+            .set("X2Hotkey", rt.lua.create_table().ok()?)
+            .ok()?;
+        let path = crate::settings::isolated_bindings(&rt).ok()?;
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(
+            super::super::api::HudData::default(),
+        ));
+        let mut app = cinema_app(player);
+        app.init_resource::<super::super::HudPointerOverUi>()
+            .insert_non_send(rt)
+            .insert_non_send(super::super::api::HudBridge(shared))
+            .add_message::<bevy::input::keyboard::KeyboardFocusLost>()
+            .add_systems(Update, crate::settings::update_input);
+        Some((app, path))
     }
 
     fn step(app: &mut App, dt: f32) {
@@ -821,6 +878,26 @@ mod tests {
             .resource_mut::<Time>()
             .advance_by(std::time::Duration::from_secs_f32(dt));
         app.update();
+    }
+
+    fn play_to_end(app: &mut App) {
+        for _ in 0..1000 {
+            if app.world().resource::<CinemaPlayer>().playing.is_none() {
+                return;
+            }
+            step(app, 0.01);
+        }
+        panic!("the movie did not end");
+    }
+
+    fn mouse_event(app: &mut App, button: MouseButton, state: bevy::input::ButtonState) {
+        app.world_mut()
+            .resource_mut::<Messages<MouseButtonInput>>()
+            .write(MouseButtonInput {
+                button,
+                state,
+                window: Entity::PLACEHOLDER,
+            });
     }
 
     fn key_event(app: &mut App, key: KeyCode, state: bevy::input::ButtonState) {
@@ -848,7 +925,8 @@ mod tests {
             played: Default::default(),
             queued: Default::default(),
             held_keys: Default::default(),
-            keys_tracked: false,
+            held_mouse: Default::default(),
+            input_tracked: false,
             resume_in: None,
         }
     }
@@ -860,43 +938,96 @@ mod tests {
     }
 
     #[test]
-    fn a_long_movie_replays_a_key_held_throughout_only_after_the_release_window() {
-        let mut app = cinema_app(started_movie());
+    fn a_long_movie_replays_a_held_key_only_after_the_release_window() {
+        let Some((mut app, path)) = settings_app(started_movie()) else {
+            return;
+        };
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyW);
         step(&mut app, 0.0);
-        for _ in 0..100 {
-            step(&mut app, 0.1);
-            if app.world().resource::<CinemaPlayer>().playing.is_none() {
-                break;
-            }
-        }
-        assert!(app.world().resource::<CinemaPlayer>().playing.is_none());
+        play_to_end(&mut app);
         assert!(app.world().resource::<CinemaPlayer>().resume_in.is_some());
-        assert!(
-            !app.world()
-                .resource::<ButtonInput<KeyCode>>()
-                .pressed(KeyCode::KeyW),
-            "the key stays blocked after the movie"
-        );
-        run(&mut app, 23);
-        while app.world().resource::<CinemaPlayer>().resume_in.is_some() {
+        let moving = |app: &App| {
+            app.world()
+                .resource::<crate::settings::Actions>()
+                .pressed("moveforward", 0)
+        };
+        assert!(!moving(&app), "the action stays blocked after the movie");
+        for _ in 0..230 {
+            step(&mut app, 0.01);
             assert!(
-                !app.world()
-                    .resource::<ButtonInput<KeyCode>>()
-                    .pressed(KeyCode::KeyW),
-                "the key stays blocked through the window"
+                app.world().resource::<CinemaPlayer>().resume_in.is_some(),
+                "the block ended before end+2.3 s"
             );
-            step(&mut app, 0.1);
+            assert!(!moving(&app), "no movement action before end+2.3 s");
         }
-        step(&mut app, 0.0);
+        for _ in 0..20 {
+            step(&mut app, 0.01);
+        }
+        assert!(
+            moving(&app),
+            "the held key becomes a movement action by end+2.5 s"
+        );
         assert!(
             app.world()
                 .resource::<ButtonInput<KeyCode>>()
-                .pressed(KeyCode::KeyW),
-            "the key comes back when input resumes"
+                .pressed(KeyCode::KeyW)
         );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::KeyW);
+        key_event(&mut app, KeyCode::KeyW, bevy::input::ButtonState::Released);
+        step(&mut app, 0.0);
+        assert!(!moving(&app), "the action stops on the key's release");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn mouse_buttons_are_tracked_like_keys_through_the_movie_and_window() {
+        let mut app = cinema_app(started_movie());
+        {
+            let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            mouse.press(MouseButton::Right);
+            mouse.press(MouseButton::Left);
+        }
+        step(&mut app, 0.0);
+        run(&mut app, 45);
+        assert!(app.world().resource::<CinemaPlayer>().resume_in.is_some());
+        mouse_event(
+            &mut app,
+            MouseButton::Left,
+            bevy::input::ButtonState::Released,
+        );
+        run(&mut app, 30);
+        let mouse = app.world().resource::<ButtonInput<MouseButton>>();
+        assert!(
+            mouse.pressed(MouseButton::Right),
+            "a held RMB comes back after the window"
+        );
+        assert!(
+            !mouse.pressed(MouseButton::Left),
+            "an LMB released during the window stays released"
+        );
+    }
+
+    #[test]
+    fn a_held_mouse_binding_is_replayed_after_the_window() {
+        let Some((mut app, path)) = settings_app(started_movie()) else {
+            return;
+        };
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Back);
+        step(&mut app, 0.0);
+        run(&mut app, 70);
+        assert!(
+            app.world()
+                .resource::<crate::settings::Actions>()
+                .pressed("autorun", 0),
+            "a held mouse binding becomes a held action"
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -993,13 +1124,14 @@ mod tests {
                 played: Default::default(),
                 queued: Default::default(),
                 held_keys: Default::default(),
-                keys_tracked: false,
+                held_mouse: Default::default(),
+                input_tracked: false,
                 resume_in: None,
             })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
+            .add_systems(PreUpdate, (track_held_input, block_cinema_input).chain());
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyW);
         app.update();
         app.world_mut().resource_mut::<CinemaPlayer>().playing = None;
@@ -1020,7 +1152,8 @@ mod tests {
             played: Default::default(),
             queued: Default::default(),
             held_keys: Default::default(),
-            keys_tracked: false,
+            held_mouse: Default::default(),
+            input_tracked: false,
             resume_in: None,
         };
         player.playing.as_mut().unwrap().elapsed = 2.0;
@@ -1100,7 +1233,8 @@ mod tests {
             played: Default::default(),
             queued: Default::default(),
             held_keys: Default::default(),
-            keys_tracked: false,
+            held_mouse: Default::default(),
+            input_tracked: false,
             resume_in: None,
         };
         let mut app = App::new();
@@ -1132,7 +1266,9 @@ mod tests {
         }
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let Ok(game) = super::super::GameData::load(&path) else { return };
-        let shared = std::rc::Rc::new(std::cell::RefCell::new(super::super::api::HudData::default()));
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(
+            super::super::api::HudData::default(),
+        ));
         {
             let mut data = shared.borrow_mut();
             data.game = super::super::SharedGameData::default();
@@ -1182,13 +1318,14 @@ mod tests {
                 played: Default::default(),
                 queued: Default::default(),
                 held_keys: Default::default(),
-                keys_tracked: false,
+                held_mouse: Default::default(),
+                input_tracked: false,
                 resume_in: None,
             })
             .add_message::<KeyboardInput>()
             .add_message::<MouseButtonInput>()
             .add_message::<MouseWheel>()
-            .add_systems(PreUpdate, (track_held_keys, block_cinema_input).chain());
+            .add_systems(PreUpdate, (track_held_input, block_cinema_input).chain());
         app.world_mut().resource_mut::<Messages<KeyboardInput>>().write(KeyboardInput { key_code: KeyCode::KeyA, logical_key: bevy::input::keyboard::Key::Character("a".into()), state: bevy::input::ButtonState::Pressed, text: Some("a".into()), repeat: false, window: Entity::PLACEHOLDER });
         app.world_mut().resource_mut::<Messages<MouseButtonInput>>().write(MouseButtonInput { button: MouseButton::Left, state: bevy::input::ButtonState::Pressed, window: Entity::PLACEHOLDER });
         app.update();
