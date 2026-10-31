@@ -2177,8 +2177,8 @@ mod tests {
     /// The 2026-10-31 recapture's glider bodies, byte for byte against the server's `UnitMove.Read`
     /// (`aaemu-game/src/models/movement.rs:418-438`): 9-byte position (three fixed-point components), velocity 3 x i16,
     /// rotation 3 x i8, delta movement 3 x i8, stance, alertness, actor flags, then `fallVel` only when 0x80 is set.
-    /// Glide: stance 1, flags 0, actor flags 0x04. Landing: stance 1, flags 4, actor flags 0x0E. Fold stop: stance 2,
-    /// flags 0, actor flags 0 (`handoff/2026-10-31-recapture2.md` S14).
+    /// Flight rows 5137-5287: stance 1, actor flags 0, move flags 2 with delta 0x7f while W is held (row 5124). The exact
+    /// landing packet is capture-pending; this uses the ordinary grounded packet (stance 1, flags 4, actor flags 0x04).
     #[test]
     fn gliding_type_1_bodies_match_the_server_unit_move_reader() {
         let cmd = crate::session::MoveCommand {
@@ -2189,7 +2189,7 @@ mod tests {
             velocity: [1024, -2048, 512],
             delta_movement: [0, 127, 0],
             wire_flags: Some(0),
-            wire_actor_flags: Some(0x04),
+            wire_actor_flags: Some(0),
             ..crate::session::MoveCommand::default()
         }
         .with_state(crate::session::MoveState::Ground);
@@ -2217,25 +2217,21 @@ mod tests {
         assert_eq!(server.delta_movement, [0, 127, 0]);
         assert_eq!(server.stance, stance::RELAXED);
         assert_eq!(server.alertness, 0);
-        assert_eq!(server.actor_flags, 0x04);
+        assert_eq!(server.actor_flags, 0);
         assert_eq!(
             body.len(),
             9 + 6 + 3 + 3 + 3,
             "no fall velocity block without 0x80"
         );
-        // The server's `on_actor_move` (`skills/mod.rs:278-292`) sees a grounded glider (0x04).
-        assert!(
-            server.actor_flags & actor_flags::STANDING_ON_SOLID != 0,
-            "the captured glide packet is grounded"
-        );
+        // The server's `on_actor_move` (`skills/mod.rs:278-292`) sees airborne (no ground/jump bits).
+        assert_eq!(server.actor_flags, 0, "the captured flight is airborne");
 
-        // The first ground contact: stance 1, flags 4, actor flags 0x0E, no fall velocity (S14-C3).
+        // The touchdown: the ordinary grounded packet, stance 1, flags 4, actor flags 0x04 (S14-C3 pending).
         let landing = crate::session::MoveCommand {
             pos: Pos::new(101.0, 200.0, 30.0),
             yaw: 0.0,
             moving: false,
             stance: stance::RELAXED,
-            wire_actor_flags: Some(0x0E),
             ..crate::session::MoveCommand::default()
         }
         .with_state(crate::session::MoveState::Ground);
@@ -2246,29 +2242,22 @@ mod tests {
         assert_eq!(bytes[5], move_flags::STOPPING);
         let server = ServerUnitMove::read(&bytes[6..]);
         assert_eq!(server.stance, stance::RELAXED);
-        assert_eq!(server.actor_flags, 0x0E);
+        assert_eq!(server.actor_flags, actor_flags::STANDING_ON_SOLID);
         assert_eq!(server.fall_velocity, 0);
 
-        // The fold stop: stance 2 (swim), flags 0, actor flags 0.
-        let fold = crate::session::MoveCommand {
+        // The override keeps the IN_COMBAT bit (the captured glider flags only say moving/stopping).
+        let combat = crate::session::MoveCommand {
             pos: Pos::new(101.0, 200.0, 30.0),
             yaw: 0.0,
-            moving: false,
-            stance: stance::SWIM,
+            moving: true,
+            stance: stance::RELAXED,
+            in_combat: true,
             wire_flags: Some(0),
             wire_actor_flags: Some(0),
             ..crate::session::MoveCommand::default()
         }
         .with_state(crate::session::MoveState::Ground);
-        let movement = fold.to_movement(8);
-        let mut w = Writer::new();
-        movement.write(&mut w);
-        let bytes = w.finish();
-        assert_eq!(bytes[5], 0);
-        let server = ServerUnitMove::read(&bytes[6..]);
-        assert_eq!(server.stance, stance::SWIM);
-        assert_eq!(server.actor_flags, 0);
-        assert_eq!(server.fall_velocity, 0);
+        assert_eq!(combat.to_movement(9).flags, move_flags::IN_COMBAT);
     }
 
     /// The field walk of the server's `UnitMove::Read`, read from raw bytes (not through this crate's reader).

@@ -23,10 +23,11 @@
 //!   `land_height + 0.2` that hits sets stance 5 (sliding), a miss sets stance 0; a rising velocity also keeps stance 5.
 //!   `CActor::Update` (`FUN_3911feb0`) counts `sliding_time` down and leaves stance 5 at 0.
 //! * `FUN_3912b280` is the sliding movement: `move_normal` along the facing, no gravity and no input.
-//! * The wire is the ordinary `CSMoveUnit` type 1; there is no glider packet. The 2026-10-31 recapture
-//!   (`handoff/2026-10-31-recapture2.md` S14) settles S14-C1/C3: while gliding stance 1, move flags 0, actor flags 0x04;
-//!   the first ground packet stance 1, flags 4, actor flags 0x0E; the fold stop stance 2, flags 0, actor flags 0. Deploy is
-//!   `CSStartSkill` 12373 cast as the equipped item (14677, item id 16777259).
+//! * The wire is the ordinary `CSMoveUnit` type 1; there is no glider packet. The real flight rows (2026-10-31 recapture
+//!   rows 5137-5287, buff index 20) are stance 1, actor flags 0x00; move flags 2 with delta 0x7f while W is held (row 5124),
+//!   0 otherwise. S14-C1 is settled. The exact landing packet is capture-pending (S14-C3): this client sends the ordinary
+//!   grounded packet (stance 1, flags 4, actor flags 0x04). Row 5288 is a stance-2 water entry while still moving, not a
+//!   fold stop; no fold stop packet is sent. Deploy is `CSStartSkill` 12373 cast as the equipped item (14677, id 16777259).
 //! * The animation graph (`game/animations/graphs/player_full_body.xml`) has `gliding`/`gliding_slow`/`gliding_fast`/
 //!   `gliding_sliding`, the turn poses `gliding_{left,right,front_left,...}` (TurnSpeedLH +-1.9, 2..200, -200..-2),
 //!   `gliding_start` and `gliding_end` (which fires `CleanupGlider`); the glider model's own `.cal` names
@@ -34,10 +35,11 @@
 //!
 //! **Capture-pending** (concrete capture steps are in `docs/aa-client-movement.md`):
 //!
-//! * S14-C1: settled (stance 1 / flags 0 / actor flags 0x04 while gliding).
+//! * S14-C1: settled (stance 1 / actor flags 0 while gliding; move flags 2 while a movement key is held, else 0).
 //! * S14-C2: which keys feed `controller+0x10` (W / S is assumed, as in the old branches, but the decompile only names the
 //!   axis).
-//! * S14-C3: settled (first ground packet stance 1 / flags 4 / actor flags 0x0E; fold stop stance 2 / flags 0).
+//! * S14-C3: the exact landing packet is still capture-pending (ordinary grounded packet used); the old "fold stop" was a
+//!   stance-2 water entry, not a fold.
 //! * S14-C4: the double-jump deploy gate (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`, option 57, default off): the height /
 //!   freefall gate is unknown; this client asks for the item's skill when airborne in a freefall or 3 m over the terrain.
 //! * S14-C5: where the opened model hangs (this client puts it at the character's origin, like the old branch).
@@ -52,7 +54,7 @@ use std::sync::Arc;
 
 use aa_anim::pose::BoundClip;
 use aa_anim::{Animator, Cal, ClipLibrary};
-use aa_net::model::{slot, stance};
+use aa_net::model::{move_flags, slot, stance};
 use aa_net::state::{Buffs, Inventory, Units};
 use aa_net::{Command, MoveCommand, MoveState, NetCommand, Pos};
 use aa_world::{TerrainQuery, WaterQuery, WorldCollision};
@@ -558,8 +560,6 @@ pub struct Gliding {
     pub ending: f32,
     /// The buff whose flight ended while it was still in the list: it must leave before it can start another flight.
     ended: Option<u32>,
-    /// The next frame has to send the captured fold stop (stance 2, flags 0) after an in-air fold.
-    fold_stop: bool,
     params: Option<HashMap<u32, GlideParams>>,
     /// When the last deploy request went out (s).
     asked: Option<f64>,
@@ -772,7 +772,6 @@ pub fn track_flight(
                     active.buff_id,
                     distance.unwrap_or(f32::INFINITY)
                 );
-                gliding.fold_stop = true;
                 gliding.end_flight(active.buff_id);
                 state.glide_owns = false;
                 return;
@@ -815,7 +814,6 @@ pub fn track_flight(
         deck: None,
     });
     gliding.ending = 0.0;
-    gliding.fold_stop = false;
     gliding.since_sent = SEND_INTERVAL;
     gliding.sent_first = false;
     state.glide_owns = true;
@@ -951,23 +949,6 @@ pub fn control_glide(
         return;
     }
     let Some(mut active) = gliding.active else {
-        if gliding.fold_stop {
-            gliding.fold_stop = false;
-            // S14-C3 (settled 2026-10-31): the stop after the fold is stance 2, move flags 0, actor flags 0
-            send_move(
-                &mut out,
-                &mut gliding,
-                mover.pos,
-                mover.facing,
-                false,
-                stance::SWIM,
-                Vec3::ZERO,
-                [0; 3],
-                MoveState::Ground,
-                Some(0),
-                Some(0),
-            );
-        }
         state.glide_owns = false;
         return;
     };
@@ -1423,7 +1404,7 @@ pub fn control_glide(
                 "glide: touched the ground at ({:.1}, {:.1}, {:.1}), asking the server to land",
                 pos.x, pos.y, pos.z
             );
-            // S14-C3 (settled 2026-10-31): the first ground packet is stance 1, move flags 4, actor flags 0x0E
+            // S14-C3: the exact landing packet is capture-pending; this is the ordinary grounded packet (stance 1 / flags 4 / actor 0x04)
             send_move(
                 &mut out,
                 &mut gliding,
@@ -1435,7 +1416,7 @@ pub fn control_glide(
                 [0; 3],
                 MoveState::Ground,
                 None,
-                Some(0x0E),
+                None,
             );
         }
         return;
@@ -1444,6 +1425,9 @@ pub fn control_glide(
     let due = gliding.since_sent >= SEND_INTERVAL || !gliding.sent_first;
     if due {
         let delta = [0, (input.forward * 127.0).round() as i8, 0];
+        // captured flight rows: flags 2 with delta 0x7f while a movement key is held, 0 otherwise; actor flags 0
+        let key_held = input.forward != 0.0 || input.turn != 0.0;
+        let flags = if key_held { move_flags::MOVING } else { 0 };
         send_move(
             &mut out,
             &mut gliding,
@@ -1454,8 +1438,8 @@ pub fn control_glide(
             velocity,
             delta,
             MoveState::Ground,
+            Some(flags),
             Some(0),
-            Some(0x04),
         );
     }
     gliding.active = Some(active);
@@ -2301,11 +2285,40 @@ mod tests {
             stance::RELAXED,
             "S14-C1: stance 1 while gliding"
         );
-        assert_eq!(wire.flags, 0, "S14-C1: neither moving nor stopping");
-        assert_eq!(wire.actor_flags, 0x04, "S14-C1: actor flags 0x04");
+        assert_eq!(
+            wire.flags, 0,
+            "S14-C1: flags 0 while no movement key is held"
+        );
+        assert_eq!(wire.actor_flags, 0, "S14-C1: actor flags 0 while flying");
         assert!(command.moving);
         assert!(command.pos.z > 0.0);
         assert!(app.world().resource::<SendState>().glide_owns);
+        // W held: captured rows show flags 2, delta 0x7f
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .hold_for_test("moveforward");
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(0.2));
+        app.update();
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let movement = commands
+            .iter()
+            .find_map(|command| match command {
+                Command::Move(command) if command.stance == stance::RELAXED => {
+                    Some(command.to_movement(0))
+                }
+                _ => None,
+            })
+            .expect("a held W glider movement");
+        assert_eq!(movement.flags, move_flags::MOVING);
+        assert_eq!(movement.actor_flags, 0);
+        assert_eq!(movement.delta_movement, [0, 127, 0]);
     }
 
     #[test]

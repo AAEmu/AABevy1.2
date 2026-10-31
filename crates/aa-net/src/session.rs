@@ -227,7 +227,8 @@ impl MoveCommand {
             m.support = Some(support.clone());
         }
         if let Some(flags) = self.wire_flags {
-            m.flags = flags;
+            // keep the combat bit the command asked for; the captured glider flags only say moving/stopping
+            m.flags = (m.flags & move_flags::IN_COMBAT) | flags;
         }
         if let Some(flags) = self.wire_actor_flags {
             m.actor_flags = flags;

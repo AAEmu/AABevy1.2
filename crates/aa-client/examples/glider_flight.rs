@@ -88,7 +88,6 @@ struct Sim {
     done: bool,
     glide_wire: bool,
     landing_wire: bool,
-    fold_wire: bool,
 }
 
 #[derive(Component)]
@@ -156,7 +155,6 @@ fn main() -> AppExit {
         done: false,
         glide_wire: false,
         landing_wire: false,
-        fold_wire: false,
     })
     .insert_resource(ClearColor(Color::srgb(0.62, 0.74, 0.88)))
     .add_systems(Startup, stage)
@@ -274,17 +272,14 @@ fn step(world: &mut World) {
             let wire = movement.to_movement(0);
             match sim.stage {
                 Stage::Climb | Stage::Glide
-                    if wire.stance == 1 && wire.flags == 0 && wire.actor_flags == 0x04 =>
+                    if wire.stance == 1 && wire.actor_flags == 0 && wire.flags & 0x02 == 0 =>
                 {
                     sim.glide_wire = true;
                 }
                 Stage::LandWait | Stage::SlideWait
-                    if wire.stance == 1 && wire.flags == 4 && wire.actor_flags == 0x0E =>
+                    if wire.stance == 1 && wire.flags == 4 && wire.actor_flags == 0x04 =>
                 {
                     sim.landing_wire = true;
-                }
-                Stage::FoldFall if wire.stance == 2 && wire.flags == 0 && wire.actor_flags == 0 => {
-                    sim.fold_wire = true;
                 }
                 _ => {}
             }
@@ -442,14 +437,13 @@ fn after(world: &mut World, sim: &mut Sim) {
                     sim.fold_vz
                 );
                 assert!(
-                    sim.glide_wire && sim.landing_wire && sim.fold_wire,
-                    "glider_flight: FAILED wire: glide {} / landing {} / fold {} not all captured",
+                    sim.glide_wire && sim.landing_wire,
+                    "glider_flight: FAILED wire: glide {} / landing {} not both captured",
                     sim.glide_wire,
-                    sim.landing_wire,
-                    sim.fold_wire
+                    sim.landing_wire
                 );
                 info!(
-                    "glider_flight: wire stance/flags captured: glide 1/0/0x04, landing 1/4/0x0E, fold 2/0/0"
+                    "glider_flight: wire stance/flags captured: glide 1/airborne, landing 1/4/grounded"
                 );
                 info!(
                     "glider_flight: PASS: startup climb, glide speeds, landing slide and in-air fold"

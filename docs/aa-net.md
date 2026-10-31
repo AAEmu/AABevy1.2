@@ -113,10 +113,11 @@ send undecoded are listed in "Small server messages" at the end, with who owns t
 | 4 | ship request | time, flags, throttle `i8`, steering `i8` (no position) |
 | 5 | transfer | time, flags, position, velocity (50/32767), rotation `i16×3`, angular velocity, steering `i32`, path point `i32`, speed `f32`, reverse `bool` |
 
-A gliding character sends the same type-1 body: stance 1, move flags 0, actor flags 0x04 while flying; the landing is
-stance 1 / flags 4 / actor flags 0x0E; the fold stop is stance 2 / flags 0 / actor flags 0 (2026-10-31 recapture).
-`model::tests::gliding_type_1_bodies_match_the_server_unit_move_reader` pins all three against the server's `UnitMove.Read`
-field walk (`aaemu-game/src/models/movement.rs:418-438`).
+A gliding character sends the same type-1 body: stance 1, actor flags 0 while flying; move flags 2 with delta 0x7f while W
+is held (2026-10-31 recapture rows 5137-5287, 5124), 0 otherwise. The touchdown is the ordinary grounded packet (stance 1,
+flags 4, actor flags 0x04; exact landing packet capture-pending). The wire override keeps the IN_COMBAT bit.
+`model::tests::gliding_type_1_bodies_match_the_server_unit_move_reader` pins the flight and landing bodies against the
+server's `UnitMove.Read` field walk (`aaemu-game/src/models/movement.rs:418-438`).
 
 The type-2 and type-4 codecs are the 1.2 serializer `FUN_397c0470` (case 2 and case 4) in
 `aa_net::vehicle`; `FUN_3961e2c0` is the 9-byte position codec, `FUN_397ad8c0` the 30/32767
