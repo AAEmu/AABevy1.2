@@ -78,7 +78,8 @@ const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
 pub(crate) fn rotation_mode(bridge: Option<&crate::hud::api::HudBridge>, on: bool) {
     if let Some(bridge) = bridge {
         bridge.0.borrow_mut().input_modes.set(2, u32::from(on));
-    }
+
+}
 }
 
 /// The builder's steps.
@@ -394,17 +395,17 @@ pub fn check(
         // a centre outside every polygon, or one whose group has no row for the design's
         // category, is 0x244 ("Building doesn't fit in this area."). Unrestricted designs skip
         // this check (the client and the server both do).
-        return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
-    }
+            return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
+        }
     if let Some((_, group)) = allowed {
         if group.houseless && !around.own_categories.is_empty() {
-            return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
-        }
+        return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
+    }
         if group.existing_category_id != 0
             && around.own_categories.contains(&group.existing_category_id)
         {
-            return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
-        }
+        return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
+    }
     }
     let lower = site.pos - Vec2::splat(half);
     let upper = site.pos + Vec2::splat(half);
@@ -423,21 +424,21 @@ pub fn check(
             .iter()
             .filter(|land| land.overlaps_box(lower, upper))
             .collect();
-        for cy in 0..n {
-            for cx in 0..n {
-                let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
+    for cy in 0..n {
+        for cx in 0..n {
+            let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
                 let cell = [
                     corner,
                     corner + Vec2::X * CELL,
                     corner + Vec2::Y * CELL,
                     corner + Vec2::splat(CELL),
                 ];
-                let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
-                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-                };
-                if cell[1..].iter().any(|p| !area.contains(*p)) {
-                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-                }
+            let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
+                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+            };
+            if cell[1..].iter().any(|p| !area.contains(*p)) {
+                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+            }
                 // `FUN_39333e20`'s cell callback asks the housing manager whether the cell can be
                 // built on; a house already standing there is not buildable, and the client
                 // answers 0x70 (recapture2), before the 0x71 house-overlap test.
@@ -449,8 +450,8 @@ pub fn check(
                         && centre.y < c.y + h
                 }) {
                     return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-                }
-            }
+        }
+    }
         }
     }
     if around
@@ -491,12 +492,12 @@ fn terrain_samples(
         Vec2::new(hi.x, hi.y),
         centre,
     ]
-    .into_iter()
+        .into_iter()
     .map(|p| {
         let p = rotate(p) + site.pos;
         height(p.x, p.y)
     })
-    .collect();
+        .collect();
     heights.map(|h| {
         (
             h.iter().copied().fold(f32::INFINITY, f32::min),
@@ -626,7 +627,7 @@ pub fn input(
     mut net: MessageWriter<NetCommand>,
     mut signals: MessageWriter<BuilderSignal>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
-    bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     if builder.build.is_none() {
         *pressed_at = [None; 2];
@@ -830,7 +831,7 @@ pub fn follow(
                     .get(&template_id)
                     .map_or(0.0, |d| d.garden_radius),
             )),
-            _ => None,
+        _ => None,
         })
         .collect();
     let own_obj = player.spawn.as_ref().map(|s| s.obj_id);
@@ -1005,11 +1006,11 @@ pub fn ghost(
         b.meshes = children
             .iter_descendants(root)
             .filter_map(|e| {
-                let (standard, illum) = meshes.get(e).ok()?;
+            let (standard, illum) = meshes.get(e).ok()?;
                 let own = illum
                     .map(|m| GhostMaterial::Illum(m.0.clone()))
-                    .or_else(|| standard.map(|m| GhostMaterial::Standard(m.0.clone())))?;
-                Some((e, own))
+                .or_else(|| standard.map(|m| GhostMaterial::Standard(m.0.clone())))?;
+            Some((e, own))
             })
             .collect();
         b.shown_error = None;

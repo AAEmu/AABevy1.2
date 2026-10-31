@@ -285,8 +285,8 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
             h.set(
                 $name,
                 lua.create_function(move |_, _: Value| {
-                    let $v = s.0.borrow();
-                    Ok($body)
+                let $v = s.0.borrow();
+                Ok($body)
                 })?,
             )?;
         }};
@@ -491,16 +491,16 @@ fn install_construction(lua: &Lua, h: &Table, bridge: &Shared, state: &State) ->
     h.set(
         "NextStepFromBuildCheck",
         lua.create_function(move |_, _: Value| {
-            s.0.borrow_mut().builder_next = true;
-            Ok(())
+        s.0.borrow_mut().builder_next = true;
+        Ok(())
         })?,
     )?;
     let s = state.clone();
     h.set(
         "PrevStepFromBuildCheck",
         lua.create_function(move |_, _: Value| {
-            s.0.borrow_mut().builder_prev = true;
-            Ok(())
+        s.0.borrow_mut().builder_prev = true;
+        Ok(())
         })?,
     )?;
     // the build pay of the old interface: nothing to pay besides the tax
@@ -606,24 +606,24 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
         "SetHouseForSale",
         lua.create_function(
             move |_, (_, g, sv, c, name): (Value, Value, Value, Value, Option<String>)| {
-                let mut v = s.0.borrow_mut();
-                let price = copper(&g, &sv, &c);
+            let mut v = s.0.borrow_mut();
+            let price = copper(&g, &sv, &c);
                 let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) else {
                     return Ok(());
                 };
-                if !(1..=i64::from(i32::MAX)).contains(&price) {
+            if !(1..=i64::from(i32::MAX)).contains(&price) {
                     v.notices.push(Notice {
                         name: "HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE",
                         arg: None,
                     });
-                    return Ok(());
-                }
+                return Ok(());
+            }
                 v.commands.push(Command::House(HouseCommand::Sell {
                     tl,
                     money_amount: price as u32,
                     sell_to: name.unwrap_or_default(),
                 }));
-                Ok(())
+            Ok(())
             },
         )?,
     )?;
@@ -682,24 +682,24 @@ fn install_dev(lua: &Lua, state: &State) -> mlua::Result<()> {
     hud.raw_set(
         "house_interact",
         lua.create_function(move |_, obj_id: u32| {
-            s.0.borrow_mut().interact = Some(obj_id);
-            Ok(())
+        s.0.borrow_mut().interact = Some(obj_id);
+        Ok(())
         })?,
     )?;
     let s = state.clone();
     hud.raw_set(
         "house_builder",
         lua.create_function(move |_, (x, y, yaw): (f32, f32, f32)| {
-            s.0.borrow_mut().pin = Some((x, y, yaw));
-            Ok(())
+        s.0.borrow_mut().pin = Some((x, y, yaw));
+        Ok(())
         })?,
     )?;
     let s = state.clone();
     hud.raw_set(
         "house_builder_click",
         lua.create_function(move |_, ()| {
-            s.0.borrow_mut().clicks += 1;
-            Ok(())
+        s.0.borrow_mut().clicks += 1;
+        Ok(())
         })?,
     )?;
     Ok(())
@@ -969,7 +969,7 @@ pub(crate) fn sync(
     builder.clicks += std::mem::take(&mut v.clicks);
     if std::mem::take(&mut v.builder_next) {
         builder.commit(time.elapsed_secs(), &mut net, &mut builder_signals.p0());
-        if builder.build.is_none() {
+    if builder.build.is_none() {
             crate::ingame::housing::placement::rotation_mode(Some(&bridge), false);
         }
     }
@@ -982,7 +982,7 @@ pub(crate) fn sync(
             )
         });
         builder.back_to_position(&mut builder_signals.p0());
-        if changes {
+    if changes {
             crate::ingame::housing::placement::rotation_mode(Some(&bridge), false);
         }
     }
