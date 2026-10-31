@@ -36,6 +36,11 @@ const HOLD: f32 = 0.2;
 /// The game goes on after this many seconds whatever is still loading.
 const TIMEOUT: f32 = 20.0;
 
+/// A world load finished: the loading screen is down and the arrival is logged (`FUN_39426520`'s end-of-load
+/// point). The 30 s planting reuse lock starts here (`FUN_393a6de0`); emitted after the load is taken down.
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct WorldLoadFinished;
+
 /// A teleport's loading screen.
 #[derive(Resource, Default)]
 pub struct Teleport {
@@ -87,6 +92,7 @@ pub fn idle(tp: Res<Teleport>) -> bool {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<Teleport>()
+        .add_message::<WorldLoadFinished>()
         .add_systems(
             Update,
             detect
@@ -210,6 +216,7 @@ fn drive(world: &mut World) {
         world.write_message(NetCommand(Command::Portal(PortalCommand::InstanceLoaded)));
     }
     info!("teleport: arrived after {:.1} s at ({:.1}, {:.1}, {:.1})", load.t, load.target.x, load.target.y, load.target.z);
+    world.write_message(WorldLoadFinished);
 }
 
 fn new_load(target: Vec3) -> Load {
