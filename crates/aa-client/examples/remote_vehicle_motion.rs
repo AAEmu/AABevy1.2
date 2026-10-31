@@ -152,6 +152,7 @@ fn unit(row: &Row) -> Unit {
         buffs: Vec::new(),
         anim_action: 0,
         house_posture: None,
+        turret: None,
         state_attachments: None,
         attached_to: None,
         doodad_bond: None,

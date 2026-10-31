@@ -126,10 +126,15 @@ Ships (merged after the checkpoint was written):
   passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
 
-Still open across these slices: cannons/turrets (S12), hanging (S13), vehicle state/FX (S15), auto-walk, mount jump
-clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own
-captures, and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks
-are in [units](aa-client-units.md) and the PR
+- **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim
+  clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState`, the drawn
+  `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
+  (`docs/aa-client-units.md`, S12).
+
+Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
+the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
+to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
+[units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.
 

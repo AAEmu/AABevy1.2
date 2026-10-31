@@ -1210,6 +1210,9 @@ pub struct LocalSeat {
     /// The slave is a ship (`models.sub_type` `ShipModel`): the server owns its hull and `ship::drive_ship` sends
     /// the type-4 helm request instead of the cart's type-2 body.
     pub ship: bool,
+    /// The slave is a cannon or siege turret (slave kind 7/8 with a `vehicle_models` turret block): the gunner
+    /// aims it, walks nowhere and sends no vehicle movement; the server places the model.
+    pub turret: bool,
     pub speed: MountSpeed,
     /// Height of the seat over the mount's feet (m): the camera's pivot rises by it.
     pub lift: f32,
@@ -1219,13 +1222,18 @@ impl LocalMount {
     /// The mount the player drives: its object id and speed.
     pub fn driving(&self) -> Option<(u32, MountSpeed)> {
         self.0
-            .filter(|s| s.drives && !s.cart && !s.ship)
+            .filter(|s| s.drives && !s.cart && !s.ship && !s.turret)
             .map(|s| (s.mount, s.speed))
+    }
+
+    /// The cannon/siege turret the player mans (attach point 1 of a kind-7/8 slave with turret limits).
+    pub fn turret_seat(&self) -> Option<u32> {
+        self.0.filter(|s| s.turret).map(|s| s.mount)
     }
 
     /// The slave cart the player drives from attach point 1.
     pub fn cart_driver(&self) -> Option<u32> {
-        self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
+        self.0.filter(|s| s.drives && s.cart && !s.turret).map(|s| s.mount)
     }
 
     /// The ship the player drives from attach point 1 (the helm): the server simulates the hull.
@@ -1314,8 +1322,17 @@ pub fn track_local_mount(
                 (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
             let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
+            // A cannon is a kind-7/8 slave with a turret block that cannot drive. The controller
+            // type 3 is not in the database copy, so `vehicle_models.velocity == 0` stands in
+            // (S12-C6); a trebuchet or tank stays drivable. A cart is kind 6.
+            let turret = driver_seat(a.point)
+                && db.as_deref().is_some_and(|db| {
+                    net.by_id
+                        .get(&a.obj_id)
+                        .is_some_and(|unit| super::turret::turret_seat(unit, db))
+                });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship, ship, speed, lift: 0.0 }
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1427,7 +1444,7 @@ pub fn track_local_mount(
         send.send_now();
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
-    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship).and_then(|s| views.unit_entity(s.mount))
+    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && !s.turret).and_then(|s| views.unit_entity(s.mount))
         && units.get(e).is_ok_and(|(_, driven)| !driven)
     {
         commands.entity(e).insert(Driven);
@@ -1491,7 +1508,7 @@ pub fn drive_mount(
         return;
     }
     let entity = views.unit_entity(s.mount);
-    if !s.drives || s.ship {
+    if !s.drives || s.ship || s.turret {
         let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
         let known = net.by_id.get(&s.mount).map(|u| (Vec3::new(u.pos.x, u.pos.y, u.pos.z), u.yaw()));
         if let Some((pos, facing)) = shown.or(known) {
@@ -1764,6 +1781,7 @@ mod tests {
             drives: true,
             cart: true,
             ship: false,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));
@@ -1829,6 +1847,7 @@ mod tests {
             drives: false,
             cart: true,
             ship: false,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));
@@ -2758,6 +2777,7 @@ mod tests {
                 drives: point == 1,
                 cart: false,
                 ship: false,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2774,6 +2794,7 @@ mod tests {
                 drives: point == 1,
                 cart: true,
                 ship: false,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2789,6 +2810,7 @@ mod tests {
                 drives: point == 1,
                 cart: false,
                 ship: true,
+                turret: false,
                 speed: MountSpeed::default(),
                 lift: 1.2,
             }))
@@ -2797,6 +2819,23 @@ mod tests {
         assert_eq!(ship(1).cart_driver(), None, "a ship is not driven by the cart controller");
         assert_eq!(ship(1).driving(), None, "the server moves the hull, not the mover");
         assert_eq!(ship(2).ship_driver(), None, "a passenger does not steer");
+        let turret = |point| {
+            LocalMount(Some(LocalSeat {
+                mount: 7,
+                point,
+                drives: point == 1,
+                cart: false,
+                ship: false,
+                turret: point == 1,
+                speed: MountSpeed::default(),
+                lift: 1.2,
+            }))
+        };
+        assert_eq!(turret(1).turret_seat(), Some(7));
+        assert_eq!(turret(1).driving(), None, "a gunner does not move the cannon");
+        assert_eq!(turret(1).cart_driver(), None);
+        assert!(!turret(1).passenger(), "the gunner keeps the slave's bar");
+        assert_eq!(turret(2).turret_seat(), None);
         assert!((seat(2).lift() - 0.35).abs() < 1e-6, "the seat 1.2 m up, less the seated drop");
         assert_eq!(LocalMount::default().driving(), None);
         assert_eq!(LocalMount::default().lift(), 0.0);
@@ -2824,6 +2863,7 @@ mod tests {
             drives: true,
             cart: false,
             ship: true,
+            turret: false,
             speed: MountSpeed::default(),
             lift: 0.0,
         })));

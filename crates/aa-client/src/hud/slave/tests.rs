@@ -975,6 +975,7 @@ fn a_ship_driver_leave_sends_the_final_helm_zero_before_the_unbind() {
             drives: true,
             cart: false,
             ship: true,
+            turret: false,
             speed: Default::default(),
             lift: 0.0,
         })))

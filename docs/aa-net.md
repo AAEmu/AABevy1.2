@@ -9587,3 +9587,19 @@ auxiliary `z` is the player's world facing. Both are truncated
 `2 pi / 128` direction bytes: the `d_leave` row has ship yaw 1.3977 and player
 yaw -1.7344, so the primary is -63 (-3.132 rad relative) and aux `z` is -35;
 the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.
+
+## S12: turret aim (`CSTurretState 0x036`, posture type 8, 2026-10-31)
+
+* `CSTurretState` is `bc unitId, f32 pitch, f32 yaw` (1.2 writer `FUN_397c7640`; server reader
+  `packets/c2g_misc.rs::CSTurretStatePacket::read`). `ClientMsg::TurretState` / `Command::TurretState`
+  write exactly that. The session refuses a zero/over-24-bit unit or a non-finite angle locally
+  (`Event::TurretStateRejected`) and never invents a server answer.
+* Posture type 8 is `u8 8, bool has_loot_left, f32 pitch, f32 yaw` in both
+  `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail (server writer
+  `systems/npcs/npc/packets.rs`). `Posture.turret` and `Unit.turret` keep the stored aim;
+  `Event::UnitPosture` carries it to the app. The bytes are the server's own `turret_posture` test.
+* A cannon fires with `Command::UseMateSkillAt`: `CSStartSkill` with `SkillCaster::Mount` and
+  `SkillCastTarget::Position` (wire kind 1; `long_position`, `rot`, two empty object ids). The
+  server's `ship_cannon_gunner_seat_skill_and_leaving` uses that target shape for skill 10473.
+  The aim point is capture-pending S12-C1; the packet shape is byte-tested against
+  `skill::write_start_skill` and the server reader.

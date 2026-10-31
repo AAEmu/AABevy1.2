@@ -110,6 +110,12 @@ pub struct HudData {
     pub player_entity: Option<Entity>,
     pub pos: Vec3,
     pub yaw: f32,
+    /// The slave whose point-1 seat is a turret (`ingame::LocalMount::turret_seat`): its bar
+    /// shows the point-1 attached skill. `None` on foot and on a drivable vehicle.
+    pub turret_seat: Option<u32>,
+    /// The manned cannon's clamped aim and ground point (`ingame::turret::Sight`): a fire skill
+    /// with a BallisticPos target goes out with this spot instead of the selected unit.
+    pub turret: Option<crate::ingame::turret::Sight>,
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,
     pub passive_buffs: Vec<u32>,
@@ -207,6 +213,8 @@ impl Default for HudData {
             player_entity: None,
             pos: Vec3::ZERO,
             yaw: 0.0,
+            turret_seat: None,
+            turret: None,
             skill_levels: Default::default(),
             passive_buffs: Vec::new(),
             cooldowns: Default::default(),
@@ -856,6 +864,10 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     data.player_entity = entity;
     data.pos = pos;
     data.yaw = yaw;
+    data.turret_seat = world
+        .get_resource::<crate::ingame::LocalMount>()
+        .and_then(crate::ingame::LocalMount::turret_seat);
+    data.turret = world.get_resource::<crate::ingame::turret::Sight>().copied();
     let character = spawn.character();
     let game = data.game.clone();
     let game = game.get();
