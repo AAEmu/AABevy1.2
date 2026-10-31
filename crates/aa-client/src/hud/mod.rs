@@ -135,7 +135,7 @@ pub(crate) mod script_api;
 mod salon;
 mod session;
 mod skillbook;
-mod slave;
+pub(crate) mod slave;
 mod stats;
 mod store;
 mod stubs;

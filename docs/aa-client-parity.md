@@ -116,9 +116,20 @@ Ships (merged after the checkpoint was written):
   header/actor sets, ship id, cadence and support rows. Open: hull pitch/roll, a raised helm on larger ships, two
   header-only step-off rows, and deck walking/jump values the capture cannot verify.
 
-Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
-hanging (S13), gliders (S14), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and the copper boiler
-colour; the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in [units](aa-client-units.md) and the PR
+- **S11 passenger seats.** The slave interaction's first skill 13863 sends a plain `CSStartSkill` 0x052 with the slave
+  as the unit target (point 2 via the server's `AttachTo` 53 value1 2); 12076 stays the driver bind and a dead target is
+  refused with 0x144. Vehicle seats use the `attach_anims` loop, a row-less **passenger** seat stands (ship decks;
+  point 1 keeps the rider loop), the `$`-less `passenger0`/`driver` bones of the red ox cart are matched, and remote
+  passengers sit at their own `$passengerN` helper on the drawn vehicle transform. Switching is leave-then-board (no
+  seat-change packet); the local example and unit tests cover the HUD 13863 request, boarding, switching, two remote
+  passengers and leaving (`examples/passenger_seats`, `hud/slave/tests.rs`, `mount.rs`). Open: the exact row-less
+  passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
+  boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
+
+Still open across these slices: cannons/turrets (S12), hanging (S13), vehicle state/FX (S15), auto-walk, mount jump
+clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own
+captures, and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks
+are in [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.
 

@@ -63,7 +63,7 @@ pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
 pub(crate) mod housing;
 mod idle;
-mod mount;
+pub(crate) mod mount;
 pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
