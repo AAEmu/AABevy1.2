@@ -51,7 +51,7 @@ mod combat;
 mod cooldown;
 mod crafting;
 mod crime;
-mod data;
+pub(crate) mod data;
 #[allow(unused_imports)] // used by the app's `main` target, not by the standalone examples
 pub(crate) use data::{install_exp_table, item_recharge_catalog, GameData, SharedGameData};
 pub(crate) mod dialog;
@@ -118,7 +118,7 @@ mod portal;
 pub(crate) mod doodad;
 mod dynamic_actions;
 pub(crate) use portal::{OPEN_PORTAL_SKILL, PortalBookUsed};
-mod mode_actions;
+pub(crate) mod mode_actions;
 mod mounted;
 #[cfg(test)]
 mod mounted_tests;
@@ -135,7 +135,7 @@ pub(crate) mod script_api;
 mod salon;
 mod session;
 mod skillbook;
-mod slave;
+pub(crate) mod slave;
 mod stats;
 mod store;
 mod stubs;

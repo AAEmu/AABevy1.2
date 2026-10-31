@@ -119,7 +119,9 @@ pub struct DeckRider;
 pub struct DeckHullPoses(pub HashMap<u32, (Vec3, Quat, f32)>);
 
 impl RemoteUnit {
-    pub(crate) fn announced(unit: &Unit) -> Self {
+    /// The playback state of a unit announced by the server. The live path creates it in [`sync_views`]; a scripted
+    /// example that spawns an actor for `unit` uses it directly.
+    pub fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
         Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
             rotation: Quat::from_rotation_y(unit.yaw()), game_rotation: Quat::from_rotation_z(unit.yaw()), deck: None,
@@ -440,8 +442,9 @@ impl Views {
         self.doodads.get(&obj_id).map(|view| view.source_generation)
     }
 
-    #[cfg(test)]
-    pub(crate) fn fixture_unit(&mut self, obj_id: u32, entity: Entity) {
+    /// Binds the unit `obj_id` to the entity that draws it: the live path fills this through [`sync_views`], and
+    /// scripted examples/tests that spawn their own actor use it directly.
+    pub(crate) fn track_unit_entity(&mut self, obj_id: u32, entity: Entity) {
         self.units.insert(obj_id, View { entity: Some(entity), ..default() });
     }
 

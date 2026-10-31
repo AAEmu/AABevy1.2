@@ -64,7 +64,7 @@ pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
 pub(crate) mod housing;
 mod idle;
-mod mount;
+pub(crate) mod mount;
 pub(crate) mod player;
 mod prepare;
 pub(crate) mod prewarm;
@@ -81,6 +81,7 @@ mod swim;
 pub(crate) mod teleport;
 mod tools;
 mod trace;
+pub(crate) mod turret;
 pub(crate) mod units;
 pub(crate) mod vehicle;
 pub(crate) mod vehicle_track;
@@ -188,6 +189,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(attachments::plugin)
             .add_plugins(gear_refresh::plugin)
             .add_plugins(seating::plugin)
+            .add_plugins(turret::plugin)
             .add_plugins(bench::plugin)
             .add_plugins(trace::plugin)
             .add_plugins(teleport::plugin)
@@ -210,6 +212,7 @@ impl Plugin for InGamePlugin {
                             .chain()
                             .run_if(in_state(Screen::InGame))
                             .run_if(teleport::idle),
+                        turret::local_aim,
                         camera::vehicle_camera,
                         ship::board_deck
                             .run_if(in_state(Screen::InGame))
@@ -318,6 +321,7 @@ fn leave_game(
     commands.insert_resource(sprint::Sprint::default());
     commands.insert_resource(glide::Gliding::default());
     commands.insert_resource(mount::LocalMount::default());
+    commands.remove_resource::<turret::Sight>();
     commands.insert_resource(camera::VehicleCamera::default());
     commands.insert_resource(cart::CartDrive::default());
     commands.insert_resource(mount::MountReason::default());

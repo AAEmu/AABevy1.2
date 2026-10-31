@@ -80,6 +80,9 @@ pub struct SkillInfo {
     pub desc: String,
     /// `skills.weapon_slot_for_autoattack_id` is set: the auto attack (the combat text prints its hits white).
     pub auto_attack: bool,
+    /// `skills.target_type_id`: 11 is `BallisticPos` (a cannon's fire skill), the only type that
+    /// needs a `Position` target instead of a unit.
+    pub target_type: u8,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -551,13 +554,13 @@ impl GameData {
                     multipliers.insert(r.get(0)?, (r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) * 100.0).round() as i64);
                 }
             }
-            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range, weapon_slot_for_autoattack_id, link_equip_slot_id, link_backpack_type_id FROM skills")?;
+            let mut q = conn.prepare("SELECT id, name, icon_id, cooldown_time, cooldown_tag_id, custom_gcd, default_gcd, ignore_global_cooldown, ability_id, mana_cost, casting_time, channeling_time, min_range, max_range, weapon_slot_for_autoattack_id, target_type_id, link_equip_slot_id, link_backpack_type_id FROM skills")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
-                let link_slot = any_int(r, 15)?.max(-1);
+                let link_slot = any_int(r, 16)?.max(-1);
                 if link_slot >= 0 {
-                    data.skill_links.insert(id, SkillLink { slot: link_slot as usize, backpack_type: any_int(r, 16)? });
+                    data.skill_links.insert(id, SkillLink { slot: link_slot as usize, backpack_type: any_int(r, 17)? });
                 }
                 data.skills.insert(
                     id,
@@ -575,6 +578,7 @@ impl GameData {
                         min_range: any_int(r, 12)?.max(0),
                         max_range: any_int(r, 13)?.max(0),
                         auto_attack: any_int(r, 14)? > 0,
+                        target_type: any_int(r, 15)?.clamp(0, 255) as u8,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
                 );

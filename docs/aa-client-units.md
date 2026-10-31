@@ -506,6 +506,68 @@ and explicit controls").
 * Owner and a second player, dead, combat and trade-pack cases; the S5 capture is
   `tools/evidence/cart_boarding/`.
 
+### Passenger seats (S11)
+
+The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.rs` acts on the FIRST
+`SCNpcInteractionSkillList` 0x07b skill (`FUN_393be850` -> `FUN_393be280`):
+
+* **12076 "occupy"** is the driver's seat: the existing bind checks and `CSBindSlave` 0x031 (attach
+  point 1).
+* **13863 "passenger seat"** is a plain `CSStartSkill` 0x052 with the **slave** as the unit target and
+  the player as the unit caster (`FUN_393bf310` -> `FUN_39362f50`). The server's `AttachTo` effect
+  (special type 53, `value1 = 2`) attaches point 2 (`$passenger0`); the client never sends a seat
+  number. `CSStartSkill` bytes: `u32 13863, u8 caster kind 0 + bc player, u8 target kind 0 + bc slave,
+  u8 0` (13 bytes), checked against the server reader. `FUN_39362f50` refuses a dead target with
+  0x144 for 13863/19165, and the port applies the same dead check to the passenger skill.
+* The common interaction reach (`FUN_393bf270`) applies to both: the 3D surface gap must be strictly
+  under 3.0 m (3.5 m on a mate seat). The 4.0 m bind check belongs to 12076 only. Riding a mate is not
+  a refusal on this path: only the reach widens (capture-pending S11-C5).
+* **Switching** has no packet: a character leaves with `CSDiscardSlave` 0x032 and boards the other
+  seat afterwards. The occupy skill on the slave already occupied is silent. `FUN_39362f50` has no
+  seated refusal, so the port does not invent one; a right click while seated sends only
+  `CSChangeTarget`, so the interaction request does not normally arise on a second seat (capture-pending
+  S11-C2).
+* **Seat pose.** A vehicle seat takes its loop from `attach_anims` (`fist_ac_trailer_sit_idle` for the
+  red ox cart point 2, `fist_ac_sit_down` for the cars, `fist_ac_cannon_idle` for the tanks). A vehicle
+  **passenger** seat (point 2 and above) with no row has no seated pose: the ship passengers stand on
+  the deck in the normal idle; they no longer fall back to the mount's horse/car rider loops. Point 1
+  with no row keeps the mount's rider set (the ship helm), because the evidence covers passenger
+  points only (capture-pending S11-C1).
+* **Helper names.** The attach strings name `$passenger0`, but some bodies (the red ox cart's
+  `transfers_trailer_c.chr`) name the bones `passenger0` / `driver` without `$`. `vehicle::helper_key`
+  accepts both spellings; before that the cart passenger fell back to the cart origin (capture-pending
+  S11-C3).
+* **Remote passengers.** `SCUnitAttached` point 2..8 sets `Unit::attached_to`; the seated unit gets no
+  movement of its own. `mount::start_stop_riding` seats it and `mount::pose_riders` puts it at its own
+  `$passengerN` helper on the vehicle entity's **drawn `Transform`** (the S8 branch replaces that same
+  input with the smoothed hull). `mount.rs` tests cover two remote passengers at different helpers and
+  a moved cart transform (capture-pending S11-C4).
+* **Leaving.** The local driver uses `DiscardSiegeWeapon`/the speed-guarded 0x032 (S5); a passenger
+  walks off on movement input (1500 ms throttle) or sends the same 0x032. On `SCUnitDetached` the local
+  seat clears and the mover starts from the seat helper, as before.
+
+Capture-pending (S11):
+
+* **S11-C1** ship/Farm Wagon passenger pose and the row-less helm. Two clients; `/slave spawn 21` (or
+  a clipper) and `/slave spawn 60`; B boards point 2 with 13863 and A captures B's drawn clip and
+  relative offset for ≥ 5 s. Expected: standing idle, not a rider loop. Then B takes the helm (point 1)
+  and A captures its row-less pose, which the port currently leaves as the mount rider set.
+* **S11-C2** switching and seat-taken feedback. B on the driver seat (12076), then attempt 13863 on the
+  same slave; with a third client C holding point 2, capture the 0x07b list, any `SCErrorMsg`, the
+  order of 0x032/0x052 and whether 1.2 ever offers or acts on a second seat while seated (expected:
+  none).
+* **S11-C3** helper spelling. With B on the red ox cart's passenger seat, read B's attached-entity
+  relative transform (or the rendered pelvis) in the original and compare it with the model's
+  `driver` / `passenger0` bones; confirms the `$`-less matching.
+* **S11-C4** remote passenger. A drives the red ox cart; B rides point 2 and C observes both the
+  SCUnitAttached bytes and B's drawn per-frame pose. Compare with the Bevy replay (the cart transform
+  moves in `examples/passenger_seats`). Also confirm that point 3+ is never offered: the only
+  `AttachTo` seat skill in the data has value1 2.
+* **S11-C5** passenger seat while riding a mate. B mounts a mate within 3.5 m of the cart's passenger
+  point, presses the 13863 interaction and records whether the server detaches the mate, refuses the
+  seat, or attaches both; the port currently sends 13863 (the interaction reach is the only mounted
+  difference).
+
 ### Cart driving (S6/S7, 2026-10-29 capture)
 
 A slave at attach point 1 is driven by `ingame/cart.rs`: the movement keys go to the cart
@@ -999,3 +1061,65 @@ Pending live checks: a sailboat/clipper deck (only the rowboat was walkable in
 the capture), whether walking packets (the fixture's `walk-support` rows are
 standing rows) keep header 0x40 on another hull, and whether the support
 block's velocity/rotation follow the hull when the ship turns.
+
+## S12: cannons and siege turrets (2026-10-31)
+
+A cannon is a slave of kind 7 (siege weapon / ground cannon) or 8 (ship cannon) whose `models.sub_id ->
+vehicle_models` row has turret limits. `ingame::turret::slave_turret` reads the block through
+`Db::turret_limits` (degrees and deg/s into radians). A row with a non-numeric angle (vehicle_models 5,
+the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not read as zero.
+
+* **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
+  gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
+  slave is kind 7/8, the `vehicle_models` row parses to a non-zero turret range, and its `velocity`
+  is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database copy, so
+  `velocity == 0` is the substitute (S12-C6); the trebuchets/tanks (velocity 2.5-3.5) and the
+  cotton-field cart (4.0) stay drivable, and the all-zero rows (vehicle_models 37/40) are not
+  turrets. `turret_seat_model` is the gate; a real-data test walks every kind-7/8 `slaves` row. So
+  `player::control_player` locks walking, `cart::drive_cart` and the mate driver path do not run, and
+  the player follows the server-placed cannon (`mount::drive_mount`). The seat pose is the cannon's
+  `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` / `fist_ac_ballista_idle` /
+  `fist_ba_siegeweapon_idle`), already handled by the mount code.
+* **Aim.** `turret::local_aim` takes the orbit camera direction in the cannon root's frame
+  (`394322f0`'s camera direction), clamps pitch to the model's min/max and yaw to min/max (or wraps a
+  full-circle yaw, `39425580`), and sends `CSTurretState` 0x036 with the slave's object id through
+  `turret::TurretSend`: one global 200 ms timer (`DAT_3a169940`), a packet only when the model aim
+  changed, and a change inside the window is **dropped** (not queued; `FUN_39356990` returns without
+  sending). The state resets when the local player mounts a gunner seat, so the same clamped aim is
+  sent again. `turret::aim_turrets` moves
+  the drawn aim towards the target at `turret_yaw_angvel` / `turret_pitch_angvel` and writes
+  `bone_yaw` (`R_z(yaw)`) and `bone_pitch` (`R_x(pitch)`) after the animation pass
+  (`UpdateGunTurret` `FUN_390d14b0`).
+* **Remote.** Posture type 8 (both `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail) is
+  decoded into `Posture.turret` / `Unit.turret`; `turret::remote_targets` and `aim_turrets` apply it
+  to another player's cannon (a late viewer reads the `SCUnitState` snapshot).
+* **Fire.** A cannon's gunner bar is the point-1 `mount_attached_skills` skill (the real bar shows
+  14372 for slave 10, 24501 for 133, 20161 for 100; `target_type_id` 0), while the slot casts the
+  linked `mount_skills.skill_id` (10473, 24500, 20160). `hud/mode_actions` builds that gunner bar and
+  `use_slot` sends the cast skill: when it has `skills.target_type_id` 11 (`BallisticPos`) and a
+  `Sight` for the same slave is published, the command is `UseMateSkillAt` (`CSStartSkill` with a
+  `Mount` caster and a `Position` target at the aimed ground point). The tower deployment skill
+  20160/20161 is not a shot and keeps the ordinary unit/no-target cast. The server's
+  `ship_cannon_gunner_seat_skill_and_leaving` sends the same Position shape, and a real-data test
+  covers the bar -> cast mapping for slaves 10/133/100.
+
+Capture-pending (case ids; every one has a capture step):
+
+* **S12-C1** The fire aim point and the exact Position bytes: the client sends the clamped barrel
+  direction's straight terrain hit (max 120 m, the server test's skill 10473 range), not the 1.2
+  ballistic solve (`FUN_394281b0` / the `FUN_394322f0` march). Capture: record the CSStartSkill 0x052
+  body of a cannon shot and the aimpoint when the target is on a hill or behind cover.
+* **S12-C2** The `CSTurretState` unit id: the client sends the manned slave. Capture: compare the
+  captured 0x036 object id with the cannon child, the gunner and the hull.
+* **S12-C3** The camera aim: the client uses the orbit camera's total yaw/pitch; 1.2 solves the
+  camera ray and may split the pitch past 50 degrees. Capture the drawn `bone_yaw`/`bone_pitch` per
+  frame while panning the mouse and compare with the orbit angles.
+* **S12-C4** Installed-turret key aim (`39425580`): the key indices and key rates are not captured;
+  this client uses the camera aim and the same rate limit for installed models (the trebuchet).
+* **S12-C6** The kind-7/8 gate for a turret seat: `vehicle_models.velocity == 0` substitutes for the
+  model controller type 3 (`FUN_390b3750`), which is not in the database copy. Capture the
+  controller type of a trebuchet and a tank and the attach point the original uses for a ground
+  cannon; if the controller type differs from velocity == 0, replace the gate.
+* **S12-C7** A non-identity `bone_yaw` / `bone_pitch` bind: the galleon cannon's bones are identity
+  bind, so the direct `R_z` / `R_x` composition is proven only there. Capture a model whose turret
+  bones carry a bind rotation and compare.
