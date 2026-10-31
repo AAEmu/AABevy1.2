@@ -598,9 +598,11 @@ fn route(
         }
         // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
         if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
-            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)."
+            let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
+            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)." It refuses a new aim only; the
+            // same item again still lets go of the current one
             let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
-            if let Some(lock) = lock.as_deref().filter(|lock| lock.refused(now)) {
+            if let Some(lock) = lock.as_deref().filter(|lock| !again && lock.refused(now)) {
                 let remaining = lock.remaining(now) as u64;
                 let text = plant::lock_text(remaining);
                 info!("plant: reuse lock for {remaining} s: {text}");
@@ -609,10 +611,12 @@ fn route(
                 }
                 continue;
             }
-            // the 2 s post-send cooldown (FUN_393a89d0 -> now + 2000, FUN_393a9540 error 0x163)
-            if lock
-                .as_deref()
-                .is_some_and(|lock| lock.post_send_refused(now))
+            // the 2 s post-send cooldown (FUN_393a89d0 -> now + 2000, FUN_393a9540 error 0x163); like the 30 s lock,
+            // it refuses a new aim only, so the same item again still cancels the current one
+            if !again
+                && lock
+                    .as_deref()
+                    .is_some_and(|lock| lock.post_send_refused(now))
             {
                 info!(
                     "plant: post-send cooldown, error 0x163 ({})",
@@ -622,7 +626,6 @@ fn route(
                 continue;
             }
             crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
-            let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
             aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant), fixed_spot: false });
             continue;
         }
@@ -1132,6 +1135,66 @@ mod tests {
         app.world_mut().write_message(press);
         app.update();
         assert!(app.world().resource::<Aiming>().plant().is_some());
+    }
+
+    #[test]
+    fn the_same_seed_again_cancels_the_aim_under_either_lock() {
+        let Some(db) = crate::ingame::data::Db::open() else {
+            return;
+        };
+        let press = SkillPressed {
+            skill: 25536,
+            item: Some((1, 15646)),
+            target_obj_id: 0,
+            gcd: false,
+        };
+        let (skill, rice) = plant::begin(&press, &db).expect("the rice seed places doodad 2246");
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::PortalBookUsed>()
+            .add_message::<crate::hud::MusicItemUsed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<crate::hud::ShowError>()
+            .add_message::<NetCommand>()
+            .insert_resource(GroundSkills::default())
+            .insert_resource(db)
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<Target>()
+            .init_resource::<Units>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Sent>()
+            .init_resource::<Errors>()
+            .init_resource::<plant::PlantLock>()
+            .init_resource::<Time>()
+            .add_systems(Update, (route, collect, collect_errors).chain());
+        let aim = |app: &mut App| {
+            app.world_mut().resource_mut::<Aiming>().set_plant_preview(
+                press,
+                skill,
+                rice.clone(),
+                Some((Vec3::new(0.0, 5.0, 0.0), true)),
+            );
+        };
+        // the 30 s world-load lock refuses a new aim but lets the same seed cancel
+        app.world_mut().resource_mut::<plant::PlantLock>().hold(0.0);
+        aim(&mut app);
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_none());
+        assert!(app.world().resource::<Errors>().0.is_empty());
+        // the 2 s post-send cooldown behaves the same
+        *app.world_mut().resource_mut::<plant::PlantLock>() = plant::PlantLock::default();
+        app.world_mut()
+            .resource_mut::<plant::PlantLock>()
+            .hold_post_send(0.0);
+        aim(&mut app);
+        app.world_mut().write_message(press);
+        app.update();
+        assert!(app.world().resource::<Aiming>().plant().is_none());
+        assert!(app.world().resource::<Errors>().0.is_empty());
     }
 
     #[test]

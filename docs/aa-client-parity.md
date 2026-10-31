@@ -10,9 +10,10 @@ ghost's yaw (`FUN_393a9340`, F4). The ground under the ghost box's four corners 
 Two reuse locks exist (F13): the 30 s one (`_DAT_39ac7748` = 30,000 ms) starts at the end of a world load
 (`FUN_39426520`/`FUN_393a6de0`) and at a teleport arrival (F3's `SCTeleportUnit`), showing "Can't place this for N
 second(s)." (`ui_texts` 4598); a send starts the separate 2 s post-send cooldown (`FUN_393a89d0` -> `now + 2000`,
-`FUN_393a9540` error 0x163 `OTHER_BUILD_IS_ON`). `farm_plant_preview` checks the 30 m boundary, sphere/box overlap, the
-terrain spread and its exemptions, literal texts, the post-send cooldown, the 30 s lock, the ghost and ring offscreen,
-and exits after PASS/FAIL in a plain run. Still open: F5 water site, F6 exact radii, F8-F12 house/farm/zone/labor,
+`FUN_393a9540` error 0x163 `OTHER_BUILD_IS_ON`). The same seed pressed again still cancels the aim, also while either
+lock is active (maintainer 6cc6a453). `farm_plant_preview` checks the 30 m boundary, sphere/box overlap, the terrain
+spread and its exemptions, literal texts, the post-send cooldown, the 30 s lock, the ghost and ring offscreen, and
+exits after PASS/FAIL in a plain run. Still open: F5 water site, F6 exact radii, F8-F12 house/farm/zone/labor,
 F15-F18 harvest/growth, and the ghost model's own box bounds for the spread; see `aa-client-doodads.md` "Planting".
 
 ## Doodad cutdown capture checkpoint, 2026-10-30
@@ -29,8 +30,7 @@ axe/loot presentation remain unverified; see `aa-client-doodads.md` "Pending liv
 ## Transport checkpoint (mounts, carts, ships), 2026-10-29
 
 The older checkpoint sections below still say "mounts remain excluded"; those lines are historical and stay as
-written. This checkpoint lifts that exclusion for the merged mount and cart areas below; ship steering and deck
-standing are open PRs, not yet in main. Most slices pair a capture on the original 1.2 client (r208022) through AAEmu's
+written. This checkpoint lifts that exclusion for the mount, cart and ship areas below. Most slices pair a capture on the original 1.2 client (r208022) through AAEmu's
 client driver with a Bevy replay; the evidence is text under `tools/evidence/` (the two rendering slices below say what
 they used instead).
 
@@ -79,24 +79,25 @@ Merged:
   (`tools/evidence/mount_dismount/`). Open: reason 10 travel, right-side dismount, other players' landing, and the
   settle phase/mid-air height.
 
-Open PRs:
+Ships (merged after the checkpoint was written):
 
-- **#39 ship steering at the helm (open PR).** The helm sends `CSMoveUnit` type 4 `{throttle, steering}` on the 100 ms
+- **#39 ship steering at the helm.** The helm sends `CSMoveUnit` type 4 `{throttle, steering}` on the 100 ms
   pump, resending 0/0 at idle; throttle is ±127 and steering ramps/decays at the ship model's `steer_vel`; the server's
   type 3 decodes with the 30/32767 velocity scale. The 1.2 capture and replay cover idle, forward, reverse, left/right
   and leaving (`tools/evidence/ship_steering/`). Open: larger ships and helm/rudder visuals, the game-option steering
   factor, the sailboat/clipper capture, and remote ship smoothing; deck standing is #40.
-- **#40 ship deck standing (open PR, builds on #39).** A player on a deck sends `CSMoveUnit` type 1 with the ship
-  support block (actor flag 0x20), ship-local position, the relative facing as the primary direction and the world
-  facing as auxiliary z; a jump is 0x44/0x34. Leaving the helm keeps the player on deck, and stepping off resumes world
-  movement. The capture and replay in `tools/evidence/ship_deck/` (the full capture with #39) match structurally:
+- **#40 ship deck standing (builds on #39).** A player on a deck sends `CSMoveUnit` type 1 with the ship support block
+  (actor flag 0x20), ship-local position, the relative facing as the primary direction and the world facing as auxiliary
+  z; a jump is 0x44/0x34. Leaving the helm keeps the player on deck, and stepping off resumes world movement. The
+  capture and replay in `tools/evidence/ship_deck/` (the full capture is #39's `ship_steering/`) match structurally:
   header/actor sets, ship id, cadence and support rows. Open: hull pitch/roll, a raised helm on larger ships, two
   header-only step-off rows, and deck walking/jump values the capture cannot verify.
 
 Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
-hanging (S13), gliders (S14), vehicle state/FX (S15), cart terrain following, vehicle camera distance, walking to the
-mount before mounting, auto-walk, mount jump clips, larger ships, and the copper boiler colour. The detailed pending
-checks are in [units](aa-client-units.md) and the PR descriptions.
+hanging (S13), gliders (S14), vehicle state/FX (S15), walking to the mount before mounting, auto-walk, mount jump clips,
+larger ships, and the copper boiler colour. The detailed pending checks are in [units](aa-client-units.md) and the PR
+descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
+action bar (#44) followed with their own captures.
 
 ## Slider range-notification checkpoint, 2026-10-26
 
@@ -876,7 +877,7 @@ not turn it into a current completion claim.
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall; original auction house search, bid, buy-out, listing, cancel and bid history, driven live between two accounts | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction settlement mails claimed through the window, bid/buy-out chat notices of other players |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F with the "Gather" cast bar and phase 4513->4514, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; legacy ore/rock/shear capture-pending) | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows |
-| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load/teleport lock and the 2 s post-send cooldown per F13) with an offscreen self-check | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open) |
+| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load/teleport lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open) |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
 | Duels | Challenge from the target popup, challenge prompt (default dialog with the original `locale.duel` texts), accept/refuse, `STARTED_DUEL`/`ENDED_DUEL`, start text and result notice, temporary team factions on plates/target | Retail placement of the countdown text (system message here); the AAEmu server now sends `SCDuelStartCountdownPacket` at acceptance (NickMesser/AAEmu#15), so the countdown shows live; `SCAreaChatBubble` 0x153 (type 543, ignored) |

@@ -22,7 +22,7 @@
 //!
 //! `cargo run -p aa-client --example farm_plant_preview -- --mute --offscreen-shot shots/aa-client/farm_plant_preview.png --shot-after 17`
 //! (needs `AA_PAK` and `AA_DB`; without them it says so and exits 0). `--shot` draws into a window; `--shot-after` must
-//! be after the last check (15.6 s), or the run would end before checking anything. Without a shot flag the run exits
+//! be after the last check (16.0 s), or the run would end before checking anything. Without a shot flag the run exits
 //! 0 after PASS (non-zero after FAIL).
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -70,8 +70,8 @@ const PLAYER_OBJ: u32 = 47;
 const PLAYER_AT: Vec3 = Vec3::ZERO;
 /// The staged neighbour doodad the overlap cases use.
 const NEIGHBOUR_OBJ: u32 = 900;
-/// Last check time (the lock cases run at 11.8-15.6 s); the screenshot must come after it.
-const LAST_CHECK: f32 = 15.6;
+/// Last check time (the lock cases run at 11.8-16.0 s); the screenshot must come after it.
+const LAST_CHECK: f32 = 16.0;
 
 /// A 10 m step at x > 0: the corners of the 0.5 m ghost box straddle it.
 fn cliff(x: f32, _y: f32) -> Option<f32> {
@@ -712,18 +712,12 @@ fn lock_cases(
                     .failures
                     .push("a teleport/world load did not start the 30 s reuse lock".into());
             }
+            // nothing is aimed here, so the press must be refused; the same item again would cancel an aim instead
             pressed.write(preview.press);
-            // after the lock checks, show the final free preview again for the screenshot
-            aiming.set_plant_preview(
-                preview.press,
-                preview.skill,
-                preview.plant.clone(),
-                Some((Vec3::new(0.0, 5.0, 0.0), true)),
-            );
             state.lock_step = 6;
         }
         6 if t >= 15.6 => {
-            if aiming.plant().is_none() {
+            if aiming.plant().is_some() {
                 state
                     .failures
                     .push("planting within 30 s of a teleport was not locked".into());
@@ -751,6 +745,16 @@ fn lock_cases(
                     .failures
                     .push(format!("the countdown text is {text:?}, expected {want:?}"));
             }
+            // after the locked press was refused, show the final free preview again for the screenshot
+            aiming.set_plant_preview(
+                preview.press,
+                preview.skill,
+                preview.plant.clone(),
+                Some((Vec3::new(0.0, 5.0, 0.0), true)),
+            );
+            state.lock_step = 7;
+        }
+        7 if t >= 16.0 => {
             // the restored preview must be the visible rice ghost under a green ring at shot time
             match aiming.plant() {
                 Some(plant) if plant.blocked.is_none() && plant.text() == plant::CAN_BE_PLACED => {}
