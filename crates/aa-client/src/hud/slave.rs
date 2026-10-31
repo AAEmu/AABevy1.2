@@ -21,9 +21,11 @@
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
 //! (live capture 2026-10-28, case e), never 0x068.
 //!
-//! Skills 13863 (passenger) and 19165 (destroy) go to `CSStartSkill` in 1.2; this client has no
-//! generic interaction skill-cast path yet, so they are ignored. Any other first skill (0 or
-//! unknown) does nothing.
+//! Skills 13863 (passenger) goes to `CSStartSkill` in 1.2; 19165 (destroy) needs the same
+//! generic interaction cast but is not ported. The passenger request targets the slave, not the
+//! player, and the server attaches point 2 (`AttachTo` value1 2). A second seat needs leaving the
+//! first: there is no change-seat packet, so a passenger request while already seated is refused
+//! like another slave (capture-pending S11-C2). Any other first skill (0 or unknown) does nothing.
 //!
 //! The interactive key (F) sends nothing for a cart; NPC talk keeps the path it had. The player
 //! flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13), the parent unit type 0xe (native silent
@@ -167,10 +169,32 @@ pub(super) fn interact(
 }
 
 /// `FUN_393be850` / `FUN_393be280`: `SCNpcInteractionSkillList` 0x07b for a slave acts on the
-/// first skill at once. 12076 is the bind route; 13863 (passenger), 19165 (destroy) and any
-/// other skill need a generic interaction skill cast this client does not have yet.
+/// first skill at once. The two skills the 1.2 tables name for a slave:
+/// * 12076 "occupy" -> `CSBindSlave` 0x031 (the driver seat, point 1);
+/// * 13863 "passenger seat" -> a plain `CSStartSkill` 0x052 with the slave as the unit target
+///   (`AttachTo` value1 2 attaches point 2).
+/// 19165 (destroy) and any other skill do nothing here.
+const SKILL_OCCUPY: u32 = 12076;
+const SKILL_PASSENGER: u32 = 13863;
+
+/// Which seat a slave interaction skill asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SlaveSeat {
+    Driver,
+    Passenger,
+}
+
+impl SlaveSeat {
+    fn of_skill(skill: u32) -> Option<SlaveSeat> {
+        match skill {
+            SKILL_OCCUPY => Some(SlaveSeat::Driver),
+            SKILL_PASSENGER => Some(SlaveSeat::Passenger),
+            _ => None,
+        }
+    }
+}
+
 pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
-    const SKILL_OCCUPY: u32 = 12076;
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
     }) = event
@@ -180,7 +204,10 @@ pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     let Some(unit) = units.get(*npc_obj_id) else {
         return Outcome::Silent;
     };
-    if !matches!(unit.kind, UnitKind::Slave { .. }) || skills.first() != Some(&SKILL_OCCUPY) {
+    let Some(seat) = skills.first().copied().and_then(SlaveSeat::of_skill) else {
+        return Outcome::Silent;
+    };
+    if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
     let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
@@ -193,7 +220,28 @@ pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     if gap >= interact_reach(data) {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
-    bind(data, units, *npc_obj_id)
+    match seat {
+        SlaveSeat::Driver => bind(data, units, *npc_obj_id),
+        SlaveSeat::Passenger => passenger(data, units, *npc_obj_id),
+    }
+}
+
+/// The passenger seat request: `CSStartSkill` 13863 with the slave as the unit target. The
+/// original client goes from the interaction range check straight to the skill
+/// (`FUN_393bf310` -> `FUN_39362f50`); the bind checks of `FUN_39346290` belong to 12076.
+/// A character already on a seat must leave it first: there is no change-seat packet (server
+/// `bind_slave` also has no "already attached" guard, so a second attach would leave two
+/// points for one character). Refusing with `SLAVE_UNBIND_FIRST` follows the driver bind checks
+/// and is capture-pending (S11-C2).
+fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+    if current_slave(data, units).is_some() {
+        return Outcome::Refused(MSG_SLAVE_UNBIND_FIRST);
+    }
+    data.requests.push(Request::UseSkill {
+        skill_id: SKILL_PASSENGER,
+        target_obj_id: target,
+    });
+    Outcome::Sent
 }
 
 /// Feeds `SCNpcInteractionSkillList` 0x07b for slaves to [`receive`].
