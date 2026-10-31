@@ -598,9 +598,11 @@ fn route(
         }
         // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
         if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
-            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)."
+            let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
+            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)." It refuses a new aim only; the
+            // same item again still lets go of the current one
             let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
-            if let Some(lock) = lock.as_deref().filter(|lock| lock.refused(now)) {
+            if let Some(lock) = lock.as_deref().filter(|lock| !again && lock.refused(now)) {
                 let remaining = lock.remaining(now) as u64;
                 let text = plant::lock_text(remaining);
                 info!("plant: reuse lock for {remaining} s: {text}");
@@ -610,7 +612,6 @@ fn route(
                 continue;
             }
             crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
-            let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
             aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant), fixed_spot: false });
             continue;
         }
