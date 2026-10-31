@@ -205,7 +205,10 @@ impl Plugin for InGamePlugin {
                         player::follow_server,
                         sprint::drive_sprint.run_if(in_state(Screen::InGame)),
                         track_local_mount,
-                        (glide::track_flight, glide::request_deploy, glide::control_glide).chain(),
+                        (glide::track_flight, glide::request_deploy, glide::control_glide)
+                            .chain()
+                            .run_if(in_state(Screen::InGame))
+                            .run_if(teleport::idle),
                         camera::vehicle_camera,
                         ship::board_deck
                             .run_if(in_state(Screen::InGame))

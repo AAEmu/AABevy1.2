@@ -702,7 +702,10 @@ pub fn track_flight(
         return;
     };
     if dead {
-        gliding.active = None;
+        // like a mount: a buff still listed at the resurrection must not open a new flight
+        if let Some(active) = gliding.active.take() {
+            gliding.ended = Some(active.buff_id);
+        }
         state.glide_owns = false;
         return;
     }
@@ -947,7 +950,10 @@ pub fn control_glide(
         return;
     };
     if dead {
-        gliding.active = None;
+        // like a mount: a buff still listed at the resurrection must not open a new flight
+        if let Some(active) = gliding.active.take() {
+            gliding.ended = Some(active.buff_id);
+        }
         state.glide_owns = false;
         return;
     }
@@ -1640,8 +1646,9 @@ pub fn show_glider(
     mut commands: Commands,
     mut cry: aa_cry::scene::CryAssets,
     player: Query<(Entity, Option<&Animator>), With<LocalPlayer>>,
+    // a glider model without a rig (a static `.cgf`) has no Animator but is still the shown glider
     mut models: Query<
-        (Entity, &mut Animator, &mut GliderPlay),
+        (Entity, Option<&mut Animator>, &mut GliderPlay),
         (With<GliderModel>, Without<RemoteGliderModel>),
     >,
     children: Query<&Children>,
@@ -1707,7 +1714,8 @@ pub fn show_glider(
         ));
         return;
     }
-    for (_, mut animator, mut play) in &mut models {
+    for (_, animator, mut play) in &mut models {
+        let Some(mut animator) = animator else { continue };
         if play.playing == Some(pose) {
             continue;
         }
