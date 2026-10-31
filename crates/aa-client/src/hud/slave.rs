@@ -24,8 +24,9 @@
 //! Skills 13863 (passenger) goes to `CSStartSkill` in 1.2; 19165 (destroy) needs the same
 //! generic interaction cast but is not ported. The passenger request targets the slave, not the
 //! player, and the server attaches point 2 (`AttachTo` value1 2). A second seat needs leaving the
-//! first: there is no change-seat packet, so a passenger request while already seated is refused
-//! like another slave (capture-pending S11-C2). Any other first skill (0 or unknown) does nothing.
+//! first: there is no change-seat packet, and this client does not refuse a passenger request
+//! while already seated; the server decides (capture-pending S11-C2). Any other first skill (0 or
+//! unknown) does nothing.
 //!
 //! The interactive key (F) sends nothing for a cart; NPC talk keeps the path it had. The player
 //! flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13), the parent unit type 0xe (native silent

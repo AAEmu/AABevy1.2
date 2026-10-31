@@ -116,17 +116,21 @@ fn helper_nodes(
     placement: Affine3A,
     out: &mut HashMap<String, Affine3A>,
 ) {
-    if let Some(skeleton) = &model.skeleton {
-        for bone in &skeleton.bones {
-            if let Some(name) = helper_key(&bone.name) {
-                out.entry(name).or_insert(placement * bone.bind_model);
+    // `$`-prefixed helpers first, so a bare `driver`/`passenger` bone never displaces an authored `$driver` node
+    for prefixed in [true, false] {
+        let pass = |name: &str| name.starts_with('$') == prefixed;
+        if let Some(skeleton) = &model.skeleton {
+            for bone in skeleton.bones.iter().filter(|bone| pass(&bone.name)) {
+                if let Some(name) = helper_key(&bone.name) {
+                    out.entry(name).or_insert(placement * bone.bind_model);
+                }
             }
         }
-    }
-    for (index, node) in model.nodes.iter().enumerate() {
-        if let Some(name) = helper_key(&node.name) {
-            out.entry(name)
-                .or_insert_with(|| placement * model.world_transform(index));
+        for (index, node) in model.nodes.iter().enumerate().filter(|(_, node)| pass(&node.name)) {
+            if let Some(name) = helper_key(&node.name) {
+                out.entry(name)
+                    .or_insert_with(|| placement * model.world_transform(index));
+            }
         }
     }
 }
