@@ -6,9 +6,10 @@
 //!
 //! It also stands a camera inside the wagon's box with a passenger on the body: the wagon must not
 //! be picked from inside its own box, and the passenger must be (the deck case). A camera outside
-//! the box looking at the same passenger must pick the passenger, not the nearer wagon box, and a
-//! wagon root moved and turned after its box was measured must be picked at the new place, not the
-//! old one.
+//! the box looking at the same passenger must pick the passenger, not the nearer wagon box; a click
+//! on the rear side with a merchant 3 m behind the wagon must pick the wagon, not the merchant; and
+//! a wagon root moved and turned after its box was measured must be picked at the new place, not
+//! the old one.
 //!
 //! The run exits non-zero on a failed check or a staging timeout. Needs `AA_PAK` and `AA_DB`;
 //! without them it says so and exits 0.
@@ -60,6 +61,7 @@ const WAGON_MODEL: u32 = 1008;
 const WAGON_POS: Vec3 = Vec3::new(100.0, 200.0, 5.0);
 const WAGON_YAW: f32 = 0.4;
 const DECK_NPC: u32 = 21;
+const MERCHANT: u32 = 22;
 /// Wait this long for the model and its bounds, then give up.
 const READY_TIMEOUT: f32 = 30.0;
 /// With no screenshot asked for, leave once the check passed.
@@ -412,6 +414,33 @@ fn check(
         if picked != Some(DECK_NPC) {
             failures.push(format!(
                 "the shore click picked {picked:?}, not the passenger {DECK_NPC}"
+            ));
+        }
+        // a merchant 3 m behind the wagon on the same ray: a click on the rear side, outside the
+        // wagon's own sphere, must pick the wagon (the nearer box entry), not the merchant
+        let behind_camera = base + turn * Vec3::new(8.0, 3.0, 0.0);
+        let behind_aim = base + turn * Vec3::new(0.5, 1.2, 1.8);
+        let behind_ray = Ray3d::new(
+            behind_camera,
+            Dir3::new(behind_aim - behind_camera).expect("the wagon rear side"),
+        );
+        let merchant_middle = behind_ray.origin + *behind_ray.direction * 12.0;
+        let merchant = fixture_unit(
+            MERCHANT,
+            UnitKind::Npc {
+                template_id: 1,
+                owner_id: 0,
+            },
+            "Wagon-side Merchant",
+            0,
+            aa_world::bevy_to_cry(merchant_middle - Vec3::Y * 0.9),
+        );
+        units.by_id.insert(MERCHANT, merchant);
+        let picked = pick(&behind_ray, &units, &poses, &mut boxes);
+        info!("slave_pick: behind-the-wagon click -> {picked:?}");
+        if picked != Some(WAGON_OBJ) {
+            failures.push(format!(
+                "the rear-side click picked {picked:?}, not the wagon {WAGON_OBJ}"
             ));
         }
         if !failures.is_empty() {

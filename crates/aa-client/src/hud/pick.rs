@@ -7,16 +7,17 @@
 //! `bound` row: a right click on the seated slave sends `CSChangeTarget` 0x02c).
 //!
 //! The box is only a fallback, and a loose one: it is the union of every drawn mesh, so a ship's
-//! masts and sails enlarge it well beyond the hull. A unit whose sphere the ray hits therefore
-//! wins over every vehicle box, wherever along the ray (a passenger on a deck is picked from
-//! shore, not the ship); the box only decides when no sphere is hit. A box that contains the
-//! camera is ignored too (a camera on deck sits inside the ship's box and would otherwise pick the
-//! ship on every click), an attached child (a cannon) wins over its parent only while its hit lies
-//! inside the parent's span along the ray, and the slave the player rides gets no box at all, only
-//! its sphere. Making the box hug the hull would need the mesh geometry or a hull material/mesh
-//! marker, neither of which the draw tree carries; the capture's own pick landed on only 4 of 44
-//! sweep points (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick shape stays
-//! capture-pending.
+//! masts and sails enlarge it well beyond the hull. A sphere hit wins over a vehicle box only while
+//! the sphere's entry lies at or before that box's exit along the ray, so a passenger on a deck or
+//! in a wagon bed (inside the vehicle's span) is picked from shore, while a unit behind the vehicle
+//! loses to the nearer box entry and cannot steal the click. Among box hits the nearest entry wins.
+//! A box that contains the camera is ignored (a camera on deck sits inside the ship's box and would
+//! otherwise pick the ship on every click); an attached child (a cannon) wins over its parent only
+//! when its entry is within 1.0 m of the parent's entry, and the slave the player rides gets no box
+//! at all, only its sphere. Making the box hug the hull would need the mesh geometry or a hull
+//! material/mesh marker, neither of which the draw tree carries; the capture's own pick landed on
+//! only 4 of 44 sweep points (`captures/2026-10-28b/summary.txt:36`, case e), so the exact 1.2 pick
+//! shape stays capture-pending.
 
 use std::collections::HashMap;
 
@@ -39,6 +40,10 @@ const CENTRE_LIFT: f32 = 0.9;
 const CACHE_LIMIT: usize = 1024;
 /// How many parent links the child-over-parent preference follows (the attach tree is shallow).
 const MAX_ATTACH_DEPTH: usize = 8;
+/// How close to the parent's box entry a child's entry must be for the child to win the box choice,
+/// metres. A child deeper inside the parent (a stern cannon behind a bow click) is not what the
+/// click aimed at.
+const CHILD_ENTRY_SLACK: f32 = 1.0;
 
 /// A unit's model box in the Bevy world: the centre, the half extents along its own axes, and the
 /// rotation those axes have in the world.
@@ -121,12 +126,14 @@ pub(crate) fn unit_middle_hit(ray: &Ray3d, unit: &Unit, world: Option<Vec3>) -> 
 }
 
 /// The unit the ray picks among the ones `accept` takes (never the local player), with `data`
-/// giving a unit's world position and drawn model box. A unit whose pick sphere is hit wins over
-/// every model box, wherever along the ray; among sphere hits the nearest entry wins. The box only
-/// decides when no sphere is hit: its nearest entry wins, and an attached child (a cannon) wins
-/// over its parent only while the child's hit lies inside the parent's span along the ray. The
-/// slave the player rides (`ridden`) gets no box at all. A miss is logged at debug level with the
-/// nearest unit's name, so an owner report can be checked from the log.
+/// giving a unit's world position and drawn model box. Among sphere hits the nearest entry wins,
+/// and among box hits the nearest entry wins, except that an attached child (a cannon) whose entry
+/// is within [`CHILD_ENTRY_SLACK`] of its parent's entry wins over the parent. A sphere hit beats
+/// the chosen box only while its entry is at or before the box's exit along the ray: a unit inside
+/// the box's span (a deck or wagon-bed passenger) wins even though the box is entered first, while
+/// a unit behind the box loses to the nearer box entry. The slave the player rides (`ridden`) gets
+/// no box at all. A miss is logged at debug level with the nearest unit's name, so an owner report
+/// can be checked from the log.
 pub(crate) fn pick_unit(
     ray: &Ray3d,
     units: &Units,
@@ -176,28 +183,26 @@ pub(crate) fn pick_unit(
             }
         }
     }
-    // a passenger on a deck or in a wagon bed is inside the vehicle's loose box; the sphere is
-    // what the click aimed at
-    if let Some((_, chosen)) = spheres.iter().min_by(|a, b| a.0.total_cmp(&b.0)) {
-        return Some(*chosen);
-    }
+    let nearest_sphere = spheres.iter().min_by(|a, b| a.0.total_cmp(&b.0)).copied();
     let Some(&(near, far, mut chosen)) = boxes.iter().min_by(|a, b| a.0.total_cmp(&b.0)) else {
+        if let Some((_, chosen)) = nearest_sphere {
+            return Some(chosen);
+        }
         if let Some((miss, name)) = nearest_miss {
             debug!("hud: pick: no unit under the ray (nearest miss {miss:.2} m: {name})");
         }
         return None;
     };
     let mut span = (near, far);
-    // a cannon on a ship is inside the ship's box, so its entry is farther; the click still means
-    // the cannon the player aimed at, but only while the child is inside the parent's span (a
-    // cannon far behind the clicked bow is not what the click aims at)
+    // a cannon on a ship sits inside the ship's box, so its entry is farther; the click still means
+    // the cannon when the ray meets both at nearly the same place (the near surface). A cannon deep
+    // inside the parent's box (a stern gun behind a bow click) is not what the click aimed at.
     for _ in 0..MAX_ATTACH_DEPTH {
         let Some((child_near, child_far, child)) = boxes
             .iter()
             .filter(|(child_near, _, id)| {
                 *id != chosen
-                    && *child_near >= span.0
-                    && *child_near <= span.1
+                    && (*child_near - span.0).abs() <= CHILD_ENTRY_SLACK
                     && units.get(*id).and_then(crate::ingame::units::unit_parent) == Some(chosen)
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -207,6 +212,13 @@ pub(crate) fn pick_unit(
         };
         chosen = child;
         span = (child_near, child_far);
+    }
+    // a unit on a deck or in a wagon bed is inside the vehicle's loose box; the sphere is what the
+    // click aimed at. A sphere behind the box (a unit the wagon hides) loses to the box's entry.
+    if let Some((sphere_entry, sphere)) = nearest_sphere
+        && sphere_entry <= span.1
+    {
+        return Some(sphere);
     }
     Some(chosen)
 }
@@ -284,6 +296,7 @@ struct CachedBox {
 pub(crate) struct ModelBoxes<'w, 's> {
     views: Option<Res<'w, Views>>,
     roots: Query<'w, 's, (Entity, &'static RemoteUnit)>,
+    added: Query<'w, 's, (), Added<RemoteUnit>>,
     globals: Query<'w, 's, &'static GlobalTransform>,
     transforms: Query<'w, 's, &'static Transform>,
     parents: Query<'w, 's, &'static ChildOf>,
@@ -319,8 +332,11 @@ impl ModelBoxes<'_, '_> {
 
     /// The model box of a vehicle, if it is drawn and its tree is fully built. The box is measured
     /// in the root's local frame and placed by the root's current `Transform` chain (not last
-    /// frame's `GlobalTransform`). A unit that is not a vehicle has no box at all (its tree's
-    /// Aabbs are weapons, attachments or effects).
+    /// frame's `GlobalTransform`). Measuring waits until the root's `GlobalTransform` agrees with
+    /// that chain: a freshly spawned root has the identity until propagation, and measuring from it
+    /// would cache a box at the origin. The spawn frame itself is skipped too (its mesh
+    /// `GlobalTransform`s are equally unpropagated). A unit that is not a vehicle has no box at all
+    /// (its tree's Aabbs are weapons, attachments or effects).
     pub(crate) fn get(&mut self, unit: &Unit) -> Option<PickBox> {
         if !matches!(unit.kind, UnitKind::Slave { .. }) {
             return None;
@@ -331,7 +347,13 @@ impl ModelBoxes<'_, '_> {
         let local = match self.cache.get(&unit.obj_id) {
             Some(cached) if cached.entity == entity && cached.model_id == model_id => cached.local,
             _ => {
+                if self.added.contains(entity) {
+                    return None;
+                }
                 let root = *self.globals.get(entity).ok()?;
+                if !root.affine().abs_diff_eq(current.compute_affine(), 1e-4) {
+                    return None;
+                }
                 let local = self.measure(entity, &root)?;
                 if self.cache.len() >= CACHE_LIMIT {
                     self.cache.clear();
@@ -625,13 +647,13 @@ mod tests {
     }
 
     #[test]
-    fn a_sphere_hit_wins_over_a_vehicle_box_wherever_it_lies_on_the_ray() {
+    fn a_sphere_hit_inside_the_vehicle_span_still_wins() {
         // the wagon's own pick sphere misses the ray (2.4 m to its middle); only its box is hit
         let wagon = unit_at_bevy(Vec3::new(3.0, 0.0, 0.0));
         let npc = npc_at_bevy(21, Vec3::new(0.6, 0.0, 0.0));
         let units = units_with(&[wagon, npc]);
-        // the box is entered at 8.5 m (top 1.5 m, ray from y=10); the NPC sphere's middle is
-        // 9.1 m away but its surface is entered at 8.18 m, and the sphere wins anyway
+        // the box is entered at 8.5 m and left at 9.25 m (top 1.5 m, ray from y=10); the NPC
+        // sphere is entered at 8.18 m, inside that span, so the sphere wins
         let wagon_box = PickBox {
             centre: Vec3::new(3.0, 0.75, 0.0),
             half: Vec3::new(3.0, 0.75, 2.0),
@@ -647,6 +669,46 @@ mod tests {
                 |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(wagon_box))
             ),
             Some(21)
+        );
+    }
+
+    #[test]
+    fn a_unit_behind_the_wagon_does_not_take_the_click() {
+        // a camera 8 m from the wagon's side and 3 m up; the click lands on the rear side,
+        // outside the wagon's own pick sphere; a merchant 3.5 m behind the wagon lies on the
+        // same ray but past the box's exit, so the nearer box entry is the wagon
+        let wagon = unit_at_bevy(Vec3::ZERO);
+        let merchant = npc_at_bevy(21, Vec3::new(-3.5, 0.0, 2.0));
+        let units = units_with(&[wagon, merchant]);
+        let wagon_box = PickBox {
+            centre: Vec3::new(0.0, 1.2, 0.0),
+            half: Vec3::new(1.0, 1.2, 2.0),
+            rotation: Quat::IDENTITY,
+        };
+        let camera = Vec3::new(9.0, 3.0, 0.0);
+        let aim = Vec3::new(1.0, 2.2, 1.5);
+        let ray = Ray3d::new(camera, Dir3::new(aim - camera).expect("the wagon side"));
+        assert!(
+            sphere_hit(&ray, unit_centre(Vec3::ZERO, 1.0), 1.1).is_none(),
+            "the click is outside the wagon's pick sphere"
+        );
+        let merchant_hit = sphere_hit(&ray, unit_centre(Vec3::new(-3.5, -2.0, 0.0), 1.0), 1.1)
+            .expect("the merchant is on the ray");
+        let box_far = wagon_box.span(&ray).expect("the wagon box is hit").1;
+        assert!(
+            merchant_hit > box_far,
+            "the merchant sphere is behind the wagon: {merchant_hit} > {box_far}"
+        );
+        assert_eq!(
+            pick_unit(
+                &ray,
+                &units,
+                0,
+                None,
+                |_| true,
+                |unit, _| (world_raw(unit), (unit.obj_id == 20).then_some(wagon_box))
+            ),
+            Some(20)
         );
     }
 
@@ -683,10 +745,10 @@ mod tests {
     }
 
     #[test]
-    fn an_attached_child_box_wins_inside_the_parents_span() {
+    fn an_attached_child_box_at_the_parents_entry_wins() {
         let ship = unit_at(Vec3::ZERO);
-        // middle (0, 4, 0): the sphere misses the ray at y 2.5, the 1 m box is hit
-        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, 0.0));
+        // middle (0, 4, -1): the sphere misses the ray at y 2.5, the 1 m box is hit
+        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, -1.0));
         cannon.obj_id = 21;
         cannon.name = "Deck Cannon".into();
         cannon.state_attachments = Some(UnitStateAttachments {
@@ -701,11 +763,11 @@ mod tests {
             rotation: Quat::IDENTITY,
         };
         let cannon_box = PickBox {
-            centre: Vec3::new(0.0, 2.5, 0.0),
+            centre: Vec3::new(0.0, 2.5, -1.0),
             half: Vec3::new(0.5, 0.5, 0.5),
             rotation: Quat::IDENTITY,
         };
-        // the ship is entered at 8 m and left at 12 m; the cannon at 9.5 m, inside that span
+        // the ship is entered at 8 m; the cannon at 8.5 m, within 1 m of the parent's entry
         let ray = Ray3d::new(
             Vec3::new(0.0, 2.5, -10.0),
             Dir3::new(Vec3::Z).expect("forward"),
@@ -837,8 +899,8 @@ mod tests {
     #[test]
     fn a_stern_cannon_behind_a_bow_click_does_not_win() {
         let ship = unit_at(Vec3::ZERO);
-        // middle (0, 4, 5): its sphere misses the ray at y 2.5, its box (2 m tall) is hit
-        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, 5.0));
+        // middle (0, 4, 7): its sphere misses the ray at y 2.5, its box is hit
+        let mut cannon = unit_at_bevy(Vec3::new(0.0, 3.1, 7.0));
         cannon.obj_id = 21;
         cannon.name = "Stern Cannon".into();
         cannon.state_attachments = Some(UnitStateAttachments {
@@ -847,20 +909,25 @@ mod tests {
             bonding_obj_id: None,
         });
         let units = units_with(&[ship, cannon]);
+        // the real hull+mast box spans the whole ship; the cannon sits inside it near the stern
         let ship_box = PickBox {
             centre: Vec3::new(0.0, 1.0, 0.0),
-            half: Vec3::new(2.0, 2.0, 2.0),
+            half: Vec3::new(2.0, 2.0, 10.0),
             rotation: Quat::IDENTITY,
         };
         let cannon_box = PickBox {
-            centre: Vec3::new(0.0, 4.0, 5.0),
-            half: Vec3::new(0.5, 2.0, 0.5),
+            centre: Vec3::new(0.0, 2.5, 7.0),
+            half: Vec3::new(0.5, 0.5, 0.5),
             rotation: Quat::IDENTITY,
         };
-        // the ship is entered at 8 m and left at 12 m; the cannon is entered at 14.5 m, behind
-        // the whole ship box, so the bow click is the ship
+        assert!(
+            ship_box.contains(cannon_box.centre),
+            "the cannon is inside the ship box"
+        );
+        // the ship is entered at 10 m and left at 30 m; the stern cannon at 26.5 m, far from the
+        // parent's entry (and more than 1 m past it), so the bow click is the ship
         let ray = Ray3d::new(
-            Vec3::new(0.0, 2.5, -10.0),
+            Vec3::new(0.0, 2.5, -20.0),
             Dir3::new(Vec3::Z).expect("forward"),
         );
         assert_eq!(
@@ -1012,6 +1079,8 @@ mod tests {
             RemoteDoodad { obj_id: 7 },
             ChildOf(root),
         ));
+        // the spawn frame does not measure; the next one does
+        app.update();
         app.update();
         let model = app.world().resource::<BoxOut>().0.expect("the hull's box");
         assert_eq!(model.centre, Vec3::ZERO);
@@ -1059,6 +1128,8 @@ mod tests {
             GlobalTransform::default(),
             ChildOf(root),
         ));
+        // the spawn frame does not measure; the next one does
+        app.update();
         app.update();
         assert_eq!(
             app.world().resource::<BoxOut>().0.expect("the hull").centre,
@@ -1130,6 +1201,8 @@ mod tests {
                 ChildOf(root),
             ))
             .id();
+        // the spawn frame does not measure; the next one sees the partial tree
+        app.update();
         app.update();
         assert_eq!(
             app.world().resource::<BoxOut>().0,
@@ -1155,6 +1228,101 @@ mod tests {
                 .expect("the cached box")
                 .half,
             Vec3::new(6.0, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn a_box_waits_for_the_frame_after_spawn() {
+        let unit = unit_at(Vec3::ZERO);
+        let mut app = box_app(unit.clone());
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
+            Transform::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+            GlobalTransform::default(),
+            ChildOf(root),
+        ));
+        app.update();
+        assert_eq!(
+            app.world().resource::<BoxOut>().0,
+            None,
+            "the spawn frame's child globals are not propagated yet"
+        );
+        app.update();
+        let model = app
+            .world()
+            .resource::<BoxOut>()
+            .0
+            .expect("the measured box");
+        assert!(
+            model.centre.abs_diff_eq(Vec3::new(10.0, 0.0, 0.0), 1e-4),
+            "the box is at the propagated mesh: {model:?}"
+        );
+    }
+
+    #[test]
+    fn a_box_is_not_measured_from_a_stale_global_transform() {
+        let unit = unit_at(Vec3::ZERO);
+        let mut app = box_app(unit.clone());
+        let root = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(20.0, 0.0, 0.0)),
+                RemoteUnit::announced(&unit),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(20, root);
+        app.world_mut().spawn((
+            Aabb::from_min_max(Vec3::splat(-1.0), Vec3::splat(1.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            ChildOf(root),
+        ));
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<BoxOut>()
+                .0
+                .expect("the box")
+                .centre
+                .abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-4)
+        );
+        // a new model forces a remeasure, while the root's propagated global is still the old
+        // identity (as before the first propagation); the current Transform chain says (20, 0, 0)
+        let mut changed = unit;
+        changed.model_id = 999;
+        app.world_mut().resource_mut::<CachedUnit>().0 = changed.clone();
+        app.world_mut()
+            .entity_mut(root)
+            .insert((RemoteUnit::announced(&changed), GlobalTransform::default()));
+        // keep the root's Transform marked changed so propagation refreshes its global next frame
+        app.world_mut()
+            .get_mut::<Transform>(root)
+            .unwrap()
+            .translation = Vec3::new(20.0, 0.0, 0.0);
+        app.update();
+        assert_eq!(
+            app.world().resource::<BoxOut>().0,
+            None,
+            "a stale global transform must not be measured"
+        );
+        app.update();
+        assert!(
+            app.world()
+                .resource::<BoxOut>()
+                .0
+                .expect("the remeasured box")
+                .centre
+                .abs_diff_eq(Vec3::new(20.0, 0.0, 0.0), 1e-4)
         );
     }
 
@@ -1191,6 +1359,8 @@ mod tests {
             GlobalTransform::default(),
             ChildOf(root),
         ));
+        // the spawn frame does not measure; the next one does
+        app.update();
         app.update();
         assert!(
             app.world().resource::<NearOut>().0.is_some(),
@@ -1218,6 +1388,8 @@ mod tests {
                 ChildOf(root),
             ))
             .id();
+        // the spawn frame does not measure; the next one does
+        app.update();
         app.update();
         assert_eq!(
             app.world().resource::<BoxOut>().0.expect("the hull").half,

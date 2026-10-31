@@ -428,22 +428,28 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
-* **Clicking the model (2026-10-31).** A unit's 1.1 m pick sphere decides first: a sphere hit wins
-  over every vehicle box, wherever along the ray, so a player, NPC or passenger standing on a deck
-  or in a wagon bed is picked from outside the vehicle. Only when no sphere is hit does the box
-  decide, using the bounds of the meshes the vehicle is drawn with, in the unit's own turned frame.
-  A unit that is not a `UnitKind::Slave` has no box: a character's draw tree has weapon, attachment
-  and effect bounds but no body bounds, and the box walk stops at a child unit, a parented doodad or
-  an effect. A box that contains the camera is ignored (a camera on deck is inside a ship's box,
-  masts and sails included, and would otherwise be picked on every click). Among box hits, an
-  attached child (a cannon) wins over its parent only while the child's hit lies within the
-  parent's span along the ray, so a stern cannon behind a bow click does not win. The slave the
-  player rides or is attached to gets no box at all, only its sphere, so it does not block clicks
-  past it. The box is measured in the drawn root's local frame and composed with the root's current
-  `Transform` chain on every read, so a wagon that drives or turns is picked where it is now; only
-  a fully built tree (every static mesh has its bounds) is cached, and the cache lasts until the
-  root or model changes. Left click, the right click, the Tab candidates and the talk distances use
-  the unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
+* **Clicking the model (2026-10-31).** A unit's 1.1 m pick sphere and a vehicle's drawn mesh box
+  are both candidates. Among sphere hits the nearest entry wins; among box hits the nearest entry
+  wins, except that an attached child (a cannon) wins over its parent when its entry is within
+  1.0 m of the parent's entry, so a stern cannon deep inside a bow-clicked hull does not win. A
+  sphere hit then beats the chosen box only while its entry is at or before the box's exit along
+  the ray: a player, NPC or passenger standing on a deck or in a wagon bed (inside the vehicle's
+  span) is picked from outside the vehicle, while a unit behind the vehicle loses to the nearer
+  box entry and cannot steal the click. A unit that is not a `UnitKind::Slave` has no box: a
+  character's draw tree has weapon, attachment and effect bounds but no body bounds, and the box
+  walk stops at a child unit, a parented doodad or an effect. A box that contains the camera is
+  ignored (a camera on deck is inside a ship's box, masts and sails included, and would otherwise
+  be picked on every click). The slave the player rides or is attached to gets no box at all, only
+  its sphere, so it does not block clicks past it; seated, a click only inside the ridden wagon's
+  loose box therefore does not target it (a documented deviation: 1.2's ridden pick is tight,
+  landing on 4 of 44 sweep points, `captures/2026-10-28b/summary.txt:36`; its exact shape is
+  capture-pending). The box is measured in the drawn root's local frame and composed with the
+  root's current `Transform` chain on every read, so a wagon that drives or turns is picked where
+  it is now; only a fully built tree (every static mesh has its bounds) is cached, and the cache
+  lasts until the root or model changes. A box is not measured until the root's `GlobalTransform`
+  agrees with that chain (and never on the spawn frame), so an unpropagated root cannot cache a box
+  at the origin. Left click, the right click, the Tab candidates and the talk distances use the
+  unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
   parent-composed position, and `Tab` and the talk checks measure from the manned slave's world
   position (`hud/slave.rs::player_centre`). The rule that an own vehicle may be targeted is
   `captures/2026-10-28b/summary.txt:36`, case e `bound` (`CSChangeTarget` 0x02c); the native pick
