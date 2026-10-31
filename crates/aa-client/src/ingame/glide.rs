@@ -1668,7 +1668,7 @@ pub fn show_glider(
     // a glider model without a rig (a static `.cgf`) has no Animator but is still the shown glider
     mut models: Query<
         (Entity, Option<&mut Animator>, &mut GliderPlay),
-        (With<GliderModel>, Without<RemoteGliderModel>),
+        (With<GliderModel>, Without<RemoteGliderModel>, Without<LocalPlayer>),
     >,
     children: Query<&Children>,
     mut stowed: Query<&mut Visibility, With<StowedPack>>,
