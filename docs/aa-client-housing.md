@@ -96,7 +96,10 @@ time 20.99 s, 25 labor and one stage material per action; the server answers `SC
 The client's local material check looks only at the bag, as in the capture: without a bag stack it shows
 `NOT_ENOUGH_REQUIRED_ITEM` ("Not enough <item>."), but the same click still casts when the material is equipped in
 the backpack slot (the server pays it then). One click sends at most one `Command::UseSkill`; the cast bar and labor
-bar follow the ordinary `SCSkillStarted` / `SCCharacterLaborPowerChanged` path.
+bar follow the ordinary `SCSkillStarted` / `SCCharacterLaborPowerChanged` path. The capture covered action 1 only:
+actions 2-20, the 10/5/5 boundaries, completion, the cast-bar text and the wrong-skill/out-of-range negatives remain
+capture-pending (a second capture is running); the stage models in the example come from `housing_build_steps` and
+the finished model from `housings.main_model_id`.
 
 ## `X2House`
 

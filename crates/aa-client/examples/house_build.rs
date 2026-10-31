@@ -66,7 +66,9 @@ const PLAYER_OBJ: u32 = 8615;
 /// The captured, client-valid spot and the one the original refuses.
 const VALID: (f32, f32) = (15328.4, 14631.8);
 const REFUSED: (f32, f32) = (15338.53, 14632.33);
-/// Model per construction step (`housing_build_steps` of design 171) and the finished model.
+/// Model per construction step (`housing_build_steps` of design 171) and the finished model
+/// (`housings.main_model_id`). The 2026-10-31 capture covered action 1 only; actions 2-20, the
+/// 10/5/5 boundaries and completion are capture-pending (a second capture is running).
 const STAGES: [u32; 4] = [1083, 1084, 1085, 1082];
 
 fn hex(raw: &str) -> Vec<u8> {
