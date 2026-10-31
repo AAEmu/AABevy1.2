@@ -890,7 +890,12 @@ vehicle_models` row has turret limits. `ingame::turret::slave_turret` reads the 
 the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not read as zero.
 
 * **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
-  gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret`, so
+  gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
+  slave is kind 7/8, the `vehicle_models` row parses to a non-zero turret range, and its `velocity`
+  is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database copy, so
+  `velocity == 0` is the substitute (S12-C6); the trebuchets/tanks (velocity 2.5-3.5) and the
+  cotton-field cart (4.0) stay drivable, and the all-zero rows (vehicle_models 37/40) are not
+  turrets. `turret_seat_model` is the gate; a real-data test walks every kind-7/8 `slaves` row. So
   `player::control_player` locks walking, `cart::drive_cart` and the mate driver path do not run, and
   the player follows the server-placed cannon (`mount::drive_mount`). The seat pose is the cannon's
   `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` / `fist_ac_ballista_idle` /
@@ -898,18 +903,25 @@ the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not re
 * **Aim.** `turret::local_aim` takes the orbit camera direction in the cannon root's frame
   (`394322f0`'s camera direction), clamps pitch to the model's min/max and yaw to min/max (or wraps a
   full-circle yaw, `39425580`), and sends `CSTurretState` 0x036 with the slave's object id through
-  `turret::TurretSend` (a change-only 200 ms throttle, `FUN_39356990`). `turret::aim_turrets` moves
+  `turret::TurretSend`: one global 200 ms timer (`DAT_3a169940`), a packet only when the model aim
+  changed, and a change inside the window is **dropped** (not queued; `FUN_39356990` returns without
+  sending). The state resets when the local player mounts a gunner seat, so the same clamped aim is
+  sent again. `turret::aim_turrets` moves
   the drawn aim towards the target at `turret_yaw_angvel` / `turret_pitch_angvel` and writes
   `bone_yaw` (`R_z(yaw)`) and `bone_pitch` (`R_x(pitch)`) after the animation pass
   (`UpdateGunTurret` `FUN_390d14b0`).
 * **Remote.** Posture type 8 (both `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail) is
   decoded into `Posture.turret` / `Unit.turret`; `turret::remote_targets` and `aim_turrets` apply it
   to another player's cannon (a late viewer reads the `SCUnitState` snapshot).
-* **Fire.** A slave-bar skill with `skills.target_type_id` 11 (`BallisticPos`, e.g. 10473) goes out
-  as `Command::UseMateSkillAt`: `CSStartSkill` with a `Mount` caster and a `Position` target at the
-  aimed ground point. The server's `ship_cannon_gunner_seat_skill_and_leaving` sends the same shape.
-  `hud/mode_actions::use_slot` uses the `Sight` the turret system publishes while the local player
-  mans the cannon; every other slave skill keeps the unit/no-target caster.
+* **Fire.** A cannon's gunner bar is the point-1 `mount_attached_skills` skill (the real bar shows
+  14372 for slave 10, 24501 for 133, 20161 for 100; `target_type_id` 0), while the slot casts the
+  linked `mount_skills.skill_id` (10473, 24500, 20160). `hud/mode_actions` builds that gunner bar and
+  `use_slot` sends the cast skill: when it has `skills.target_type_id` 11 (`BallisticPos`) and a
+  `Sight` for the same slave is published, the command is `UseMateSkillAt` (`CSStartSkill` with a
+  `Mount` caster and a `Position` target at the aimed ground point). The tower deployment skill
+  20160/20161 is not a shot and keeps the ordinary unit/no-target cast. The server's
+  `ship_cannon_gunner_seat_skill_and_leaving` sends the same Position shape, and a real-data test
+  covers the bar -> cast mapping for slaves 10/133/100.
 
 Capture-pending (case ids; every one has a capture step):
 
@@ -924,8 +936,10 @@ Capture-pending (case ids; every one has a capture step):
   frame while panning the mouse and compare with the orbit angles.
 * **S12-C4** Installed-turret key aim (`39425580`): the key indices and key rates are not captured;
   this client uses the camera aim and the same rate limit for installed models (the trebuchet).
-* **S12-C6** The kind-7/8 gate for a turret seat: a cannon is point 1 of a kind-7/8 slave with a
-  complete turret block; capture the attach point the original uses for a ground cannon and a tank.
+* **S12-C6** The kind-7/8 gate for a turret seat: `vehicle_models.velocity == 0` substitutes for the
+  model controller type 3 (`FUN_390b3750`), which is not in the database copy. Capture the
+  controller type of a trebuchet and a tank and the attach point the original uses for a ground
+  cannon; if the controller type differs from velocity == 0, replace the gate.
 * **S12-C7** A non-identity `bone_yaw` / `bone_pitch` bind: the galleon cannon's bones are identity
   bind, so the direct `R_z` / `R_x` composition is proven only there. Capture a model whose turret
   bones carry a bind rotation and compare.
