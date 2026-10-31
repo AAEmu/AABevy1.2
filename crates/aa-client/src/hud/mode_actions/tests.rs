@@ -42,6 +42,14 @@ fn game() -> crate::hud::data::GameData {
         73,
         vec![SlaveSkill::new(15622, 65), SlaveSkill::new(17000, 75)],
     );
+    // the cannon fire skill (10473) is `target_type_id` 11 (`BallisticPos`)
+    game.skills.insert(
+        20704,
+        crate::hud::data::SkillInfo {
+            target_type: 11,
+            ..default()
+        },
+    );
     game
 }
 
@@ -414,6 +422,79 @@ fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
             0xE0, 0x50, 0, 0, 3, 0x14, 0, 0, 0xC9, 0, 0, 0, 0, 0x09, 0x03, 0, 0
         ]
     );
+    Ok(())
+}
+
+/// A cannon gunner's ballistic skill goes out at the aimed spot, not at the selected unit: the
+/// server's cannon test uses `SkillCastTarget::Position` for exactly this (`flow_tests`).
+#[test]
+fn a_manned_cannon_slot_fires_at_the_aimed_spot()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::hud::{
+        alerts::UseFailed,
+        usable::{Env, InFlight},
+    };
+    use crate::ingame::ground_target::SkillPressed;
+    use bevy::ecs::system::SystemState;
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 60))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached { obj_id: 100, mount: 20, point: 1, reason: 1 },
+        None,
+    );
+    state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
+        slave: 20,
+        aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
+        pos: aa_net::Pos::new(130.25, 131.5, 100.0),
+        rot: 0.7,
+    });
+
+    let mut world = World::new();
+    world.init_resource::<Messages<SkillPressed>>();
+    world.init_resource::<Messages<aa_net::NetCommand>>();
+    world.init_resource::<Messages<UseFailed>>();
+    let mut writers: SystemState<(
+        MessageWriter<SkillPressed>,
+        MessageWriter<aa_net::NetCommand>,
+        MessageWriter<UseFailed>,
+    )> = SystemState::new(&mut world);
+    let (mut pressed, mut cast, mut failed) = writers.get_mut(&mut world).unwrap();
+    let data = state.borrow();
+    let env = Env::of(&data, None, &[], None);
+    let mut target = aa_net::state::Target::default();
+    target.obj_id = Some(777);
+    use_slot(
+        &data,
+        0,
+        &env,
+        &mut InFlight::default(),
+        &target,
+        &mut pressed,
+        &mut cast,
+        &mut failed,
+    );
+    drop(data);
+    let sent: Vec<_> = world
+        .resource_mut::<Messages<aa_net::NetCommand>>()
+        .drain()
+        .map(|command| command.0)
+        .collect();
+    let [aa_net::Command::UseMateSkillAt { skill_id, mate_obj_id, mount_skill_id, pos, rot }] = &sent[..] else {
+        panic!("{sent:?}")
+    };
+    assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (20704, 20, 201));
+    assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
+    assert_eq!(*rot, 0.7);
     Ok(())
 }
 

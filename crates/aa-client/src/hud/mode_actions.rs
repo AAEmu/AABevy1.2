@@ -499,12 +499,31 @@ pub(super) fn use_slot(
         if env.mount_held_back(slave, skill, flight) {
             return;
         }
-        cast.write(aa_net::NetCommand(aa_net::Command::UseMateSkill {
-            skill_id: skill,
-            mate_obj_id: slave,
-            mount_skill_id: entry.mount_skill,
-            target_obj_id: target.obj_id.unwrap_or(0),
-        }));
+        // A cannon's fire skill is `target_type_id` 11 (`BallisticPos`): it needs the aimed
+        // spot, not a selected unit. The sight comes from the turret system; without one (not
+        // manning the cannon) the ordinary unit target stays. The exact aim point is
+        // capture-pending S12-C1.
+        let ballistic = data
+            .game
+            .get()
+            .and_then(|game| game.skills.get(&skill))
+            .is_some_and(|info| info.target_type == 11);
+        if let Some(sight) = data.turret.filter(|sight| ballistic && sight.slave == slave) {
+            cast.write(aa_net::NetCommand(aa_net::Command::UseMateSkillAt {
+                skill_id: skill,
+                mate_obj_id: slave,
+                mount_skill_id: entry.mount_skill,
+                pos: sight.pos,
+                rot: sight.rot,
+            }));
+        } else {
+            cast.write(aa_net::NetCommand(aa_net::Command::UseMateSkill {
+                skill_id: skill,
+                mate_obj_id: slave,
+                mount_skill_id: entry.mount_skill,
+                target_obj_id: target.obj_id.unwrap_or(0),
+            }));
+        }
         if env.uses_gcd(skill) {
             flight.sent_mount(slave, web_time::Instant::now());
         }
