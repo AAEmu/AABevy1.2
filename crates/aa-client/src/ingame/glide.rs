@@ -632,6 +632,22 @@ pub struct RemoteGlide {
     bound: HashMap<&'static str, Option<BoundClip>>,
 }
 
+impl RemoteGlide {
+    #[cfg(test)]
+    pub(crate) fn fixture() -> RemoteGlide {
+        RemoteGlide {
+            buff_id: 1029,
+            params: GlideParams::EXPERIMENTAL,
+            age: 1.0,
+            speed: 5.0,
+            pose: Pose::Idle,
+            glider: None,
+            character_playing: None,
+            bound: HashMap::new(),
+        }
+    }
+}
+
 /// `OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP` (57, the 1.2 cvar `glider_start_with_double_jump`, default 0).
 pub const DOUBLE_JUMP_OPTION: u32 = 57;
 

@@ -980,7 +980,7 @@ pub fn plugin(app: &mut App) {
         (
             receive_moves.after(super::seating::track).after(super::world_switch::clear_old_units).before(sync_views).before(move_units),
             (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders, super::mount::step_dismounts).chain().after(move_units),
-            place_deck_riders.after(move_units).before(super::anim::drive_locomotion),
+            place_deck_riders.after(move_units).before(super::anim::drive_locomotion).before(super::glide::track_remote_gliders),
             super::idle::posture_changes,
             super::idle::remote_idles.after(super::anim::drive_locomotion),
             face::select.after(cull_units),
@@ -1106,12 +1106,10 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                             let start = hull_poses
                                 .as_deref()
                                 .and_then(|poses| poses.0.get(&ship).copied())
-                                .map(|(root, rotation, _)| {
+                                .map(|(root, rotation, hull_yaw)| {
                                     (
                                         super::ship::deck::world_to_ship(root, rotation, unit.pos),
-                                        super::cart::wrap_angle(
-                                            unit.facing - super::ship::deck::yaw_of(rotation),
-                                        ),
+                                        super::cart::wrap_angle(unit.facing - hull_yaw),
                                     )
                                 })
                                 .or_else(|| {
@@ -1201,7 +1199,7 @@ pub fn place_deck_riders(
     mut views: ResMut<Views>,
     units: Option<Res<Units>>,
     mut hull_poses: ResMut<DeckHullPoses>,
-    mut riders: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (With<DeckRider>, Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    mut riders: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>, Option<&super::glide::RemoteGlide>), (With<DeckRider>, Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     hulls: Query<&RemoteUnit, Without<DeckRider>>,
 ) {
     let dt = time.delta_secs().min(0.1);
@@ -1230,7 +1228,7 @@ pub fn place_deck_riders(
         .values()
         .filter_map(|view| view.pending.as_ref()?.deck.as_ref().map(|deck| deck.ship))
         .collect();
-    let mut hull_poses: HashMap<u32, (Vec3, Quat, f32)> = HashMap::new();
+    let mut drawn_hulls: HashMap<u32, (Vec3, Quat, f32)> = HashMap::new();
     for ship in ships {
         if let Some(pose) = views
             .unit_entity(ship)
@@ -1250,7 +1248,7 @@ pub fn place_deck_riders(
                     })
             })
         {
-            hull_poses.insert(ship, pose);
+            drawn_hulls.insert(ship, pose);
         }
     }
     for view in views.units.values_mut() {
@@ -1259,7 +1257,7 @@ pub fn place_deck_riders(
         }
         let Some(unit) = view.pending.as_mut() else { continue };
         let Some(deck) = unit.deck.as_mut() else { continue };
-        let Some(hull) = hull_poses.get(&deck.ship).copied() else { continue };
+        let Some(hull) = drawn_hulls.get(&deck.ship).copied() else { continue };
         let local = deck.track.sample(dt);
         let world = super::ship::deck::ship_to_world(hull.0, hull.1, local.pos);
         let world_yaw = super::cart::wrap_angle(hull.2 + local.yaw);
@@ -1267,8 +1265,9 @@ pub fn place_deck_riders(
         unit.facing = world_yaw;
         unit.rotation = Quat::from_rotation_y(world_yaw);
         unit.game_rotation = Quat::from_rotation_z(world_yaw);
+        unit.speed = local.speed;
     }
-    for (mut unit, mut transform, motion) in &mut riders {
+    for (mut unit, mut transform, motion, gliding) in &mut riders {
         let Some(deck) = unit.deck.as_mut() else { continue };
         let local = deck.track.sample(dt);
         let pose = views
@@ -1295,6 +1294,8 @@ pub fn place_deck_riders(
         unit.facing = world_yaw;
         unit.rotation = Quat::from_rotation_y(world_yaw);
         unit.game_rotation = Quat::from_rotation_z(world_yaw);
+        // The glide's pose tiers read this; a deck rider does not run move_units' foot track.
+        unit.speed = local.speed;
         let placed = unit.drawn();
         if !(transform.translation.abs_diff_eq(placed.translation, 1e-4)
             && transform.rotation.abs_diff_eq(placed.rotation, 1e-6)
@@ -1304,7 +1305,12 @@ pub fn place_deck_riders(
         }
         // The world track is not fed for a deck walker; its animation must follow the local
         // walking track instead of move_units' starved speed (which would show the idle clip
-        // while the body glides).
+        // while the body glides). A remote glider owns its Motion: `track_remote_gliders`
+        // sets it to default and this must not mix the walk clip in; `track_remote_gliders`
+        // runs after this system.
+        if gliding.is_some() {
+            continue;
+        }
         if let Some(mut motion) = motion {
             let moving = local.speed > remote::STANDING;
             *motion = Motion {
@@ -2269,6 +2275,47 @@ mod deck_rider_tests {
         let want = super::super::ship::deck::ship_to_world(moved, turned, local);
         let rider = app.world().get::<RemoteUnit>(rider_entity).unwrap();
         assert!(rider.pos.distance(want) < 1e-4, "rider left the moved deck: {:?} vs {want:?}", rider.pos);
+    }
+
+    /// A remote glider that lands on a deck keeps its glide Motion (no walk clip) while its
+    /// RemoteUnit speed stays fed for the glide pose tiers; when the glide ends the deck walk
+    /// takes the Motion back.
+    #[test]
+    fn a_gliding_deck_rider_keeps_the_glide_motion() {
+        let mut app = app();
+        let root = Vec3::new(100.0, 200.0, 10.0);
+        let yaw = 0.4;
+        let rotation = Quat::from_rotation_z(yaw);
+        let (_, rider) = hull_and_rider(&mut app, root, yaw, rotation, root, yaw);
+        app.world_mut()
+            .entity_mut(rider)
+            .insert(super::super::glide::RemoteGlide::fixture());
+        for i in 0..3u32 {
+            app.world_mut().write_message(NetEvent(Event::UnitMoved {
+                obj_id: 7,
+                movement: deck_move(
+                    Vec3::new(0.3 * i as f32, 3.0, 1.2),
+                    0.2,
+                    yaw + 0.2,
+                    1000 + i * 100,
+                ),
+            }));
+            for _ in 0..6 {
+                step(&mut app, 1.0 / 60.0);
+            }
+        }
+        let unit = app.world().get::<RemoteUnit>(rider).unwrap();
+        assert!(unit.speed() > 0.5, "the glide tier speed is stale: {}", unit.speed());
+        let motion = app.world().get::<Motion>(rider).unwrap();
+        assert_eq!(motion.speed, 0.0, "the deck walk mixed its Motion into the glide");
+        assert_eq!(motion.local_dir, Vec2::ZERO);
+        app.world_mut().entity_mut(rider).remove::<super::super::glide::RemoteGlide>();
+        for _ in 0..3 {
+            step(&mut app, 1.0 / 60.0);
+        }
+        let motion = app.world().get::<Motion>(rider).unwrap();
+        assert!(motion.speed > 0.5, "the deck walk did not take the Motion back: {}", motion.speed);
+        assert!(motion.local_dir.length() > 0.5);
     }
 
     /// A pending rider (no render tree yet) samples its deck walk before admission: on admit it
