@@ -32,9 +32,12 @@ mod task;
 use lua_value::lua_int;
 
 use aa_net::game::ServerMsg;
-use aa_net::model::UnitKind;
+use aa_net::model::{Attachment, UnitKind};
 use aa_net::{Command, Event, NetCommand, NetEvent, Pos, TurretAim, Unit};
+use aa_world::{TerrainQuery, WorldCollision};
 use bevy::prelude::*;
+
+use hud::mode_actions::SlaveSkill;
 
 #[derive(States, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Screen {
@@ -48,6 +51,7 @@ pub enum Screen {
 }
 
 const CANNON_MODEL: u32 = 117; // models -> vehicle_models 10 (`galleon.cannon`)
+const PLAYER: u32 = 0x10_0000;
 const LOCAL: u32 = 0x10_0001;
 const REMOTE: u32 = 0x10_0002;
 
@@ -63,6 +67,14 @@ const REMOTE_AIM: TurretAim = TurretAim {
 
 #[derive(Resource, Default)]
 struct Sent(Vec<(f64, f32, f32)>);
+
+/// The real gunner bar and the two skill target types from `AA_DB` (the bar shows 14372,
+/// the slot casts 10473).
+#[derive(Resource)]
+struct FireFixture {
+    bar: Vec<SlaveSkill>,
+    game: hud::data::GameData,
+}
 
 fn main() {
     if std::env::var("AA_PAK").is_err() || std::env::var("AA_DB").is_err() {
@@ -85,6 +97,8 @@ fn main() {
         || (degrees(limits.yaw_max) - 22.0).abs() > 1e-4
         || (degrees(limits.yaw_rate) - 35.0).abs() > 1e-4
         || (degrees(limits.pitch_rate) - 20.0).abs() > 1e-4
+        || limits.velocity != 0.0
+        || !limits.is_aimable()
     {
         eprintln!(
             "cannon_aim: FAIL: vehicle_models 10 turret block is {:.1}..{:.1} pitch, {:.1}..{:.1} yaw, {:.1}/{:.1} deg/s",
@@ -97,7 +111,11 @@ fn main() {
         );
         std::process::exit(1);
     }
+    seat_gate_check(&db);
+    let fire = fire_fixture();
 
+    let terrain = TerrainQuery::new("main_world");
+    let collision = WorldCollision::new("main_world", terrain.clone());
     App::new()
         .add_plugins((
             aa_dev::default_plugins("Cannon aim"),
@@ -114,16 +132,16 @@ fn main() {
         })
         .init_resource::<aa_net::state::Units>()
         .init_resource::<Sent>()
-        .insert_resource(ingame::LocalMount(Some(ingame::LocalSeat {
-            mount: LOCAL,
-            point: 1,
-            drives: true,
-            cart: false,
-            ship: false,
-            turret: true,
-            speed: Default::default(),
-            lift: 0.0,
-        })))
+        .init_resource::<ingame::units::Views>()
+        .init_resource::<ingame::player::SendState>()
+        .init_resource::<ingame::MountReason>()
+        .init_resource::<ingame::LocalMount>()
+        .insert_resource(fire)
+        .insert_resource(terrain)
+        .insert_resource(collision)
+        .insert_resource(aa_net::state::Player {
+            spawn: Some(player_spawn(LOCAL)),
+        })
         .add_message::<NetCommand>()
         .add_message::<NetEvent>()
         .add_plugins(ingame::turret::plugin)
@@ -131,6 +149,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                ingame::track_local_mount,
                 drive_camera,
                 ingame::turret::local_aim.after(drive_camera),
                 collect,
@@ -140,6 +159,127 @@ fn main() {
                 .chain(),
         )
         .run();
+}
+
+fn player_spawn(attached_to: u32) -> aa_net::PlayerSpawn {
+    let mut unit = cannon_unit(PLAYER, Pos::new(0.0, 0.0, 0.0));
+    unit.kind = UnitKind::Character { char_id: 1 };
+    unit.model_id = 0;
+    unit.attached_to = Some(Attachment {
+        obj_id: attached_to,
+        point: 1,
+        reason: 1,
+    });
+    aa_net::PlayerSpawn {
+        obj_id: PLAYER,
+        state: aa_net::model::CharacterState::default(),
+        unit,
+    }
+}
+
+/// Runs the real `track_local_mount` gate for a cannon, a trebuchet and an all-zero turret row:
+/// the cannon becomes the turret seat, the trebuchet stays drivable, and the all-zero model is
+/// neither. Exits non-zero on a mismatch.
+fn seat_gate_check(db: &ingame::data::Db) {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(db.clone())
+        .init_resource::<aa_net::state::Units>()
+        .init_resource::<ingame::units::Views>()
+        .init_resource::<ingame::player::SendState>()
+        .init_resource::<ingame::MountReason>()
+        .init_resource::<ingame::LocalMount>()
+        .init_resource::<aa_anim::ClipLibrary>()
+        .insert_resource(TerrainQuery::new("main_world"))
+        .insert_resource(WorldCollision::new(
+            "main_world",
+            TerrainQuery::new("main_world"),
+        ))
+        .insert_resource(aa_net::state::Player { spawn: None })
+        .add_message::<NetEvent>()
+        .add_systems(Update, ingame::track_local_mount);
+    app.world_mut().spawn((
+        ingame::player::LocalPlayer { obj_id: PLAYER },
+        ingame::player::Mover {
+            pos: Vec3::ZERO,
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+        Transform::default(),
+    ));
+    let cases = [
+        ("galleon cannon", 8u32, 10u32, CANNON_MODEL, true),
+        // slave 2/model 2 (vehicle_models 2): velocity 2.5, a drivable trebuchet
+        ("trebuchet", 7, 2, 2, false),
+        // slave 59/model 1005 (vehicle_models 37): velocity 0 but all-zero turret ranges
+        ("all-zero turret", 7, 59, 1005, false),
+    ];
+    for (index, (name, kind, template, model, want_turret)) in cases.into_iter().enumerate() {
+        let obj_id = LOCAL + index as u32;
+        let mut unit = cannon_unit(obj_id, Pos::new(0.0, 0.0, 0.0));
+        unit.kind = UnitKind::Slave {
+            id: kind,
+            tl_id: 1,
+            template_id: template,
+            summoner_id: 0,
+        };
+        unit.model_id = model;
+        app.world_mut()
+            .resource_mut::<aa_net::state::Units>()
+            .by_id
+            .insert(obj_id, unit);
+        app.world_mut()
+            .resource_mut::<aa_net::state::Player>()
+            .spawn = Some(player_spawn(obj_id));
+        *app.world_mut().resource_mut::<ingame::LocalMount>() = ingame::LocalMount::default();
+        app.update();
+        let seat = *app.world().resource::<ingame::LocalMount>();
+        if want_turret {
+            if seat.turret_seat() != Some(obj_id)
+                || seat.cart_driver().is_some()
+                || seat.driving().is_some()
+            {
+                eprintln!("cannon_aim: FAIL: {name} did not become the turret seat: {seat:?}");
+                std::process::exit(1);
+            }
+        } else if seat.turret_seat().is_some() || seat.cart_driver() != Some(obj_id) {
+            eprintln!("cannon_aim: FAIL: {name} did not stay drivable: {seat:?}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The real gunner bar and target types, read from `AA_DB` (no `GameData::load` of the whole
+/// catalog): slave template 10 shows 14372 and casts 10473.
+fn fire_fixture() -> FireFixture {
+    let path = std::env::var("AA_DB").expect("AA_DB");
+    let conn =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .expect("open the game database");
+    let tables = hud::mode_actions::Tables::load(&conn).expect("mode action tables");
+    let bar = tables.gunner_bar(10).expect("slave 10 gunner bar");
+    let mut game = hud::data::GameData::default();
+    for skill in [bar[0].skill, bar[0].cast_skill()] {
+        let target_type: i64 = conn
+            .query_row(
+                "SELECT target_type_id FROM skills WHERE id = ?1",
+                [skill],
+                |r| r.get(0),
+            )
+            .expect("skill target type");
+        game.skills.insert(
+            skill,
+            hud::data::SkillInfo {
+                target_type: target_type.clamp(0, 255) as u8,
+                ..default()
+            },
+        );
+    }
+    FireFixture { bar, game }
 }
 
 fn stage(
@@ -230,6 +370,20 @@ fn scene(
         .vehicle_look(CANNON_MODEL)
         .expect("model 117 is a vehicle");
     let loader = cry.loader();
+    // The local player entity `track_local_mount` seats from the Player attachment.
+    commands.spawn((
+        ingame::player::LocalPlayer { obj_id: PLAYER },
+        ingame::player::Mover {
+            pos: Vec3::ZERO,
+            facing: 0.0,
+            vz: 0.0,
+            grounded: true,
+            velocity: Vec3::ZERO,
+            swim: None,
+            wading: 0.0,
+        },
+        Transform::default(),
+    ));
     for (obj_id, x) in [(LOCAL, 0.0), (REMOTE, 8.0)] {
         let pieces = ingame::vehicle::prepare(&loader, &look);
         assert!(!pieces.is_empty(), "the galleon cannon has parts");
@@ -313,6 +467,9 @@ fn verify(
     mut done: Local<bool>,
     sent: Res<Sent>,
     units: Res<aa_net::state::Units>,
+    seat: Res<ingame::LocalMount>,
+    fire: Option<Res<FireFixture>>,
+    sight: Option<Res<ingame::turret::Sight>>,
     roots: Query<(Entity, &ingame::units::RemoteUnit)>,
     targets: Query<&ingame::turret::TurretTarget>,
     poses: Query<&ingame::turret::TurretPose>,
@@ -384,6 +541,53 @@ fn verify(
     // an unchanged aim must not be sent again.
     if sent.0.iter().any(|(at, _, _)| *at > 1.3) {
         fail("CSTurretState kept going after the aim stopped changing".into());
+    }
+
+    // The seat came through the real `track_local_mount` gate: a galleon cannon is the turret
+    // seat, not a cart or a mate driver.
+    if seat.turret_seat() != Some(LOCAL) || seat.cart_driver().is_some() || seat.driving().is_some()
+    {
+        fail(format!(
+            "track_local_mount did not make the cannon the turret seat: {seat:?}"
+        ));
+    }
+
+    // The aimed-fire packet: the real gunner bar shows 14372 and casts 10473, and with the sight
+    // published this frame the command is UseMateSkillAt at that spot.
+    let fire = fire.unwrap_or_else(|| fail("no fire fixture".into()));
+    let sight = sight.unwrap_or_else(|| fail("no published cannon sight".into()));
+    if sight.slave != LOCAL {
+        fail(format!(
+            "the sight is for slave {}, not the manned {LOCAL}",
+            sight.slave
+        ));
+    }
+    let entry = fire
+        .bar
+        .first()
+        .unwrap_or_else(|| fail("empty gunner bar".into()));
+    if entry.skill != 14372 || entry.cast_skill() != 10473 {
+        fail(format!("gunner bar {entry:?} is not 14372 -> 10473"));
+    }
+    match hud::mode_actions::slave_cast(entry, Some(&fire.game), Some(*sight), LOCAL, 0) {
+        aa_net::Command::UseMateSkillAt {
+            skill_id,
+            mate_obj_id,
+            mount_skill_id,
+            pos,
+            rot,
+        } => {
+            if (skill_id, mate_obj_id, mount_skill_id) != (10473, LOCAL, 16)
+                || pos != sight.pos
+                || rot != sight.rot
+            {
+                fail(format!(
+                    "aimed fire command {skill_id}/{mate_obj_id}/{mount_skill_id} at {pos:?} {rot}, sight {:?} {}",
+                    sight.pos, sight.rot
+                ));
+            }
+        }
+        other => fail(format!("the gunner cast is not an aimed use: {other:?}")),
     }
 
     // The remote cannon: the decoded posture reached its target, its drawn aim converged and its
