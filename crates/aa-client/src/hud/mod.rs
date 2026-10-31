@@ -263,6 +263,11 @@ pub(crate) fn stablehand_fixture() {
 pub(crate) fn owned_pet_fixture() { pets::active_fixture::run(); }
 
 #[allow(dead_code)]
+pub(crate) fn mount_walk_fixture() -> AppExit {
+    pets::owned::mount_walk_fixture::run()
+}
+
+#[allow(dead_code)]
 pub(crate) fn radar_fixture() { radar::fixture::run(); }
 
 #[allow(dead_code)]

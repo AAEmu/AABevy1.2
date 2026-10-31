@@ -1,5 +1,33 @@
 # ArcheAge 1.2 feature parity
 
+## Mount-walk checkpoint, 2026-10-31
+
+`X2Mate:MountMate()` now matches the 1.2 mount controller as read in the 1.2
+decompile: the walk ends at `FUN_390aa730`'s arrival window (horizontal squared
+distance `0x399A3240 = 0.64`, i.e. 0.8 m, and `-1.5 < dz < 2.5`), the `+0x1d`
+flag stops the steering there, and `FUN_3909b070` sends `CSMountMate` on the same
+frame; its 3 m gate (`0x39AC3878 = 9.0` squared) is nested inside the arrival
+test and always holds inside the window. The reason is `FUN_3909ae90` from the
+arrival position. The ride cooldown is stamped at the accepted request
+(`FUN_393642f0` line 701802, before the controller at line 701812) and survives a
+cancelled walk; the send stamps nothing. Movement cancels only through
+`FUN_390aaf30`'s actions 1..5 (`moveback`, `moveleft`, `moveright`, `turnleft`,
+`turnright`); `moveforward` and `jump` do not. A mate moving past 25 m mid-walk
+does not cancel: the 25 m rule is `FUN_3935aa10`'s refusal at the request
+(`0x399CFF68 = 625.0` squared, detail 0x205 "Target is too far."), so 30 m is
+refused and a refused request starts no cooldown. The walk has a 10 s life
+(`FUN_390a5f00` + `0x3999CCE8`), not the port's former 3 s no-progress rule. The
+new-target and teleport cancels remain capture-pending (A1b): the walk functions
+have no test for either and neither was measured. A doodad walk and the mount
+walk cancel each other, and a cancelled walk never sends.
+`hud/pets/owned.rs` owns the state machine, `hud/pets.rs` the movement and
+steering, and `hud/pets/owned/tests.rs` the window/cooldown/input/reach/cancel/
+despawn/restart/seat/teleport/doodad/arrival and wire checks. The `mount_walk`
+example asserts the 30 m refusal, the 0.8 m send, the cooldown-at-accept and the
+2.5 m walk through the real binding and systems. Pending live checks: the exact
+arrival distance, the native movement-input mapping, a new target and a
+teleport mid-walk. Overall original 1.2 parity remains unfinished.
+
 ## Farm planting checkpoint, 2026-10-30
 
 The 2026-10-30 original-client capture settled the seed builder's main constants: valid near 30 m; the decompile allows exactly 30 m
@@ -89,8 +117,8 @@ Ships (merged after the checkpoint was written):
   header-only step-off rows, and deck walking/jump values the capture cannot verify.
 
 Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
-hanging (S13), gliders (S14), vehicle state/FX (S15), walking to the mount before mounting, auto-walk, mount jump clips,
-larger ships, and the copper boiler colour. The detailed pending checks are in [units](aa-client-units.md) and the PR
+hanging (S13), gliders (S14), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and the copper boiler
+colour; the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.
 
