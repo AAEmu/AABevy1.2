@@ -611,7 +611,6 @@ fn pick(
     doodads: &Doodads,
     units: &Units,
     own: u32,
-    boxes: &super::pick::ModelBoxes,
 ) -> Option<u32> {
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
@@ -630,7 +629,7 @@ fn pick(
     }
     let (along, obj_id) = best?;
     let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
-        super::pick::unit_hit(&ray, u, boxes.get(u.obj_id)).is_some_and(|a| a < along)
+        super::pick::unit_hit(&ray, u, None, None).is_some_and(|a| a < along)
     });
     (!npc_in_front).then_some(obj_id)
 }
@@ -656,13 +655,12 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals, mut target_decal, boxes): (
+    (mut glows, names, views, visuals, mut target_decal): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
-        super::pick::ModelBoxes,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
@@ -729,7 +727,7 @@ fn track(
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = pick(ray, &d, &doodads, &units, own, &boxes);
+        clicked = pick(ray, &d, &doodads, &units, own);
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
@@ -740,7 +738,7 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &boxes)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
+    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;

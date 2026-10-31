@@ -1,8 +1,11 @@
-//! Clicking a wagon anywhere on its model targets it, as in 1.2 (the server's own capture case e:
-//! a right click on the slave you ride sends `CSChangeTarget` 0x02c). The example draws the Farm
-//! Wagon (slave template 60, model 1008), then sends view rays through the middle, the front and
-//! the rear of its drawn model box and requires the shared pick to return the wagon each time. A
-//! ray beside it must pick nothing.
+//! Clicking a wagon anywhere on its model targets it, as in 1.2 (`captures/2026-10-28b/summary.txt:36`,
+//! case e `bound`: a right click on the slave you ride sends `CSChangeTarget` 0x02c). The example draws the Farm
+//! Wagon (slave template 60, model 1008), then sends view rays through independently chosen world
+//! points on its front, middle and rear (a 4 m body, not points read back from the pick box) and
+//! requires the shared pick to return the wagon each time. A ray well beside it must pick nothing.
+//!
+//! It also stands a camera inside the wagon's box with a passenger above it: the wagon must not be
+//! picked from inside its own box, and the passenger must be (the deck case).
 //!
 //! The run exits non-zero on a failed check or a staging timeout. Needs `AA_PAK` and `AA_DB`;
 //! without them it says so and exits 0.
@@ -53,6 +56,7 @@ const WAGON_TEMPLATE: u32 = 60;
 const WAGON_MODEL: u32 = 1008;
 const WAGON_POS: Vec3 = Vec3::new(100.0, 200.0, 5.0);
 const WAGON_YAW: f32 = 0.4;
+const DECK_NPC: u32 = 21;
 /// Wait this long for the model and its bounds, then give up.
 const READY_TIMEOUT: f32 = 30.0;
 /// With no screenshot asked for, leave once the check passed.
@@ -209,6 +213,31 @@ fn fixture_unit(obj_id: u32, kind: UnitKind, name: &str, model_id: u32, pos: Vec
     }
 }
 
+/// The shared pick, with the current world pose and model box of each unit.
+fn pick(
+    ray: &Ray3d,
+    units: &Units,
+    poses: &hud::pick::UnitPoses,
+    boxes: &mut hud::pick::ModelBoxes,
+) -> Option<u32> {
+    hud::pick::pick_unit(
+        ray,
+        units,
+        0,
+        |_| true,
+        |unit, ray| {
+            (
+                poses.get(unit, units).map(|(pos, _)| pos),
+                boxes.get_near(unit, ray),
+            )
+        },
+    )
+}
+
+fn down(at: Vec3) -> Ray3d {
+    Ray3d::new(at, Dir3::new(Vec3::NEG_Y).expect("down"))
+}
+
 /// A view ray the way a click makes one (a screen point back through the camera).
 fn click_ray(camera: &Camera, transform: &GlobalTransform, at: Vec3) -> Result<Ray3d, String> {
     let screen = camera
@@ -221,8 +250,9 @@ fn click_ray(camera: &Camera, transform: &GlobalTransform, at: Vec3) -> Result<R
 
 fn check(
     time: Res<Time>,
-    boxes: hud::pick::ModelBoxes,
-    units: Res<Units>,
+    mut boxes: hud::pick::ModelBoxes,
+    poses: hud::pick::UnitPoses,
+    mut units: ResMut<Units>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut checked: ResMut<Checked>,
     mut exit: MessageWriter<AppExit>,
@@ -238,7 +268,7 @@ fn check(
         }
         return;
     };
-    let Some(model) = boxes.get(WAGON_OBJ) else {
+    let Some(model) = boxes.get(wagon) else {
         if time.elapsed_secs() > READY_TIMEOUT {
             error!("slave_pick: the wagon was never drawn with bounds");
             exit.write(AppExit::error());
@@ -252,24 +282,25 @@ fn check(
         checked.done = true;
         return;
     };
-    // the long horizontal axis of the drawn model (front and rear), and the side across it
-    let along_x = model.half.x >= model.half.z;
-    let (long, half_long, side, half_side) = if along_x {
-        (Vec3::X, model.half.x, Vec3::Z, model.half.z)
-    } else {
-        (Vec3::Z, model.half.z, Vec3::X, model.half.x)
-    };
-    let front = model.centre + model.rotation * long * (half_long - 0.25);
-    let rear = model.centre - model.rotation * long * (half_long - 0.25);
+    // independently chosen points on the 4 m wagon body: 1.8 m to the front and rear of its
+    // origin, 1.2 m up; not read back from the pick box, so the click is not the box checking itself
+    let base = aa_world::cry_to_bevy(WAGON_POS);
+    let turn = Quat::from_rotation_y(WAGON_YAW);
+    let point = |local: Vec3| base + turn * local;
     let mut failures = Vec::new();
-    for (what, at) in [("front", front), ("middle", model.centre), ("rear", rear)] {
-        let picked = match click_ray(camera, transform, at) {
-            Ok(ray) => hud::pick::pick_unit(&ray, &units, 0, |_| true, |obj_id| boxes.get(obj_id)),
+    for (what, at) in [
+        ("front", point(Vec3::new(0.0, 1.2, -1.8))),
+        ("middle", point(Vec3::new(0.0, 1.2, 0.0))),
+        ("rear", point(Vec3::new(0.0, 1.2, 1.8))),
+    ] {
+        let ray = match click_ray(camera, transform, at) {
+            Ok(ray) => ray,
             Err(e) => {
                 failures.push(e);
                 continue;
             }
         };
+        let picked = pick(&ray, &units, &poses, &mut boxes);
         info!("slave_pick: {what} click at {at:?} -> {picked:?}");
         if picked != Some(WAGON_OBJ) {
             failures.push(format!(
@@ -278,20 +309,52 @@ fn check(
             ));
         }
     }
-    // a straight-down ray well beside the wagon must miss it
-    let beside = model.centre + model.rotation * side * (half_side + 2.0);
-    let beside_ray = Ray3d::new(
-        beside + Vec3::Y * 10.0,
-        Dir3::new(Vec3::NEG_Y).expect("down"),
-    );
-    let picked = hud::pick::pick_unit(&beside_ray, &units, 0, |_| true, |obj_id| boxes.get(obj_id));
+    // a straight-down ray 4 m beside the wagon must miss it
+    let beside = point(Vec3::new(4.0, 1.2, 0.0));
+    let beside_ray = down(beside);
+    let picked = pick(&beside_ray, &units, &poses, &mut boxes);
     info!("slave_pick: beside click at {beside:?} -> {picked:?}");
     if picked.is_some() {
         failures.push(format!("the beside click picked {picked:?}, not nothing"));
     }
+    // the deck case: a camera inside the wagon's box must not pick the wagon; a passenger above
+    // it must be picked instead. The camera sits at a horizontal near-corner of the box (inside,
+    // and more than the 1.1 m pick sphere from the wagon's middle); the passenger's middle is the
+    // independently chosen point 1.5 m above the wagon's middle.
+    let wagon_middle = base + Vec3::Y * 0.9;
+    let passenger_middle = wagon_middle + Vec3::Y * 1.5;
+    let passenger = fixture_unit(
+        DECK_NPC,
+        UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        },
+        "Deck Hand",
+        0,
+        aa_world::bevy_to_cry(passenger_middle - Vec3::Y * 0.9),
+    );
+    units.by_id.insert(DECK_NPC, passenger);
+    let inside =
+        model.centre + model.rotation * Vec3::new(model.half.x * 0.9, 0.0, model.half.z * 0.9);
+    if !model.contains(inside) {
+        failures.push("the deck camera is not inside the wagon box".into());
+    }
+    let deck_ray = Ray3d::new(
+        inside,
+        Dir3::new(passenger_middle - inside).expect("the passenger direction"),
+    );
+    let picked = pick(&deck_ray, &units, &poses, &mut boxes);
+    info!("slave_pick: deck click from {inside:?} -> {picked:?}");
+    if picked != Some(DECK_NPC) {
+        failures.push(format!(
+            "the on-deck click picked {picked:?}, not the passenger {DECK_NPC}"
+        ));
+    }
     checked.done = true;
     if failures.is_empty() {
-        info!("slave_pick: the wagon is picked at its front, middle and rear");
+        info!(
+            "slave_pick: the wagon is picked at its front, middle and rear, and not from inside its box"
+        );
         checked.passed = true;
     } else {
         for failure in failures {

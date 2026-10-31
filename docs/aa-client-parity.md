@@ -130,13 +130,19 @@ Ships (merged after the checkpoint was written):
   passengers and leaving (`examples/passenger_seats`, `hud/slave/tests.rs`, `mount.rs`). Open: the exact row-less
   passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
-- **S11a vehicle picking.** A click picks a vehicle anywhere on its drawn model: the fixed 1.1 m sphere at its
-  middle becomes the drawn mesh bounds in the unit's turned frame, while a small unit keeps the old sphere. Left
-  click, the right click's NPC/vehicle pick and the doodad NPC-in-front test share `hud/pick.rs`; `Tab` now
-  measures from the seated slave's replicated position instead of the stale HUD point. 1.2's own vehicle
-  targeting is the 2026-10-28 capture case e (a right click on the slave you ride sends `CSChangeTarget` 0x02c).
-  The Farm Wagon (slave template 60, model 1008) is picked at its front, middle and rear (`examples/slave_pick`,
-  `hud/pick.rs` tests). Open: the exact 1.2 pick shape and the unmeasured pick suppression distance, as in
+- **S11a vehicle picking.** A click on a vehicle is tested against the drawn mesh bounds in the unit's turned
+  frame as well as the old 1.1 m pick sphere (the nearer entry wins). Only vehicles get a box: a character's draw
+  tree has weapon, attachment and effect bounds but no body bounds, and the walk stops at child units, parented
+  doodads and effects. A box that contains the camera is ignored - a camera on deck is inside a ship's box (masts
+  and sails), which would otherwise be picked on every click - and an attached child (a cannon) wins over the
+  parent whose box encompasses it. Boxes are cached per unit until its root or model changes. Left click, the
+  right click's NPC/vehicle pick and `Tab` measure from the unit's current world pose (`unit_world_pose`), so an
+  attached cannon uses its parent-composed position. 1.2's own vehicle targeting is
+  `captures/2026-10-28b/summary.txt:36`, case e `bound`: a right click on the slave you ride sends
+  `CSChangeTarget` 0x02c (native landed on 4 of 44 sweep points). The Farm Wagon (slave template 60, model 1008)
+  is picked at independently chosen front/middle/rear points, not from inside its box (`examples/slave_pick`,
+  `hud/pick.rs` tests). Open: the exact 1.2 pick shape (the box is the union of all hull, mast and sail bounds;
+  4 of 44 suggests a tighter pick) and the unmeasured pick suppression distance, as in
   [units](aa-client-units.md).
 
 - **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim

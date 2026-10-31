@@ -393,8 +393,9 @@ and explicit controls").
   2026-10-28 capture sent exactly `3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00`
   for cart bc 0x5f3c. The earlier claim that slaves never send 0x068 is **corrected** by that
   capture; the click does not send 0x031. While already bound to or seated on the clicked slave,
-  a right click sends only `CSChangeTarget` 0x02c (capture case e: four sweep points, no 0x068,
-  no 0x031, no message); this port did the same after 2026-10-28.
+  a right click sends only `CSChangeTarget` 0x02c (`captures/2026-10-28b/summary.txt:36`, case
+  e `bound`: 4 of 44 sweep points, no 0x068, no 0x031, no message); this port did the same after
+  2026-10-28.
 * **Boarding.** `SCNpcInteractionSkillList` 0x07b for a slave acts on the FIRST skill at once
   (`FUN_393be850` -> `FUN_393be280`). 12076 ("occupy") checks the interaction reach first
   (`FUN_393bf270` / `FUN_39093860`: `DAT_39ac79fc` 9.0, or `DAT_39ac7a00` 12.25 when the player
@@ -427,13 +428,20 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
-* **Clicking the model (2026-10-31).** A left or right click picks a vehicle anywhere on its drawn
-  model, not only within a 1.1 m sphere at its middle: `hud/pick.rs` uses the bounds of the meshes the
-  unit is drawn with, in the unit's own turned frame, when that box is larger than the old sphere; a
-  small unit (an NPC, a character) keeps exactly the old sphere. Left click, the right click's
-  NPC/vehicle pick, the doodad NPC-in-front test and `Tab` share the helper; `Tab` measures from the
-  attached slave's replicated position while seated (`hud/slave.rs::player_centre`). The rule that an
-  own vehicle may be targeted is the 2026-10-28 capture case e (`CSChangeTarget` 0x02c).
+* **Clicking the model (2026-10-31).** A click tests a vehicle against the bounds of the meshes it
+  is drawn with, in the unit's own turned frame, and against the old 1.1 m sphere; the nearer entry
+  wins. A unit that is not a `UnitKind::Slave` keeps only the sphere: a character's draw tree has
+  weapon, attachment and effect bounds but no body bounds, and the box walk stops at a child unit,
+  a parented doodad or an effect. A box that contains the camera is ignored (a camera on deck is
+  inside a ship's box, masts and sails included, and would otherwise be picked on every click), and
+  an attached child (a cannon) wins over its parent's box. The box is cached per unit until its
+  root or model changes. Left click, the right click, the Tab candidates and the talk distances use
+  the unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
+  parent-composed position, and `Tab` measures from the manned slave's world position
+  (`hud/slave.rs::player_centre`). The rule that an own vehicle may be targeted is
+  `captures/2026-10-28b/summary.txt:36`, case e `bound` (`CSChangeTarget` 0x02c); the native pick
+  landed on 4 of 44 sweep points there, so the port's union-of-meshes box is looser than 1.2's
+  (capture-pending: the exact pick shape).
 * **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
   an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
 * **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
@@ -486,7 +494,7 @@ and explicit controls").
   port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
   modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.
 * The 3.5 m and 4.5 m interaction picks could not be measured: the native pick never landed in
-  the 2026-10-28 capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
+  the 2026-10-28b capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
   binds are live evidence. A later capture must land the pick to check whether 1.2 acts at 3.5 m
   (shifted target flag) and refuses at 4.5 m.
 * `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /

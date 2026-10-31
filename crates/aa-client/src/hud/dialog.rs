@@ -34,7 +34,7 @@ pub(super) mod fixture;
 pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
 
 use aa_net::interaction::Interact;
-use aa_net::model::UnitKind;
+use aa_net::model::{Unit, UnitKind};
 use aa_net::quest::{Quest, status};
 use aa_net::state::{Buffs, Doodads, Inventory, Player, PlayerStats, Quests, Skills, Target, Units};
 use aa_net::interaction::InteractEvent;
@@ -565,7 +565,7 @@ fn right_click_pick(
     own: u32,
     pressed_at: &mut Option<Vec2>,
     blocked: bool,
-    boxes: &super::pick::ModelBoxes,
+    pick: &mut super::pick::PickWorld,
 ) -> Option<u32> {
     if blocked { *pressed_at = None; return None; }
     let window = p.windows.single().ok()?;
@@ -587,7 +587,7 @@ fn right_click_pick(
         units,
         own,
         |u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. }),
-        |obj_id| boxes.get(obj_id),
+        |unit, ray| pick.data(unit, units, ray),
     )
 }
 
@@ -634,14 +634,16 @@ impl ScriptedTalk {
 
 /// The NPC nearest to the player in reach that can be talked to (alive, not hostile); with `wanted`,
 /// only one that has something for the player.
-fn nearest_npc(d: &HudData, units: &Units, own: u32, own_faction: u32, facts: &PlayerFacts, range: f32, wanted: bool) -> Option<(u32, u32)> {
+#[allow(clippy::too_many_arguments)]
+fn nearest_npc(d: &HudData, units: &Units, own: u32, own_faction: u32, facts: &PlayerFacts, range: f32, wanted: bool, world: &impl Fn(&Unit) -> Option<Vec3>) -> Option<(u32, u32)> {
     let game = d.game.get();
     units
         .iter()
         .filter(|u| u.obj_id != own && !u.dead)
         .filter_map(|u| {
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
-            let dist = d.pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let at = world(u).unwrap_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let dist = d.pos.distance(at);
             if dist > range || super::plates::relation_of(game, own_faction, u) == "hostile" {
                 return None;
             }
@@ -667,7 +669,7 @@ pub fn talk_input(
     doodads: Res<Doodads>,
     target: Res<Target>,
     facts: Facts,
-    boxes: super::pick::ModelBoxes,
+    mut pick: super::pick::PickWorld,
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut pressed_at: Local<Option<Vec2>>,
@@ -730,7 +732,7 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked, &boxes);
+    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked, &mut pick);
     let scripted_pick = script_pick.take_right();
     let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
 
@@ -766,7 +768,10 @@ pub fn talk_input(
         let game = d.game.get();
         units.get(obj_id).filter(|u| !u.dead && super::plates::relation_of(game, own_faction, u) != "hostile").and_then(|u| {
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
-            let dist = d.pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let at = pick
+                .pose(u, &units)
+                .map_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z), |(pos, _)| pos);
+            let dist = d.pos.distance(at);
             if dist > TALK_RANGE {
                 info!("hud: {} is too far away to talk to ({dist:.1} m)", u.name);
                 return None;
@@ -775,7 +780,9 @@ pub fn talk_input(
         })
     } else { None };
     let keyboard_npc = if scripted_talk {
-        nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
+        nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true, &|unit| {
+            pick.pose(unit, &units).map(|(pos, _)| pos)
+        })
     } else if interact_key {
         nearest_npc(
             &d,
@@ -785,6 +792,7 @@ pub fn talk_input(
             &player_facts,
             TALK_RANGE,
             false,
+            &|unit| pick.pose(unit, &units).map(|(pos, _)| pos),
         )
     } else {
         None
