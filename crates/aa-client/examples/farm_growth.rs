@@ -69,7 +69,9 @@ fn main() -> AppExit {
         return AppExit::Success;
     }
     if !aa_anim::GameDb::available() {
-        eprintln!("farm_growth: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)");
+        eprintln!(
+            "farm_growth: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)"
+        );
         return AppExit::Success;
     }
     let Some(db) = ingame::data::Db::open() else {
@@ -115,7 +117,14 @@ fn main() -> AppExit {
         .add_systems(PreUpdate, (drive, deliver).chain())
         .add_systems(
             Update,
-            (ingame::units::receive_moves, ingame::units::sync_views, observe, report).chain(),
+            (
+                ingame::units::receive_moves,
+                ingame::units::sync_views,
+                // `phase_changes` sets the new phase's model and scale; the sampler must see that frame
+                observe.after(ingame::doodad_visual::phase_changes),
+                report,
+            )
+                .chain(),
         )
         .run()
 }
@@ -125,7 +134,11 @@ fn main() -> AppExit {
 struct Inbox(Vec<Event>);
 
 /// Stands in for `aa_net`'s `receive_events`: every event is folded into the state, then written as a `NetEvent`.
-fn deliver(mut inbox: ResMut<Inbox>, mut doodads: ResMut<Doodads>, mut out: MessageWriter<NetEvent>) {
+fn deliver(
+    mut inbox: ResMut<Inbox>,
+    mut doodads: ResMut<Doodads>,
+    mut out: MessageWriter<NetEvent>,
+) {
     for event in inbox.0.drain(..) {
         doodads.apply(&event);
         out.write(NetEvent(event));
@@ -255,11 +268,15 @@ fn observe(
     if observed.announced_at.is_none() {
         observed.announced_at = Some(now);
     }
-    let Some((_, visual, transform)) = roots.iter().find(|(remote, _, _)| remote.obj_id == FIG_OBJ) else {
+    let Some((_, visual, transform)) = roots.iter().find(|(remote, _, _)| remote.obj_id == FIG_OBJ)
+    else {
         return;
     };
     let drawn = visual.model.is_some_and(|model| {
-        entities.contains(model) && children.iter_descendants(model).any(|entity| meshes.contains(entity))
+        entities.contains(model)
+            && children
+                .iter_descendants(model)
+                .any(|entity| meshes.contains(entity))
     });
     if drawn && observed.first_drawn.is_none() {
         observed.first_drawn = Some((now, transform.scale.x, visual.path.clone()));
@@ -340,7 +357,9 @@ fn report(
         return finish(failures, &mut exit);
     };
     if !path.ends_with("temp_tree_fig02no.cgf") {
-        failures.push(format!("the model after the phase change is {path}, not phase 1780's"));
+        failures.push(format!(
+            "the model after the phase change is {path}, not phase 1780's"
+        ));
     }
     if observed.rendered_after_swap != Some(FIG_NEXT_PHASE) {
         failures.push(format!(
@@ -375,7 +394,9 @@ fn finish(failures: Vec<String>, exit: &mut MessageWriter<AppExit>) {
 
 /// When the run is unattended (`--shot` / `--offscreen-shot`).
 fn shot_mode() -> bool {
-    aa_dev::args().iter().any(|a| a == "--shot" || a == "--offscreen-shot")
+    aa_dev::args()
+        .iter()
+        .any(|a| a == "--shot" || a == "--offscreen-shot")
 }
 
 fn shot_after() -> f32 {

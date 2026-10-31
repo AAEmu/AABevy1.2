@@ -116,9 +116,11 @@ pub struct DoodadGrowth {
 impl DoodadGrowth {
     /// The duration the scale is interpolated over: the `time_left` the server announced (it already applied the growth
     /// rate and climate), or the database `delay` when it announced none (0). The original `ClientDoodad::Update`
-    /// (`0x393a4810`) starts every growth at `start_scale` and grows linearly to `end_scale` over exactly this duration;
-    /// a doodad first seen mid-phase therefore starts at `start_scale` for the remaining time, not at the size the
-    /// database delay would imply. Without a `time_left` (0) it uses the delay, again from `start_scale`.
+    /// (`0x393a4810`) reads exactly that duration and applies `start_scale` at once; a doodad first seen mid-phase
+    /// therefore starts at `start_scale` for the remaining time. The linear ramp and reaching `end_scale` exactly at the
+    /// phase change are **inferred** from `UpdateScaling`'s constant speed, not measured (F18 did not sample the
+    /// original's scale: capture-pending). The phase-change re-init is inferred too: `0x251` gates it (the clear at
+    /// `0x393a1c90` lets `Update` initialize again), also capture-pending (F18).
     pub fn total_ms(&self, time_left_ms: f32) -> f32 {
         if time_left_ms > 0.0 {
             time_left_ms

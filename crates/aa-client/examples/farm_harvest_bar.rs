@@ -4,7 +4,8 @@
 //! 4000 ms). The example stages a character that owns the crop 3 m in front of it (the original `SCDoodadCreated`
 //! owner fields: `owner_type` CHARACTER 254, `owner_id` the character), lets `units::sync_views` draw it and the
 //! original Lua dynamic action bar read it, then executes the bar's first entry. The bar and the `UseDoodadSkill`
-//! command it produces are checked; without a server the command is not sent.
+//! command it produces are checked; without a server the command is not sent. It then moves the crop to 4.5 m, just
+//! beyond the 4 m reach, and checks that the bar offers nothing there.
 //!
 //! F15 (the owner-planted crop's bar) was not driven in the 2026-10-30 original-client capture (`GetDynamicActionCount`
 //! was nil), so the original's bar entries, reach and labor for a planted crop remain capture-pending. This example
@@ -12,8 +13,8 @@
 //!
 //! Needs `AA_PAK` and `AA_DB`; without them it says so and exits 0.
 //!
-//! `cargo run -p aa-client --example farm_harvest_bar -- --mute --offscreen-shot shots/aa-client/farm_harvest_bar.png --shot-after 6`
-//! takes the picture at 6 s; the checks run at 4.5 s. Without a shot the run ends after the checks.
+//! `cargo run -p aa-client --example farm_harvest_bar -- --mute --offscreen-shot shots/aa-client/farm_harvest_bar.png --shot-after 8`
+//! takes the picture at 8 s; the checks run at 7 s. Without a shot the run ends after the checks.
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;
@@ -61,19 +62,28 @@ const RICE_TEMPLATE: u32 = 2_246;
 const RICE_PHASE: u32 = 4_404;
 const RICE_OBJ: u32 = 3_101;
 const RICE_AT: Vec3 = Vec3::new(0.0, 3.0, 0.0);
+/// Just beyond the Harvest skill's 4 m reach: the bar must offer nothing here.
+const RICE_OUT_AT: Vec3 = Vec3::new(0.0, 4.5, 0.0);
 const HARVEST_SKILL: u32 = 13_980;
 /// The bar is read at this second and its first entry executed.
 const EXEC_AT: f32 = 3.0;
+/// The crop is moved out of reach here, and the bar read back a moment later.
+const OUT_AT: f32 = 5.0;
+const OUT_READ_AT: f32 = 5.5;
 /// The checks run here.
-const CHECK_AT: f32 = 4.5;
+const CHECK_AT: f32 = 7.0;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
-        eprintln!("farm_harvest_bar: skipped, the game pak is missing (AA_PAK=<1.2 client>/game_pak)");
+        eprintln!(
+            "farm_harvest_bar: skipped, the game pak is missing (AA_PAK=<1.2 client>/game_pak)"
+        );
         return AppExit::Success;
     }
     if !aa_anim::GameDb::available() {
-        eprintln!("farm_harvest_bar: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)");
+        eprintln!(
+            "farm_harvest_bar: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)"
+        );
         return AppExit::Success;
     }
     let Some(db) = ingame::data::Db::open() else {
@@ -128,8 +138,7 @@ fn main() -> AppExit {
             (
                 ingame::units::sync_views.run_if(ingame::world_screens),
                 watch_commands,
-                drive_bar,
-                report,
+                (move_crop, drive_bar, read_out, report).chain(),
             ),
         )
         .run()
@@ -311,14 +320,52 @@ struct BarCheck {
     executed: bool,
     bar: Option<String>,
     command: Option<(u32, u32)>,
+    out_checked: bool,
+    out_bar: Option<String>,
 }
 
 /// Records the `UseDoodadSkill` the HUD sends (a live session's `NetPlugin` would put it on the wire).
 fn watch_commands(mut commands: MessageReader<NetCommand>, mut check: ResMut<BarCheck>) {
     for NetCommand(command) in commands.read() {
-        if let Command::UseDoodadSkill { skill_id, doodad_obj_id } = command {
+        if let Command::UseDoodadSkill {
+            skill_id,
+            doodad_obj_id,
+        } = command
+        {
             check.command = Some((*skill_id, *doodad_obj_id));
         }
+    }
+}
+
+/// Moves the crop to just beyond the skill's reach at [`OUT_AT`]. `find_focus` reads the doodads' state positions, so the
+/// bar drops it even though the staged model stays where it was drawn.
+fn move_crop(time: Res<Time>, mut doodads: ResMut<aa_net::state::Doodads>, mut moved: Local<bool>) {
+    if *moved || time.elapsed_secs() < OUT_AT {
+        return;
+    }
+    *moved = true;
+    if let Some(doodad) = doodads.by_id.get_mut(&RICE_OBJ) {
+        doodad.pos = Pos::new(RICE_OUT_AT.x, RICE_OUT_AT.y, RICE_OUT_AT.z);
+        info!(
+            "farm-harvest-bar: crop {RICE_OBJ} moved to {:.1} m, beyond the 4 m reach",
+            RICE_OUT_AT.length()
+        );
+    }
+}
+
+/// After [`OUT_READ_AT`]: the bar's visible/count state with the crop out of range.
+fn read_out(time: Res<Time>, rt: Option<NonSend<aa_ui::UiRuntime>>, mut check: ResMut<BarCheck>) {
+    if check.out_checked || time.elapsed_secs() < OUT_READ_AT {
+        return;
+    }
+    let Some(rt) = rt else { return };
+    let bar = rt
+        .lua
+        .load("return tostring(dynamic_action_bar:IsVisible()) .. ' x' .. tostring(X2:GetDynamicActionCount())")
+        .eval::<String>();
+    if let Ok(bar) = bar {
+        check.out_bar = Some(bar);
+        check.out_checked = true;
     }
 }
 
@@ -370,6 +417,13 @@ fn report(
             check.command
         ));
     }
+    let out = check.out_bar.clone().unwrap_or_default();
+    if out != "false x0" {
+        failures.push(format!(
+            "the bar was `{out}` at {:.1} m (4 m reach), not hidden with no entry",
+            RICE_OUT_AT.length()
+        ));
+    }
     if failures.is_empty() {
         info!("farm-harvest-bar: PASSED");
         if !shot_mode() {
@@ -382,7 +436,9 @@ fn report(
 }
 
 fn shot_mode() -> bool {
-    aa_dev::args().iter().any(|a| a == "--shot" || a == "--offscreen-shot")
+    aa_dev::args()
+        .iter()
+        .any(|a| a == "--shot" || a == "--offscreen-shot")
 }
 
 fn shot_after() -> f32 {

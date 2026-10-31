@@ -57,8 +57,8 @@ pub struct DoodadVisual {
     pub growth: Option<DoodadGrowth>,
     /// Milliseconds of the growth left: the server's `time_left` at the spawn / phase change, counted down locally.
     pub remaining_ms: f32,
-    /// The whole phase's duration (see [`DoodadGrowth::total_ms`]): the `time_left` announced by a phase change, or
-    /// the longer of the database delay and the `time_left` at a spawn first seen mid-phase.
+    /// The whole phase's duration (see [`DoodadGrowth::total_ms`]): the announced `time_left`, or the database delay
+    /// when the packet announced none (0).
     pub total_ms: f32,
     /// The spawn packet's `doodad.scale` (the model's own size is multiplied by the growth).
     pub base_scale: f32,

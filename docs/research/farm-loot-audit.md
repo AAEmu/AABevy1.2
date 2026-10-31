@@ -12,6 +12,10 @@ func groups, both `doodad_funcs` and `doodad_phase_funcs`, and resolves each loo
 * `DoodadFuncLootPack` -> `doodad_func_loot_packs` -> `loots` -> `items`;
 * `DoodadFuncLootItem` -> `doodad_func_loot_items` -> `items`.
 
+`DoodadFuncFruitPick`, `DoodadFuncFakeUse` and `DoodadFuncCutdowning` carry no item id; their loot is in the
+`next_phase` group. The main walk already scans every group of each plantable, and a separate pass follows those three
+transitions explicitly: 9 loot groups and 9 loot rows on the 1.2 data (checked with the same item lookup).
+
 Result on the 1.2 data (2026-10-31): 335 doodads, 352 loot packs, 1,563 loot rows, three missing item references.
 
 | Doodad | Func group | Func | Func id | Missing item |

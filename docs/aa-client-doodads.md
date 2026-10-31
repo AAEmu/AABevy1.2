@@ -142,7 +142,8 @@ Fertilize 13788 (6 m, 1 LP, 5000 ms) is on 42-52 other plant doodads, not on ric
 phase chain, but the planted crop's dynamic bar was not driven (`raw/F15*.json` is empty: `GetDynamicActionCount` was nil,
 `do_interaction_1` sent no `CSStartSkill`). So the bar entries, the exact reach, the labor delta and the loot delivery
 for an owner-planted crop are still unmeasured in the original; everything above is the database plus the generic
-slice-1 path. `examples/farm_harvest_bar.rs` checks the grown crop's Harvest entry in range through that path.
+slice-1 path. `examples/farm_harvest_bar.rs` checks the grown crop's Harvest entry at 3 m and that the bar hides at
+4.5 m, just beyond the 4 m reach, through that path.
 
 ## Phase models and growth
 
@@ -158,13 +159,15 @@ A doodad is drawn with the model of its **current phase**, not just its template
   build stale (checked against the server's current `func_group_id`) and it is prepared again.
 * `ingame/doodad_visual.rs` stores the drawn path, the phase, the growth, the remaining and the total milliseconds in a
   `DoodadVisual` component. The root scale is `doodad.scale * growth.scale_at(remaining, total)`; `grow` counts the
-  announced `time_left` down locally (packets do not tick it). The server's `time_left` is the whole growth duration
-  (it already applied its growth rate and climate), so the original `ClientDoodad::Update` (`0x393a4810`) starts at
-  `start_scale` and reaches `end_scale` exactly when the server changes phase. A doodad first seen mid-phase also starts
-  at `start_scale` for the announced remaining time; it is **not** stretched back to the database `delay`. The database
-  delay is only the fallback when the packet announces no `time_left` (0), and that fallback also starts at
-  `start_scale` (the original resets the duration to the delay and the elapsed time to 0, not to "finished"). If the
-  next phase has a different model with its own growth, the scale restarts at that phase's `start_scale`.
+  announced `time_left` down locally (packets do not tick it). The original `ClientDoodad::Update` (`0x393a4810`)
+  reads the announced `time_left` as the whole growth duration and applies `start_scale` at once; a doodad first seen
+  mid-phase also starts at `start_scale` for the announced remaining time and is **not** stretched back to the database
+  `delay`. The database delay is only the fallback when the packet announces no `time_left` (0), and that fallback also
+  starts at `start_scale` (the original resets the duration to the delay and the elapsed time to 0, not to "finished").
+  The **linear** ramp and the claim that it reaches `end_scale` exactly when the server changes phase are inferred from
+  `UpdateScaling`'s constant speed, not measured; the phase-change restart at the next phase's `start_scale` is inferred
+  from the `0x251` re-init gate (`0x393a1c90` clears it, `Update` initializes while it is clear). Both are
+  **capture-pending**: F18 did not sample the original client's model/root scale.
 * `SCDoodadPhaseChanged` restarts the growth from the packet's `time_left` and, when the phase model differs, swaps the
   model under the doodad root: the new model is loaded and spawned first, then the old one is despawned in the same
   command flush, so no frame is left without a model. A phase that cannot be loaded keeps the old model. The same path
@@ -174,9 +177,10 @@ A doodad is drawn with the model of its **current phase**, not just its template
 
 Capture status: F18 (growth visual at spawn) was **not driven quantitatively** in the 2026-10-30 capture; the rice
 seedling was visible as a seedling with `time_left` 1,032,000 ms, but the client's model/root scale was not sampled. The
-scale rule above is the decompile (`ClientDoodad::Update`, `0x393a4810`: the packet `time_left` becomes the duration,
-0 falls back to the database delay, `start_scale` is applied at once) plus the database (`doodad_func_growths`), not a
-measured original-client value.
+duration and the immediate `start_scale` are read in the decompile (`ClientDoodad::Update`, `0x393a4810`; 0 falls back
+to the database delay) plus `doodad_func_growths`. The linear ramp, the exact end at the phase change and the restart at
+the next phase's `start_scale` are inferred from `UpdateScaling` and the `0x251` gate, not measured: capture-pending
+(F18).
 
 Examples in the database: seedling 367 phase 2632 -> `sub_tree_bigfir01_grow02.cgf`, growth 0.6 -> 1.0 over 37,032 s;
 rice 2246 phase 4403 -> `common_plants_rice01.cgf`, growth 0.75 -> 1.0 over 9,288 s; rice phase 10155 has an empty
