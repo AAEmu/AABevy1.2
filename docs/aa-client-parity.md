@@ -77,7 +77,10 @@ Ships (merged after the checkpoint was written):
   header/actor sets, ship id, cadence and support rows. Open: hull pitch/roll, a raised helm on larger ships, two
   header-only step-off rows, and deck walking/jump values the capture cannot verify.
 
-Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11), cannons/turrets (S12),
+Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim clamped to the `vehicle_models`
+turret block, the 200 ms change-only `CSTurretState`, the drawn `bone_yaw`/`bone_pitch` aim, remote type-8 posture and
+the fire skill sent at the aimed ground spot (`docs/aa-client-units.md`, S12).
+Still open across these slices: remote vehicle movement smoothing (S8), seats/passengers (S11),
 hanging (S13), gliders (S14), vehicle state/FX (S15), walking to the mount before mounting, auto-walk, mount jump clips,
 larger ships, and the copper boiler colour. The detailed pending checks are in [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
