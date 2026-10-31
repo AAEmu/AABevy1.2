@@ -1,9 +1,10 @@
 //! Self-checking walk to the mount through the real HUD binding and game systems, with no socket.
 //!
-//! A mate 10 m away is mounted with `X2Mate:MountMate()`: the press starts `hud::pets::walk_to_mount`, the real
-//! `ingame::player::control_player` moves the character on the scripted forward key, the distance shrinks, the walk
-//! stops at the 1.2 controller's 3 m (`0x39AC3878 = 9.0`, squared) and exactly one `CSMountMate` is queued. A mate
-//! 2.5 m away mounts at once: no walk, no forward key, one request. The run exits non-zero when a case is wrong.
+//! A mate 30 m away is refused with `Target is too far.`; a mate 6 m away is mounted with `X2Mate:MountMate()`: the
+//! press starts `hud::pets::walk_to_mount`, the real `ingame::player::control_player` moves the character on the
+//! scripted forward key, the walk does not send at 3 m, stops at the 1.2 controller's 0.8 m arrival window
+//! (`0x399A3240 = 0.64`, squared), queues exactly one `CSMountMate` and stamped the ride cooldown at the accepted
+//! press. A mate 2.5 m away walks the last stretch too. The run exits non-zero when a case is wrong.
 //!
 //! `cargo run -p aa-client --example mount_walk -- --headless --headless-fps 240` needs `AA_PAK` and `AA_DB`; without
 //! them it says so and exits 0. Add `--mute` in a shared session (the audio device is not part of the check).

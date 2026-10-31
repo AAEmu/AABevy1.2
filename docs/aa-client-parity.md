@@ -1,29 +1,32 @@
 # ArcheAge 1.2 feature parity
 
-## Mount-walk checkpoint, 2026-10-30
+## Mount-walk checkpoint, 2026-10-31
 
-`X2Mate:MountMate()` now matches the 1.2 mount controller (`FUN_3909b070`):
-from farther than 3 m (`0x39AC3878 = 9.0`, squared) the client walks the player
-to the own mate through the normal movement path and only then sends
-`CSMountMate`, with `FUN_3909ae90`'s reason computed from the arrival position.
-`CanMount`'s 25 m and the "Target is too far." refusal stay as before. The
-2026-10-30 group-A2 capture mounted at 7.642 m and sent 1.19 s later; a second
-run at ~15 m also walked to the pet and mounted (the distance was not sampled,
-the pet pose helper returned null), and the 30 m case was not captured, so the
-25 m measured limit is retained. Movement input, the mate despawning/dying, the
-player dying, a mate/vehicle seat, a teleport or 3 s without progress cancel the
-walk; a cancelled walk never sends. The new-target rule (the authoritative
-target state changing) and the mate drifting past 25 m are implemented, but both
-are capture-pending: neither the 2026-10-30 capture nor the decompile exercises
-them. The teleport cancel is likewise capture-pending for 1.2. A doodad walk and
-the mount walk cancel each other. The ride-cooldown timing is capture-pending
-(A4b); this client stamps it when the request is queued.
+`X2Mate:MountMate()` now matches the 1.2 mount controller as read in the 1.2
+decompile: the walk ends at `FUN_390aa730`'s arrival window (horizontal squared
+distance `0x399A3240 = 0.64`, i.e. 0.8 m, and `-1.5 < dz < 2.5`), the `+0x1d`
+flag stops the steering there, and `FUN_3909b070` sends `CSMountMate` on the same
+frame; its 3 m gate (`0x39AC3878 = 9.0` squared) is nested inside the arrival
+test and always holds inside the window. The reason is `FUN_3909ae90` from the
+arrival position. The ride cooldown is stamped at the accepted request
+(`FUN_393642f0` line 701802, before the controller at line 701812) and survives a
+cancelled walk; the send stamps nothing. Movement cancels only through
+`FUN_390aaf30`'s actions 1..5 (`moveback`, `moveleft`, `moveright`, `turnleft`,
+`turnright`); `moveforward` and `jump` do not. A mate moving past 25 m mid-walk
+does not cancel: the 25 m rule is `FUN_3935aa10`'s refusal at the request
+(`0x399CFF68 = 625.0` squared, detail 0x205 "Target is too far."), so 30 m is
+refused and a refused request starts no cooldown. The walk has a 10 s life
+(`FUN_390a5f00` + `0x3999CCE8`), not the port's former 3 s no-progress rule. The
+new-target and teleport cancels remain capture-pending (A1b): the walk functions
+have no test for either and neither was measured. A doodad walk and the mount
+walk cancel each other, and a cancelled walk never sends.
 `hud/pets/owned.rs` owns the state machine, `hud/pets.rs` the movement and
-steering, and `hud/pets/owned/tests.rs` the far/close/cancel/despawn/restart/
-stuck/drift/seat/teleport/doodad/arrival and wire checks. Pending live checks:
-native movement-input cancellation, a new target and a mate drift past 25 m
-mid-walk, a teleport mid-walk, the exact 3 m stop, the ride-cooldown timing and
-the alive-mate 30 m case. Overall original 1.2 parity remains unfinished.
+steering, and `hud/pets/owned/tests.rs` the window/cooldown/input/reach/cancel/
+despawn/restart/seat/teleport/doodad/arrival and wire checks. The `mount_walk`
+example asserts the 30 m refusal, the 0.8 m send, the cooldown-at-accept and the
+2.5 m walk through the real binding and systems. Pending live checks: the exact
+arrival distance, the native movement-input mapping, a new target and a
+teleport mid-walk. Overall original 1.2 parity remains unfinished.
 
 ## Doodad cutdown capture checkpoint, 2026-10-30
 

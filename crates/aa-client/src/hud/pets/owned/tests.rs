@@ -559,7 +559,7 @@ fn mounting_needs_a_live_pet_with_a_driver_seat_in_reach_and_getting_off_names_t
     data.pets.owned.current = Some(Pet { spawn: MateSpawn { tl_id: 12, ..default() }, object: 201, model: 139, ..default() });
     data.pets.owned.pet_pos = Some((Vec3::new(30.0, 0.0, 0.0), 0.0));
     assert!(!can_mount(&data), "26 m away");
-    data.pets.owned.pet_pos = Some((Vec3::new(3.0, 0.0, 0.0), 0.0));
+    data.pets.owned.pet_pos = Some((Vec3::new(0.5, 0.0, 0.0), 0.0));
     assert!(can_mount(&data));
     data.pets.owned.mounted = true;
     assert!(!can_mount(&data), "already riding");
@@ -877,11 +877,18 @@ fn mount_reach_is_25_m_in_three_dimensions_and_too_far_says_so() {
     data.pets.owned.pet_pos = Some((Vec3::new(25.0, 0.0, 0.0), 0.0));
     assert!(can_mount(&data), "25.0 m is still inside the native squared-distance 625");
     assert_eq!(mount(&mut data), None);
+    assert!(data.pets.owned.approach.is_some(), "25 m starts the walk");
     data.pets.owned.requests.clear();
+    data.pets.owned.approach = None;
+    data.pets.owned.last_ride = None;
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 0.0, 25.001), 0.0));
     assert!(!can_mount(&data), "the z offset counts: the native check is 3D");
     assert_eq!(mount(&mut data), Some("Target is too far."));
     assert!(data.pets.owned.requests.is_empty());
+    assert!(
+        data.pets.owned.last_ride.is_none(),
+        "FUN_393642f0 line 701802 stamps only an accepted request: a refused one starts no cooldown"
+    );
 }
 
 #[test]
@@ -898,9 +905,10 @@ fn a_far_mount_does_not_send_before_the_walk() {
 fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
     let mut data = mountable_pet(7.642);
     assert_eq!(mount(&mut data), None);
+    let accepted = data.pets.owned.last_ride.expect("the accepted request stamps the cooldown");
     assert!(
         data.pets.owned.requests.is_empty(),
-        "1.2 sends CSMountMate only within 3 m"
+        "1.2 sends CSMountMate only at the arrival window, not at the request"
     );
     assert!(
         data.pets.owned.approach.is_some(),
@@ -910,10 +918,20 @@ fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
         walking_toward_pet(step_mount_walk(&mut data, false, 0.0)).abs() < 1e-6,
         "toward the pet"
     );
-    // the player walked around to 2.5 m south of the pet: the reason is the arrival side
-    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    // 3 m south of the pet is not the send point: FUN_3909b070 needs the +0x1d arrival flag
+    data.pos = Vec3::new(0.0, 2.0, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.1),
+        MountWalk::Toward(_)
+    ));
+    assert!(
+        data.pets.owned.requests.is_empty(),
+        "no CSMountMate at 3 m"
+    );
+    // the player walked around to 0.7 m south of the pet: the reason is the arrival side
+    data.pos = Vec3::new(0.0, 4.3, 0.0);
+    assert_eq!(step_mount_walk(&mut data, false, 0.2), MountWalk::Arrived);
     assert_eq!(
         sent(&mut data),
         [MateCommand::Mount {
@@ -923,8 +941,13 @@ fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
         }],
         "reason 3 is FUN_3909ae90 at the send, not at the walk start"
     );
+    assert_eq!(
+        data.pets.owned.last_ride,
+        Some(accepted),
+        "FUN_3909b070 stamps nothing at the send"
+    );
     assert!(data.pets.owned.approach.is_none());
-    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
+    assert_eq!(step_mount_walk(&mut data, false, 0.2), MountWalk::Idle);
     assert!(
         data.pets.owned.requests.is_empty(),
         "the arrival sends exactly once"
@@ -932,8 +955,8 @@ fn a_far_mount_walks_to_the_pet_and_sends_once_on_arrival() {
 }
 
 #[test]
-fn a_close_mount_keeps_sending_at_once() {
-    let mut data = mountable_pet(3.0);
+fn a_mount_inside_the_arrival_window_keeps_sending_at_once() {
+    let mut data = mountable_pet(0.5);
     assert_eq!(mount(&mut data), None);
     assert!(data.pets.owned.approach.is_none());
     assert_eq!(
@@ -947,8 +970,117 @@ fn a_close_mount_keeps_sending_at_once() {
 }
 
 #[test]
+fn a_mount_just_outside_the_arrival_window_starts_the_walk() {
+    let mut data = mountable_pet(1.0);
+    assert_eq!(mount(&mut data), None);
+    assert!(
+        data.pets.owned.approach.is_some(),
+        "0.8 m is the native stop; 1.0 m walks the last 0.2 m"
+    );
+    assert!(data.pets.owned.requests.is_empty());
+}
+
+#[test]
+fn the_walk_sends_at_the_arrival_window_not_at_three_metres() {
+    let mut data = mountable_pet(10.0);
+    mount(&mut data);
+    // horizontal 3 m: the old port sent here, but FUN_3909b070 requires the +0x1d arrival flag first
+    data.pos = Vec3::new(0.0, 7.0, 0.0);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.0),
+        MountWalk::Toward(_)
+    ));
+    assert!(data.pets.owned.requests.is_empty());
+    // horizontal 0.7 m but 2.0 m below the mate: outside FUN_390aa730's dz band
+    data.pos = Vec3::new(0.0, 9.3, 2.0);
+    assert!(matches!(
+        step_mount_walk(&mut data, false, 0.1),
+        MountWalk::Toward(_)
+    ));
+    assert!(data.pets.owned.requests.is_empty());
+    // inside the horizontal 0.8 m and the (-1.5, 2.5) height band
+    data.pos = Vec3::new(0.0, 9.3, 0.0);
+    assert_eq!(step_mount_walk(&mut data, false, 0.2), MountWalk::Arrived);
+    assert_eq!(sent(&mut data).len(), 1);
+}
+
+#[test]
+fn the_ride_cooldown_starts_at_the_accepted_request_and_survives_a_cancel() {
+    let mut data = mountable_pet(10.0);
+    assert!(data.pets.owned.last_ride.is_none());
+    mount(&mut data);
+    let accepted = data
+        .pets
+        .owned
+        .last_ride
+        .expect("FUN_393642f0 line 701802 stamps the accepted request");
+    assert!(data.pets.owned.approach.is_some());
+    assert!(
+        !can_mount(&data),
+        "the cooldown runs during the walk, not only after the send"
+    );
+    assert_eq!(step_mount_walk(&mut data, true, 0.0), MountWalk::Cancelled);
+    assert_eq!(
+        data.pets.owned.last_ride,
+        Some(accepted),
+        "a cancelled walk keeps the stamp from its accepted request"
+    );
+    assert!(!can_mount(&data));
+    old_ride(&mut data);
+    assert!(can_mount(&data));
+    mount(&mut data);
+    assert!(
+        data.pets.owned.last_ride.unwrap() > accepted,
+        "the next accepted request restamps the cooldown"
+    );
+
+    // the send itself stamps nothing: an arrival keeps the accept's instant
+    let mut data = mountable_pet(10.0);
+    mount(&mut data);
+    let accepted = data.pets.owned.last_ride.unwrap();
+    data.pos = Vec3::new(0.0, 9.3, 0.0);
+    assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
+    assert_eq!(data.pets.owned.last_ride, Some(accepted));
+}
+
+#[test]
+fn forward_does_not_cancel_the_walk_but_the_five_side_actions_do() {
+    for action in ["moveback", "moveleft", "moveright", "turnleft", "turnright"] {
+        let mut data = mountable_pet(7.642);
+        mount(&mut data);
+        let (mut app, shared) = walk_app(data);
+        app.update();
+        assert_eq!(held(&app), "W");
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .tap_for_test(action);
+        app.update();
+        assert!(
+            shared.borrow().pets.owned.approach.is_none(),
+            "FUN_390aaf30 cancels on action {action}"
+        );
+        assert_eq!(held(&app), "", "action {action} releases the forward key");
+        assert!(shared.borrow().pets.owned.requests.is_empty());
+    }
+    let mut data = mountable_pet(7.642);
+    mount(&mut data);
+    let (mut app, shared) = walk_app(data);
+    app.update();
+    app.world_mut()
+        .resource_mut::<crate::settings::Actions>()
+        .tap_for_test("moveforward");
+    app.update();
+    assert!(
+        shared.borrow().pets.owned.approach.is_some(),
+        "moveforward is action 0, which FUN_390aaf30 does not test"
+    );
+    assert_eq!(held(&app), "W");
+    assert!(shared.borrow().pets.owned.requests.is_empty());
+}
+
+#[test]
 fn a_close_mount_cancels_a_doodad_walk_and_releases_its_forward_key() {
-    let mut data = mountable_pet(2.5);
+    let mut data = mountable_pet(0.5);
     crate::hud::doodad::start_walk(&mut data, 900, 12.0, 0.0);
     assert!(data.doodad.walking());
     assert_eq!(mount(&mut data), None);
@@ -988,13 +1120,14 @@ fn a_close_mount_during_a_walk_sends_exactly_once() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     assert!(data.pets.owned.approach.is_some());
-    // the player closed the distance and pressed mount again: the close-range send ends the walk
-    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    // the rest of the native 2 s cooldown passes, then a press within the window sends at once
+    old_ride(&mut data);
+    data.pos = Vec3::new(0.0, 4.5, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
     assert_eq!(mount(&mut data), None);
     assert!(
         data.pets.owned.approach.is_none(),
-        "the close-range send ends the walk"
+        "the in-window send ends the walk"
     );
     assert_eq!(
         sent(&mut data),
@@ -1017,8 +1150,8 @@ fn movement_input_cancels_the_walk_and_never_mounts() {
     mount(&mut data);
     assert_eq!(step_mount_walk(&mut data, true, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.approach.is_none());
-    // even if the player happens to stand in reach next frame, the cancelled walk is gone
-    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    // even if the player happens to stand in the arrival window next frame, the cancelled walk is gone
+    data.pos = Vec3::new(0.0, 4.3, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
     assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
     assert!(
@@ -1111,8 +1244,8 @@ fn a_teleport_mid_walk_cancels_the_walk() {
         "a teleported walk never sends CSMountMate"
     );
     assert!(
-        data.pets.owned.last_ride.is_none(),
-        "a cancelled walk starts no cooldown"
+        data.pets.owned.last_ride.is_some(),
+        "the cooldown was stamped at the accepted request and survives the cancel (A4b)"
     );
 }
 
@@ -1229,12 +1362,14 @@ fn a_cancelled_walk_restarted_sends_exactly_one_mount() {
     assert_eq!(step_mount_walk(&mut data, true, 0.0), MountWalk::Cancelled);
     assert!(data.pets.owned.requests.is_empty());
     assert!(
-        data.pets.owned.last_ride.is_none(),
-        "a cancelled walk starts no cooldown"
+        data.pets.owned.last_ride.is_some(),
+        "the cancelled walk keeps the cooldown its accepted request stamped"
     );
+    // the native cooldown must pass before a second request is accepted
+    old_ride(&mut data);
     mount(&mut data);
     assert!(data.pets.owned.approach.is_some());
-    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pos = Vec3::new(0.0, 4.3, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
     assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
     assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
@@ -1254,7 +1389,7 @@ fn the_arrival_queues_one_csmountmate_for_commands() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     walking_toward_pet(step_mount_walk(&mut data, false, 0.0));
-    data.pos = Vec3::new(0.0, 2.5, 0.0);
+    data.pos = Vec3::new(0.0, 4.3, 0.0);
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
     assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Arrived);
     assert_eq!(step_mount_walk(&mut data, false, 0.0), MountWalk::Idle);
@@ -1434,14 +1569,14 @@ fn the_walk_system_holds_forward_steers_at_the_pet_and_lets_go_on_input() {
     );
     app.world_mut()
         .resource_mut::<crate::settings::Actions>()
-        .tap_for_test("moveforward");
+        .tap_for_test("moveback");
     app.update();
     assert!(
         app.world()
             .resource::<crate::ingame::DevOptions>()
             .script_keys
             .is_empty(),
-        "a movement key cancels the walk and releases the forward key"
+        "FUN_390aaf30's action 1 cancels the walk and releases the forward key"
     );
 }
 
@@ -1459,7 +1594,7 @@ fn the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range() {
     );
     {
         let mut data = shared.borrow_mut();
-        data.pos = Vec3::new(0.0, 2.5, 0.0);
+        data.pos = Vec3::new(0.0, 4.3, 0.0);
         data.pets.owned.pet_pos = Some((Vec3::new(0.0, 5.0, 0.0), 0.0));
     }
     app.update();
@@ -1474,7 +1609,7 @@ fn the_walk_system_stops_and_queues_the_mount_when_the_pet_is_in_range() {
 }
 
 #[test]
-fn a_stuck_walk_cancels_and_releases_the_forward_key() {
+fn the_walk_times_out_ten_seconds_after_it_starts() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     let (mut app, shared) = walk_app(data);
@@ -1487,7 +1622,15 @@ fn a_stuck_walk_cancels_and_releases_the_forward_key() {
     );
     app.world_mut()
         .resource_mut::<Time>()
-        .advance_by(std::time::Duration::from_secs(4));
+        .advance_by(std::time::Duration::from_secs(9));
+    app.update();
+    assert!(
+        shared.borrow().pets.owned.approach.is_some(),
+        "FUN_390a5f00 gives the controller 0x3999CCE8 = 10.0 s"
+    );
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs(2));
     app.update();
     assert!(shared.borrow().pets.owned.approach.is_none());
     assert!(
@@ -1495,12 +1638,13 @@ fn a_stuck_walk_cancels_and_releases_the_forward_key() {
             .resource::<crate::ingame::DevOptions>()
             .script_keys
             .is_empty(),
-        "a stuck walk releases the forward key"
+        "the timed-out walk releases the forward key"
     );
+    assert!(shared.borrow().pets.owned.requests.is_empty());
 }
 
 #[test]
-fn a_mate_that_drifts_beyond_the_mount_reach_cancels_the_walk() {
+fn a_mate_beyond_the_mount_reach_mid_walk_does_not_cancel_the_walk() {
     let mut data = mountable_pet(7.642);
     mount(&mut data);
     assert!(matches!(
@@ -1508,7 +1652,11 @@ fn a_mate_that_drifts_beyond_the_mount_reach_cancels_the_walk() {
         MountWalk::Toward(_)
     ));
     data.pets.owned.pet_pos = Some((Vec3::new(0.0, 25.001, 0.0), 0.0));
-    assert_eq!(step_mount_walk(&mut data, false, 0.1), MountWalk::Cancelled);
+    assert!(
+        matches!(step_mount_walk(&mut data, false, 0.1), MountWalk::Toward(_)),
+        "FUN_390aaf30 / FUN_390aa730 / FUN_3909b070 have no distance cancel"
+    );
+    assert!(data.pets.owned.approach.is_some());
     assert!(data.pets.owned.requests.is_empty());
 }
 
@@ -1648,7 +1796,7 @@ fn the_real_walks_hand_over_from_the_doodad_to_the_mount_without_dropping_w() {
             "frame {frame}: the doodad-to-mount hand-over dropped the forward key"
         );
     }
-    shared.borrow_mut().pos = Vec3::new(0.0, 5.5, 0.0);
+    shared.borrow_mut().pos = Vec3::new(0.0, 7.0, 0.0);
     app.update();
     assert_eq!(held(&app), "", "the mount arrival releases the forward key");
     assert!(shared.borrow().pets.owned.approach.is_none());

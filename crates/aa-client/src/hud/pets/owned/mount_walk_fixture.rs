@@ -1,11 +1,17 @@
-//! Self-checking walk to the mount: the real HUD binding (`X2Mate:MountMate()`), the real `walk_to_mount` / `update`
-//! systems and the real on-foot controller over received mate state, with no socket.
+//! Self-checking walk to the mount: the real HUD binding (`X2Mate:MountMate()`), the real `walk_to_mount` /
+//! `update` systems and the real on-foot controller over received mate state, with no socket.
 //!
-//! A mate 10 m north is mounted: the press starts the walk, the scripted forward key moves the player in, the walk
-//! stops at the 1.2 controller's 3 m (`0x39AC3878 = 9.0`, squared) and queues exactly one `CSMountMate`. A mate 2.5 m
-//! north is mounted at once: no walk, no forward key, one request. The check fails the run when either case is wrong.
+//! Cases, all through the real binding:
+//! * a mate 30 m away is refused at the request ("Target is too far.", no walk, no request, no cooldown), the
+//!   `FUN_3935aa10` 25 m rule;
+//! * a mate 6 m away starts the walk, never queues `CSMountMate` while the distance is still over the 0.8 m arrival
+//!   window (`FUN_390aa730`, `0x399A3240` squared), sends exactly one at the window and releases the forward key;
+//!   the ride cooldown keeps the instant stamped at the accepted request (`FUN_393642f0` line 701802), so a second
+//!   in-window press 2 s after the accept sends at once while the send itself is younger than 2 s;
+//! * a mate 2.5 m away starts the walk too and sends at the window (the port used to send at once under 3 m).
 //!
 //! `cargo run -p aa-client --example mount_walk -- --headless --headless-fps 240` (needs `AA_PAK` and `AA_DB`).
+//! Add `--mute` in a shared session. The run exits non-zero when a case is wrong.
 use crate::hud::api::{self, HudBridge, HudData, Shared};
 use crate::hud::data::GameData;
 use crate::hud::{HudBuilt, HudKeyboardFocus, HudPointerOverUi};
@@ -23,11 +29,15 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-/// The 1.2 mount controller's stop distance (`0x39AC3878` = 9.0, squared).
-const STOP: f32 = 3.0;
-/// The first mate's distance (m) and the second's.
-const FAR: f32 = 10.0;
+/// The 1.2 arrival window (`0x399A3240` = 0.64 squared) and the `FUN_3909b070` 3 m send gate (`0x39AC3878` = 9.0).
+const STOP: f32 = 0.8;
+const SEND_GATE: f32 = 3.0;
+/// The mate distances (m) for the walk, the in-window press and the refused request.
+const FAR: f32 = 6.0;
 const NEAR: f32 = 2.5;
+const TOO_FAR: f32 = 30.0;
+/// The native ride cooldown (`1999 < now - _DAT_3a169944`).
+const RIDE_COOLDOWN: f32 = 2.0;
 /// The player and the mate live on the main world near the character spawn (terrain exists there).
 const AT: (f32, f32) = (15_600.0, 15_380.0);
 /// `control_player` waits up to 5 s for the collision around the spawn; press after that.
@@ -40,7 +50,7 @@ const TIMEOUT: f32 = 30.0;
 const PLAYER_OBJ: u32 = 100;
 const MATE_OBJ: u32 = 201;
 
-/// The staged positions: the player at [`AT`] on the terrain, the mate [`FAR`] then [`NEAR`] metres north.
+/// The staged positions: the player at [`AT`] on the terrain, the mate placed by [`place`].
 #[derive(Resource, Clone, Copy)]
 struct Staged {
     player: Vec3,
@@ -48,13 +58,17 @@ struct Staged {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Phase {
-    /// Waiting for the collision settle before the first press.
+    /// Waiting for the collision settle, then the refused 30 m request and the 6 m walk.
     Waiting,
-    /// The 10 m walk.
-    Walking,
-    /// The 2.5 m press at once.
-    Close,
-    /// Both cases passed.
+    /// The 6 m walk.
+    Far,
+    /// Waiting for the accepted request's 2 s cooldown, then pressing again at the arrival window.
+    AfterFar,
+    /// Waiting for that in-window request to reach `commands`.
+    Probe,
+    /// The 2.5 m walk.
+    Near,
+    /// Every case passed.
     Done,
 }
 
@@ -67,6 +81,9 @@ struct Check {
     start: f32,
     last: f32,
     saw_w: bool,
+    saw_between: bool,
+    arrived_at: f32,
+    accepted: Option<web_time::Instant>,
     failures: Vec<String>,
 }
 
@@ -80,6 +97,9 @@ impl Default for Check {
             start: 0.0,
             last: 0.0,
             saw_w: false,
+            saw_between: false,
+            arrived_at: 0.0,
+            accepted: None,
             failures: Vec::new(),
         }
     }
@@ -222,7 +242,8 @@ fn stage(
 }
 
 /// Moves the player and mate to `mate_distance` metres north of the staged player; the HUD state is updated too so a
-/// press in this frame reads them.
+/// press in this frame reads them. The ride cooldown is left alone: it belongs to the accepted request, not to the
+/// staging.
 #[allow(clippy::too_many_arguments)]
 fn place(
     staged: Staged,
@@ -245,7 +266,6 @@ fn place(
     data.pos = player;
     data.pets.owned.pet_pos = Some((mate, 0.0));
     data.pets.owned.approach = None;
-    data.pets.owned.last_ride = None;
     data.pets.owned.requests.clear();
     data.pets.release_w = false;
 }
@@ -259,7 +279,8 @@ fn press(rt: &UiRuntime) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Runs both cases: the 10 m walk (forward key, shrinking distance, 3 m stop, one `CSMountMate`) and the 2.5 m press.
+/// Runs the 30 m refusal, the 6 m walk, the cooldown check at the window and the 2.5 m walk through the real
+/// `X2Mate:MountMate` binding, `walk_to_mount`, `pets::update` and `control_player`.
 #[allow(clippy::too_many_arguments)]
 fn check(
     time: Res<Time>,
@@ -296,33 +317,79 @@ fn check(
                 if data.pets.owned.pet_pos.is_none() {
                     return;
                 }
-                place(*staged, FAR, &mut data, &mut movers, &mut units);
-                check.start = FAR;
-                check.last = FAR;
+                place(*staged, TOO_FAR, &mut data, &mut movers, &mut units);
+            }
+            if let Err(error) = rt
+                .lua
+                .load("CAPTURED={} SYSMSG=function(text) CAPTURED[#CAPTURED+1]=text end")
+                .set_name("@mount_walk_messages")
+                .exec()
+            {
+                check.fail(format!("the system-message capture failed: {error}"));
+                return finish(&mut check, &mut exit);
             }
             if let Err(error) = press(&rt) {
-                check.fail(format!("the far mount press failed: {error}"));
+                check.fail(format!("the 30 m mount press failed: {error}"));
                 return finish(&mut check, &mut exit);
+            }
+            {
+                let data = bridge.0.borrow();
+                if data.pets.owned.approach.is_some() {
+                    check.fail("a mate 30 m away started the walk".into());
+                }
+                if !data.pets.owned.requests.is_empty() {
+                    check.fail("a mate 30 m away queued a mount request".into());
+                }
+                if data.pets.owned.last_ride.is_some() {
+                    check.fail("a refused request stamped the ride cooldown".into());
+                }
+            }
+            let text = rt
+                .lua
+                .load("return CAPTURED[1]")
+                .eval::<Option<String>>()
+                .ok()
+                .flatten();
+            if text.as_deref() != Some("Target is too far.") {
+                check.fail(format!("the 30 m refusal showed {text:?}, not \"Target is too far.\""));
+            }
+            {
+                let mut data = bridge.0.borrow_mut();
+                place(*staged, FAR, &mut data, &mut movers, &mut units);
+            }
+            if let Err(error) = press(&rt) {
+                check.fail(format!("the 6 m mount press failed: {error}"));
+                return finish(&mut check, &mut exit);
+            }
+            {
+                let data = bridge.0.borrow();
+                if data.pets.owned.approach.is_none() {
+                    check.fail("a mate 6 m away did not start the walk".into());
+                }
+                check.accepted = data.pets.owned.last_ride;
+                if check.accepted.is_none() {
+                    check.fail("the accepted 6 m request did not stamp the ride cooldown".into());
+                }
             }
             check.pressed_at = now;
             check.frames = 0;
+            check.start = FAR;
+            check.last = FAR;
             check.saw_w = false;
+            check.saw_between = false;
             check.sent = 0;
-            let walking = bridge.0.borrow().pets.owned.approach.is_some();
-            if !walking {
-                check.fail("a mate 10 m away did not start the walk".into());
-                return finish(&mut check, &mut exit);
+            check.phase = Phase::Far;
+            if !check.failures.is_empty() {
+                finish(&mut check, &mut exit);
             }
-            check.phase = Phase::Walking;
         }
-        Phase::Walking => {
-            let (sent, start, last) = (check.sent, check.start, check.last);
+        Phase::Far | Phase::Near => {
             check.frames += 1;
             if now - check.pressed_at > TIMEOUT {
-                check.fail(format!("the 10 m walk did not arrive within {TIMEOUT} s"));
+                check.fail(format!("the walk did not arrive within {TIMEOUT} s"));
                 return finish(&mut check, &mut exit);
             }
-            let (approach, dist, requests) = {
+            let (approach, dist, requests, ride) = {
                 let data = bridge.0.borrow();
                 let dist = data
                     .pets
@@ -333,6 +400,7 @@ fn check(
                     data.pets.owned.approach.is_some(),
                     dist,
                     data.pets.owned.requests.len(),
+                    data.pets.owned.last_ride,
                 )
             };
             if check.sent == 0 {
@@ -343,11 +411,19 @@ fn check(
                     check.fail("the walk did not hold the scripted forward key".into());
                     return finish(&mut check, &mut exit);
                 }
-                if now - check.pressed_at >= PROGRESS_SECS && start - dist < PROGRESS {
+                if now - check.pressed_at >= PROGRESS_SECS && check.start - dist < PROGRESS {
+                    let start = check.start;
                     check.fail(format!(
                         "the walk did not get nearer: {dist:.2} m from {start:.2} m after {PROGRESS_SECS} s"
                     ));
                     return finish(&mut check, &mut exit);
+                }
+                if dist <= SEND_GATE && dist > STOP + 0.05 {
+                    check.saw_between = true;
+                    if requests != 0 {
+                        check.fail(format!("the walk queued CSMountMate at {dist:.2} m, before the 0.8 m window"));
+                        return finish(&mut check, &mut exit);
+                    }
                 }
             }
             if approach {
@@ -355,77 +431,137 @@ fn check(
                 return;
             }
             if check.sent != 1 || requests != 0 {
+                let sent_count = check.sent;
                 check.fail(format!(
-                    "the arrival sent {} CSMountMate ({} queued), not exactly one",
-                    sent, requests
+                    "the arrival sent {sent_count} CSMountMate ({requests} queued), not exactly one"
                 ));
                 return finish(&mut check, &mut exit);
+            }
+            if !check.saw_between {
+                check.fail("the walk jumped over the 0.8..3 m band: the no-3 m send was not sampled".into());
             }
             if !check.saw_w {
                 check.fail("the walk never held the scripted forward key".into());
             }
-            if !(check.last > STOP && dist <= STOP) {
+            if !(check.last > STOP && dist <= STOP + 0.2) {
+                let last = check.last;
                 check.fail(format!(
-                    "the walk stopped at {dist:.2} m (last frame {last:.2} m), not across the {STOP} m stop"
+                    "the walk stopped at {dist:.2} m (last frame {last:.2} m), not across the {STOP} m window"
                 ));
             }
             if dev.script_keys.contains('W') {
                 check.fail("the arrival left the scripted forward key held".into());
             }
+            if check.accepted != ride {
+                let a = check.accepted.map_or(-1.0, |t| t.elapsed().as_secs_f32());
+                let r = ride.map_or(-1.0, |t| t.elapsed().as_secs_f32());
+                check.fail(format!(
+                    "the send restamped the ride cooldown (accept {a:.3} s ago, send {r:.3} s ago); FUN_3909b070 stamps nothing"
+                ));
+            }
+            if ride.is_none_or(|t| t.elapsed().as_secs_f32() < 0.2) {
+                check.fail("the ride cooldown was not stamped at the accepted request".into());
+            }
             if !check.failures.is_empty() {
                 return finish(&mut check, &mut exit);
             }
-            // second case: the mate is already inside the send range
-            {
-                let mut data = bridge.0.borrow_mut();
-                place(*staged, NEAR, &mut data, &mut movers, &mut units);
-                check.start = NEAR;
-                check.last = NEAR;
+            if check.phase == Phase::Near {
+                check.phase = Phase::Done;
+                return finish(&mut check, &mut exit);
+            }
+            check.arrived_at = now;
+            check.phase = Phase::AfterFar;
+        }
+        Phase::AfterFar => {
+            let ride = bridge.0.borrow().pets.owned.last_ride;
+            if ride.is_some_and(|t| t.elapsed().as_secs_f32() < RIDE_COOLDOWN) {
+                return;
+            }
+            let since_arrival = now - check.arrived_at;
+            if since_arrival >= RIDE_COOLDOWN {
+                check.fail(format!(
+                    "the 6 m walk took {since_arrival:.2} s, so this press cannot separate an accept stamp from a send stamp"
+                ));
+                return finish(&mut check, &mut exit);
             }
             if let Err(error) = press(&rt) {
-                check.fail(format!("the close mount press failed: {error}"));
+                check.fail(format!("the in-window mount press failed: {error}"));
                 return finish(&mut check, &mut exit);
+            }
+            {
+                let data = bridge.0.borrow();
+                if data.pets.owned.approach.is_some() {
+                    check.fail("an in-window press started a walk".into());
+                }
+                if data.pets.owned.requests.is_empty() {
+                    check.fail("the press after the accept's cooldown queued no CSMountMate".into());
+                }
             }
             check.pressed_at = now;
-            check.frames = 0;
-            check.saw_w = false;
             check.sent = 0;
-            let data = bridge.0.borrow();
-            if data.pets.owned.approach.is_some() {
-                check.fail("a mate 2.5 m away started a walk".into());
-            }
-            if dev.script_keys.contains('W') {
-                check.fail("the close press held the scripted forward key".into());
-            }
-            drop(data);
+            check.phase = Phase::Probe;
             if !check.failures.is_empty() {
-                return finish(&mut check, &mut exit);
+                finish(&mut check, &mut exit);
             }
-            check.phase = Phase::Close;
         }
-        Phase::Close => {
+        Phase::Probe => {
             if now - check.pressed_at > TIMEOUT {
-                check.fail(format!("the close mount did not send within {TIMEOUT} s"));
+                check.fail(format!("the in-window mount did not send within {TIMEOUT} s"));
                 return finish(&mut check, &mut exit);
             }
             if check.sent == 0 {
                 return;
             }
-            let sent = check.sent;
-            if sent != 1 {
-                check.fail(format!("the close mount sent {sent} CSMountMate, not one"));
+            if check.sent != 1 {
+                let sent_count = check.sent;
+                check.fail(format!("the in-window press sent {sent_count} CSMountMate, not one"));
+                return finish(&mut check, &mut exit);
             }
-            if bridge.0.borrow().pets.owned.approach.is_some() {
-                check.fail("the close mount left a walk running".into());
+            if ride_not_rested(&bridge) {
+                return;
             }
-            if dev.script_keys.contains('W') {
-                check.fail("the close mount left the scripted forward key held".into());
+            {
+                let mut data = bridge.0.borrow_mut();
+                place(*staged, NEAR, &mut data, &mut movers, &mut units);
             }
-            check.phase = Phase::Done;
-            finish(&mut check, &mut exit);
+            if let Err(error) = press(&rt) {
+                check.fail(format!("the 2.5 m mount press failed: {error}"));
+                return finish(&mut check, &mut exit);
+            }
+            {
+                let data = bridge.0.borrow();
+                if data.pets.owned.approach.is_none() {
+                    check.fail("a mate 2.5 m away did not start the walk".into());
+                }
+                if !data.pets.owned.requests.is_empty() {
+                    check.fail("a mate 2.5 m away sent CSMountMate at once".into());
+                }
+                check.accepted = data.pets.owned.last_ride;
+            }
+            check.pressed_at = now;
+            check.frames = 0;
+            check.start = NEAR;
+            check.last = NEAR;
+            check.saw_w = false;
+            check.saw_between = false;
+            check.sent = 0;
+            check.phase = Phase::Near;
+            if !check.failures.is_empty() {
+                finish(&mut check, &mut exit);
+            }
         }
         Phase::Done => finish(&mut check, &mut exit),
     }
+}
+
+fn ride_not_rested(bridge: &HudBridge) -> bool {
+    bridge
+        .0
+        .borrow()
+        .pets
+        .owned
+        .last_ride
+        .is_some_and(|t| t.elapsed().as_secs_f32() < RIDE_COOLDOWN)
 }
 
 fn finish(check: &mut Check, exit: &mut MessageWriter<AppExit>) {
@@ -439,7 +575,7 @@ fn finish(check: &mut Check, exit: &mut MessageWriter<AppExit>) {
     }
     if check.phase == Phase::Done {
         info!(
-            "mount-walk: passed: walked 10 m to {STOP} m and sent one CSMountMate; 2.5 m sent one at once"
+            "mount-walk: passed: 30 m refused; 6 m walked past 3 m to {STOP} m (one CSMountMate, cooldown at the accept); 2.5 m walked to {STOP} m"
         );
         exit.write(AppExit::Success);
     }

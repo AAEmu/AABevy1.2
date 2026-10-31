@@ -53,16 +53,10 @@ impl Tables {
     }
 }
 
-/// The keys that end the walk to a mate (the player takes over), as the doodad walk does.
-const MOVE_ACTIONS: [&str; 7] = [
-    "moveforward",
-    "moveback",
-    "moveleft",
-    "moveright",
-    "turnleft",
-    "turnright",
-    "jump",
-];
+/// The keys that end the walk to a mate: `FUN_390aaf30` lines 142504-142508 cancel when any of actions 1..5
+/// (`moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`; table `0x39AC8E68`) is held. Action 0
+/// `moveforward` and action 6 `jump` are not tested there.
+const MOUNT_CANCEL_ACTIONS: [&str; 5] = ["moveback", "moveleft", "moveright", "turnleft", "turnright"];
 
 #[derive(Default)]
 pub(super) struct View {
@@ -83,8 +77,10 @@ pub(super) fn use_skill(data: &mut HudData, slot: usize, target_obj_id: u32) -> 
 
 /// One frame of the walk to the own mate before `CSMountMate` (`FUN_3909b070`): it steers the character at the pet
 /// through the normal movement path (the scripted forward key `control_player` reads, like the doodad walk) and lets
-/// [`owned::step_mount_walk`] send the request when it is within 3 m. The target test is the authoritative
-/// `Panels.target` that `sync_hud` refreshes before this system, not the Lua request queue.
+/// [`owned::step_mount_walk`] send the request at the 0.8 m arrival window (`FUN_390aa730`). The target test is the
+/// authoritative `Panels.target` that `sync_hud` refreshes before this system, not the Lua request queue
+/// (capture-pending, A1b). Movement cancels only through `FUN_390aaf30`'s actions 1..5; holding `moveforward`
+/// (action 0) does not.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn walk_to_mount(
     time: Res<Time>,
@@ -99,9 +95,7 @@ pub(super) fn walk_to_mount(
     mut walking: Local<bool>,
 ) {
     let typing = focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured());
-    let interrupted = !typing
-        && (MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0))
-            || actions.just_pressed("autorun", 0));
+    let interrupted = !typing && MOUNT_CANCEL_ACTIONS.iter().any(|a| actions.pressed(a, 0));
     let (step, release, doodad_walking) = {
         let mut data = bridge.0.borrow_mut();
         let release = std::mem::take(&mut data.pets.release_w);
@@ -133,7 +127,8 @@ pub(super) fn walk_to_mount(
     }
 }
 
-/// Ends a mount walk when a doodad action or walk takes over; a cancelled walk sends nothing and leaves no cooldown.
+/// Ends a mount walk when a doodad action or walk takes over; a cancelled walk sends nothing, but the ride cooldown
+/// stamped at its accepted request stays (`FUN_393642f0` line 701802, A4b).
 pub(super) fn cancel_mount_walk(data: &mut HudData) {
     if owned::cancel_mount_walk(data) {
         data.pets.release_w = true;
