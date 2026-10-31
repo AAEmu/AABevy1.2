@@ -47,6 +47,8 @@ const SPAWN_SLOW_FRAME: f32 = 0.025;
 const SPAWN_MAX_WAIT: f32 = 0.2;
 /// Unit and doodad preparations on the workers at once; the nearest are started first.
 const MAX_JOBS: usize = 16;
+/// The server's own cap for a transform parent chain (`aaemu-game` `world/mod.rs:50`).
+const MAX_PARENT_DEPTH: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;
@@ -86,6 +88,9 @@ pub struct RemoteUnit {
     /// A remote unit walking on a ship deck: its ship-local track, composed with the smoothed
     /// hull each frame instead of its own world track.
     pub(super) deck: Option<DeckWalk>,
+    /// The unit this slave is attached to (`SCUnitState` first attach point), while its packet
+    /// position and rotation are parent-local. `None` for a unit standing in the world.
+    parent: Option<u32>,
     scale: f32,
     /// A player character (8 way run clips, jump and fall) rather than an NPC or a creature (always faces where it goes).
     character: bool,
@@ -121,9 +126,12 @@ pub struct DeckHullPoses(pub HashMap<u32, (Vec3, Quat, f32)>);
 impl RemoteUnit {
     pub(crate) fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        let parent = unit_parent(unit);
+        let game_rotation = if parent.is_some() { unit_game_rotation(unit) } else { Quat::from_rotation_z(unit.yaw()) };
+        let rotation = if parent.is_some() { cry_rot_to_bevy(game_rotation) } else { Quat::from_rotation_y(unit.yaw()) };
         Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
-            rotation: Quat::from_rotation_y(unit.yaw()), game_rotation: Quat::from_rotation_z(unit.yaw()), deck: None,
-            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
+            rotation, game_rotation, deck: None, parent,
+            scale: unit_scale(unit), character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
     }
 
     /// The same committed movement clock is used with and without a render tree.
@@ -171,9 +179,10 @@ impl RemoteUnit {
         true
     }
 
-    /// The transform of the drawn pose: vehicles keep their full rotation.
+    /// The transform of the drawn pose: an attached slave is parent-local (its root is a `ChildOf`
+    /// the parent), and vehicles keep their full rotation.
     fn drawn(&self) -> Transform {
-        if self.vehicle.is_some() {
+        if self.parent.is_some() || self.vehicle.is_some() {
             Transform { translation: cry_to_bevy(self.pos), rotation: self.rotation, scale: Vec3::splat(self.scale) }
         } else {
             placement(self.pos, self.facing, self.scale)
@@ -186,7 +195,7 @@ impl RemoteUnit {
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
         Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
-            rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None,
+            rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None, parent: None,
             scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
     }
 
@@ -294,6 +303,9 @@ struct View {
     /// Owns playback only while no RemoteUnit component owns it. Render policy
     /// (distance, missing model or failed preparation) does not retire an actor.
     pending: Option<RemoteUnit>,
+    /// The source unit's attachment, so a later state that attaches or detaches it rebuilds the
+    /// playback at the new frame.
+    parent: Option<u32>,
     /// Receipt which created this incarnation, not a same-identity refresh.
     announced_after: Option<usize>,
 }
@@ -329,6 +341,20 @@ impl View {
         }
         if let Some(entity) = self.entity.take() { commands.entity(entity).despawn(); }
     }
+
+    /// A later state attached or detached the unit: the packet position changed frame (parent-local
+    /// or world), so the old root cannot be moved as if it were the same placement. Rebuild the
+    /// playback from the snapshot and let the normal spawn path wait for the new parent.
+    fn reparent(&mut self, commands: &mut Commands, unit: &Unit, parent: Option<u32>) {
+        if self.parent == parent {
+            return;
+        }
+        self.parent = parent;
+        if let Some(entity) = self.entity.take() {
+            commands.entity(entity).try_despawn();
+        }
+        self.pending = Some(RemoteUnit::announced(unit));
+    }
 }
 
 /// The existing visual-source identity, shared by receipt-owned presentation
@@ -345,7 +371,13 @@ impl Views {
             commands.entity(entity).try_despawn();
         }
         self.source_generation += 1;
-        self.units.insert(unit.obj_id, View { source_generation: self.source_generation, unit_identity: Some(identity), pending: Some(RemoteUnit::announced(unit)), ..default() });
+        self.units.insert(unit.obj_id, View {
+            source_generation: self.source_generation,
+            unit_identity: Some(identity),
+            pending: Some(RemoteUnit::announced(unit)),
+            parent: unit_parent(unit),
+            ..default()
+        });
     }
 
     fn finish_unit(&mut self, id: u32, generation: u64) -> Option<&mut View> {
@@ -386,11 +418,14 @@ impl Views {
     }
 
     /// Current logical point when the model is absent. The caller still checks
-    /// received membership/identity, and a live render root takes precedence.
-    pub(crate) fn unit_point(&self, unit: &Unit) -> Option<Vec3> {
+    /// received membership/identity, and a live render root takes precedence. An attached slave's
+    /// packet position is parent-local, so its point is resolved through the parent.
+    pub(crate) fn unit_point(&self, unit: &Unit, units: &Units) -> Option<Vec3> {
         let view = self.units.get(&unit.obj_id)?;
         if view.unit_identity.as_ref()? != &source_identity(unit) { return None; }
-        view.pending.as_ref().map(|actor| cry_to_bevy(actor.pos))
+        let pending = view.pending.as_ref()?;
+        if unit_parent(unit).is_some() { return unit_world(unit, units); }
+        Some(cry_to_bevy(pending.pos))
     }
 
     /// The drawn pose of an actor without a render tree (examples and tests): Bevy-space position
@@ -418,6 +453,7 @@ impl Views {
             entity: Some(entity),
             source_generation: self.source_generation,
             unit_identity: Some(source_identity(unit)),
+            parent: unit_parent(unit),
             ..default()
         });
     }
@@ -449,7 +485,7 @@ impl Views {
     pub(crate) fn fixture_actor(&mut self, unit: &Unit, entity: Option<Entity>) {
         self.source_generation += 1;
         self.units.insert(unit.obj_id, View { entity, source_generation: self.source_generation,
-            unit_identity: Some(source_identity(unit)),
+            unit_identity: Some(source_identity(unit)), parent: unit_parent(unit),
             pending: entity.is_none().then(|| RemoteUnit::announced(unit)), ..default() });
     }
 
@@ -486,9 +522,14 @@ impl Views {
             if view.is_some_and(|v| v.no_model) {
                 failed += 1;
                 reasons.push((*id, view.map_or("", |v| v.why.as_str())));
-            } else if flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS {
-                far += 1;
+            } else if let Some(world) = unit_world(unit, units) {
+                if flat_distance(world, me) > UNIT_RADIUS {
+                    far += 1;
+                } else {
+                    pending += 1;
+                }
             } else {
+                // an attached child whose parent is not announced yet: waiting, not far away
                 pending += 1;
             }
         }
@@ -519,6 +560,81 @@ fn same_doodad_source(a: &aa_net::model::Doodad, b: &aa_net::model::Doodad) -> b
 
 fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
+}
+
+fn unit_scale(unit: &Unit) -> f32 {
+    if unit.scale > 0.0 { unit.scale } else { 1.0 }
+}
+
+/// The unit a slave is attached to, from its unit-state snapshot. `SCUnitState` carries the first
+/// attach point and, for a slave, the owner object id; the packet position is then parent-local
+/// (`aaemu-game` `slaves.rs:4256-4261`, `unit_state.rs:473-495`). Only a slave's first attachment is
+/// a unit: a transfer's first object is a bonding object and a character's is a doodad bond.
+/// The 1.2 `Unit::AttachTo` (`FUN_390b3f10`) ignores attach point 0 and the system point (-1).
+pub(crate) fn unit_parent(unit: &Unit) -> Option<u32> {
+    if !matches!(unit.kind, aa_net::model::UnitKind::Slave { .. }) {
+        return None;
+    }
+    let attachments = unit.state_attachments?;
+    if attachments.first_point == 0 || attachments.first_point == u8::MAX {
+        return None;
+    }
+    attachments.first_obj_id.filter(|id| *id != 0)
+}
+
+/// A unit's full local rotation (roll, pitch, yaw about CryEngine X, Y, Z), the order
+/// `aaemu-game`'s `PositionAndRotation::to_quaternion` composes. Only an attached slave's rotation
+/// is local; an ordinary unit is drawn upright about its yaw.
+fn unit_game_rotation(unit: &Unit) -> Quat {
+    let [roll, pitch, yaw] = unit.rotation;
+    Quat::from_euler(EulerRot::ZYX, yaw, pitch, roll)
+}
+
+/// The transform of a unit in its parent's frame: the packet position and rotation are the server's
+/// attach-point local values (`aaemu-game` `apply_attach_point_location`, `slaves.rs:3383-3415`).
+pub(crate) fn unit_local_transform(unit: &Unit, scale: f32) -> Transform {
+    Transform {
+        translation: cry_to_bevy(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)),
+        rotation: cry_rot_to_bevy(unit_game_rotation(unit)),
+        scale: Vec3::splat(scale),
+    }
+}
+
+/// The root transform of a unit: the local transform for an attached slave, otherwise the world
+/// placement (upright about its yaw, as before).
+fn unit_transform(unit: &Unit) -> Transform {
+    let scale = unit_scale(unit);
+    if unit_parent(unit).is_some() {
+        unit_local_transform(unit, scale)
+    } else {
+        placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), scale)
+    }
+}
+
+/// Where a unit stands in the world (game coordinates): the packet position for an ordinary unit, or
+/// the parent's placement applied to the parent-local packet position. `None` while an attached
+/// unit's parent is not announced.
+pub(crate) fn unit_world(unit: &Unit, units: &Units) -> Option<Vec3> {
+    Some(bevy_to_cry(unit_world_transform(unit, units, 0)?.translation))
+}
+
+fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
+    let Some(parent_id) = unit_parent(unit) else {
+        return Some(placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), unit_scale(unit)));
+    };
+    if depth > MAX_PARENT_DEPTH {
+        return None;
+    }
+    let parent = units.by_id.get(&parent_id)?;
+    let root = unit_world_transform(parent, units, depth + 1)?;
+    Some(root.mul_transform(unit_local_transform(unit, unit_scale(unit))))
+}
+
+/// Parents a spawned unit root to the entity drawing its parent, keeping the local transform that
+/// [`unit_local_transform`] put on it. `ChildOf` makes the child follow the parent's moves and
+/// despawn with it.
+pub(crate) fn attach_unit_root(commands: &mut Commands, entity: Entity, parent: Entity) {
+    commands.entity(entity).insert(ChildOf(parent));
 }
 
 /// The root transform of a doodad. The server writes the packet's position in the parent unit's frame when it has a
@@ -649,6 +765,22 @@ pub fn sync_views(
             view.entity = None;
         }
     }
+    // The same for a unit root under an attached parent: when the parent leaves view Bevy despawns the child, so forget
+    // the dead root here and build the child again when its parent comes back. Its playback restarts from the snapshot
+    // (the child's packet position is parent-local).
+    let orphans: Vec<u32> = views
+        .units
+        .iter()
+        .filter_map(|(id, view)| Some((*id, view.entity?)))
+        .filter(|(_, entity)| remote.get(*entity).is_err())
+        .map(|(id, _)| id)
+        .collect();
+    for id in orphans {
+        if let Some(view) = views.units.get_mut(&id) {
+            view.entity = None;
+            view.pending = units.by_id.get(&id).map(RemoteUnit::announced);
+        }
+    }
     // units and doodads that are gone; `try_despawn` because a parented doodad may already be gone with its unit
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
     for id in gone {
@@ -674,18 +806,29 @@ pub fn sync_views(
         if matches!(unit.kind, aa_net::model::UnitKind::Housing { .. }) {
             continue;
         }
-        let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-        let d = flat_distance(pos, me);
+        let parent = unit_parent(unit);
+        let world = unit_world(unit, &units);
+        let d = world.map_or(f32::MAX, |p| flat_distance(p, me));
         if !views.units.contains_key(id) { views.announce_unit(&mut commands, unit); }
+        let parent_entity = parent.and_then(|p| views.unit_entity(p));
         let view = views.units.get_mut(id).expect("announced unit source");
+        // a later state attached or detached it: the packet position is in a different frame now
+        view.reparent(&mut commands, unit, parent);
         match view.entity {
             Some(e) => {
-                if d > UNIT_RADIUS * 1.25 {
+                // an attached child waits for (and goes away with) its parent root
+                if d > UNIT_RADIUS * 1.25 || (parent.is_some() && parent_entity.is_none()) {
                     view.evict(&mut commands, remote.get(e).ok());
                 }
             }
-            None if !view.no_model && !view.preparing && d <= UNIT_RADIUS => {
-                let ahead = Vec2::new(pos.x - me.x, pos.y - me.y).normalize_or_zero().dot(facing_game(facing));
+            None if !view.no_model
+                && !view.preparing
+                && world.is_some()
+                && (parent.is_none() || parent_entity.is_some())
+                && d <= UNIT_RADIUS =>
+            {
+                let world = world.expect("world checked");
+                let ahead = Vec2::new(world.x - me.x, world.y - me.y).normalize_or_zero().dot(facing_game(facing));
                 wanted.push((d + if ahead < -0.2 { 50.0 } else { 0.0 }, *id));
             }
             None => {}
@@ -784,7 +927,7 @@ pub fn sync_views(
     // spawn what is ready, nearest first, while the frame can take it
     let mut ready = std::mem::take(&mut views.ready);
     let distance = |b: &Built| match b {
-        Built::Unit(id, _, _) => units.by_id.get(id).map_or(f32::MAX, |u| flat_distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z), me)),
+        Built::Unit(id, _, _) => units.by_id.get(id).and_then(|u| unit_world(u, &units)).map_or(f32::MAX, |p| flat_distance(p, me)),
         Built::Doodad(id, _, _) => doodads
             .by_id
             .get(id)
@@ -800,9 +943,18 @@ pub fn sync_views(
         }
         match built {
             Built::Unit(id, generation, build) => {
-                let Some(view) = views.finish_unit(id, generation) else { continue };
                 let Some(unit) = units.by_id.get(&id) else { continue };
-                if view.entity.is_some() || flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS * 1.25 {
+                let parent = unit_parent(unit);
+                let parent_entity = parent.and_then(|p| views.unit_entity(p));
+                let Some(view) = views.finish_unit(id, generation) else { continue };
+                let Some(world) = unit_world(unit, &units) else { continue };
+                if view.entity.is_some() || flat_distance(world, me) > UNIT_RADIUS * 1.25 {
+                    continue;
+                }
+                // the parent unit is not drawn yet: keep the prepared model and wait (its packet position is local)
+                if parent.is_some() && parent_entity.is_none() {
+                    view.preparing = true;
+                    later.push(Built::Unit(id, generation, build));
                     continue;
                 }
                 *last_spawn = 0.0;
@@ -821,6 +973,9 @@ pub fn sync_views(
                 match entity {
                     Ok(e) => {
                         view.admit(&mut commands, e, unit);
+                        if let Some(parent_entity) = parent_entity {
+                            attach_unit_root(&mut commands, e, parent_entity);
+                        }
                         views.spawned_units += 1;
                     }
                     Err(why) => {
@@ -889,10 +1044,10 @@ pub fn sync_views(
 
 /// Builds the entity of one unit from what the worker prepared. `None` when there is nothing we can draw.
 pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Result<Entity, String> {
-    let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
+    let scale = unit_scale(unit);
     let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-    let transform = placement(pos, unit.yaw(), scale);
-    debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
+    let transform = unit_transform(unit);
+    debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2} parent {:?}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale, unit_parent(unit));
     let entity = match build {
         UnitBuild::Character { assets, models, carried, applied, wield, clips: set, pose, tools } => {
             for m in models {
@@ -941,21 +1096,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
     };
     commands.entity(entity).insert((
         Name::new(format!("unit {} {}", unit.obj_id, unit.name)),
-        RemoteUnit {
-            obj_id: unit.obj_id,
-            track: Track::new(pos, unit.yaw()),
-            vehicle: None,
-            pos,
-            facing: unit.yaw(),
-            rotation: Quat::from_rotation_y(unit.yaw()),
-            game_rotation: Quat::from_rotation_z(unit.yaw()),
-            deck: None,
-            scale,
-            character: unit.is_character(),
-            combat: false,
-            casting: true,
-            speed: 0.0,
-        },
+        RemoteUnit::announced(unit),
     ));
     // different idle phases, so a crowd does not breathe in step
     let obj_id = unit.obj_id;
@@ -1075,6 +1216,11 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 None => continue,
             },
         };
+        // An attached slave's state position is parent-local: its placement is the `ChildOf` hierarchy, and a later
+        // state that detaches it replaces the actor in `sync_views`. Its own movement reports must not re-place it.
+        if unit.parent.is_some() {
+            continue;
+        }
         match event {
             Event::UnitMoved { movement, .. } if movement.move_type != 4 => {
                 // A relative-only attachment report does not establish a world point.
@@ -1395,6 +1541,7 @@ pub fn move_units(
     for view in views.units.values_mut().filter(|view| view.entity.is_none()) {
         if let Some(actor) = view.pending.as_mut()
             && actor.deck.is_none()
+            && actor.parent.is_none()
         {
             actor.advance(now, dt, &terrain);
         }
@@ -1402,8 +1549,9 @@ pub fn move_units(
     let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
-        // walker whose deck a `reset_track` cleared moves here again
-        if unit.deck.is_some() {
+        // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
+        // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position.
+        if unit.deck.is_some() || unit.parent.is_some() {
             continue;
         }
         let before = unit.pos;
@@ -1543,7 +1691,7 @@ mod lifecycle_tests {
         let mut track = Track::new(pos, 1.0);
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
         let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, vehicle: None, pos, facing: 1.0,
-            rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None,
+            rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None, parent: None,
             scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
@@ -1797,6 +1945,9 @@ pub fn cull_units(
         }
     }
 }
+
+#[cfg(test)]
+mod child_unit_tests;
 
 #[cfg(test)]
 mod point_tests;

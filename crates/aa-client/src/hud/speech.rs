@@ -193,7 +193,7 @@ impl ActorPoints<'_, '_> {
         if let Some(entity) = root {
             return self.roots.get(entity).ok().map(|root| root.translation);
         }
-        views.unit_point(unit)
+        views.unit_point(unit, units)
     }
 
     fn in_range(&self, obj_id: u32, units: &Units, player: &Player) -> bool {
