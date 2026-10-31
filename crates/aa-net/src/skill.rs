@@ -779,13 +779,7 @@ mod tests {
     /// plain unit target (kind 0), no bc-house target type, 13 bytes.
     #[test]
     fn captured_house_build_cast_is_a_plain_unit_target() {
-        let body = crate::game::ClientMsg::StartSkill {
-            skill_id: 14575,
-            self_obj_id: 8615,
-            caster: StartCaster::Unit,
-            target: SkillTarget::unit(39109),
-        }
-        .encode_body();
+        let body = crate::session::use_skill_body(14575, 8615, 39109);
         assert_eq!(body, [0xef, 0x38, 0, 0, 0, 0xa7, 0x21, 0, 0, 0xc5, 0x98, 0, 0]);
         let mut r = Reader::new(&body);
         assert_eq!(r.u32().unwrap(), 14575);

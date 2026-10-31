@@ -997,6 +997,23 @@ async fn recv_stream(c: &mut Option<StreamConn>) -> net::Result<stream::ServerMs
     }
 }
 
+/// The `CSStartSkill` message of [`Command::UseSkill`]: a unit caster, a unit target and no
+/// skill object (`target_obj_id` 0 means the caster).
+pub fn use_skill_message(skill_id: u32, self_obj_id: u32, target_obj_id: u32) -> game::ClientMsg {
+    let target_obj_id = if target_obj_id == 0 { self_obj_id } else { target_obj_id };
+    game::ClientMsg::StartSkill {
+        skill_id,
+        self_obj_id,
+        caster: StartCaster::Unit,
+        target: SkillTarget::unit(target_obj_id),
+    }
+}
+
+/// The wire body [`Command::UseSkill`] sends, through the same message the session encodes.
+pub fn use_skill_body(skill_id: u32, self_obj_id: u32, target_obj_id: u32) -> Vec<u8> {
+    use_skill_message(skill_id, self_obj_id, target_obj_id).encode_body()
+}
+
 impl Session {
     fn new(evt: UnboundedSender<Event>, options: ClientOptions) -> Self {
         let mut native_records=crate::NativeItemRecords::default();
@@ -1746,8 +1763,7 @@ impl Session {
                 }
             }
             Command::UseSkill { skill_id, target_obj_id } => {
-                let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
-                self.start_skill(skill_id, StartCaster::Unit, target).await;
+                self.use_skill(skill_id, target_obj_id).await;
             }
             Command::UseDoodadSkill { skill_id, doodad_obj_id } => {
                 let target = if skill_id == 0 { Err("interaction skill ID must be nonzero") } else { SkillTarget::doodad(doodad_obj_id) };
@@ -2336,6 +2352,14 @@ impl Session {
         if let Err(message)=command.validate(){self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:message.into()}));}
         else if self.send_game(game::ClientMsg::Auction(command.clone())).await{self.emit(Event::Auction(crate::auction::AuctionEvent::Requested(command)));}
         else{self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:"auction request was not sent".into()}));}
+    }
+
+    async fn use_skill(&mut self, skill_id: u32, target_obj_id: u32) {
+        if self.phase != Phase::InWorld {
+            tracing::warn!("skill {skill_id} ignored: not in the world");
+            return;
+        }
+        self.send_game(use_skill_message(skill_id, self.self_obj, target_obj_id)).await;
     }
 
     async fn start_skill(&mut self, skill_id: u32, caster: StartCaster, target: SkillTarget) {

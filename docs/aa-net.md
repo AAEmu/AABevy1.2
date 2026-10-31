@@ -3696,7 +3696,8 @@ The 2026-10-31 original-client capture pins two golden bodies: `CSCreateHouse` d
 money i32, ht i32, bool auto`), and the stage-0 `SCMyHouse`/`SCHouseState` body is the
 100-byte house body (model 1083, 0 of 20 actions). A build action sends a 13-byte
 `CSStartSkill`: skill 14575, caster kind 0 + unit, target kind 0 + the house BC object id,
-no skill object; the server answers `SCSkillStarted` with 20990 ms.
+no skill object; the server answers `SCSkillStarted` with 20990 ms. `session::use_skill_body`
+is the same message `Command::UseSkill` sends (unit caster and target, 0 = the caster).
 
 `Houses` applies deltas only to a known timeline. A full body replaces the TL record,
 resets `demolished`, and drops any other TL with the same runtime object id. Character

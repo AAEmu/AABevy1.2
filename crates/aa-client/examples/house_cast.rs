@@ -21,7 +21,8 @@ mod lua_value;
 mod script;
 #[path = "../src/settings.rs"]
 mod settings;
-#[path = "../src/sound/mod.rs"] mod sound;
+#[path = "../src/sound/mod.rs"]
+mod sound;
 #[path = "../src/task.rs"]
 mod task;
 use bevy::prelude::*;
@@ -41,7 +42,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use aa_net::housing::{House, HouseSnapshot};
-use aa_net::model::{slot, Item, Unit, UnitKind};
+use aa_net::model::{Item, Unit, UnitKind, slot};
 use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::wire::Pos;
 use aa_net::{Command, Houses, NetCommand, NetEvent};
@@ -85,12 +86,19 @@ fn main() -> AppExit {
     let mut game = GameData::default();
     game.items.insert(
         STONE_PACK,
-        ItemInfo { named: Named { name: "Stone Pack".into(), ..default() }, ..default() },
+        ItemInfo {
+            named: Named {
+                name: "Stone Pack".into(),
+                ..default()
+            },
+            ..default()
+        },
     );
     assert!(bridge.borrow().game.0.set(game).is_ok());
     bridge.borrow_mut().character_id = 42;
     api::install(&mut rt, &bridge).expect("hud api");
-    rt.load_ui_texts(std::path::Path::new(&db)).expect("ui texts");
+    rt.load_ui_texts(std::path::Path::new(&db))
+        .expect("ui texts");
     rt.lua
         .load(
             r#"SYSMSG_LAST = nil
@@ -124,7 +132,11 @@ fn unit() -> Unit {
     Unit {
         obj_id: HOUSE_OBJ,
         name: "Thatched Farmhouse".into(),
-        kind: UnitKind::Housing { tl_id: 13, template_id: 171, build_step: 0 },
+        kind: UnitKind::Housing {
+            tl_id: 13,
+            template_id: 171,
+            build_step: 0,
+        },
         owner_name: String::new(),
         pos: Pos::new(0.0, 0.0, 0.0),
         rotation: [0.0; 3],
@@ -197,14 +209,24 @@ fn synthetic_houses() -> Houses {
     let mut houses = Houses::default();
     houses.by_tl_id.insert(
         13,
-        House { snapshot: snapshot(), demolished: false, build_pay: None, tax: None, sale: None },
+        House {
+            snapshot: snapshot(),
+            demolished: false,
+            build_pay: None,
+            tax: None,
+            sale: None,
+        },
     );
     houses
 }
 
 fn synthetic_inventory() -> Inventory {
     let mut inventory = Inventory::default();
-    inventory.bag.push(Some(Item { template_id: STONE_PACK, count: 1, ..default() }));
+    inventory.bag.push(Some(Item {
+        template_id: STONE_PACK,
+        count: 1,
+        ..default()
+    }));
     inventory
 }
 
@@ -229,7 +251,9 @@ fn script(mut p: Script) {
         return;
     }
     let Some(rt) = p.rt.as_deref() else { return };
-    let Some(bridge) = p.bridge.as_deref() else { return };
+    let Some(bridge) = p.bridge.as_deref() else {
+        return;
+    };
     match p.test.phase {
         0 => {
             bridge.0.borrow_mut().pos = Vec3::ZERO;
@@ -243,7 +267,11 @@ fn script(mut p: Script) {
             p.test.phase = 3;
         }
         4 => {
-            p.inventory.equipment.slots[slot::BACKPACK] = Some(Item { template_id: STONE_PACK, count: 1, ..default() });
+            p.inventory.equipment.slots[slot::BACKPACK] = Some(Item {
+                template_id: STONE_PACK,
+                count: 1,
+                ..default()
+            });
             rt.lua.load("SYSMSG_LAST = nil").exec().unwrap();
             click(rt);
             p.test.phase = 5;
@@ -253,7 +281,10 @@ fn script(mut p: Script) {
 }
 
 fn click(rt: &aa_ui::UiRuntime) {
-    rt.lua.load("HUD.house_interact(39109)").exec().expect("house_interact");
+    rt.lua
+        .load("HUD.house_interact(39109)")
+        .exec()
+        .expect("house_interact");
 }
 
 #[derive(SystemParam)]
@@ -268,20 +299,26 @@ fn check(mut p: Check) {
         return;
     }
     for NetCommand(command) in p.commands.read() {
-        let Command::UseSkill { skill_id, target_obj_id } = command else { continue };
+        let Command::UseSkill {
+            skill_id,
+            target_obj_id,
+        } = command
+        else {
+            continue;
+        };
         p.test.casts += 1;
         if (*skill_id, *target_obj_id) != (SKILL, HOUSE_OBJ) {
-            fail(&mut p.test, format!("UseSkill {skill_id} at {target_obj_id}"));
+            fail(
+                &mut p.test,
+                format!("UseSkill {skill_id} at {target_obj_id}"),
+            );
         }
-        let body = aa_net::game::ClientMsg::StartSkill {
-            skill_id: *skill_id,
-            self_obj_id: 8615,
-            caster: aa_net::skill::StartCaster::Unit,
-            target: aa_net::skill::SkillTarget::unit(*target_obj_id),
-        }
-        .encode_body();
+        let body = aa_net::session::use_skill_body(*skill_id, 8615, *target_obj_id);
         if body != CAPTURE_CAST {
-            fail(&mut p.test, format!("CSStartSkill differs from the capture: {body:?}"));
+            fail(
+                &mut p.test,
+                format!("CSStartSkill differs from the capture: {body:?}"),
+            );
         }
     }
     let Some(rt) = p.rt.as_deref() else { return };
@@ -290,34 +327,51 @@ fn check(mut p: Check) {
         1 => {
             let casts = p.test.casts;
             if casts != 1 {
-                fail(&mut p.test, format!("one click sent {casts} casts, expected 1"));
+                fail(
+                    &mut p.test,
+                    format!("one click sent {casts} casts, expected 1"),
+                );
             }
             p.test.phase = 2;
         }
         3 => {
             let casts = p.test.casts;
             if casts != 1 {
-                fail(&mut p.test, format!("the no-material click sent a cast ({casts} total)"));
+                fail(
+                    &mut p.test,
+                    format!("the no-material click sent a cast ({casts} total)"),
+                );
             }
             if sysmsg.as_deref() != Some(NOTICE) {
-                fail(&mut p.test, format!("no-material text {sysmsg:?}, expected {NOTICE:?}"));
+                fail(
+                    &mut p.test,
+                    format!("no-material text {sysmsg:?}, expected {NOTICE:?}"),
+                );
             }
             p.test.phase = 4;
         }
         5 => {
             let casts = p.test.casts;
             if casts != 2 {
-                fail(&mut p.test, format!("the equipped bundle click sent {casts} casts, expected 2"));
+                fail(
+                    &mut p.test,
+                    format!("the equipped bundle click sent {casts} casts, expected 2"),
+                );
             }
             if sysmsg.as_deref() != Some(NOTICE) {
-                fail(&mut p.test, format!("equipped-bundle text {sysmsg:?}, expected {NOTICE:?}"));
+                fail(
+                    &mut p.test,
+                    format!("equipped-bundle text {sysmsg:?}, expected {NOTICE:?}"),
+                );
             }
             p.test.phase = 6;
         }
         6 => {
             p.test.finished = true;
             if p.test.failed.is_empty() {
-                println!("house_cast: passed (one CSStartSkill per click, capture bytes, {NOTICE:?})");
+                println!(
+                    "house_cast: passed (one CSStartSkill per click, capture bytes, {NOTICE:?})"
+                );
                 std::process::exit(0);
             }
             for message in &p.test.failed {
