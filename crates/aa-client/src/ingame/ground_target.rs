@@ -49,7 +49,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::PrimaryWindow;
 
-mod plant;
+pub(crate) mod plant;
 
 use super::player::{LocalPlayer, Mover};
 use crate::Screen;
@@ -185,15 +185,43 @@ struct Aim {
     spot: Option<(Vec3, bool)>,
     /// The item that places a doodad is aimed, not a skill ([`plant`]).
     plant: Option<plant::Plant>,
+    /// The spot is driven by [`Aiming::set_plant_preview`] (examples and tests), not the cursor ray.
+    fixed_spot: bool,
 }
 
 #[derive(Resource, Default)]
 pub struct Aiming(Option<Aim>);
-impl Aiming { pub(crate) fn cancel(&mut self) -> bool { self.0.take().is_some() } }
+impl Aiming {
+    pub(crate) fn cancel(&mut self) -> bool { self.0.take().is_some() }
+
+    /// The aimed plant, for the example and tests that drive placement without a cursor.
+    #[allow(dead_code)]
+    pub(crate) fn plant(&self) -> Option<&plant::Plant> {
+        self.0.as_ref().and_then(|a| a.plant.as_ref())
+    }
+
+    /// Aims a plant at `spot` directly (the cursor ray is replaced), keeping the press and skill of `begin`.
+    #[allow(dead_code)]
+    pub(crate) fn set_plant_preview(
+        &mut self,
+        press: SkillPressed,
+        skill: GroundSkill,
+        plant: plant::Plant,
+        spot: Option<(Vec3, bool)>,
+    ) {
+        self.0 = Some(Aim {
+            press,
+            skill,
+            spot,
+            plant: Some(plant),
+            fixed_spot: true,
+        });
+    }
+}
 
 /// `--ground-press` and friends.
 #[derive(Resource, Default)]
-struct Script {
+pub(crate) struct Script {
     press: Vec<(f32, u32)>,
     aim: Vec<(f32, Vec2)>,
     /// `--aim-world X Y T`: from T on the cursor is held on this ground point (game coordinates).
@@ -213,6 +241,12 @@ struct Script {
 }
 
 impl Script {
+    /// Queue the next frame's left click (the example's real `aim_input` send path).
+    #[allow(dead_code)]
+    pub(crate) fn click(&mut self) {
+        self.clicked = true;
+    }
+
     fn from_args() -> Script {
         let args: Vec<String> = aa_dev::args();
         let mut s = Script::default();
@@ -258,7 +292,7 @@ impl Script {
 }
 
 #[derive(Component)]
-struct Reticle;
+pub(crate) struct Reticle;
 
 #[derive(Resource, Default)]
 struct ReticleAssets {
@@ -273,13 +307,16 @@ pub fn plugin(app: &mut App) {
         .add_message::<crate::hud::MusicItemUsed>()
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
+        .add_message::<crate::ingame::teleport::WorldLoadFinished>()
         .init_resource::<Aiming>()
+        .init_resource::<plant::PlantLock>()
         .init_resource::<ReticleAssets>()
         .init_resource::<InFlight>()
         .insert_resource(Script::from_args())
         .insert_resource(GroundSkills(load_skills().unwrap_or_default()))
         .add_systems(PreUpdate, aim_input.in_set(AimInput).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
-        .add_systems(Update, (dev_script, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
+        .add_systems(OnEnter(Screen::InGame), plant::lock_on_world_enter.run_if(resource_exists::<crate::ingame::teleport::Teleport>))
+        .add_systems(Update, (dev_script, plant::lock_on_arrival, route.in_set(ItemUseRouting).after(crate::hud::HudItemUse)).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, (track_cursor, plant::validate, reticle, plant::ghost, log_server).chain().after(crate::hud::PointerFinished).run_if(in_state(Screen::InGame)))
         .add_systems(OnExit(Screen::InGame), leave);
 }
@@ -448,6 +485,8 @@ fn route(
         slaves,
         summon_world,
         (bridge, native_skills, buffs, inventory, mut failed, mut refused),
+        lock,
+        time,
     ): (
         Res<ButtonInput<KeyCode>>,
         MessageWriter<crate::hud::PortalBookUsed>,
@@ -465,6 +504,8 @@ fn route(
             MessageWriter<crate::hud::UseFailed>,
             MessageWriter<crate::hud::ShowError>,
         ),
+        Option<Res<plant::PlantLock>>,
+        Option<Res<Time>>,
     ),
 ) {
     for press in pressed.read() {
@@ -557,9 +598,21 @@ fn route(
         }
         // seeds, saplings and the other items that place a doodad are aimed at the ground (`plant.rs`); the same item again lets go
         if let Some((skill, plant)) = press.item.and(db.as_deref()).and_then(|db| plant::begin(press, db)) {
-            crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
             let again = aiming.0.as_ref().is_some_and(|a| a.press.item == press.item);
-            aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant) });
+            // the 30 s planting reuse lock (F13): "Can't place this for N second(s)." It refuses a new aim only; the
+            // same item again still lets go of the current one
+            let now = f64::from(time.as_deref().map_or(0.0, Time::elapsed_secs));
+            if let Some(lock) = lock.as_deref().filter(|lock| !again && lock.refused(now)) {
+                let remaining = lock.remaining(now) as u64;
+                let text = plant::lock_text(remaining);
+                info!("plant: reuse lock for {remaining} s: {text}");
+                if let Some(rt) = rt.as_deref() {
+                    rt.fire_event("SYSMSG", text);
+                }
+                continue;
+            }
+            crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
+            aiming.0 = (!again).then_some(Aim { press: *press, skill, spot: None, plant: Some(plant), fixed_spot: false });
             continue;
         }
         let Some(skill) = skills.0.get(&press.skill).copied() else {
@@ -601,7 +654,7 @@ fn route(
         }
         info!("ground: aiming skill {} (radius {:.1} m, range {:.0}..{:.0} m)", press.skill, skill.radius, skill.min_range, skill.max_range);
         crate::hud::cancel_look_target(rt.as_deref(),bridge.as_deref());
-        aiming.0 = Some(Aim { press: *press, skill, spot: None, plant: None });
+        aiming.0 = Some(Aim { press: *press, skill, spot: None, plant: None, fixed_spot: false });
     }
 }
 
@@ -621,6 +674,9 @@ fn track_cursor(
         *last = None;
         return;
     };
+    if aim.fixed_spot {
+        return;
+    }
     let (Ok(mover), Some((camera, transform))) = (player.single(), cameras.iter().find(|(c, _)| c.is_active)) else { return };
     let cursor = if over_ui.0 && script.cursor.is_none() { None } else { cursor_of(windows.single().ok(), &script) };
     aim.spot = cursor
@@ -697,7 +753,8 @@ fn aim_input(
     }
     let Ok(mut mover) = player.single_mut() else { return };
     if let Some(plant) = aim.plant.as_ref() {
-        // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free
+        // an item that places a doodad: the packet instead of a cast, the aiming goes on while the spot is not free.
+        // F3: two sends 13 s apart both succeeded, so a send does not start the reuse lock.
         match aim.spot {
             Some((spot, true)) if plant::place(plant, spot, &mover, &mut net) => aiming.0 = None,
             Some(_) => info!("plant: that spot cannot be used"),
@@ -1251,6 +1308,7 @@ mod tests {
             },
             spot: None,
             plant: None,
+            fixed_spot: false,
         };
         app.world_mut().resource_mut::<Aiming>().0 = Some(aim());
         send(&mut app, KeyCode::F12, true);

@@ -285,6 +285,9 @@ mod tests {
 
     #[test]
     fn create_doodad_body_matches_the_server_reader() {
+        // The server's own golden (`aaemu-game/systems/npcs/doodad/packets.rs`, `CSCreateDoodadPacket::read`) and the
+        // 1.2 capture F3/F4: the body is template, x, y, z, z_rot, scale, item; z_rot precedes scale and scale was 1.0
+        // on every captured placement. This matches the decompiled ctor `FUN_397ac850` (DEC 761389-761470).
         let request = CreateDoodad {
             id: 2336,
             pos: Pos::new(1000.5, 2000.25, 100.0),
@@ -294,6 +297,7 @@ mod tests {
         };
         let mut w = Writer::new();
         request.write(&mut w);
+        let body = w.finish();
         let mut expected = Writer::new();
         expected
             .raw(&2336u32.to_le_bytes())
@@ -303,7 +307,10 @@ mod tests {
             .raw(&1.5f32.to_le_bytes())
             .raw(&1.0f32.to_le_bytes())
             .raw(&77u64.to_le_bytes());
-        assert_eq!(w.finish(), expected.finish());
+        assert_eq!(body, expected.finish());
+        assert_eq!(body.len(), 4 + 8 + 8 + 4 + 4 + 4 + 8);
+        assert_eq!(&body[24..28], &1.5f32.to_le_bytes(), "z_rot comes first");
+        assert_eq!(&body[28..32], &1.0f32.to_le_bytes(), "then scale");
         assert_eq!(
             crate::game::ClientMsg::CreateDoodad(request).opcode(),
             cs::CSCreateDoodadPacket
