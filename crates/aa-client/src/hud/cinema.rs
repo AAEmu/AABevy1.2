@@ -486,8 +486,17 @@ pub(crate) fn block_cinema_input(
 ) {
     if !player.active() {
         if !player.held_keys.is_empty() {
+            // a key released in this same frame was already processed as unpressed: re-pressing it would stick it
+            // down; Escape is not replayed as a fresh press
+            let released: Vec<KeyCode> = keyboard
+                .iter_current_update_messages()
+                .filter(|event| event.state == bevy::input::ButtonState::Released)
+                .map(|event| event.key_code)
+                .collect();
             for key in player.held_keys.drain(..) {
-                keys.press(key);
+                if key != KeyCode::Escape && !released.contains(&key) {
+                    keys.press(key);
+                }
             }
             actions.reread_physical();
         }
