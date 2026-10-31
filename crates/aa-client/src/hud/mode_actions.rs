@@ -50,10 +50,13 @@ pub(crate) struct Tables {
     /// `slave_mount_skills` per slave template id, in row order: the driver's mode bar (1.2's
     /// `GetSlaveMountSkillList`; the capture's Farm Wagon order matches the row ids).
     slave_skills: HashMap<u32, Vec<SlaveSkill>>,
-    /// A gunner's bar: `mount_attached_skills` at point 1 (what `GetSiegeWeaponSkill` shows),
-    /// with the `mount_skills.skill_id` the same slot casts. The cannon's `slave_mount_skills`
-    /// row is the fire skill (10473); its point-1 attached skill is the presentation (14372).
-    gunner_skills: HashMap<u32, Vec<SlaveSkill>>,
+    /// `(slave template, mount skill)` -> its point-1 `mount_attached_skills.skill_id`.
+    attached_point1: HashMap<(u32, u32), u32>,
+    /// Slave templates whose point-1 seat is a turret (kind 7/8, `vehicle_models.velocity == 0`
+    /// and a non-zero turret range): only their rows show the point-1 attached skill. This is
+    /// the same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a
+    /// bar without the engine's seat resource.
+    turret_slaves: HashSet<u32>,
 }
 
 impl Tables {
@@ -94,16 +97,14 @@ impl Tables {
                 .or_default()
                 .push(SlaveSkill::new(skill, mount_skill));
         }
-        // The gunner bar: the point-1 `mount_attached_skills` skill is displayed, the linked
-        // mount skill is what a cast names (`start_skill` on the server casts the attached skill
-        // after a successful mount skill).
+        // The per-row attached skill: only point 1 is the operator/gunner seat. A row without
+        // one keeps its mount skill (the server's `GetMountAttachedSkills` is per attach point).
         let mut query = db.prepare(
-            "SELECT sm.slave_id, mas.skill_id, sm.mount_skill_id, ms.skill_id
+            "SELECT sm.slave_id, sm.mount_skill_id, mas.skill_id
              FROM slave_mount_skills sm
              JOIN mount_attached_skills mas ON mas.mount_skill_id = sm.mount_skill_id
                  AND mas.attach_point_id = 1
-             JOIN mount_skills ms ON ms.id = sm.mount_skill_id
-             WHERE sm.slave_id IS NOT NULL AND mas.skill_id > 0 AND ms.skill_id > 0
+             WHERE sm.slave_id IS NOT NULL AND mas.skill_id > 0
              ORDER BY sm.id",
         )?;
         for row in query.query_map([], |row| {
@@ -111,24 +112,67 @@ impl Tables {
                 row.get::<_, u32>(0)?,
                 row.get::<_, u32>(1)?,
                 row.get::<_, u32>(2)?,
-                row.get::<_, u32>(3)?,
             ))
         })? {
-            let (slave, skill, mount_skill, fire) = row?;
-            out.gunner_skills
-                .entry(slave)
-                .or_default()
-                .push(SlaveSkill::gunner(skill, mount_skill, fire));
+            let (slave, mount_skill, skill) = row?;
+            out.attached_point1.insert((slave, mount_skill), skill);
+        }
+        // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a numeric
+        // `vehicle_models.velocity` of 0, and a non-zero parsed pitch/yaw range. The text
+        // `f`/`t` values in other columns are not angles and are excluded by `typeof`.
+        let mut query = db.prepare(
+            "SELECT s.id FROM slaves s
+             JOIN models m ON m.id = s.model_id
+             JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+             WHERE s.slave_kind_id IN (7, 8)
+               AND typeof(v.velocity) IN ('integer', 'real') AND v.velocity = 0
+               AND typeof(v.turret_pitch_angle_min) IN ('integer', 'real')
+               AND typeof(v.turret_pitch_angle_max) IN ('integer', 'real')
+               AND typeof(v.turret_yaw_angle_min) IN ('integer', 'real')
+               AND typeof(v.turret_yaw_angle_max) IN ('integer', 'real')
+               AND typeof(v.turret_yaw_angvel) IN ('integer', 'real')
+               AND typeof(v.turret_pitch_angvel) IN ('integer', 'real')
+               AND v.turret_pitch_angle_min <= v.turret_pitch_angle_max
+               AND v.turret_yaw_angle_min <= v.turret_yaw_angle_max
+               AND (v.turret_pitch_angle_min != v.turret_pitch_angle_max
+                    OR v.turret_yaw_angle_min != v.turret_yaw_angle_max)",
+        )?;
+        for row in query.query_map([], |row| row.get::<_, u32>(0))? {
+            out.turret_slaves.insert(row?);
         }
         Ok(out)
     }
 
-    /// The real gunner bar for a slave template (displayed skill, mount row, fire skill).
+    fn turret_slave(&self, template: u32) -> bool {
+        self.turret_slaves.contains(&template)
+    }
+
+    /// The slave's bar, one entry per `slave_mount_skills` row. On a turret seat a row with a
+    /// point-1 attached skill shows that skill and casts the mount skill; every other row shows
+    /// and casts the mount skill. No row is dropped.
+    pub(crate) fn bar(&self, template: u32, turret: bool) -> Option<Vec<SlaveSkill>> {
+        let rows = self.slave_skills.get(&template)?;
+        if rows.is_empty() {
+            return None;
+        }
+        Some(
+            rows.iter()
+                .map(|row| {
+                    if turret
+                        && let Some(skill) = self.attached_point1.get(&(template, row.mount_skill))
+                    {
+                        return SlaveSkill::gunner(*skill, row.mount_skill, row.skill);
+                    }
+                    *row
+                })
+                .collect(),
+        )
+    }
+
+    /// The turret-seat view of [`Tables::bar`], used by the fire-path tests and the example.
+    #[allow(dead_code)]
     pub(crate) fn gunner_bar(&self, template: u32) -> Option<Vec<SlaveSkill>> {
-        self.gunner_skills
-            .get(&template)
-            .cloned()
-            .filter(|skills| !skills.is_empty())
+        self.bar(template, true)
     }
 
     fn has(&self, buff: u32) -> bool {
@@ -223,18 +267,15 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
 /// The slave skill bar of the slave the local player drives, from `slave_mount_skills`; `None` on foot, on a
 /// passenger seat, for a mate, or with the catalog not loaded yet.
 fn driver_skills(data: &HudData) -> Option<Vec<SlaveSkill>> {
-    let (_, template, kind) = data.mounted.driver_slave_kind()?;
+    let (slave, template, kind) = data.mounted.driver_slave_kind()?;
     let tables = &data.game.get()?.mode_actions;
-    let gunner = matches!(kind, 7 | 8)
-        .then(|| tables.gunner_bar(template))
-        .flatten();
-    gunner.or_else(|| {
-        tables
-            .slave_skills
-            .get(&template)
-            .cloned()
-            .filter(|skills| !skills.is_empty())
-    })
+    // The engine's seat flag wins; before it reaches the HUD (the attach event can arrive
+    // first) the same template gate as `turret_seat_model` keeps a cannon's attached skill.
+    let turret = match data.turret_seat {
+        Some(seated) if seated == slave => true,
+        _ => tables.turret_slave(template),
+    };
+    tables.bar(template, matches!(kind, 7 | 8) && turret)
 }
 
 /// The mode bar's skills this frame: the driven slave's in its row order, else the received buff skills.

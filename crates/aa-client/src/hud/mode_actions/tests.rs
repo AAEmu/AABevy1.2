@@ -63,10 +63,9 @@ fn cannon_game() -> crate::hud::data::GameData {
             ..default()
         },
     );
-    game.mode_actions.gunner_skills.insert(
-        10,
-        vec![SlaveSkill::gunner(14372, 16, 10473)],
-    );
+    game.mode_actions.slave_skills.insert(10, vec![SlaveSkill::new(10473, 16)]);
+    game.mode_actions.attached_point1.insert((10, 16), 14372);
+    game.mode_actions.turret_slaves.insert(10);
     game
 }
 
@@ -519,6 +518,7 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot()
         None,
     );
     assert_eq!(actions(&state.borrow()), [14372], "the real gunner bar skill");
+    state.borrow_mut().turret_seat = Some(20);
     state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
         slave: 20,
         aim: aa_net::TurretAim { pitch: 0.3, yaw: -0.2 },
@@ -1410,5 +1410,92 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
             };
             assert_eq!((skill_id, mate_obj_id, mount_skill_id, target_obj_id), (fire, 20, mount, 0));
         }
+    }
+
+}
+
+/// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a turret seat a row with
+/// a point-1 attached skill shows that skill and casts the mount skill; every other row shows
+/// and casts its mount skill. This is the regression that dropped rows (tank 53's 14332, slave
+/// 54's 14344, ladder 5's 21723, harpoons 37/48/90's 13750) and gave the cotton cart 73 the
+/// attached 15548 instead of its mount skill 15622.
+#[test]
+#[ignore = "requires AA_DB"]
+fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills() {
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&path).exists() {
+        return;
+    }
+    let conn = Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .expect("read the game database");
+    let tables = Tables::load(&conn).expect("mode action tables");
+    let Some(db) = crate::ingame::data::Db::open() else { return };
+    let mut query = conn
+        .prepare("SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)")
+        .expect("slave query");
+    let rows = query
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, u32>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, u32>(2)?,
+                r.get::<_, u32>(3)?,
+            ))
+        })
+        .expect("query slaves")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("read slaves");
+    let mut checked = 0;
+    for (id, name, kind, model) in rows {
+        let mounts = tables.slave_skills.get(&id).cloned().unwrap_or_default();
+        let turret = crate::ingame::turret::turret_seat_model(kind, model, &db);
+        let bar = tables.bar(id, turret).unwrap_or_default();
+        assert_eq!(bar.len(), mounts.len(), "slave {id} {name} keeps every row");
+        for (entry, mount) in bar.iter().zip(&mounts) {
+            assert_eq!(entry.mount_skill, mount.mount_skill);
+            match tables.attached_point1.get(&(id, mount.mount_skill)) {
+                Some(attached) if turret => {
+                    assert_eq!(entry.skill, *attached, "slave {id} {name} attached skill");
+                    assert_eq!(entry.fire, Some(mount.skill), "slave {id} {name} fire skill");
+                }
+                _ => {
+                    assert_eq!(entry.skill, mount.skill, "slave {id} {name} mount skill");
+                    assert_eq!(entry.fire, None, "slave {id} {name} has no attached fire");
+                }
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked >= 40, "checked {checked} kind-7/8 rows");
+
+    let cart = tables.bar(73, false).expect("cotton cart bar");
+    assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
+    let tank = tables.bar(53, false).expect("tank 53 bar");
+    assert!(tank.iter().any(|row| row.skill == 14332), "tank 53 keeps 14332");
+    let ladder = tables.bar(5, false).expect("siege ladder bar");
+    assert!(ladder.iter().any(|row| row.skill == 21723), "ladder 5 keeps 21723");
+    let tank54 = tables.bar(54, true).expect("tank 54 bar");
+    assert!(tank54.iter().any(|row| row.skill == 14344), "tank 54 keeps the point-2 row");
+    for id in [37u32, 48] {
+        assert!(
+            tables.bar(id, true).expect("harpoon bar").iter().any(|row| row.skill == 13750),
+            "harpoon {id} keeps 13750"
+        );
+    }
+    assert_eq!(tables.bar(90, true).expect("harpoon bar").len(), 2, "slave 90 keeps both rows");
+    for (id, display, fire, mount) in [
+        (10u32, 14372u32, 10473u32, 16u32),
+        (133, 24501, 24500, 341),
+        (100, 20161, 20160, 184),
+    ] {
+        let bar = tables.bar(id, true).expect("gunner bar");
+        let entry = bar
+            .iter()
+            .find(|row| row.mount_skill == mount)
+            .unwrap_or_else(|| panic!("slave {id} mount {mount}"));
+        assert_eq!((entry.skill, entry.fire), (display, Some(fire)), "slave {id}");
     }
 }
