@@ -125,6 +125,14 @@ Ships (merged after the checkpoint was written):
   passengers and leaving (`examples/passenger_seats`, `hud/slave/tests.rs`, `mount.rs`). Open: the exact row-less
   passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
+- **S11a vehicle picking.** A click picks a vehicle anywhere on its drawn model: the fixed 1.1 m sphere at its
+  middle becomes the drawn mesh bounds in the unit's turned frame, while a small unit keeps the old sphere. Left
+  click, the right click's NPC/vehicle pick and the doodad NPC-in-front test share `hud/pick.rs`; `Tab` now
+  measures from the seated slave's replicated position instead of the stale HUD point. 1.2's own vehicle
+  targeting is the 2026-10-28 capture case e (a right click on the slave you ride sends `CSChangeTarget` 0x02c).
+  The Farm Wagon (slave template 60, model 1008) is picked at its front, middle and rear (`examples/slave_pick`,
+  `hud/pick.rs` tests). Open: the exact 1.2 pick shape and the unmeasured pick suppression distance, as in
+  [units](aa-client-units.md).
 
 Still open across these slices: cannons/turrets (S12), hanging (S13), vehicle state/FX (S15), auto-walk, mount jump
 clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own

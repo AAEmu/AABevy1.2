@@ -13,14 +13,8 @@ use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// How far `Tab` looks, metres.
 const TAB_RANGE: f32 = 40.0;
-/// How near the view ray has to pass a unit's middle for a click to select it, metres.
-const PICK_RADIUS: f32 = 1.1;
 /// A press that moves more than this many pixels before it is released was a camera drag.
 const CLICK_SLOP: f32 = 6.0;
-
-fn unit_centre(pos: aa_net::Pos, scale: f32) -> Vec3 {
-    aa_world::cry_to_bevy(Vec3::new(pos.x, pos.y, pos.z + 0.9 * scale.max(0.5)))
-}
 
 /// `Tab`: the nearest enemy that is alive and not the one targeted, the next one after it when pressed again (the
 /// client's "target nearest enemy"; with no enemy in range, any unit).
@@ -51,7 +45,8 @@ pub fn tab_target(
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     let (me, shared) = {
         let d = bridge.0.borrow();
-        (d.pos, d.game.clone())
+        // seated, the server moves only the slave: the HUD position can stay at the boarding point
+        (super::slave::player_centre(&d, &units), d.game.clone())
     };
     let own_faction = player.spawn.as_ref().map_or(0, |s| s.character().faction_id);
     let mut near: Vec<(f32, u32, bool)> = units
@@ -86,6 +81,7 @@ pub fn click_target(
     cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     units: Res<Units>,
     player: Res<Player>,
+    boxes: super::pick::ModelBoxes,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut net: MessageWriter<NetCommand>,
     mut pressed_at: Local<Option<Vec2>>,
@@ -117,19 +113,7 @@ pub fn click_target(
     };
     let Ok(ray) = camera.viewport_to_world(transform, end) else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
-    let mut best: Option<(f32, u32)> = None;
-    for u in units.iter().filter(|u| u.obj_id != own) {
-        let centre = unit_centre(u.pos, u.scale);
-        let along = (centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
-            continue;
-        }
-        let miss = (ray.origin + *ray.direction * along).distance(centre);
-        if miss <= PICK_RADIUS * u.scale.max(0.7) && best.is_none_or(|(a, _)| along < a) {
-            best = Some((along, u.obj_id));
-        }
-    }
-    if let Some((_, obj_id)) = best {
+    if let Some(obj_id) = super::pick::pick_unit(&ray, &units, own, |_| true, |obj_id| boxes.get(obj_id)) {
         net.write(NetCommand(Command::Target { obj_id }));
     }
 }

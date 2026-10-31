@@ -427,6 +427,13 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
+* **Clicking the model (2026-10-31).** A left or right click picks a vehicle anywhere on its drawn
+  model, not only within a 1.1 m sphere at its middle: `hud/pick.rs` uses the bounds of the meshes the
+  unit is drawn with, in the unit's own turned frame, when that box is larger than the old sphere; a
+  small unit (an NPC, a character) keeps exactly the old sphere. Left click, the right click's
+  NPC/vehicle pick, the doodad NPC-in-front test and `Tab` share the helper; `Tab` measures from the
+  attached slave's replicated position while seated (`hud/slave.rs::player_centre`). The rule that an
+  own vehicle may be targeted is the 2026-10-28 capture case e (`CSChangeTarget` 0x02c).
 * **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
   an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
 * **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
@@ -473,8 +480,8 @@ and explicit controls").
 * `CSBindSlave` 0x031 body is exactly a `u16` timeline id (the decompile only shows a 32-bit
   setter; the 2026-10-28 capture never reached 0x031).
 * The pick suppression distance: 1.2 sent nothing for a cart picked at 4.57 m and 0x068 at
-  2.46 m; the exact check is unknown. The port keeps its view-ray pick (`PICK_RADIUS`) and adds no
-  range test.
+  2.46 m; the exact check is unknown. The port keeps its view-ray pick (the model box, or the
+  small-unit `PICK_RADIUS` sphere) and adds no range test.
 * The exact collision shapes behind the 3.0 / 3.5 / 4.0 m surface gaps are not recovered; the
   port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
   modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.

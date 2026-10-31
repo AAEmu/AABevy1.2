@@ -54,8 +54,6 @@ use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// How far the player reaches to talk to an NPC (F, a right click), metres.
 const TALK_RANGE: f32 = 6.0;
-/// How near the view ray has to pass a unit's middle for a right click to pick it, metres.
-const PICK_RADIUS: f32 = 1.1;
 /// A press that moves more than this many pixels before it is released was a camera drag.
 const CLICK_SLOP: f32 = 6.0;
 /// The widgets the dialog leaves shown when it hides the HUD.
@@ -560,8 +558,15 @@ pub struct Pointer<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 }
 
-/// The NPC a right click released over the 3D view picked (not a drag, not on the HUD).
-fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<u32> {
+/// The NPC or vehicle a right click released over the 3D view picked (not a drag, not on the HUD).
+fn right_click_pick(
+    p: &Pointer,
+    units: &Units,
+    own: u32,
+    pressed_at: &mut Option<Vec2>,
+    blocked: bool,
+    boxes: &super::pick::ModelBoxes,
+) -> Option<u32> {
     if blocked { *pressed_at = None; return None; }
     let window = p.windows.single().ok()?;
     let cursor = window.cursor_position();
@@ -577,21 +582,13 @@ fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Optio
     }
     let (camera, transform) = p.cameras.iter().find(|(c, _)| c.is_active)?;
     let ray = camera.viewport_to_world(transform, end).ok()?;
-    let mut best: Option<(f32, u32)> = None;
-    for u in units.iter().filter(|u| {
-        u.obj_id != own && matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. })
-    }) {
-        let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 0.9 * u.scale.max(0.5)));
-        let along = (centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
-            continue;
-        }
-        let miss = (ray.origin + *ray.direction * along).distance(centre);
-        if miss <= PICK_RADIUS * u.scale.max(0.7) && best.is_none_or(|(a, _)| along < a) {
-            best = Some((along, u.obj_id));
-        }
-    }
-    best.map(|(_, id)| id)
+    super::pick::pick_unit(
+        &ray,
+        units,
+        own,
+        |u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. }),
+        |obj_id| boxes.get(obj_id),
+    )
 }
 
 /// `--hud-talk-nearest T` (talk to the nearest NPC that has something for the player, T seconds
@@ -670,6 +667,7 @@ pub fn talk_input(
     doodads: Res<Doodads>,
     target: Res<Target>,
     facts: Facts,
+    boxes: super::pick::ModelBoxes,
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut pressed_at: Local<Option<Vec2>>,
@@ -732,7 +730,7 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked);
+    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked, &boxes);
     let scripted_pick = script_pick.take_right();
     let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
 

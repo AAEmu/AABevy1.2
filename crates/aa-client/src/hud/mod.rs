@@ -114,6 +114,7 @@ mod notices;
 mod panels;
 mod party;
 mod period;
+pub(crate) mod pick;
 mod portal;
 pub(crate) mod doodad;
 mod dynamic_actions;
