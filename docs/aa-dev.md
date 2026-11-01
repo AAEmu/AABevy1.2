@@ -40,14 +40,17 @@ A run that claims wall time passes `--require-wall-clock` (`clock.rs`):
 * `Time<Real>` is compared with the wall clock directly (a manual strategy drives Real too), and game time over a
   rolling 3 s window of per-frame deltas. A frame whose `Time<Virtual>` delta hit `max_delta` (250 ms) was clamped by
   a hitch and is left out with its wall interval, so a slow machine or an unfocused window is not a failure; frame
-  offsets at 15-30 fps cannot distort the ratio either. Game time **faster** than wall time beyond 5 % fails (the
-  direction that inflates recorded timings); slower is logged as a warning.
+  offsets at 15-30 fps cannot distort the ratio either. A frame whose `Time<Real>` delta differs from the wall delta
+  by more than 50 ms is the render thread's lag (or catch-up) after a stall and is left out of both windows. `Time<Real>`
+  fails only when it runs **faster** than wall; a lag is not the bug. Game time **faster** than wall time beyond 5 %
+  fails (the direction that inflates recorded timings); slower is logged as a warning.
 * The final ratio is judged once more at `AppExit`, so a drift after the last update is not lost. The run also
   becomes continuous when windowed, so an unfocused window is not throttled.
 
 The regression tests drive the systems with a hand-stepped wall clock and render-time channel (no sleeps): a fixed
 step or `set_relative_speed` installed after the warm-up, the original `ManualDuration(1/60)` at a 120 fps loop, a
-400 ms hitch that clamps game time, a slower clock (warning), and a manual clock judged only at exit.
+400 ms hitch that clamps game time, a delayed render instant (stall and catch-up), a slower Real or game clock
+(warning), and a manual clock judged only at exit.
 
 ## Headless
 

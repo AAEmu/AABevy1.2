@@ -10,8 +10,9 @@ from the 1.2 game database and the model's own animation data.
 > **Time base (2026-11-01, T0).** The only Bevy/1.2 combat side-by-side (2026-10-26, `tools/combat-side`) ran the Bevy
 > side with `--headless-fps 120` and `--feel-fps 60`, which pins `TimeUpdateStrategy::ManualDuration(1/60)`; 561ebd1b
 > records that as game time advancing 1.562x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by
-> 1.562, so that cast mismatch was a time-base artefact (**suspect (time base)**, and the only one); no raw run data is
-> retained.
+> 1.562, so that cast mismatch was a time-base artefact (**suspect (time base)**, and the only one); the phase-2
+> side-by-side report (`docs/research/port-combat/side-by-side.md` in 1b0066d4) reran the Bevy side in real time
+> (`--feel-fps 0`) and measured 1.502 s against the original's 1.496 s. No raw run data is retained.
 > The "stance exit 10.017 s vs 0.861 s" is **not** a time-base artefact: the client holds `Drawn` for 10 s of game
 > time (6.41 s wall in that run), `combat.rs` / `weapons.rs` never read `CombatChanged` (only the HUD does), and the
 > native client exits the stance 0.861 s after the kill. It is an **open bug** (see Weapon draw). The current client

@@ -23,6 +23,10 @@ pub const WARMUP: f64 = 1.0;
 /// Wall seconds over which the rates are measured. Frame deltas are compared, never cumulative time from frame 0, so a
 /// warm-up offset cannot distort the ratio; a clamped frame (a hitch) is left out entirely.
 pub const WINDOW: f64 = 3.0;
+/// A `Time<Real>` delta that differs from the wall delta by more than this is the render thread's one-frame lag (or its
+/// catch-up) after a main-thread stall, not a rate; the frame is left out of both windows. 5 % of the shortest judged
+/// window ([`WARMUP`]), so a stall right after the warm-up cannot decide the run.
+const STALL: Duration = Duration::from_millis(50);
 
 /// What advances the app clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,12 +204,18 @@ impl ClockAudit {
         }
         self.wall += wall;
         self.frames += 1;
+        let real_delta = real_elapsed.saturating_sub(last.real_elapsed);
+        // `Time<Real>` takes the instant the render thread sent when the previous frame's render finished
+        // (`vendor/bevy_render/src/lib.rs` `send_time`). A main-thread stall makes Real lag the wall clock for one
+        // sample and the next frame catches up; a difference beyond the shortest window's tolerance is that stall, not
+        // a rate. Leave the frame out of both windows. A manual strategy drives Real by its step, so its ratio stays
+        // measurable (the strategy check is what fails it).
+        if mode == ClockMode::Wall && real_delta.abs_diff(wall) > STALL {
+            return;
+        }
         let wall = wall.as_secs_f64();
         // `Time<Real>` follows the wall clock even when `Time<Virtual>` is clamped.
-        self.real_window.push(
-            wall,
-            real_elapsed.saturating_sub(last.real_elapsed).as_secs_f64(),
-        );
+        self.real_window.push(wall, real_delta.as_secs_f64());
         // A virtual delta of `max_delta` was clamped (a hitch, or a slow manual clock): not a rate sample. The wall
         // interval goes with it, or the window would count a frame of game time against more than its own wall time.
         let virtual_delta = virtual_elapsed.saturating_sub(last.virtual_elapsed);
@@ -243,9 +253,9 @@ impl ClockAudit {
             );
         }
         let real = self.real_ratio();
-        if self.real_window.wall > 0.0 && (real - 1.0).abs() > tolerance {
+        if self.real_window.wall > 0.0 && real > 1.0 + tolerance {
             return Assessment::Fail(format!(
-                "Time<Real> runs {real:.3}x the wall clock over the last {:.1} s",
+                "Time<Real> runs {real:.3}x the wall clock over the last {:.1} s (faster than wall)",
                 self.real_window.wall
             ));
         }
@@ -542,6 +552,33 @@ mod tests {
     }
 
     #[test]
+    fn a_delayed_render_instant_is_not_a_rate_sample() {
+        let mut h = Harness::new(true);
+        h.run(75, Duration::from_millis(16), Duration::from_millis(16));
+        assert_eq!(h.exit(), None);
+        // A 150 ms main-thread stall: the wall clock advances, but `Time<Real>` still carries the render thread's
+        // instant from before the stall, so its delta is one normal frame (the old symmetric check read 0.89x).
+        h.step(Duration::from_millis(166), Duration::from_millis(16));
+        assert_eq!(h.exit(), None, "a Real lag is not a slower clock");
+        assert!(
+            (h.audit().real_ratio() - 1.0).abs() <= TOLERANCE,
+            "the stall frame is not a rate sample: real/wall {:.3}",
+            h.audit().real_ratio()
+        );
+        // The render thread's next instant covers the stall: Real catches up with a large delta. That is the same
+        // stall, not a fast clock, and must not fail either.
+        h.step(Duration::from_millis(16), Duration::from_millis(166));
+        assert_eq!(h.exit(), None, "the catch-up frame is not a fast clock");
+        assert!(
+            (h.audit().ratio() - 1.0).abs() <= TOLERANCE,
+            "the catch-up frame is not a rate sample: game/wall {:.3}",
+            h.audit().ratio()
+        );
+        h.run(75, Duration::from_millis(16), Duration::from_millis(16));
+        assert_eq!(h.exit(), None);
+    }
+
+    #[test]
     fn a_hitch_that_clamps_game_time_does_not_fail_the_check() {
         let mut h = Harness::new(true);
         h.run(75, Duration::from_millis(16), Duration::from_millis(16));
@@ -641,6 +678,20 @@ mod tests {
             Assessment::Fail(why) => assert!(why.contains("Time<Real>"), "{why}"),
             other => panic!("a non-wall Time<Real> must fail, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_slower_real_clock_is_not_a_failure() {
+        // Only a Real clock that runs faster than wall can inflate a timing; a lag is a stall (see the harness test).
+        let audit = pure_audit(
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+            Duration::from_millis(5),
+        );
+        assert!(matches!(
+            audit.assess(&TimeUpdateStrategy::Automatic, 1.0, false, TOLERANCE),
+            Assessment::Ok
+        ));
     }
 
     #[test]
