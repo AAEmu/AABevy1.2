@@ -15,8 +15,10 @@
 //! dead (`CANT_DO_WHILE_YOU_DEAD` 0x14c), we are bound to another slave (0x66), we are bound to
 //! this one (silent), a bind is already pending (0x13), and the same gap strictly below
 //! `DAT_39ac7408` 16.0 -> 4.0 m (0x9a). 1.2 minimises over per-collider shapes that are not
-//! recovered; this client uses one sphere per unit (unverified), and a slave has no
-//! `ActorModel`, so its radius is 0 and only the player's radius reduces the centre distance.
+//! recovered; a slave (a `VehicleModel`) has no `ActorModel` radius, so this client measures the
+//! player to the drawn body's prefab box ([`slave_gap`]: the same box the summon placement uses,
+//! in the slave's yaw frame), not to its origin. That box is an approximation of the collision
+//! parts, like the server's ship mass box / attach-point stand-in.
 //! The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
 //!
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
@@ -122,12 +124,39 @@ pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
 
 /// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
 /// model is a `VehicleModel`, not an `ActorModel`, so the catalog has no radius for it and this
-/// returns 0: the slave's collider is not approximated at all (unverified, but the 1.2
-/// `FUN_3989bf90` uses the slave's real collision shape, which is also not recovered).
+/// returns 0; [`slave_gap`] uses the model's box instead.
 fn radius(data: &HudData, unit: &Unit) -> f32 {
     data.game
         .get()
         .map_or(0.0, |game| game.model_size(unit.model_id, unit.scale))
+}
+
+/// The surface gap to a slave: the player's distance to the vehicle body's box in the slave's
+/// frame, minus the player's radius. The 1.2 client measures the player's collision shape to the
+/// target's collision parts (`FUN_3989bf90` -> `FUN_398b1ab0`); those shapes are not recovered,
+/// so the prefab body box [`crate::ingame::data::Db::vehicle_look`] draws and the summon
+/// placement uses stands in for them, like the server's ship mass box / attach-point measure.
+/// The box is authored at scale 1 in Cry model space (Z up); it is rotated by the slave's yaw and
+/// divided by the unit scale before the clamp. A model with no loaded box keeps the old centre
+/// distance minus the (zero for a vehicle) actor radius.
+pub(super) fn slave_gap(
+    data: &HudData,
+    unit: &Unit,
+    from: Vec3,
+    at: Vec3,
+    yaw: f32,
+) -> f32 {
+    let Some((lo, hi)) = data
+        .game
+        .get()
+        .and_then(|game| game.vehicle_box(unit.model_id))
+    else {
+        return surface_gap(from, data.player_radius, at, radius(data, unit));
+    };
+    let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
+    let local = Quat::from_rotation_z(-yaw) * (from - at) / scale;
+    let nearest = local.clamp(lo, hi);
+    local.distance(nearest) - data.player_radius
 }
 
 /// Where the checks measure from. While attached to a slave the server moves only the slave,
@@ -275,8 +304,9 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
         if seated == Some(unit.obj_id) {
             continue;
         }
-        let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-        let gap = surface_gap(from, data.player_radius, at, radius(data, unit));
+        let (at, yaw) = world(unit.obj_id)
+            .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+        let gap = slave_gap(data, unit, from, at, yaw);
         if gap >= CANDIDATE_REACH {
             continue;
         }
@@ -325,13 +355,9 @@ pub(crate) fn receive(
     if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
-    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-    let gap = surface_gap(
-        player_centre(data, world),
-        data.player_radius,
-        at,
-        radius(data, unit),
-    );
+    let (at, yaw) = world(unit.obj_id)
+        .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+    let gap = slave_gap(data, unit, player_centre(data, world), at, yaw);
     if gap >= interact_reach(data) {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
@@ -430,13 +456,9 @@ pub(super) fn bind(
     if data.mounted.bind_pending(Instant::now()) {
         return Outcome::Refused(MSG_ALREADY_REQUESTED);
     }
-    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-    let gap = surface_gap(
-        player_centre(data, world),
-        data.player_radius,
-        at,
-        radius(data, unit),
-    );
+    let (at, yaw) = world(unit.obj_id)
+        .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+    let gap = slave_gap(data, unit, player_centre(data, world), at, yaw);
     if gap >= BIND_REACH {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }

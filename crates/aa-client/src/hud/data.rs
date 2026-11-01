@@ -7,7 +7,7 @@
 //! background thread at start-up ([`GameData::load_in_background`]) and queried from memory.
 
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags};
@@ -230,6 +230,12 @@ pub struct GameData {
     /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
     /// `ModelManager.GetActorModel(modelId).Radius`.
     pub(super) model_radii: HashMap<u32, f32>,
+    /// `models.id` -> the prefab / model reference of a `VehicleModel` or `ShipModel` (no wheels:
+    /// the reach box is the body's).
+    pub(super) vehicle_looks: HashMap<u32, crate::ingame::data::VehicleLook>,
+    /// `models.id` -> its model-space AABB from [`crate::ingame::vehicle::bounds`], loaded from the
+    /// pak on first use and cached with failed loads too (at most one attempt per model).
+    pub(super) vehicle_boxes: Mutex<HashMap<u32, Option<(Vec3, Vec3)>>>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
@@ -486,6 +492,38 @@ fn load_summon_slaves(
                 valid_area_range: any_real(r, 6)?,
             },
         );
+    }
+    Ok(out)
+}
+
+/// The body model of every `VehicleModel` / `ShipModel`, for [`GameData::vehicle_box`]. The reach
+/// box is the body's (wheels stay out, as in the summon placement's own box).
+fn load_vehicle_looks(
+    conn: &Connection,
+) -> rusqlite::Result<HashMap<u32, crate::ingame::data::VehicleLook>> {
+    let mut q = conn.prepare(
+        "SELECT m.id, COALESCE(v.normal, s.normal) FROM models m \
+         LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel' \
+         LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' \
+         WHERE m.sub_type IN ('VehicleModel', 'ShipModel')",
+    )?;
+    let mut rows = q.query([])?;
+    let mut out = HashMap::new();
+    while let Some(r) = rows.next()? {
+        let model_id = any_int(r, 0)?.max(0) as u32;
+        let normal: Option<String> = r.get(1)?;
+        if let Some(normal) = normal
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+        {
+            out.insert(
+                model_id,
+                crate::ingame::data::VehicleLook {
+                    normal,
+                    wheels: [None, None],
+                },
+            );
+        }
     }
     Ok(out)
 }
@@ -814,6 +852,10 @@ impl GameData {
             warn!("hud: cannot load summon slaves: {err}");
             HashMap::new()
         });
+        data.vehicle_looks = load_vehicle_looks(&conn).unwrap_or_else(|err| {
+            warn!("hud: cannot load vehicle models for the interaction reach: {err}");
+            HashMap::new()
+        });
         // nothing reads these yet: a missing table must not fail the whole HUD data
         data.housing = housing::Tables::load(&conn).unwrap_or_default();
         data.load_sub_zone_shapes();
@@ -940,6 +982,36 @@ impl GameData {
     /// scale, 0 when the model has no actor radius (or the database is not loaded yet).
     pub(super) fn model_size(&self, model_id: u32, scale: f32) -> f32 {
         self.model_radii.get(&model_id).copied().unwrap_or(0.0) * scale
+    }
+
+    /// The model-space AABB `(lo, hi)` of a vehicle or ship model, in Cry metres and at scale 1.
+    /// The 1.2 reach predicate measures the player's collision shape to the target's collision
+    /// parts (`FUN_3989bf90` -> `FUN_398b1ab0`); those shapes are not recovered, so this uses the
+    /// drawn body's prefab box (the same [`crate::ingame::vehicle::bounds`] the summon placement
+    /// uses), like the server's ship mass box / attach-point stand-in. Loaded on first use and
+    /// cached, including a missing pak or model.
+    pub(super) fn vehicle_box(&self, model_id: u32) -> Option<(Vec3, Vec3)> {
+        let mut cache = self
+            .vehicle_boxes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(bounds) = cache.get(&model_id) {
+            return *bounds;
+        }
+        let bounds = self
+            .vehicle_looks
+            .get(&model_id)
+            .and_then(crate::ingame::vehicle::bounds);
+        cache.insert(model_id, bounds);
+        bounds
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_vehicle_box(&self, model_id: u32, bounds: Option<(Vec3, Vec3)>) {
+        self.vehicle_boxes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(model_id, bounds);
     }
 
     /// Zone group of a `zones.zone_key` ("Solzreed Peninsula") and the faction protecting the zone.

@@ -554,12 +554,16 @@ and explicit controls").
   **surface gap** of the collision shapes (`FUN_3989bf90` -> `FUN_398b1ab0` ->
   `FUN_398b1af0`): the minimum over the target's colliders of
   `|centre_player - centre_slave| - (r_player + r_slave)`, not clamped at 0, compared strictly
-  (`gap < limit`). The exact per-collider shapes are not recovered; the port uses one scaled
-  actor-model radius per unit (the same `GameData::model_size` as the server's `Unit.ModelSize`
-  and `api::distance_to`), an approximation (unverified). The 2026-10-28 capture bound at a
-  3.1022 m centre-to-centre 3D distance with no walking; the capture's Farm Wagon (slave
-  template 60, model 1008) has no actor-model radius (it is a `VehicleModel`), so the player
-  radius alone (0.4-0.55 m for the 1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
+  (`gap < limit`). The exact per-collider shapes are not recovered; for a vehicle or ship the
+  port uses the body's prefab AABB (the box the summon placement uses, `GameData::vehicle_box`
+  / `hud/slave.rs::slave_gap`) in the slave's yaw frame, like the server's ship mass box and
+  attach-point stand-in; other units keep one scaled actor-model radius (the same
+  `GameData::model_size` as the server's `Unit.ModelSize` and `api::distance_to`). This is the
+  approximation the 2026-11-01 retest needed: the Red Farm Hauler's cargo bed is in reach while
+  its origin is more than 3 m away. The 2026-10-28 capture bound at a 3.1022 m centre-to-centre
+  3D distance with no walking; the capture's Farm Wagon (slave template 60, model 1008) has no
+  actor-model radius (it is a `VehicleModel`), so the player radius alone (0.4-0.55 m for the
+  1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
   goes out (`FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0`, `SlaveCommand::Bind`). Out of
   reach the native client auto-walks (`FUN_390a6af0`); this port has no walk-to-unit, so it
   refuses with 0x9a. The mounted 3.5 m variant is modelled from the player's received

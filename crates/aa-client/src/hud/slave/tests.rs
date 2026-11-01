@@ -710,6 +710,92 @@ fn the_captured_farm_wagon_reaches_pass_with_the_real_model_radii()
     Ok(())
 }
 
+/// The reach to a vehicle is to its body, not its origin: 3.4 m from the origin but 2.4 m from
+/// the box's side passes the 3.0 m interaction check (the 2026-11-01 retest was refused with the
+/// origin-only sphere). The box is set directly so this runs without the pak.
+#[test]
+fn a_vehicle_slave_reach_uses_its_body_box_not_its_origin() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
+    let mut game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 0.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert!(
+        candidate(&state.borrow(), &units).is_some_and(|c| c.obj_id == 20),
+        "the F prompt uses the same body gap"
+    );
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+    assert!(matches!(
+        send(&state, &units).as_slice(),
+        [Command::Slave(SlaveCommand::Bind { tl_id: 8 })]
+    ));
+}
+
+/// The passenger list (13863) uses the same body reach and sends the plain interaction cast.
+#[test]
+fn a_vehicle_passenger_request_uses_the_body_box() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
+    let mut game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 0.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Sent
+    );
+    assert!(matches!(
+        state.borrow().requests.as_slice(),
+        [Request::UseSkill {
+            skill_id: 13863,
+            target_obj_id: 20
+        }]
+    ));
+}
+
+/// The real Red Farm Hauler (model 1553) box reaches its cargo bed: 3.4 m behind the origin is
+/// inside the hull's drawn box, so the 2026-11-01 right click is in reach.
+#[test]
+#[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+fn the_real_hauler_box_reaches_its_cargo_bed() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&path).exists() {
+        eprintln!("skipping: the game pak {pak} or database {path} is not there");
+        return Ok(());
+    }
+    let game = crate::hud::data::GameData::load(&path)?;
+    let (lo, hi) = game.vehicle_box(1553).expect("the hauler body box");
+    assert!(lo.y < -3.0, "the cargo bed extends behind the origin: {lo:?}..{hi:?}");
+    let mut hauler = slave(20, 8, Vec3::ZERO);
+    hauler.model_id = 1553;
+    hauler.kind = UnitKind::Slave {
+        id: 700,
+        tl_id: 8,
+        template_id: 146,
+        summoner_id: 100,
+    };
+    let (state, units) = setup(&[hauler]);
+    state.borrow_mut().pos = Vec3::new(0.0, -3.4, 1.1);
+    state.borrow_mut().player_radius = game.model_size(10, 1.0);
+    state.borrow().game.0.set(game).ok().expect("game data");
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+    Ok(())
+}
+
 #[test]
 fn only_a_mate_seat_switches_the_interaction_reach_to_three_point_five_metres() {
     let mut mate = crate::hud::expansion::fixture::spawn().unit;
