@@ -73,6 +73,8 @@ def record(tag, exe, plan, fps, size, extra_args):
     d = FRAMES / tag / plan["file"]
     shutil.rmtree(d, ignore_errors=True)
     d.parent.mkdir(parents=True, exist_ok=True)
+    # Exempt from --require-wall-clock: `--record` is the fixed-step mode this tool wants (one frame per 1/--record-fps
+    # of game time); its timings come from `record_from` in game seconds, not from wall time.
     cmd = [str(exe), "--enter-world", "--user", ACCOUNT, "--character", CHARACTER, "--hour", "12", "--size", size,
            *([] if plan.get("hud") else ["--no-hud"]), "--mute", *plan.get("cam", CAM), *stage_args(), "--record", str(d), "--record-fps", str(fps), "--record-gate",
            "--record-from", str(plan["record_from"]), "--record-secs", str(plan["record_secs"]), *plan.get("args", []), *extra_args]

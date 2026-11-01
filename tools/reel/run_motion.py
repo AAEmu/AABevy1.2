@@ -8,6 +8,9 @@ Same machinery as run_reel.py (fake server events, aa-dev `--record`, ffmpeg), w
 Motioncaster, access level 100 in lane_bevy_game.accounts for the GM `/spawn`) and its own stage in data/extract/motion/stage.json.
 Every scene starts the caster `dist` metres south of the doll, facing north. Besides the fake server events (AA_COMBAT_FAKE) a scene
 may use AA_MOTION_FAKE (aa-client skill_motion.rs: a push, a blink, a blink behind the doll).
+
+Exempt from --require-wall-clock: the scenes go through run_reel.record, whose `--record` is the fixed-step mode they need;
+their times are game seconds, not wall time.
 """
 import json
 import os

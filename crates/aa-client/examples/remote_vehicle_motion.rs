@@ -22,6 +22,10 @@
 //!
 //! It exits non-zero on any failure. No game files are needed.
 //!
+//! The replay is deterministic: it advances Bevy by a fixed `1/60 s` game step (`TimeUpdateStrategy::ManualDuration`),
+//! so every check above is in game time, not wall time. The `aa-dev: … clock=manual game_per_wall=…` log line records
+//! the wall ratio; this example must not be used as a wall-time measurement.
+//!
 //! `cargo run -p aa-client --example remote_vehicle_motion -- --headless`
 
 #![allow(dead_code)]
@@ -257,6 +261,13 @@ fn replay(rows: &[Row], feed: f64, until: f64, rendered: bool) -> Vec<(f64, Vec3
         let Some((pos, rot)) = pose else { continue };
         drawn.push((now, pos, rot));
     }
+    let audit = app.world().resource::<aa_dev::ClockAudit>();
+    info!(
+        "remote_vehicle_motion: replay fixed {:.0} Hz game step, game/wall {:.3} real/wall {:.3} (game time, not wall time)",
+        1.0 / FRAME,
+        audit.ratio(),
+        audit.real_ratio()
+    );
     drawn
 }
 

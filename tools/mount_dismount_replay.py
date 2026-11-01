@@ -177,7 +177,8 @@ def main() -> int:
     env["RUST_LOG"] = "info,aa_client::ingame::mount=debug"
     env["AA_DISMOUNT_TRACE"] = "1"
     command = [
-        str(client), "--headless", "--mute", "--account", args.account, "--login", args.login,
+        str(client), "--headless", "--mute", "--require-wall-clock",
+        "--account", args.account, "--login", args.login,
         "--password-file", str(password_file), "--character", args.character, "--script", str(script),
     ]
     started = time.monotonic()
