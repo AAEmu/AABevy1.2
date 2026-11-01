@@ -2,13 +2,14 @@
 //!
 //! `SCUnitState` announces the drydock (template 5, the real `shipyards` row) and `SCShipyardState` 0x1aa moves it
 //! through its stages. The example checks the rule the 1.2 client implements: the unit's model follows the packet's
-//! `step` (`FUN_394d5140`), step 1000 shows the finished ship (`main_model_id`), and `GetShipyardBaseProgress` /
-//! `GetShipyardRemainProgress` are the template's total `num_actions` and what the packet's `actions` leaves.
+//! `step` (`FUN_394d5140`), `step == steps.len()` is the finished hull (`main_model_id`) and step 1000 the launch
+//! ceremony (`ceremony_model_id`), and `GetShipyardBaseProgress` / `GetShipyardRemainProgress` are the template's
+//! total `num_actions` and what the packet's `actions` leaves.
 //!
 //! Needs `AA_PAK` and `AA_DB`; without them it says so and exits 0.
 //!
-//! `cargo run -p aa-client --example shipyard_stages -- --mute --offscreen-shot shots/aa-client/shipyard_stages.png --shot-after 15`
-//! takes the picture at 15 s; the checks run at 15 s. Without a shot the run ends after the checks.
+//! `cargo run -p aa-client --example shipyard_stages -- --mute --offscreen-shot shots/aa-client/shipyard_stages.png --shot-after 18`
+//! takes the picture at 18 s; the checks run at 16 s. Without a shot the run ends after the checks.
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
 mod hud;
@@ -44,23 +45,27 @@ use aa_net::state::Units;
 use aa_net::{Event, Pos, ShipyardEvent, ShipyardState, Shipyards};
 use ingame::shipyard::{DrawnShipyards, ShipyardModel};
 
-/// The real Iznan small sailboat drydock (`shipyards` id 5): seven stages, main model 680.
+/// The real Iznan small sailboat drydock (`shipyards` id 5): seven stages, main hull 680, ceremony 683.
 const TEMPLATE: u32 = 5;
 const YARD_ID: u64 = 0x0000_0000_0000_0005;
 const OBJ: u32 = 4_001;
 /// `shipyard_steps.num_actions` 2+3+1+2+2+3+2.
 const ALL_ACTIONS: i32 = 15;
+const MAIN_MODEL: u32 = 680;
+const CEREMONY_MODEL: u32 = 683;
 
-/// The stage swaps: (time, step, actions, model, path suffix).
-const SWAPS: [(f32, i32, i32, u32, &str); 4] = [
+/// The stage swaps: (time, step, actions, model, path suffix). Step 7 is `steps.len()` (the appended main
+/// model); step 1000 is the ceremony model.
+const SWAPS: [(f32, i32, i32, u32, &str); 5] = [
     (0.0, 0, 0, 673, "galleon.step_01"),
     (4.0, 1, 2, 674, "galleon.step_02"),
     (7.0, 3, 5, 676, "galleon.step_04"),
-    (10.0, 1000, 15, 680, "galleon.step_08"),
+    (10.0, 7, 15, MAIN_MODEL, "galleon.step_08"),
+    (12.0, 1000, 15, CEREMONY_MODEL, "galleon.step_09ceremony"),
 ];
 /// What each sample should show: (sample time, swap index).
-const SAMPLES: [(f32, usize); 4] = [(3.0, 0), (6.0, 1), (9.0, 2), (13.0, 3)];
-const CHECK_AT: f32 = 15.0;
+const SAMPLES: [(f32, usize); 5] = [(3.0, 0), (6.0, 1), (9.0, 2), (11.0, 3), (14.0, 4)];
+const CHECK_AT: f32 = 16.0;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -79,6 +84,26 @@ fn main() -> AppExit {
         eprintln!("shipyard_stages: skipped, the game database cannot be opened (AA_DB)");
         return AppExit::Success;
     };
+    let Some(template) = db.shipyard_template(TEMPLATE) else {
+        eprintln!("shipyard_stages: skipped, the database has no shipyard {TEMPLATE}");
+        return AppExit::Success;
+    };
+    if (template.main_model_id, template.ceremony_model_id) != (MAIN_MODEL, CEREMONY_MODEL)
+        || template.steps.len() != 7
+    {
+        eprintln!(
+            "shipyard_stages: template {TEMPLATE} is main {} / ceremony {} with {} steps, expected {MAIN_MODEL} / {CEREMONY_MODEL} / 7",
+            template.main_model_id,
+            template.ceremony_model_id,
+            template.steps.len()
+        );
+        return AppExit::error();
+    }
+    println!(
+        "shipyard-stages: template {TEMPLATE}: {} steps, main {MAIN_MODEL}, ceremony {CEREMONY_MODEL} ({:?})",
+        template.steps.len(),
+        template.ceremony_anim_key
+    );
     if shot_mode() && shot_after() <= CHECK_AT {
         eprintln!(
             "shipyard_stages: --shot-after {} is not after the check at {CHECK_AT} s; raise it",
@@ -225,7 +250,7 @@ fn drive(time: Res<Time>, mut swapped: ResMut<Swapped>, mut inbox: ResMut<Inbox>
 #[derive(Resource, Default)]
 struct Observed {
     first: Option<(f32, u32, String)>,
-    samples: [Option<(u32, String, i32, i32)>; 4],
+    samples: [Option<(u32, String, i32, i32)>; 5],
     blank_at: Option<f32>,
     seen: bool,
 }
@@ -386,5 +411,5 @@ fn shot_after() -> f32 {
         .position(|a| a == "--shot-after")
         .and_then(|i| args.get(i + 1))
         .and_then(|v| v.parse().ok())
-        .unwrap_or(15.0)
+        .unwrap_or(20.0)
 }

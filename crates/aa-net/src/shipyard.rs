@@ -6,9 +6,11 @@
 //! order (`FUN_397afbf0` -> `FUN_3961ef40`, then the `i32` at `+0xe8`; the registration
 //! `FUN_391eb9d0` stores the handler at `this + 4 + 4 * 0x1aa`).
 //!
-//! `step` 1000 is the launch ceremony; `0 <= step < steps.len()` is a construction stage; the
-//! server also sends `steps.len()` once the last stage is done (`sync_build_state`). The unit's
-//! model and the stage models come from the client's `shipyards` / `shipyard_steps` rows.
+//! `step` 1000 is the launch ceremony (the client draws `shipyards.ceremony_model_id`); `0 <= step <
+//! steps.len()` is a construction stage; the server also sends `steps.len()` once the last stage is
+//! done (`sync_build_state`), which the client draws as the appended `main_model_id` entry. Any other
+//! out-of-range step changes nothing. The stage models come from the client's `shipyards` /
+//! `shipyard_steps` rows.
 
 use crate::opcodes::sc;
 use crate::session::Event;
@@ -40,7 +42,7 @@ pub struct ShipyardState {
     pub spawned: i64,
     pub obj_id: u32,
     pub hp: i32,
-    /// 1000 is the launch ceremony; `-1` never reaches the wire (the server sends `steps.len()`).
+    /// 1000 is the launch ceremony, `steps.len()` the finished hull; `-1` never reaches the wire.
     pub step: i32,
 }
 

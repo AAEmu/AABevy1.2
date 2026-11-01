@@ -7848,16 +7848,21 @@ AAEmu writer (`packets/world_objects.rs::SCShipyardStatePacket::write` +
 
 The server's own `shipyard_state_layout` test pins the bytes (`encode(..) == frame(0x1aa, &b)`). The 1.2
 client reads the same fields (`FUN_397afbf0` -> `ShipyardData` reader `FUN_3961ef40`, then the `i32` at
-`+0xe8`; registered at `this + 4 + 4 * 0x1aa` by `FUN_391eb9d0`). `step` 1000 is the launch ceremony;
-`0 <= step < steps.len()` is a construction stage; the server also sends `steps.len()` once the last stage
-is done. `ingame::shipyard` draws the unit's prefab at the stage model (`FUN_394d5140`) and derives
-`GetShipyardBaseProgress` / `GetShipyardRemainProgress` as the template's total `num_actions` and the
-packet's `actions`. The HUD's shipyard getters answer for the last shipyard right-clicked; the material
-window itself is not raised yet because it needs `GetShipyardConstructionStepInfo` (the step's material
-list), which is still open.
+`+0xe8`; registered at `this + 4 + 4 * 0x1aa` by `FUN_391eb9d0`). The template (`FUN_3982dc10`) keeps
+`main_model_id` at `tpl+0x18` and `ceremony_model_id` at `tpl+0x10`; `FUN_394d8600` appends one
+`(step, main_model_id)` entry after the steps, so `step == steps.len()` is the finished hull, and
+`FUN_394d5140`'s 1000 branch swaps to the ceremony model and plays `ceremony_anim_key` (`tpl+8`). Any
+other out-of-range step changes nothing. `ingame::shipyard` draws the unit's prefab at that stage model
+and derives `GetShipyardBaseProgress` / `GetShipyardRemainProgress` as the template's total `num_actions`
+and the packet's `actions`. A shipyard unit gets no unit view (`units.rs` skips it, like houses), so
+`Views::unit_entity` is `None` for one; nothing visible (portal fx, speech, poses, mounts) applies. The HUD
+picks it by the drawn stage model's bounds (not `build_radius`) and its shipyard getters answer for the
+last shipyard right-clicked; the material window itself is not raised yet because it needs
+`GetShipyardConstructionStepInfo` (the step's material list), which is still open.
 
-Tests: `cargo test -p aa-net shipyard` (6) and `cargo test -p aa-client --bin aa-client shipyard` (2);
-`examples/shipyard_stages` runs the real template 5 through three stages and the launch model.
+Tests: `cargo test -p aa-net shipyard` (7) and `cargo test -p aa-client shipyard` (client stage/progress
+and model-at-step tests; template 5 is main 680 / ceremony 683); `examples/shipyard_stages` runs the real
+template 5 through three stages, the last-stage hull and the ceremony model.
 
 ## Small server messages, lobby replies and quest cinemas (2026-10-23)
 

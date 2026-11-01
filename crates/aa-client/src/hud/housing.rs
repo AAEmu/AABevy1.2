@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use aa_net::housing::{ConstructHouseTax, HouseCommand, HouseSnapshot, HouseTaxInfo, HousingEvent};
-use aa_net::model::UnitKind;
+use aa_net::model::{Unit, UnitKind};
 use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::{Command, Event, Houses, NetCommand, NetEvent, Shipyards};
 use aa_ui::UiRuntime;
@@ -28,6 +28,8 @@ use crate::Screen;
 use crate::ingame::data::Db;
 use crate::ingame::housing::data::{self as house_data, Design};
 use crate::ingame::housing::placement::{Builder, BuilderSignal};
+use crate::ingame::player::placement;
+use crate::ingame::shipyard::DrawnShipyards;
 
 /// The demolition skill (`interaction_effects.wi_id` 94, `WI_DEMOLISH`) `X2House:Demolish` casts at the house.
 const DEMOLISH_SKILL: u32 = 11404;
@@ -45,6 +47,10 @@ const REACH: f32 = 6.0;
 const LEAVE: f32 = 10.0;
 /// How near the view ray has to pass a house's middle for a right click to pick it, as a share of its garden.
 const PICK_SHARE: f32 = 0.8;
+/// The least half-size of a shipyard's hull pick (m); the drawn stage model's bounds are usually larger.
+const SHIPYARD_PICK_MIN: f32 = 3.0;
+/// The half-size a shipyard that is not drawn yet is picked and held by (m).
+const SHIPYARD_DEFAULT_HALF: f32 = 6.0;
 /// A press and release further apart than this (logical pixels) is a drag, not a click.
 const CLICK_SLOP: f32 = 6.0;
 
@@ -557,32 +563,100 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
 }
 
 /// The house or shipyard a right click released over the 3D view picked: the nearest whose middle the view ray
-/// passes within its garden / drydock (not a drag, not on the HUD).
-fn pick(ray: Ray3d, units: &Units, db: Option<&Db>) -> Option<u32> {
+/// passes within its garden, or whose hull the ray enters (not a drag, not on the HUD).
+fn pick(ray: Ray3d, units: &Units, drawn: Option<&DrawnShipyards>) -> Option<u32> {
     let data = house_data::get();
     let mut best: Option<(f32, u32)> = None;
     for u in units.iter() {
-        let radius = match u.kind {
-            UnitKind::Housing { template_id, .. } => data
-                .and_then(|d| d.designs.get(&template_id))
-                .map_or(5.0, |d| d.garden_radius.max(3.0)),
-            UnitKind::Shipyard { template_id, .. } => db
-                .and_then(|d| d.shipyard_template(template_id))
-                .map_or(6.0, |t| t.build_radius.max(3) as f32),
+        let along = match u.kind {
+            UnitKind::Housing { template_id, .. } => {
+                let radius = data
+                    .and_then(|d| d.designs.get(&template_id))
+                    .map_or(5.0, |d| d.garden_radius.max(3.0))
+                    * PICK_SHARE;
+                // the house's middle: a few metres over its floor
+                let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
+                let along = (centre - ray.origin).dot(*ray.direction);
+                if along <= 0.0 {
+                    continue;
+                }
+                let miss = (ray.origin + *ray.direction * along).distance(centre);
+                if miss > radius {
+                    continue;
+                }
+                along
+            }
+            UnitKind::Shipyard { .. } => {
+                // A hull-sized pick, not the drydock's `build_radius`: the drawn stage model's bounds.
+                let bounds = drawn.and_then(|d| d.bounds(u.obj_id)).unwrap_or((
+                    -Vec3::splat(SHIPYARD_DEFAULT_HALF),
+                    Vec3::splat(SHIPYARD_DEFAULT_HALF),
+                ));
+                let Some(along) = shipyard_hit(&ray, u, bounds) else {
+                    continue;
+                };
+                along
+            }
             _ => continue,
-        } * PICK_SHARE;
-        // the house's middle: a few metres over its floor
-        let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
-        let along = (centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
-            continue;
-        }
-        let miss = (ray.origin + *ray.direction * along).distance(centre);
-        if miss <= radius && best.is_none_or(|(a, _)| along < a) {
+        };
+        if best.is_none_or(|(a, _)| along < a) {
             best = Some((along, u.obj_id));
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// The horizontal half-extents of a stage model's bounds, each at least [`SHIPYARD_PICK_MIN`] metres.
+fn half_extents((lo, hi): (Vec3, Vec3)) -> Vec2 {
+    Vec2::new(lo.x.abs().max(hi.x.abs()), lo.y.abs().max(hi.y.abs()))
+        .max(Vec2::splat(SHIPYARD_PICK_MIN))
+}
+
+/// The distance at which the view ray enters the drawn stage model's bounds (unit-local cry metres).
+fn shipyard_hit(ray: &Ray3d, unit: &Unit, bounds: (Vec3, Vec3)) -> Option<f32> {
+    let scale = unit.scale.max(0.01);
+    let transform = placement(
+        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+        unit.yaw(),
+        scale,
+    );
+    let inverse = transform.compute_affine().inverse();
+    let origin = aa_world::bevy_to_cry(inverse.transform_point3(ray.origin));
+    let direction = aa_world::bevy_to_cry(inverse.transform_vector3(*ray.direction));
+    // a metre of slack around the authored bounds
+    let (lo, hi) = bounds;
+    ray_box(
+        origin,
+        direction,
+        lo - Vec3::splat(1.0),
+        hi + Vec3::splat(1.0),
+    )
+    .map(|t| t * scale)
+}
+
+/// The first distance at which the ray enters the axis-aligned box, if it does.
+fn ray_box(origin: Vec3, direction: Vec3, lo: Vec3, hi: Vec3) -> Option<f32> {
+    let mut tmin = f32::NEG_INFINITY;
+    let mut tmax = f32::INFINITY;
+    for i in 0..3 {
+        let d = direction[i];
+        if d.abs() < 1e-6 {
+            if origin[i] < lo[i] || origin[i] > hi[i] {
+                return None;
+            }
+            continue;
+        }
+        let (mut t1, mut t2) = ((lo[i] - origin[i]) / d, (hi[i] - origin[i]) / d);
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        tmin = tmin.max(t1);
+        tmax = tmax.min(t2);
+        if tmin > tmax {
+            return None;
+        }
+    }
+    (tmax >= 0.0).then(|| tmin.max(0.0))
 }
 
 fn garden(template_id: u32) -> f32 {
@@ -640,6 +714,7 @@ fn sync(
     inventory: Res<Inventory>,
     shipyards: Res<Shipyards>,
     db: Option<Res<Db>>,
+    drawn_yards: Option<Res<DrawnShipyards>>,
     pointer: Pointer,
     // the builder's signals are read and written here: a reader and a writer of one message conflict
     (mut builder, mut builder_signals): (ResMut<Builder>, ParamSet<(MessageWriter<BuilderSignal>, MessageReader<BuilderSignal>)>),
@@ -662,7 +737,9 @@ fn sync(
         (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units, db.as_deref()));
+    let picked = pointer
+        .right_click(&mut pressed_at, blocked)
+        .and_then(|ray| pick(ray, &units, drawn_yards.as_deref()));
     let mut v = state.0.borrow_mut();
     let mut last_tax = v.last_tax.take();
     v.pointer_picked = picked;
@@ -745,7 +822,16 @@ fn sync(
         }
     }
 
-    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax, &shipyards, db.as_deref());
+    interact_and_refresh(
+        &mut v,
+        None,
+        (&units, &houses, &doodads, &inventory),
+        (pos, me),
+        &mut last_tax,
+        &shipyards,
+        db.as_deref(),
+        drawn_yards.as_deref(),
+    );
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -759,6 +845,7 @@ fn interact_and_refresh(
     last_tax: &mut Option<HouseTaxInfo>,
     shipyards: &Shipyards,
     db: Option<&Db>,
+    drawn: Option<&DrawnShipyards>,
 ) {
     // the interaction: a right click or the dev hook on a house in reach
     let picked = v.interact.take().or(picked);
@@ -820,7 +907,11 @@ fn interact_and_refresh(
             base,
             remain,
         });
-        v.current = None;
+        // switching from a house closes its window, as the house-to-house switch below does
+        if v.current.take().is_some() {
+            *last_tax = None;
+            v.signals.insert(0, Signal::End);
+        }
     }
     if let Some(obj_id) = started {
         let had = v.current.is_some();
@@ -866,16 +957,16 @@ fn interact_and_refresh(
     }
     if let Some(current) = v.shipyard.as_mut() {
         let yard = current.obj_id;
+        // the same hull half-size as the pick, taken to its farthest corner: walking away is radial
+        let half = drawn
+            .and_then(|d| d.bounds(yard))
+            .map(half_extents)
+            .unwrap_or(Vec2::splat(SHIPYARD_DEFAULT_HALF));
+        let radius = half.length();
         let near = units
             .get(yard)
             .filter(|u| matches!(u.kind, UnitKind::Shipyard { .. }))
             .is_some_and(|u| {
-                let radius = match u.kind {
-                    UnitKind::Shipyard { template_id, .. } => db
-                        .and_then(|d| d.shipyard_template(template_id))
-                        .map_or(6.0, |t| t.build_radius.max(6) as f32),
-                    _ => 6.0,
-                };
                 Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= radius + LEAVE
             });
         if !near {
@@ -910,6 +1001,7 @@ fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pointer_interaction(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -919,6 +1011,7 @@ fn pointer_interaction(
     inventory: Res<Inventory>,
     shipyards: Res<Shipyards>,
     db: Option<Res<Db>>,
+    drawn_yards: Option<Res<DrawnShipyards>>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else { return };
@@ -947,6 +1040,7 @@ fn pointer_interaction(
         &mut last_tax,
         &shipyards,
         db.as_deref(),
+        drawn_yards.as_deref(),
     );
     v.last_tax = last_tax;
     drop(v);

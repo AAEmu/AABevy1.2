@@ -2,7 +2,9 @@
 //! construction stage, and swapped when `SCShipyardState` (0x1aa) moves them to the next stage.
 //!
 //! The 1.2 client keeps a shipyard record per `ShipyardData.Id` (`FUN_394d8b00`) and swaps the unit's model to
-//! `ShipyardSteps[step]` (`FUN_394d5140`); step 1000 is the launch ceremony and shows the template's `main_model_id`.
+//! `ShipyardSteps[step]` (`FUN_394d5140`). `FUN_394d8600` appends one entry after the steps, so `step == steps.len()`
+//! is the finished hull (`main_model_id`); step 1000 is the launch ceremony and shows the template's
+//! `ceremony_model_id` (with its `ceremony_anim_key`). Any other out-of-range step leaves the drawn model alone.
 //! The rows come from the client's own `shipyards` / `shipyard_steps` (`ingame::data::ShipyardTemplate`).
 //!
 //! `units.rs` leaves shipyard units alone; this module keeps one entity per shipyard within [`SHIPYARD_RADIUS`] and
@@ -44,6 +46,8 @@ struct Drawn {
     path: String,
     preparing: bool,
     failed: bool,
+    /// The drawn model's bounds in the unit's local cry frame (metres), for the HUD's pick.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 #[derive(Resource)]
@@ -70,22 +74,34 @@ impl DrawnShipyards {
     pub fn entity(&self, obj_id: u32) -> Option<Entity> {
         self.yards.get(&obj_id).and_then(|d| d.entity)
     }
+
+    /// The bounds of the stage model drawn for `obj_id` in the unit's local cry frame.
+    pub fn bounds(&self, obj_id: u32) -> Option<(Vec3, Vec3)> {
+        self.yards.get(&obj_id).and_then(|d| d.bounds)
+    }
 }
 
 /// The model the shipyard unit shows now: the stage the received `SCShipyardState` names, else the model of its
-/// `SCUnitState`. Step 1000 is the finished ship (`FUN_394d5140`).
+/// `SCUnitState`. `step == steps.len()` is the finished hull and 1000 the ceremony model (`FUN_394d5140`); any other
+/// out-of-range step keeps `drawn` (1.2 changes nothing), not the unit's model.
 pub fn stage_model(
     unit: &Unit,
     shipyards: &Shipyards,
     template: Option<&ShipyardTemplate>,
+    drawn: u32,
 ) -> Option<u32> {
     let UnitKind::Shipyard { id, .. } = unit.kind else {
         return None;
     };
-    let staged = shipyards
-        .of(id)
-        .and_then(|state| state_step_model(state, template));
-    staged.or((unit.model_id != 0).then_some(unit.model_id))
+    if let Some(state) = shipyards.of(id) {
+        if let Some(model) = state_step_model(state, template) {
+            return Some(model);
+        }
+        if drawn != 0 {
+            return Some(drawn);
+        }
+    }
+    (unit.model_id != 0).then_some(unit.model_id)
 }
 
 fn state_step_model(state: &ShipyardState, template: Option<&ShipyardTemplate>) -> Option<u32> {
@@ -140,6 +156,7 @@ pub fn sync_shipyards(
             );
             continue;
         };
+        d.bounds = prepared.bounds;
         let transform = placement(
             Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
             unit.yaw(),
@@ -195,7 +212,8 @@ pub fn sync_shipyards(
             UnitKind::Shipyard { template_id, .. } => db.shipyard_template(template_id),
             _ => None,
         };
-        let Some(model_id) = stage_model(unit, &shipyards, template.as_ref()) else {
+        let shown = drawn.yards.get(&unit.obj_id).map_or(0, |d| d.model_id);
+        let Some(model_id) = stage_model(unit, &shipyards, template.as_ref(), shown) else {
             continue;
         };
         let d = drawn.yards.entry(unit.obj_id).or_insert(Drawn {
@@ -204,6 +222,7 @@ pub fn sync_shipyards(
             path: String::new(),
             preparing: false,
             failed: false,
+            bounds: None,
         });
         if d.model_id == model_id && (d.entity.is_some() || d.preparing || d.failed) {
             continue;
@@ -224,7 +243,7 @@ pub fn sync_shipyards(
         let (obj_id, tx, loader) = (unit.obj_id, drawn.tx.clone(), loader.clone());
         Workers::global().spawn(flat(unit, me), move || {
             let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                doodad_model::prepare(&loader, &path)
+                doodad_model::prepare_with_bounds(&loader, &path)
             }))
             .ok()
             .flatten();
@@ -261,6 +280,8 @@ mod tests {
     fn template() -> ShipyardTemplate {
         ShipyardTemplate {
             main_model_id: 680,
+            ceremony_model_id: 683,
+            ceremony_anim_key: Some("ceremony".into()),
             build_radius: 25,
             steps: vec![
                 super::super::data::ShipyardStep {
@@ -302,18 +323,25 @@ mod tests {
     fn stage_models_follow_the_packet_and_fall_back_to_the_unit() {
         let unit = unit();
         let mut yards = Shipyards::default();
-        assert_eq!(stage_model(&unit, &yards, Some(&template())), Some(673));
+        let template = template();
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 0), Some(673));
 
         yards.apply(&Event::Shipyard(ShipyardEvent::State(state(1, 2))));
-        assert_eq!(stage_model(&unit, &yards, Some(&template())), Some(674));
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 0), Some(674));
 
-        yards.apply(&Event::Shipyard(ShipyardEvent::State(state(1000, 5))));
-        assert_eq!(stage_model(&unit, &yards, Some(&template())), Some(680));
-
-        // `sync_build_state` sends `steps.len()` once the last stage is done: the unit's model stays.
+        // `sync_build_state` sends `steps.len()` once the last stage is done: the appended main model.
         yards.apply(&Event::Shipyard(ShipyardEvent::State(state(2, 5))));
-        assert_eq!(stage_model(&unit, &yards, Some(&template())), Some(673));
-        assert_eq!(stage_model(&unit, &yards, None), Some(673));
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 674), Some(680));
+
+        // any other out-of-range step keeps the drawn model, not the unit's (`FUN_394d5140` changes nothing).
+        yards.apply(&Event::Shipyard(ShipyardEvent::State(state(9, 5))));
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 680), Some(680));
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 0), Some(673));
+
+        // step 1000 is the launch ceremony, the ceremony model (not the finished hull).
+        yards.apply(&Event::Shipyard(ShipyardEvent::State(state(1000, 5))));
+        assert_eq!(stage_model(&unit, &yards, Some(&template), 680), Some(683));
+        assert_eq!(stage_model(&unit, &yards, None, 680), Some(680));
     }
 
     #[test]

@@ -7,11 +7,17 @@ is now decoded byte-exactly from the server's writer and the 1.2 reader (`FUN_39
 `i32` at `+0xe8`): `ShipyardData` (`u64 id, u32 template, i64 x/y, f32 z/zRot, i32 money, i32 actions, u32 kind,
 u32 owner id, str owner, u32 faction, i64 spawned, bc obj, i32 hp`) followed by `i32 step`. `Shipyards` folds it
 by shipyard id, and `ingame::shipyard` swaps the drydock's prefab to the `shipyard_steps` model of the packet's
-`step` (step 1000 shows `shipyards.main_model_id`), as `FUN_394d5140` does. `examples/shipyard_stages` runs the real
-template 5 through stages 0, 1, 3 and the launch model (models 673/674/676/680) and checks
-`GetShipyardBaseProgress` / `GetShipyardRemainProgress` (15 total actions, packet `actions` subtracted) with the
-real database. Open: the shipyard material window (its `GetShipyardConstructionStepInfo` step-material list is
-not built yet) and a live capture of a real build; `SCCharDetail` 0x053 stays deferred (not sent by this client).
+`step`, as `FUN_394d5140` does: `steps.len()` shows the appended `shipyards.main_model_id` entry
+(`FUN_394d8600`) and step 1000 the launch ceremony's `shipyards.ceremony_model_id` (`tpl+0x10`), with its
+`ceremony_anim_key` loaded. Any other out-of-range step keeps the drawn model. `examples/shipyard_stages` runs the
+real template 5 through stages 0, 1, 3, the last-stage hull (680) and the ceremony model (683; templates 5 and 11
+share the ceremony 683) and checks `GetShipyardBaseProgress` / `GetShipyardRemainProgress` (15 total actions,
+packet `actions` subtracted) with the real database. `units.rs` leaves shipyards out of the unit view like houses,
+so `Views::unit_entity` answers `None` for a shipyard; its users (portal effects, speech bubbles, posture clips,
+mount/deck lookups) never apply to one. The HUD picks a shipyard by the drawn stage model's bounds, not its
+`build_radius`. Open: the shipyard material window (its `GetShipyardConstructionStepInfo` step-material list is
+not built yet), the ceremony animation playback (the prefab is drawn statically) and a live capture of a real
+build; `SCCharDetail` 0x053 stays deferred (not sent by this client).
 
 ## Mount-walk checkpoint, 2026-10-31
 
