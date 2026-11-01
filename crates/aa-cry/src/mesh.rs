@@ -291,15 +291,19 @@ impl Model {
         m
     }
 
-    /// Whether a node is part of LOD 0 (neither it nor an ancestor is a LOD / helper / proxy).
+    /// Whether a node is part of LOD 0 (neither it nor an ancestor is a LOD / `$` helper / proxy).
+    /// A plain-named helper is a transform container in some assets (the dead ship hulls place their
+    /// meshes under `smallboat_body_dead` / `galleon_dead`), so its mesh children stay in LOD 0.
     pub fn is_lod0_render_node(&self, node: usize) -> bool {
         let mut i = Some(node);
         let mut guard = 0;
         while let Some(n) = i {
-            if self.nodes[n].kind != NodeKind::Mesh {
+            let current = &self.nodes[n];
+            let container = current.kind == NodeKind::Helper && !current.name.to_ascii_lowercase().starts_with('$');
+            if current.kind != NodeKind::Mesh && !container {
                 return false;
             }
-            i = self.nodes[n].parent;
+            i = current.parent;
             guard += 1;
             if guard > self.nodes.len() {
                 break;
@@ -868,6 +872,117 @@ mod tests {
         let names: Vec<&str> = skin.joints[0][..3].iter().map(|&j| s.bones[j as usize].name.as_str()).collect();
         assert_eq!(names, ["Bip01 Spine1", "Bip01 Spine2", "Bip01 Pelvis"]);
         assert!(skin.joints.iter().flatten().all(|&j| (j as usize) < s.len()));
+    }
+
+    /// The dead ship hulls place their meshes under a plain-named helper container. They are LOD 0.
+    #[test]
+    fn a_dead_vehicle_hull_is_drawn_under_its_helper_container() {
+        if !crate::pak_available() {
+            return;
+        }
+        for path in [
+            "objects/env/06_unit/01_ship/smallboat/smallboat_body_dead.cgf",
+            "objects/env/06_unit/01_ship/galleon/galleon_dead.cgf",
+        ] {
+            let m = Model::load(path).unwrap();
+            assert!(m.bounds().is_some(), "{path} has no LOD 0 geometry");
+            assert!(m.lod_nodes(0).len() >= 2, "{path} keeps its mesh children");
+            assert!(m.nodes.iter().any(|n| n.kind == NodeKind::Helper && !n.name.starts_with('$')));
+        }
+    }
+
+    /// The rule before the helper-container change: only meshes under mesh nodes are LOD 0.
+    fn old_lod0(model: &Model, node: usize) -> bool {
+        let mut i = Some(node);
+        while let Some(n) = i {
+            if model.nodes[n].kind != NodeKind::Mesh {
+                return false;
+            }
+            i = model.nodes[n].parent;
+        }
+        true
+    }
+
+    /// Every geometry file in the pak, comparing the helper-container LOD 0 rule with the strict mesh-only
+    /// rule. Run with `cargo test -p aa-cry --release helper_container_lod_scope -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "walks every .cgf/.cga/.chr in the pak; run with --ignored"]
+    fn helper_container_lod_scope() {
+        if !crate::pak_available() {
+            return;
+        }
+        let pak = aa_pak::Pak::global();
+        let mut parsed = 0usize;
+        let mut failed = 0usize;
+        let mut changed = Vec::new();
+        let mut doubles = Vec::new();
+        for path in pak.names() {
+            let lower = path.to_ascii_lowercase();
+            if !(lower.ends_with(".cgf") || lower.ends_with(".cga") || lower.ends_with(".chr")) {
+                continue;
+            }
+            let Ok(model) = Model::load(path) else {
+                failed += 1;
+                continue;
+            };
+            parsed += 1;
+            let new: std::collections::BTreeSet<usize> = model.lod_nodes(0).into_iter().collect();
+            let old: std::collections::BTreeSet<usize> = (0..model.nodes.len())
+                .filter(|&i| model.nodes[i].mesh.is_some() && old_lod0(&model, i))
+                .collect();
+            if new == old {
+                continue;
+            }
+            // a compiled `Merged` node next to its non-empty source meshes would draw the geometry twice
+            let drawn: Vec<_> = new
+                .iter()
+                .filter(|&&i| {
+                    model
+                        .meshes
+                        .get(model.nodes[i].mesh.unwrap())
+                        .is_some_and(|m| !m.indices.is_empty())
+                })
+                .copied()
+                .collect();
+            let merged = drawn
+                .iter()
+                .any(|&i| model.nodes[i].name.eq_ignore_ascii_case("Merged"));
+            let sources = drawn
+                .iter()
+                .filter(|&&i| !model.nodes[i].name.eq_ignore_ascii_case("Merged"))
+                .count();
+            if merged && sources > 0 {
+                doubles.push((path.to_string(), drawn.len()));
+            }
+            changed.push((path.to_string(), old.len(), new.len()));
+        }
+        let added: usize = changed
+            .iter()
+            .map(|(_, old, new)| new.saturating_sub(*old))
+            .sum();
+        println!(
+            "LOD sweep: {parsed} geometry files parsed, {failed} unreadable, {} models changed, {added} extra LOD 0 nodes",
+            changed.len()
+        );
+        for (path, old, new) in changed.iter().take(20) {
+            println!("  {path}: {old} -> {new}");
+        }
+        println!(
+            "double geometry candidates (Merged + source meshes): {}",
+            doubles.len()
+        );
+        for (path, n) in doubles.iter().take(10) {
+            println!("  {path}: {n} drawn nodes");
+        }
+        assert!(
+            doubles.is_empty(),
+            "no model draws a Merged node and its source meshes twice"
+        );
+        assert!(
+            changed.len() < parsed / 10,
+            "the helper rule touched {} of {parsed} models",
+            changed.len()
+        );
     }
 
     /// Legacy uncompiled skinned part (Mesh 0x744 + BoneAnim / BoneNameList / BoneInitialPos).

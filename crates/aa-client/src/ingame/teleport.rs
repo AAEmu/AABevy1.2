@@ -36,8 +36,9 @@ const HOLD: f32 = 0.2;
 /// The game goes on after this many seconds whatever is still loading.
 const TIMEOUT: f32 = 20.0;
 
-/// A world load finished: the loading screen is down and the arrival is logged (`FUN_39426520`'s end-of-load
-/// point). The 30 s planting reuse lock starts here (`FUN_393a6de0`); emitted after the load is taken down.
+/// A world load finished: the loading screen is down and the arrival is logged (`FUN_39426520`'s
+/// end-of-load point). The shared 30 s placement/planting lock starts here (`FUN_393a6de0`);
+/// emitted after the load is taken down.
 #[derive(Message, Clone, Copy, Debug, Default)]
 pub struct WorldLoadFinished;
 

@@ -34,6 +34,10 @@ pub struct Actions {
     mouse_latched: HashMap<MouseButton, Action>,
     primed: bool,
     zoom_lines: f32,
+    /// Keys held when a cinema's post-movie input block ends, latched by the next `update`.
+    replay_keys: Vec<KeyCode>,
+    /// Mouse buttons held across the same block.
+    replay_mouse: Vec<MouseButton>,
 }
 
 impl Actions {
@@ -135,11 +139,53 @@ impl Actions {
         self.tapped.clear();
         self.mouse_latched.clear();
         self.primed = false;
+        self.clear_replay();
     }
 
-    /// Rebuild the physical key map from the next frame's real button state.
-    pub(crate) fn reread_physical(&mut self) {
+    /// On cinema resume, hold the keys and buttons still down as their bound actions: no tap
+    /// edge, so a held movement key starts moving and stops on its real release. `update` does
+    /// the resolution against the live keymap; plain priming (world entry, focus regain) still
+    /// never turns an already held key into a new press.
+    pub(crate) fn replay_held(
+        &mut self,
+        keys: impl IntoIterator<Item = KeyCode>,
+        mouse: impl IntoIterator<Item = MouseButton>,
+    ) {
+        self.replay_keys.clear();
+        self.replay_keys.extend(keys);
+        self.replay_mouse.clear();
+        self.replay_mouse.extend(mouse);
         self.primed = false;
+    }
+
+    fn clear_replay(&mut self) {
+        self.replay_keys.clear();
+        self.replay_mouse.clear();
+    }
+
+    fn latch_replay(&mut self, map: &Keymap, modes: &[&str]) {
+        let modifiers = self.modifiers();
+        for code in std::mem::take(&mut self.replay_keys) {
+            let Some(key) = aa_ui::native_key_name(code) else {
+                continue;
+            };
+            if let Some(action) = resolve(key, modifiers, map, modes) {
+                self.latched.insert(code, action.clone());
+                self.pressed.insert(action);
+            }
+        }
+        for button in std::mem::take(&mut self.replay_mouse) {
+            let key = match button {
+                MouseButton::Middle => "mouse3",
+                MouseButton::Back => "mouse4",
+                MouseButton::Forward => "mouse5",
+                _ => continue,
+            };
+            if let Some(action) = resolve(key, modifiers, map, modes) {
+                self.mouse_latched.insert(button, action.clone());
+                self.pressed.insert(action);
+            }
+        }
     }
 
     fn begin(&mut self, blocked: bool) {
@@ -258,11 +304,16 @@ pub(crate) fn update(
         mouse.clear();
         wheel.clear();
         actions.begin(true);
+        actions.clear_replay();
         return;
     };
     let map = shared.lock().unwrap_or_else(|e| e.into_inner());
     let blocked = !map.enabled || rt.is_some_and(|rt| rt.keyboard_captured());
     actions.begin(blocked);
+    if blocked {
+        // keyboard capture or disabled hotkeys: do not replay the cinema's held keys later
+        actions.clear_replay();
+    }
     if lost.read().next().is_some() {
         lost.clear();
         input.clear();
@@ -271,6 +322,7 @@ pub(crate) fn update(
         actions.physical.clear();
         actions.primed = false;
         actions.begin(true);
+        actions.clear_replay();
         return;
     }
     let modes: Vec<_> = bridge.0.borrow().input_modes.priority() .collect();
@@ -287,6 +339,9 @@ pub(crate) fn update(
             }
         }
         actions.primed = true;
+        if !blocked {
+            actions.latch_replay(&map, &modes);
+        }
     }
     for event in events {
         actions.edge(event.key_code, event.state.is_pressed(), event.repeat, blocked, &map, &modes);
@@ -307,6 +362,8 @@ pub(crate) fn update(
             actions.tap(action, amount);
         }
     }
+    // a replay is consumed once; never let it latch on a later frame
+    actions.clear_replay();
 }
 
 #[cfg(test)]
@@ -413,6 +470,24 @@ mod tests {
         a.begin(false);
         a.edge(KeyCode::KeyW, true, true, false, &map, &[]);
         assert!(!a.pressed("moveforward", 0), "captured held key cannot reactivate from repeat");
+        Ok(())
+    }
+
+    #[test]
+    fn a_replayed_held_key_and_button_latch_without_a_tap_and_clear_on_release() -> anyhow::Result<()> {
+        let map = Keymap::new(None)?;
+        let mut a = Actions::default();
+        a.replay_held([KeyCode::KeyW], [MouseButton::Back]);
+        assert!(!a.primed, "a replay re-reads the physical state");
+        a.physical.insert(KeyCode::KeyW);
+        a.latch_replay(&map, &[]);
+        assert!(a.pressed("moveforward", 0));
+        assert!(a.pressed("autorun", 0), "a held mouse binding is latched too");
+        assert!(!a.just_pressed("moveforward", 0), "a replay is not a tap");
+        a.edge(KeyCode::KeyW, false, false, false, &map, &[]);
+        assert!(!a.pressed("moveforward", 0));
+        a.mouse(MouseButton::Back, false, false, &map, &[]);
+        assert!(!a.pressed("autorun", 0));
         Ok(())
     }
 

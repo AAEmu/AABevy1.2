@@ -2768,6 +2768,9 @@ and `HiddenInGame` (default false). Parent transforms are composed before the ce
 unresolved parents, cycles and non-finite/singular transforms are skipped. Hidden static slots remain
 plain placement data and never enter the draw bins. This preserves the hidden training targets and
 does not spawn the CDF/CHR cinematic characters handled by aa-client's login stage.
+`parse_effect_entities` (cell `ParticleEffect` entities, and prefab `<Object Parent=...>` effects
+through `parse_named_effect_entities`) composes the same parent chain: an empty `ParentGUID` is a
+root, while an unresolved parent or a cycle skips the effect.
 
 Visible CGF slots and stopped CGA slots (`Animation.bPlaying=0`, native `ResetAnimation(0,-1)`)
 use `Kind::Entity` bins in the existing 64 m sector streamer. They share model/material assets,

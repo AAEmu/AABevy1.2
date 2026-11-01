@@ -2,6 +2,8 @@
 # usage: tools/skilltest/client_sample.sh NAME TREE SHOT_AFTER SKILL1 SKILL2 SKILL3 SKILL4
 # learns the tree on the account with the driver, then runs the real client (a copy in target/agents/skilltest/): target the nearest
 # enemy at 14 s, slot 1..4 at 16, 20, 24, 28 s, one screenshot, log in shots/skilltest/NAME.log. Check free RAM first.
+# Exempt from --require-wall-clock: this is a functional skill sample (does the tree learn, do the slots fire), not a
+# timing comparison; nothing here reads a duration from the app clock.
 name=$1; tree=$2; after=$3; shift 3
 tools/skilltest/retry.sh data/extract/skilltest/learn_$name --trees $tree --learn-only --at 15530,15323,131.4 > /dev/null 2>&1
 sleep 5
