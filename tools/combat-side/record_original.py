@@ -69,6 +69,8 @@ DRIFT_WARNING_POLICY = (
 PRESS_WINDOW_MS = 500.0
 MEMORY_SHIFT_CHANNELS = ("gcd", "anim_controller")
 MEMORY_UI_RESIDUAL_MS = 25.0
+MEMORY_UI_NEAR_WINDOW_MS = 1000.0
+MIN_CONFIRMING_PAIRS = 2
 MEMORY_UI_ASSUMPTION = (
     "the GCD is written in the same frame the cast starts; the measured offset "
     "absorbs UI frame-start stamping (about half a 52 ms frame), the 5 ms memory "
@@ -1720,7 +1722,8 @@ def cast_start_rows(rows: list[dict]) -> list[dict]:
 
 def measure_memory_ui_offset(channels: dict[str, list[dict]],
                              window_ms: float = 150.0,
-                             negative_slack_ms: float = 25.0) -> dict:
+                             negative_slack_ms: float = 25.0,
+                             near_window_ms: float = MEMORY_UI_NEAR_WINDOW_MS) -> dict:
     """Compare each GCD rise with the cast start of the same press.
 
     Both sides are client-clock times: the cast start is the UI clock the
@@ -1731,9 +1734,16 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
     preferred when present, so that re-measurement still reports the real
     difference instead of the zero the shift builds in.
 
-    ``measurable`` needs at least one matched pair.  Cast bars or GCD rises
-    that never pair leave the check unmeasurable (``ok`` true) and carry a
-    ``reason``; only a measured outlier can fail it.
+    An unpaired rise is checked again against every unused cast start within
+    ``near_window_ms``.  If one is that close, the ordering does not match the
+    same-frame assumption (e.g. the GCD written 300 ms after its cast start)
+    and the run is reported as ``unpaired_near_start`` and fails.  Only an
+    instant skill with no cast start anywhere near it stays exempt.
+
+    ``measurable`` needs at least one matched pair, but the offset is
+    ``confirmed`` only with ``MIN_CONFIRMING_PAIRS`` pairs; one pair is
+    reported as ``low_confidence``.  A run with no pairs and no near start
+    reports ``not-measurable`` and does not fail.
     """
     gcd_rows = channels.get("gcd", [])
     cast_rows = channels.get("castbar", [])
@@ -1750,8 +1760,9 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
         previous = current
     starts = cast_start_rows(cast_rows)
     used: set[int] = set()
+    paired: set[int] = set()
     pairs: list[dict] = []
-    for rise in rises:
+    for rise_index, rise in enumerate(rises):
         rise_ms = rise.get("client_ms_raw", rise.get("client_ms"))
         best = None
         for index, start in enumerate(starts):
@@ -1768,22 +1779,50 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
                 best = (delta, index, start, start_ms)
         if best is not None:
             used.add(best[1])
+            paired.add(rise_index)
             pairs.append({
                 "cast_start_ms": int(round(best[3])),
                 "gcd_rise_ms": int(rise_ms),
                 "offset_ms": round(best[0], 1),
                 "skill": best[2].get("player_name"),
             })
+    unpaired_near_start: list[dict] = []
+    for rise_index, rise in enumerate(rises):
+        if rise_index in paired:
+            continue
+        rise_ms = rise.get("client_ms_raw", rise.get("client_ms"))
+        best = None
+        for index, start in enumerate(starts):
+            if index in used:
+                continue
+            start_ms = start.get("native_ms")
+            if start_ms is None:
+                start_ms = start.get("client_ms")
+            if start_ms is None:
+                continue
+            delta = rise_ms - start_ms
+            if (abs(delta) <= near_window_ms
+                    and (best is None or abs(delta) < abs(best[0]))):
+                best = (delta, start, start_ms)
+        if best is not None:
+            unpaired_near_start.append({
+                "cast_start_ms": int(round(best[2])),
+                "gcd_rise_ms": int(rise_ms),
+                "delta_ms": round(best[0], 1),
+                "skill": best[1].get("player_name"),
+            })
     offsets = [pair["offset_ms"] for pair in pairs]
     median = statistics.median(offsets) if offsets else 0.0
     residuals = sorted(abs(offset - median) for offset in offsets)
     measured = bool(pairs)
     measurable = measured
+    confirmed = len(pairs) >= MIN_CONFIRMING_PAIRS
+    ordering_mismatch = bool(unpaired_near_start)
     if measured:
-        ok = residuals[-1] <= MEMORY_UI_RESIDUAL_MS
+        ok = residuals[-1] <= MEMORY_UI_RESIDUAL_MS and not ordering_mismatch
         reason = None
     else:
-        ok = True
+        ok = not ordering_mismatch
         if not rises and not starts:
             reason = "no-gcd-rises-or-cast-starts"
         elif not rises:
@@ -1792,20 +1831,31 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
             reason = "no-cast-starts"
         else:
             reason = "no-pairs"
+    if confirmed:
+        status = "confirmed"
+    elif measured:
+        status = "low-confidence"
+    else:
+        status = "not-measurable"
     return {
         "assumption": MEMORY_UI_ASSUMPTION,
         "raw_field": "client_ms_raw",
-        "status": "measured" if measured else "not-measurable",
+        "status": status,
         "measurable": measurable,
         "measured": measured,
+        "confirmed": confirmed,
+        "low_confidence": measured and not confirmed,
         "ok": ok,
         "reason": reason,
         "offset_ms": round(median, 2),
         "pairs": len(pairs),
         "gcd_rises": len(rises),
         "cast_starts": len(starts),
+        "unpaired_near_start": unpaired_near_start,
+        "ordering_mismatch": ordering_mismatch,
         "window_ms": window_ms,
         "negative_slack_ms": negative_slack_ms,
+        "near_window_ms": near_window_ms,
         "spread_ms": round(max(offsets) - min(offsets), 2) if offsets else None,
         "stdev_ms": round(statistics.pstdev(offsets), 2) if len(offsets) > 1 else 0.0,
         "residual_after_median_ms": round(statistics.median(residuals), 2)
@@ -1820,7 +1870,10 @@ def shift_estimate_rows(run: Path, offset_ms: float) -> int:
 
     Only ``gcd`` and ``anim_controller`` come from ReadProcessMemory.  The
     wall-stamped estimate rows (``unit_state``, ``meta``) keep the fitted
-    clock, and the unshifted memory time stays in ``client_ms_raw``.
+    clock, and the unshifted memory time stays in ``client_ms_raw``.  The shift
+    is idempotent: an existing ``client_ms_raw`` is never overwritten, so a
+    second call with the same offset changes nothing and a call with a new
+    offset re-shifts from the original time.
     """
     if not offset_ms:
         return 0
@@ -1832,13 +1885,21 @@ def shift_estimate_rows(run: Path, offset_ms: float) -> int:
             if not line:
                 continue
             row = json.loads(line)
-            if (row.get("channel") in MEMORY_SHIFT_CHANNELS
+            if not (row.get("channel") in MEMORY_SHIFT_CHANNELS
                     and row.get("clock") == "estimate"
                     and isinstance(row.get("client_ms"), int)):
-                row["client_ms_raw"] = row["client_ms"]
-                row["client_ms"] = int(round(row["client_ms"] - offset_ms))
+                lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+                continue
+            raw = row.get("client_ms_raw")
+            if not isinstance(raw, int):
+                raw = row["client_ms"]
+                row["client_ms_raw"] = raw
+            target = int(round(raw - offset_ms))
+            delta = target - row["client_ms"]
+            if delta:
+                row["client_ms"] = target
                 if isinstance(row.get("t_ms"), int):
-                    row["t_ms"] = int(round(row["t_ms"] - offset_ms))
+                    row["t_ms"] = int(round(row["t_ms"] + delta))
                 shifted += 1
                 changed = True
             lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
@@ -1874,6 +1935,9 @@ def remap_channels(run: Path, clock: Clock) -> dict:
                 row["t_ms"] = clock.relative(client)
             if wall is not None:
                 row["wall_ms"] = round(float(wall), 1)
+            # client_ms is computed afresh above, so any raw time from an
+            # earlier shift is stale; shift_estimate_rows adds it again.
+            row.pop("client_ms_raw", None)
             lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
     memory_ui = measure_memory_ui_offset(read_channels(run))
@@ -2221,7 +2285,7 @@ def main() -> int:
             })
             if not all(entry["ok"] for entry in quality["monotonic"].values()):
                 result["ok"] = False
-            if memory_ui.get("measurable") and not memory_ui.get("ok"):
+            if not memory_ui.get("ok", True):
                 result["ok"] = False
             if failure is not None:
                 result["ok"] = False
@@ -2271,12 +2335,21 @@ def main() -> int:
                         "(assumes the GCD is written in the same frame the cast starts)",
                         "spread", info["spread_ms"], "ms",
                         "pairs", info["pairs"],
+                        "status", info.get("status"),
                         "residual max", info["residual_after_max_ms"], "ms",
                         "applied", info.get("applied_offset_ms"), "ms")
+                    if info.get("low_confidence"):
+                        log("memory->UI offset low confidence: only",
+                            info["pairs"], "pair(s)")
                 else:
                     log("memory->UI offset not measurable:", info.get("reason"),
                         "rises", info.get("gcd_rises"),
                         "cast starts", info.get("cast_starts"))
+                for near in info.get("unpaired_near_start") or []:
+                    log("memory->UI ordering mismatch: GCD rise",
+                        near.get("delta_ms"), "ms from the cast start of",
+                        near.get("skill"), "(rise", near.get("gcd_rise_ms"),
+                        "cast start", near.get("cast_start_ms"), ")")
             if isinstance(result.get("quality"), dict):
                 mono = result["quality"]["monotonic"]
                 bad = [name for name, entry in mono.items() if not entry["ok"]]

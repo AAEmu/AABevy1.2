@@ -20,8 +20,10 @@ in the same frame the cast starts**; the measured offset therefore mixes the
 UI's frame-start stamping (about half a 52 ms frame), the 5 ms memory cadence
 and any real 1.2 ordering.  Each shifted row keeps its unshifted time in
 `client_ms_raw`, and the post-shift GCD-rise-vs-cast difference must not be
-read as 1.2 evidence.  Wall-stamped rows (`unit_state`, `meta`) are never
-shifted.  A read that fails (`ReadProcessMemory` error) is retried for 5 s
+read as 1.2 evidence.  A rise that does not pair but has a cast start within
+1000 ms is reported as an ordering mismatch and fails the run; the offset is
+confirmed only with two pairs.  Wall-stamped rows (`unit_state`, `meta`) are
+never shifted.  A read that fails (`ReadProcessMemory` error) is retried for 5 s
 with marked ``gap`` rows; if the actor never returns, a ``read_failed`` row
 stops the sampler with an error instead of silently producing zeros.  The Lua
 buffers are drained every 5 s, so a disconnect loses at most a few seconds; the
@@ -68,11 +70,12 @@ running (the hooks and timers are still removed) so a failed run can be retried
 without starting the client again; stop it by pid afterwards.
 
 Exit status: `0` when the self-check passes, `2` when a required channel is
-empty, the GCD never completes a press-linked rise, a measurable memory-to-UI
-alignment has a residual above 25 ms after the median, or a channel's
+empty, the GCD never completes a press-linked rise, the memory-to-UI check
+fails (an unpaired rise within 1000 ms of a cast start, i.e. an ordering
+mismatch, or a residual above 25 ms after the median), or a channel's
 `client_ms` runs backwards, `1` on a setup failure (including a failed memory
-read or an interrupt).  A `KeyboardInterrupt` is recorded in
-`self_check.json` as a failure, cleanup runs, and the interrupt is re-raised.
+read or an interrupt).  A `KeyboardInterrupt` is recorded in `self_check.json` as a
+failure, cleanup runs, and the interrupt is re-raised.
 `clock.*.drift_warning` (an applied drift beyond 200 ppm) is reported but does
 not gate the self-check; see the `clock` bullet under Self-check.
 
@@ -117,7 +120,8 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
   the clock residuals are fit quality only.
 * `client_ms_raw` is the unshifted memory time on `gcd` and `anim_controller`
   rows that the shift moved; `client_ms` for those rows is the shifted value.
-  `t_ms` follows the shifted `client_ms`.
+  The shift never overwrites an existing `client_ms_raw`, so running it twice
+  is safe.  `t_ms` follows the shifted `client_ms`.
 * `native_ms` is the raw value of that row's own clock when it has one (UI or
   system); it is absent for estimated rows.
 * `t_ms` is `client_ms` minus the fitted client time at the first clock
@@ -206,7 +210,15 @@ lane dry run therefore reads the caster/victim animation list through
   cast-start), its spread/stdev, the pairs and the residual after the median.
   It is `measured`/`measurable` only with at least one matched pair; with no
   pairs it says so (`reason`: `no-cast-starts`, `no-gcd-rises`,
-  `no-gcd-rises-or-cast-starts` or `no-pairs`) and does not fail the run.  Its
+  `no-gcd-rises-or-cast-starts` or `no-pairs`) and, if no rise has a cast start
+  nearby, does not fail the run.  The offset is `confirmed` only with two or
+  more pairs; a single pair is reported as `status=low-confidence`,
+  `low_confidence=true` and logged, but it does not gate the self-check (the
+  offset is still the best estimate and the report says it is unconfirmed).
+  An unpaired rise with an unused cast start within `near_window_ms` (1000 ms)
+  is listed in `unpaired_near_start` with its delta and sets
+  `ordering_mismatch`; that fails the run (e.g. a GCD written 300 ms after its
+  cast start).  A true instant with no cast start nearby stays exempt.  Its
   `assumption` is the same-frame GCD rule, and `raw_field` names
   `client_ms_raw`.  Do not use the post-shift difference as 1.2 ordering
   evidence: the shift makes it zero by construction, and only the spread and
@@ -249,13 +261,14 @@ Python memory sampler uses `timeBeginPeriod(1)` and a `perf_counter` busy-wait
 for its 5 ms cadence; before that it inherited the 15.6 ms Windows timer.
 
 The memory-to-UI alignment measured on run5: offset **27 ms**, spread 6 ms
-(stdev 2.5 ms) over 3 matched Flamebolt casts, residual maximum 4 ms.  That
-27 ms is the same-frame shift: it contains the UI frame-start stamping (about
-half of the 52 ms frame), the 5 ms memory cadence and any real 1.2 ordering, so
-it is not evidence of when the client writes the GCD.  After the shift the GCD
-rises coincide with their cast starts by construction; only the spread and the
-residual describe the pair jitter.  The unshifted time is in `client_ms_raw`,
-and the recomputed run is in `run5-recomputed/`; the raw run is untouched.
+(stdev 2.5 ms) over 3 matched Flamebolt casts (confirmed), residual maximum
+4 ms.  That 27 ms is the same-frame shift: it contains the UI frame-start
+stamping (about half of the 52 ms frame), the 5 ms memory cadence and any real
+1.2 ordering, so it is not evidence of when the client writes the GCD.  After
+the shift the GCD rises coincide with their cast starts by construction; only
+the spread and the residual describe the pair jitter.  The unshifted time is in
+`client_ms_raw`, and the recomputed run is in `run5-recomputed/`; the raw run is
+untouched.
 
 ## Tests
 
@@ -266,10 +279,11 @@ python -m unittest discover -s tools/combat-side -p "test_*.py" -v
 The offline tests cover the drift gate and warning policy, the completed-rise
 GCD rule (including an incrementing-counter negative case, the "most rises
 follow a press" majority and one press starting at most one rise), the
-memory-to-UI measurement and shift (instant rises, unpaired starts, an outlier
-pair, and the shift touching only the memory channels), stale-reply skipping,
-the KeyboardInterrupt self-check, sampler gap recovery and a null actor that
-must enter recovery instead of writing stale rows.
+memory-to-UI measurement and shift (instant rises, far and near unpaired
+starts at +300 ms and -100 ms, an outlier pair, a single low-confidence pair,
+idempotent shifting, and the shift touching only the memory channels),
+stale-reply skipping, the KeyboardInterrupt self-check, sampler gap recovery
+and a null actor that must enter recovery instead of writing stale rows.
 
 ## Limits
 
@@ -296,9 +310,13 @@ must enter recovery instead of writing stale rows.
   with a cast-bar start within the window.  Instant skills without a cast bar
   still count for the GCD check but cannot contribute a cross-channel pair; a
   run with no casts (or with starts and rises that never pair) leaves
-  `memory_ui.measurable=false` with a `reason` and does not gate the
-  self-check.  The measured 27 ms shift absorbs frame stamping and cadence, so
-  the post-shift difference is not 1.2 ordering evidence; use
+  `memory_ui.measurable=false` with a `reason`.  It still fails when an
+  unpaired rise has an unused cast start within 1000 ms (`ordering_mismatch`),
+  because that is exactly the ordering difference the tight window would hide;
+  a truly instant rise has no start that close and stays exempt.  One pair is
+  only `low-confidence`, not `confirmed`; it does not fail the run but does not
+  prove the offset either.  The measured 27 ms shift absorbs frame stamping and
+  cadence, so the post-shift difference is not 1.2 ordering evidence; use
   `client_ms_raw`.
 * Drift is not applied on runs shorter than 60 s; the slope reported there is
   the unconstrained estimate with its standard error, not a correction.

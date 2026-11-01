@@ -168,7 +168,11 @@ class MemoryUiOffsetTests(unittest.TestCase):
         self.assertEqual(measured["pairs"], 2)
         self.assertEqual(measured["offset_ms"], 26.0)
         self.assertEqual(measured["spread_ms"], 2.0)
-        self.assertEqual(measured["status"], "measured")
+        self.assertEqual(measured["status"], "confirmed")
+        self.assertTrue(measured["confirmed"])
+        self.assertFalse(measured["low_confidence"])
+        self.assertEqual(measured["unpaired_near_start"], [])
+        self.assertFalse(measured["ordering_mismatch"])
         self.assertIsNone(measured["reason"])
         self.assertIn("same frame", measured["assumption"])
         self.assertEqual(measured["raw_field"], "client_ms_raw")
@@ -190,6 +194,7 @@ class MemoryUiOffsetTests(unittest.TestCase):
         self.assertFalse(measured["measurable"])
         self.assertEqual(measured["pairs"], 0)
         self.assertEqual(measured["reason"], "no-cast-starts")
+        self.assertEqual(measured["unpaired_near_start"], [])
         self.assertTrue(measured["ok"])
 
     def test_starts_that_never_pair_are_not_measurable(self) -> None:
@@ -201,7 +206,47 @@ class MemoryUiOffsetTests(unittest.TestCase):
         self.assertEqual(measured["pairs"], 0)
         self.assertEqual(measured["reason"], "no-pairs")
         self.assertFalse(measured["measurable"])
+        self.assertEqual(measured["unpaired_near_start"], [])
+        self.assertFalse(measured["ordering_mismatch"])
         self.assertTrue(measured["ok"])
+
+    def test_single_pair_is_low_confidence_not_confirmed(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000)],
+             "castbar": cast_channel([1000])})
+        self.assertEqual(measured["pairs"], 1)
+        self.assertTrue(measured["measured"])
+        self.assertFalse(measured["confirmed"])
+        self.assertTrue(measured["low_confidence"])
+        self.assertEqual(measured["status"], "low-confidence")
+        self.assertTrue(measured["ok"])
+
+    def test_unpaired_rise_after_a_near_cast_start_fails(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
+                     gcd_row(3000, 0, 0), gcd_row(3027, 1000, 1000),
+                     gcd_row(6000, 0, 0), gcd_row(6300, 1000, 1000)],
+             "castbar": cast_channel([1000, 3000, 6000])})
+        self.assertEqual(measured["pairs"], 2)
+        self.assertTrue(measured["confirmed"])
+        self.assertEqual(measured["unpaired_near_start"],
+                         [{"cast_start_ms": 6000, "gcd_rise_ms": 6300,
+                           "delta_ms": 300.0, "skill": "Flamebolt"}])
+        self.assertTrue(measured["ordering_mismatch"])
+        self.assertFalse(measured["ok"])
+
+    def test_unpaired_rise_before_a_near_cast_start_fails(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
+                     gcd_row(3000, 0, 0), gcd_row(3027, 1000, 1000),
+                     gcd_row(5900, 0, 0), gcd_row(5900, 1000, 1000)],
+             "castbar": cast_channel([1000, 3000, 6000])})
+        self.assertEqual(measured["pairs"], 2)
+        self.assertEqual(measured["unpaired_near_start"],
+                         [{"cast_start_ms": 6000, "gcd_rise_ms": 5900,
+                           "delta_ms": -100.0, "skill": "Flamebolt"}])
+        self.assertTrue(measured["ordering_mismatch"])
+        self.assertFalse(measured["ok"])
 
     def test_outlier_pair_fails_the_residual_gate(self) -> None:
         measured = rec.measure_memory_ui_offset(
@@ -236,6 +281,25 @@ class MemoryUiOffsetTests(unittest.TestCase):
             row = json.loads((run / f"{name}.jsonl").read_text().splitlines()[0])
             self.assertEqual(row["client_ms"], 1000)
             self.assertNotIn("client_ms_raw", row)
+
+    def test_shift_is_idempotent(self) -> None:
+        run = pathlib.Path(tempfile.mkdtemp())
+        (run / "gcd.jsonl").write_text(
+            json.dumps({"channel": "gcd", "clock": "estimate", "client_ms": 1000,
+                        "t_ms": 100}) + "\n", encoding="utf-8")
+        self.assertEqual(rec.shift_estimate_rows(run, 27), 1)
+        first = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
+        self.assertEqual(first["client_ms"], 973)
+        self.assertEqual(first["client_ms_raw"], 1000)
+        self.assertEqual(first["t_ms"], 73)
+        self.assertEqual(rec.shift_estimate_rows(run, 27), 0)
+        second = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
+        self.assertEqual(second, first)
+        self.assertEqual(rec.shift_estimate_rows(run, 10), 1)
+        third = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
+        self.assertEqual(third["client_ms"], 990)
+        self.assertEqual(third["client_ms_raw"], 1000)
+        self.assertEqual(third["t_ms"], 90)
 
 
 class McpReplyTests(unittest.TestCase):
