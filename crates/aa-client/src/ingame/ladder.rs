@@ -27,24 +27,21 @@
 //!   reason 0 (the 1.2 "my ladder is missing" path) and death releases with reason 0xb
 //!   (`FUN_39137320`, the only native 0xb site);
 //! * a plain Space jump sends `CSUnhang` 7, the mode-7 back-hop away from the ladder (`-2.0`
-//!   forward, `4.0` up, a `-0.3 m` nudge along forward), and Space with a lateral key held (A/D
-//!   in the capture) sends the mode-4/5 side hop (`-/+2.0` local X, `4.0` up, `-/+0.3 m` along
-//!   X). The 2026-11-01 original-client capture saw 7 with no lateral input (also with W held)
-//!   and 4 with a lateral key held; 5 and 6 were not captured. Mode 6 is the forward leap
-//!   (`4.5` forward, `7.0` up).
-//!   Which lateral key gives 4 vs 5 is capture-pending: the mode switch says 4 is local -X and 5
-//!   local +X, so the left action sends 4 here.
+//!   forward, `4.0` up, a `-0.3 m` nudge along forward). A+Space sends the mode-4 side hop and
+//!   D+Space the mode-5 side hop (`-/+2.0` local X, `4.0` up, `-/+0.3 m` along X): the owner's
+//!   2026-11-01 14:20 session captured 4 for A and 5 for D on a ship ladder. An earlier
+//!   2026-11-01 capture saw 7 with no lateral input (also with W held); 6 was not captured.
+//!   Mode 6 is the forward leap (`4.5` forward, `7.0` up).
 //!
 //! Inferred (neither captured nor found in the decompile): F releases with reason 1 and the
 //! bottom exit sends reason 1. The only native reason-1 sender is `FUN_39134930`, when the top
 //! exit's `OnLadder` state turns off.
 //!
-//! Capture-pending (not settled by the decompile): which lateral key gives mode 4 vs 5; which
-//! input produces modes 3, 6, 8 and 9; the exact `deltaMovement` and velocity while climbing; the
-//! lateral `y` of the climb data on nets and guardrails (this client climbs centred, `y = 0`); the
-//! top step distance and the camera pitch clamp; and how a remote client animates a hanger (the
-//! client packet consumer was not traced). The remote side here uses the `SCHung` target's kind
-//! and the climb data.
+//! Capture-pending (not settled by the decompile): which input produces modes 3, 6, 8 and 9;
+//! the exact `deltaMovement` and velocity while climbing; the lateral `y` of the climb data on
+//! nets and guardrails (this client climbs centred, `y = 0`); the top step distance and the camera
+//! pitch clamp; and how a remote client animates a hanger (the client packet consumer was not
+//! traced). The remote side here uses the `SCHung` target's kind and the climb data.
 
 use aa_anim::Animator;
 use aa_net::climb;
@@ -152,10 +149,10 @@ pub mod reason {
     /// off. Our F release and bottom exit also send 1: inferred, with no native site found for
     /// either.
     pub const RELEASE: i32 = 1;
-    /// A jump with the left lateral key held: hop to the local -X side (`FUN_39135570` mode 4).
-    /// Which physical key gives 4 vs 5 is capture-pending (the mode switch fixes -X = 4).
+    /// A+Space: hop to the local -X side (`FUN_39135570` mode 4). Captured in the owner's
+    /// 2026-11-01 14:20 session on a ship ladder.
     pub const LEFT_HOP: i32 = 4;
-    /// A jump with the right lateral key held: hop to the local +X side (`FUN_39135570` mode 5).
+    /// D+Space: hop to the local +X side (`FUN_39135570` mode 5). Same capture.
     pub const RIGHT_HOP: i32 = 5;
     /// The mode-6 forward leap (4.5 forward, 7.0 up, anim `jumpMP01`). No capture and no known
     /// trigger; kept for the mode table.
@@ -775,11 +772,10 @@ pub fn control_ladder(
         actions.pressed("moveforward", 0) as i32 as f32
             - actions.pressed("moveback", 0) as i32 as f32
     };
-    // The lateral key held at the jump picks the side hop. The capture's keys are A/D
-    // (`turnleft`/`turnright`); the strafe pair (`moveleft`/`moveright`) is the same lateral
-    // intent. Capture-pending: which key gives 4 vs 5. The mode switch fixes 4 = local -X and
-    // 5 = local +X, so the left action sends 4 (flip this sign if a one-key capture says
-    // otherwise).
+    // The lateral key held at the jump picks the side hop: A+Space -> 4 (local -X) and
+    // D+Space -> 5 (local +X), captured 2026-11-01 14:20 on a ship ladder. A/D are
+    // `turnleft`/`turnright`; the strafe pair (`moveleft`/`moveright`) is the same lateral
+    // intent, so the left actions send 4.
     let lateral = if typing {
         0.0
     } else {

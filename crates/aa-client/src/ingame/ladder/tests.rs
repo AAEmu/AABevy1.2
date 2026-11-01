@@ -400,52 +400,57 @@ fn a_plain_jump_off_sends_7_and_carries_away_from_the_ladder() {
     );
 }
 
+/// One lateral jump: the action held at Space, the expected wire reason, and the local X sign.
+fn assert_side_jump(action: &str, reason: i32, sign: f32) {
+    let mut app = app(0);
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    clear_taps(&mut app);
+    hold(&mut app, action);
+    tap(&mut app, "jump");
+    app.update();
+    assert!(ladder_of(&mut app).is_none(), "{action}: the jump left");
+    let commands = sent(&mut app);
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: r } if *r == reason)),
+        "{action}: CSUnhang {reason}: {commands:?}"
+    );
+    let entity = player_entity(&mut app);
+    let carried = *app
+        .world()
+        .get::<super::player::CarriedVelocity>(entity)
+        .expect("the jump carry");
+    // Facing -X, the local X axis is +Y: the side velocity is 2.0 m/s along it.
+    assert!(
+        (carried.0.y - sign * 2.0).abs() < 1e-5 && carried.0.x.abs() < 1e-6,
+        "{action}: side velocity {:?}",
+        carried.0
+    );
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    assert!((mover.vz - 4.0).abs() < 1e-5, "{action}: 4.0 m/s up");
+    assert!(
+        (mover.pos.y - sign * 0.3).abs() < 1e-5,
+        "{action}: the 0.3 m side nudge: {:?}",
+        mover.pos
+    );
+}
+
 #[test]
-fn a_jump_with_a_lateral_key_sends_the_side_hop_and_its_velocity() {
-    // 4 is local -X and 5 local +X (the mode switch); which physical key gives each is
-    // capture-pending, so this pins the left/right action mapping used by `control_ladder`.
-    // A/D (turn) are the capture's keys; Q/E (strafe) are the same lateral intent.
-    for (action, reason, sign) in [
-        ("turnleft", 4, -1.0f32),
-        ("turnright", 5, 1.0),
-        ("moveleft", 4, -1.0),
-        ("moveright", 5, 1.0),
-    ] {
-        let mut app = app(0);
-        tap(&mut app, "do_interaction_1");
-        app.update();
-        clear_taps(&mut app);
-        hold(&mut app, action);
-        tap(&mut app, "jump");
-        app.update();
-        assert!(ladder_of(&mut app).is_none(), "{action}: the jump left");
-        let commands = sent(&mut app);
-        assert!(
-            commands
-                .iter()
-                .any(|c| matches!(c, Command::Unhang { reason: r } if *r == reason)),
-            "{action}: CSUnhang {reason}: {commands:?}"
-        );
-        let entity = player_entity(&mut app);
-        let carried = *app
-            .world()
-            .get::<super::player::CarriedVelocity>(entity)
-            .expect("the jump carry");
-        // Facing -X, the local X axis is +Y: the side velocity is 2.0 m/s along it.
-        assert!(
-            (carried.0.y - sign * 2.0).abs() < 1e-5 && carried.0.x.abs() < 1e-6,
-            "{action}: side velocity {:?}",
-            carried.0
-        );
-        let mut q = app.world_mut().query::<&Mover>();
-        let mover = q.single(app.world()).unwrap();
-        assert!((mover.vz - 4.0).abs() < 1e-5, "{action}: 4.0 m/s up");
-        assert!(
-            (mover.pos.y - sign * 0.3).abs() < 1e-5,
-            "{action}: the 0.3 m side nudge: {:?}",
-            mover.pos
-        );
-    }
+fn a_and_d_with_space_send_4_and_5() {
+    // The owner's 2026-11-01 14:20 session on a ship ladder: A held + Space sent CSUnhang 4,
+    // D held + Space sent CSUnhang 5.
+    assert_side_jump("turnleft", 4, -1.0);
+    assert_side_jump("turnright", 5, 1.0);
+}
+
+#[test]
+fn strafe_with_space_sends_the_same_side_hop() {
+    // Q/E strafe are the same lateral intent as A/D, which the capture used.
+    assert_side_jump("moveleft", 4, -1.0);
+    assert_side_jump("moveright", 5, 1.0);
 }
 
 #[test]
