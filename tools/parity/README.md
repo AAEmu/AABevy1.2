@@ -32,8 +32,11 @@ steps: []                    # required, non-empty
 
 Every precondition and step has a unique `id` (letters, digits, `_`, `.`, `-`),
 exactly one verb, and optional `note`, `optional` (record the error and
-continue), and `server_tag` (`client`, `server` or `script`).  A failed step
-without `optional: true` aborts the run; the row is still written.
+continue), and `server_tag` (`client`, `server` or `script`).  Scripted setup
+verbs (`gm`, `move-to`, `set-slots`) default to `server_tag: script`; a step
+that captures a server-driven state sets `server_tag: server` explicitly.  A
+failed step without `optional: true` aborts the run; the row is still written
+and remapped through the final clock fit.
 
 ### Verbs
 
@@ -158,18 +161,23 @@ python tools/parity/run_original.py tools/parity/scenarios/auto_attack.yaml \
 ```
 
 `--lane` starts the client through that lane's `Scripts/live-stack.sh client`
-once; a second start is attempted only when the first looks like a startup
-crash.  The runner hides the client immediately and fails (stopping the pid) if
-`hidden=1` does not come back.  At the end it stops the client by pid unless
-`--keep-client`.  To attach instead, pass `--pid <pid>` and omit `--lane`; the
-same stop policy applies, so pass `--keep-client` when the client is not yours.
+once.  It keeps polling for the client pid until `--start-timeout` even after
+the shell script exits (the script backgrounds the launcher and sleeps 8 s).
+A second start is attempted only when a client pid was seen and then died; a
+client that is already running is adopted, not started.  The runner hides the
+client immediately and fails (stopping the pid only if the runner started it)
+if `hidden=1` does not come back.  At the end the runner stops only the client
+it started, unless `--keep-client`.  To attach instead, pass `--pid <pid>` and
+omit `--lane`; that client is never stopped by the runner.
 
 `--reply-delay` records the lane's reply-delay setting in `meta.json`
 (`reply_delay.hint_ms`); it does not change the server.  The server switch lives
 on the server's `feat/reply-delay` branch and is recorded for the later run.
 
 `--fake-mcp <fixture>` replays recorded MCP replies for offline tests.  It does
-not start or attach a client.
+not start, attach or stop a client.  The default capture root is
+`<repo>/data/local/parity`; pass `--capture-root` or `AA_PARITY_ROOT` for a
+capture outside the repository.
 
 ## Offline tests
 
@@ -178,9 +186,11 @@ python -m unittest discover -s tools/parity/tests -p "test_*.py" -v
 ```
 
 The tests parse and validate both scenarios, reject bad ids/verbs/untagged
-conditions/`LeaveWorld`, run the mini scenario through a recorded MCP fixture
-and assert the capture files, and align the K2 capture to reproduce the audit's
-corrected client times.  The K2 test skips unless `AA_PARITY_K2_RUN` points at
+conditions/`LeaveWorld`/exit-widget clicks, run the mini scenario through a
+recorded MCP fixture with moving system and UI clocks and assert the capture
+files, cover slow-start polling, the died-pid-only retry, adopted-client stop
+policy and a hung-MCP timeout, and align the K2 capture to reproduce the
+audit's corrected client times.  The K2 test skips unless `AA_PARITY_K2_RUN` points at
 `<handoff>/2026-11-01-combat-k2k3/run`.
 
 ## Open for the first live run

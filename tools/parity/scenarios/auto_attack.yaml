@@ -49,14 +49,17 @@ steps:
     wait: 300
   - id: first_clip
     snapshot: first_clip
+    server_tag: server
   - id: wait_repeat_1
     wait: 1700
   - id: repeat_1
     snapshot: repeat_1
+    server_tag: server
   - id: wait_repeat_2
     wait: 2000
   - id: repeat_2
     snapshot: repeat_2
+    server_tag: server
   - id: re_press
     use-skill:
       id: 2
@@ -66,6 +69,7 @@ steps:
     wait: 1000
   - id: after_repress
     snapshot: after_repress
+    server_tag: server
   - id: walk_away
     key: s
     hold_ms: 1500
@@ -73,9 +77,11 @@ steps:
     wait: 1000
   - id: walked_away
     snapshot: walked_away
+    server_tag: server
   - id: wait_settle
     wait: 2000
   - id: settled
     snapshot: settled
+    server_tag: server
   - id: auto_attack_done
     mark: auto_attack_done

@@ -372,6 +372,8 @@ def _normalise_step(raw: Any, index: int, seen: set[str]) -> dict:
             "server_tag": raw.get("server_tag")}
     if step["server_tag"] is not None and step["server_tag"] not in SOURCES:
         raise ScenarioError(f"{where}: server_tag must be client, server or script")
+    if step["server_tag"] is None and verb in ("gm", "move-to", "set-slots"):
+        step["server_tag"] = "script"
     if verb == "gm":
         text = str(value)
         if not text:
@@ -398,6 +400,7 @@ def _normalise_step(raw: Any, index: int, seen: set[str]) -> dict:
         path = str(value)
         if not WIDGET_PATH_RE.match(path):
             raise ScenarioError(f"{where}: click-ui needs a plain Lua widget path")
+        _reject_forbidden_widget(path, where)
         step["widget"] = path
     elif verb == "target":
         step["target"] = _normalise_target(value, where)
@@ -454,6 +457,18 @@ def _reject_forbidden(text: str, where: str) -> None:
         if token in lowered:
             raise ScenarioError(
                 f"{where}: {token!r} is not allowed in a scenario; stop by pid instead")
+
+
+FORBIDDEN_WIDGET = ("exit", "quit", "leaveworld", "leave_world",
+                   "menuexit", "menu_exit")
+
+
+def _reject_forbidden_widget(path: str, where: str) -> None:
+    lowered = path.lower()
+    for token in FORBIDDEN_WIDGET:
+        if token in lowered:
+            raise ScenarioError(
+                f"{where}: click-ui target {path!r} names an exit/quit widget")
 
 
 def validate_scenario(data: Any, source: str = "<scenario>") -> dict:

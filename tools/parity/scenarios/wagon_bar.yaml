@@ -46,6 +46,7 @@ steps:
       source: server
   - id: wagon_bar
     snapshot: wagon_bar
+    server_tag: server
     note: the driver bar (slots 1-5 skills, 6 unbind, 7 summon info)
   - id: use_slot_6
     use-skill:
@@ -59,6 +60,7 @@ steps:
       source: server
   - id: after_slot_6
     snapshot: after_slot_6
+    server_tag: server
   - id: f_prompt
     interact:
       key: f
@@ -71,5 +73,6 @@ steps:
       source: server
   - id: after_f
     snapshot: after_f
+    server_tag: server
   - id: wagon_done
     mark: wagon_done

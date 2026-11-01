@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -57,6 +58,7 @@ UI_CLOCK_CODE = ("local ok,t=pcall(function() return X2Time:GetUiMsec() end) "
                  "if ok and t then return t end return ''")
 LIB_PATH = ROOT / "reference" / "tools" / "lib.lua"
 SNAPSHOT_PATH = ROOT / "reference" / "tools" / "snapshot.lua"
+MCP_TIMEOUT_S = 30.0
 
 
 def log(*values: object) -> None:
@@ -254,20 +256,46 @@ class Mcp:
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
         self.sequence = 0
+        self.replies: queue.Queue[str | None] = queue.Queue()
+        self.reader = threading.Thread(target=self._reader, name="mcp-reader",
+                                       daemon=True)
+        self.reader.start()
         assert self.process.stdin and self.process.stdout
-        self.call("initialize", {"protocolVersion": "2025-11-25",
-                                 "capabilities": {},
-                                 "clientInfo": {"name": "parity-original",
-                                                "version": "1"}})
-        self.process.stdin.write(json.dumps(
-            {"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
-        self.process.stdin.flush()
+        try:
+            self.call("initialize", {"protocolVersion": "2025-11-25",
+                                     "capabilities": {},
+                                     "clientInfo": {"name": "parity-original",
+                                                    "version": "1"}})
+            self.process.stdin.write(json.dumps(
+                {"jsonrpc": "2.0",
+                 "method": "notifications/initialized"}) + "\n")
+            self.process.stdin.flush()
+        except BaseException:
+            try:
+                self.process.kill()
+            except Exception:
+                pass
+            raise
 
-    def _read_matching(self) -> dict:
+    def _reader(self) -> None:
         assert self.process and self.process.stdout
+        try:
+            for line in self.process.stdout:
+                self.replies.put(line)
+        except Exception:
+            pass
+        finally:
+            self.replies.put(None)
+
+    def _read_matching(self, timeout_s: float = MCP_TIMEOUT_S) -> dict:
         for _ in range(32):
-            line = self.process.stdout.readline()
-            if not line:
+            try:
+                line = self.replies.get(timeout=timeout_s)
+            except queue.Empty:
+                raise RuntimeError(
+                    f"driver MCP reply timed out after {timeout_s:g} s "
+                    f"(id {self.sequence})")
+            if line is None:
                 raise RuntimeError("driver MCP closed stdout")
             response = json.loads(line)
             if response.get("id") == self.sequence:
@@ -275,7 +303,8 @@ class Mcp:
         raise RuntimeError(f"driver MCP sent no reply for id {self.sequence}")
 
     def call(self, method: str, params: object = None,
-             bracket: dict[str, float] | None = None) -> object:
+             bracket: dict[str, float] | None = None,
+             timeout_s: float = MCP_TIMEOUT_S) -> object:
         assert self.process and self.process.stdin and self.process.stdout
         self.sequence += 1
         request: dict[str, object] = {"jsonrpc": "2.0", "id": self.sequence,
@@ -286,7 +315,7 @@ class Mcp:
             bracket["before"] = ms_now()
         self.process.stdin.write(json.dumps(request) + "\n")
         self.process.stdin.flush()
-        response = self._read_matching()
+        response = self._read_matching(timeout_s)
         if bracket is not None:
             bracket["after"] = ms_now()
         if "error" in response:
@@ -327,6 +356,12 @@ class Mcp:
             self.process.wait(timeout=15)
         except Exception:
             self.process.kill()
+        if self.process.stdout is not None:
+            try:
+                self.process.stdout.close()
+            except Exception:
+                pass
+        self.reader.join(timeout=2.0)
 
 
 class FixtureMcp:
@@ -373,7 +408,14 @@ class FixtureMcp:
         arguments = dict(params.get("arguments") or {})
         self.calls.append({"name": name, "arguments": arguments})
         rule = self._match(name, arguments)
-        reply = rule.get("reply", {"text": ""})
+        if "values" in rule:
+            index = int(rule.get("_index", 0))
+            values = rule["values"]
+            text = values[min(index, len(values) - 1)] if values else ""
+            rule["_index"] = index + 1
+            reply = {"text": text}
+        else:
+            reply = rule.get("reply", {"text": ""})
         if isinstance(reply, str):
             return {"content": [{"type": "text", "text": reply}],
                     "isError": False}
@@ -497,7 +539,8 @@ def lane_client_pid(login_port: int) -> int | None:
 
 
 def start_lane_client(lane: str, lanes_dir: Path, server_dir: Path | None,
-                      timeout_s: float, output_path: Path) -> tuple[int, dict]:
+                      timeout_s: float, output_path: Path,
+                      stable_s: float = 1.5) -> tuple[int, dict]:
     info = load_lane(lanes_dir, lane)
     login_port = int(info.get("PORT_PREFIX", "21") + "237")
     repo = server_dir
@@ -527,42 +570,60 @@ def start_lane_client(lane: str, lanes_dir: Path, server_dir: Path | None,
             ["bash", str(script), "client"], cwd=str(repo),
             env=environment, stdout=handle, stderr=subprocess.STDOUT,
             text=True)
-        pid = None
-        while time.monotonic() - started < timeout_s:
+        deadline = started + timeout_s
+        seen_pid: int | None = None
+        first_seen = 0.0
+        died = False
+        pid: int | None = None
+        while time.monotonic() < deadline:
             pid = lane_client_pid(login_port)
-            if pid:
-                break
-            if process.poll() is not None:
-                time.sleep(1.0)
-                pid = lane_client_pid(login_port)
-                break
-            time.sleep(0.5)
+            now = time.monotonic()
+            if pid is not None:
+                if pid != seen_pid:
+                    seen_pid = pid
+                    first_seen = now
+                if now - first_seen >= stable_s:
+                    break
+            else:
+                if seen_pid is not None:
+                    died = True
+                    pid = None
+                    break
+            time.sleep(min(0.5, max(0.0, deadline - now)))
         handle.close()
         output = (output_path.read_text(encoding="utf-8", errors="replace")
                   if output_path.exists() else "")
         attempts.append({
             "attempt": attempt + 1,
-            "pid": pid,
+            "pid": pid if pid is not None else seen_pid,
+            "died": died,
             "seconds": round(time.monotonic() - started, 1),
-            "returncode": process.returncode,
+            "returncode": process.poll(),
             "output_tail": output[-1200:],
         })
-        if pid:
+        if pid is not None:
             return pid, {"attempts": attempts, "source": "lane", "lane": lane,
                          "live": str(live) if live else None,
                          "_process": process}
-        if process.returncode is None:
-            process.wait(timeout=30)
-        crashed = (process.returncode not in (None, 0)
-                   or "crash" in output.lower()
-                   or "exception" in output.lower())
-        if not crashed or attempt == 1:
-            if process.returncode is None:
-                process.wait(timeout=30)
-            raise RuntimeError(
-                "client did not start (one retry used for a startup crash):\n"
-                + output[-3000:])
-        log("client startup crash, retrying once")
+        if process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=10)
+            except Exception:
+                pass
+        if died and attempt == 0:
+            adopted = lane_client_pid(login_port)
+            if adopted:
+                attempts.append({"attempt": 2, "result": "already running",
+                                 "pid": adopted})
+                return adopted, {"attempts": attempts, "source": "existing",
+                                 "lane": lane,
+                                 "live": str(live) if live else None}
+            log("client pid died during startup, retrying once")
+            continue
+        raise RuntimeError(
+            "client did not start within %g s:\n%s"
+            % (timeout_s, output[-3000:]))
     raise RuntimeError("client did not start")
 
 
@@ -587,13 +648,17 @@ def stop_pid(pid: int) -> None:
     subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
 
 
-def attach_and_hide(mcp: Any, pid: int) -> str:
+def attach_and_hide(mcp: Any, pid: int, stop_on_failure: bool) -> str:
     mcp.text("client_attach", pid=pid)
     mcp.text("client_window", pid=pid, visible=False)
     status = mcp.text("client_status", pid=pid)
     if "hidden=1" not in status:
-        stop_pid(pid)
-        raise RuntimeError(f"client could not be hidden; stopped pid {pid}: {status}")
+        if stop_on_failure:
+            stop_pid(pid)
+            raise RuntimeError(
+                f"client could not be hidden; stopped pid {pid}: {status}")
+        raise RuntimeError(
+            f"client could not be hidden; left pid {pid} running: {status}")
     return status
 
 
@@ -957,7 +1022,8 @@ def condition_state(mcp: Any, pid: int) -> dict:
             "chat": {"last": chat[-1] if chat else None, "count": len(chat)}}
 
 
-def wait_condition(mcp: Any, pid: int, condition: dict) -> dict:
+def wait_condition(mcp: Any, pid: int, condition: dict,
+                   clock: Clock | None = None) -> dict:
     deadline = time.monotonic() + condition["timeout_ms"] / 1000.0
     polls = 0
     met = False
@@ -969,8 +1035,18 @@ def wait_condition(mcp: Any, pid: int, condition: dict) -> dict:
         if met:
             break
         time.sleep(condition["poll_ms"] / 1000.0)
-    return {"met": met, "polls": polls, "state": last,
-            "condition": condition["expr"], "source": condition["source"]}
+    result = {"met": met, "polls": polls, "state": last,
+              "condition": condition["expr"], "source": condition["source"],
+              "met_client_ms": None, "met_ui_ms": None, "met_t_ms": None}
+    if met and clock is not None:
+        client, wall_before, wall_after, error = read_clock(
+            mcp, pid, "system")
+        if client is not None:
+            clock.add("system", client, wall_before, wall_after)
+            ui = clock.ui_for_system(client)
+            result.update(met_client_ms=client, met_ui_ms=ui,
+                          met_t_ms=clock.relative(ui), met_clock_error=error)
+    return result
 
 
 def widget_rect(mcp: Any, pid: int, path: str) -> tuple[float, float, float, float]:
@@ -1187,7 +1263,7 @@ def use_skill(mcp: Any, pid: int, spec: dict) -> dict:
             "scan": scan}
 
 
-def mount(mcp: Any, pid: int, spec: dict) -> dict:
+def mount(mcp: Any, pid: int, spec: dict, clock: Clock) -> dict:
     if spec["kind"] == "pet":
         reply = mcp.text("client_lua", pid=pid, target="ui",
                          code="X2Mate:MountMate() return 1")
@@ -1199,11 +1275,12 @@ def mount(mcp: Any, pid: int, spec: dict) -> dict:
     condition = {"expr": "vehicle.mounted == true", "path": "vehicle.mounted",
                  "op": "==", "literal": True, "source": "server",
                  "timeout_ms": spec["timeout_ms"], "poll_ms": 250}
-    waited = wait_condition(mcp, pid, condition)
+    waited = wait_condition(mcp, pid, condition, clock)
     return {"kind": "vehicle", "reply": reply, "wait": waited}
 
 
-def dismount(mcp: Any, pid: int, timeout_ms: int = 8000) -> dict:
+def dismount(mcp: Any, pid: int, clock: Clock,
+             timeout_ms: int = 8000) -> dict:
     vehicle = json_or_error(mcp, "client_vehicle", pid=pid, action="status")
     if vehicle.get("mounted") or vehicle.get("driver"):
         reply = mcp.text("client_vehicle", pid=pid, action="discard")
@@ -1216,13 +1293,16 @@ def dismount(mcp: Any, pid: int, timeout_ms: int = 8000) -> dict:
                  "path": "vehicle.mounted", "op": "==", "literal": False,
                  "source": "server", "timeout_ms": timeout_ms,
                  "poll_ms": 250}
-    waited = wait_condition(mcp, pid, condition)
+    waited = wait_condition(mcp, pid, condition, clock)
     return {"kind": kind, "reply": reply, "wait": waited}
 
 
 def snapshot(mcp: Any, pid: int, run_dir: Path, step: dict, clock: Clock) -> dict:
     started = time.monotonic()
-    client_ms = clock.estimate()
+    system_ms, clock_before, clock_after, clock_error = read_clock(
+        mcp, pid, "system")
+    if system_ms is not None:
+        clock.add("system", system_ms, clock_before, clock_after)
     shot_path = run_dir / "shots" / f"{step['id']}.png"
     shot_path.parent.mkdir(parents=True, exist_ok=True)
     shot_path.write_bytes(mcp.screenshot(pid))
@@ -1235,12 +1315,17 @@ def snapshot(mcp: Any, pid: int, run_dir: Path, step: dict, clock: Clock) -> dic
     animation = read_animation(mcp, pid, str(player.get("name") or ""),
                                str(target.get("name") or "") if target.get(
                                    "present") else None)
+    if system_ms is not None:
+        ui_ms = clock.ui_for_system(system_ms)
+    else:
+        ui_ms = clock.estimate()
     state = {
         "step": step["id"],
         "label": step.get("label", step["id"]),
-        "client_ms": client_ms,
-        "ui_ms": clock.ui_for_system(client_ms),
-        "t_ms": clock.relative(clock.ui_for_system(client_ms)),
+        "client_ms": system_ms,
+        "ui_ms": ui_ms,
+        "t_ms": clock.relative(ui_ms),
+        "clock_error": clock_error,
         "entities": entities,
         "animation": animation,
         "unit_state": {"player": player, "target": target},
@@ -1297,7 +1382,7 @@ def execute_step(mcp: Any, pid: int, run_dir: Path, step: dict,
             time.sleep(wait["ms"] / 1000.0)
             result = {"wait_kind": "ms", "ms": wait["ms"]}
         else:
-            waited = wait_condition(mcp, pid, wait)
+            waited = wait_condition(mcp, pid, wait, clock)
             result = {"wait_kind": "condition", **waited}
             if not waited["met"]:
                 raise StepFailure(
@@ -1327,9 +1412,9 @@ def execute_step(mcp: Any, pid: int, run_dir: Path, step: dict,
         result = mcp.text("client_chat", pid=pid,
                           message=f"/move {x:g} {y:g} {z:g}")
     elif verb == "mount":
-        result = mount(mcp, pid, step["mount"])
+        result = mount(mcp, pid, step["mount"], clock)
     elif verb == "dismount":
-        result = dismount(mcp, pid)
+        result = dismount(mcp, pid, clock)
     elif verb == "snapshot":
         result = snapshot(mcp, pid, run_dir, step, clock)
     elif verb == "mark":
@@ -1391,6 +1476,8 @@ def run_steps(mcp: Any, pid: int, run_dir: Path, steps: list[dict],
             mcp, pid, "system")
         if after is not None:
             clock.add("system", after, after_before, after_wall)
+        ui_before = clock.ui_for_system(before) if before is not None else None
+        ui_after = clock.ui_for_system(after) if after is not None else None
         row = {
             "schema": SCHEMA, "seq": counters["seq"],
             "phase": phase, "index": index, "id": step["id"],
@@ -1399,8 +1486,11 @@ def run_steps(mcp: Any, pid: int, run_dir: Path, steps: list[dict],
             "server_tag": step.get("server_tag"),
             "wall_ms": round(before_wall, 1),
             "client_ms": before,
-            "t_ms": clock.relative(before),
+            "ui_ms": ui_before,
+            "t_ms": clock.relative(ui_before),
             "after_client_ms": after,
+            "after_ui_ms": ui_after,
+            "after_t_ms": clock.relative(ui_after),
             "elapsed_client_ms": (int(round(after - before))
                                   if before is not None and after is not None
                                   else None),
@@ -1446,7 +1536,7 @@ def parse_reply_delay(value: str | None, lane_env: dict[str, str]) -> dict:
 
 def capture_root(args: argparse.Namespace) -> Path:
     value = args.capture_root or os.environ.get("AA_PARITY_ROOT")
-    return Path(value) if value else Path("data/local/parity")
+    return Path(value) if value else ROOT / "data/local/parity"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1550,8 +1640,9 @@ def main(argv: list[str] | None = None) -> int:
                 pid, start_info = start_lane_client(
                     args.lane, args.lanes_dir, server_dir,
                     args.start_timeout, run_dir / "start.log")
-                started_pid = True
-                log("started client", pid, start_info["source"])
+                started_pid = start_info.get("source") == "lane"
+                log("client", "started" if started_pid else "adopted",
+                    pid, start_info["source"])
             mcp = Mcp(args.driver, args.dll, args.launcher, args.client,
                       args.password_file, args.login, args.user,
                       run_dir / "mcp")
@@ -1562,10 +1653,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.fake_mcp:
             bad = loaded_anti_cheat(pid)
             if bad:
-                stop_pid(pid)
+                if started_pid:
+                    stop_pid(pid)
                 raise RuntimeError(
                     f"anti-cheat module loaded: {bad}; refusing to drive")
-        status = attach_and_hide(mcp, pid)
+        status = attach_and_hide(mcp, pid, started_pid)
         log("client hidden", pid)
         player_name = ensure_world(mcp, pid, args.character,
                                    args.character_ability,
@@ -1611,7 +1703,6 @@ def main(argv: list[str] | None = None) -> int:
                 "ui_rtt_ms": round(u_after - u_before, 3),
                 "system_error": s_error, "ui_error": u_error,
             }, ensure_ascii=False, separators=(",", ":")) + "\n")
-        remap_steps(steps_path, clock)
         result = {"ok": True}
     except BaseException as error:
         failure = error
@@ -1627,7 +1718,7 @@ def main(argv: list[str] | None = None) -> int:
                 mcp.close()
             except Exception:
                 pass
-        if pid and not args.keep_client:
+        if pid and started_pid and not args.keep_client:
             stop_pid(pid)
             log("stopped client", pid)
         try:
@@ -1645,6 +1736,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:
             packets_summary = {"error": f"{type(error).__name__}: {error}"}
             log("packet alignment failed:", error)
+        try:
+            remap_steps(steps_path, clock)
+        except Exception as error:
+            log("step clock remap failed:", error)
         start_process = start_info.pop("_process", None)
         if start_process is not None:
             try:
@@ -1675,7 +1770,7 @@ def main(argv: list[str] | None = None) -> int:
                 "start": start_info,
                 "started_by_runner": started_pid,
                 "path": str(args.client), "hidden": True,
-                "stopped": bool(pid and not args.keep_client),
+                "stopped": bool(pid and started_pid and not args.keep_client),
             },
             "lane": args.lane,
             "server": {

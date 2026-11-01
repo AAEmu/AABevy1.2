@@ -77,6 +77,26 @@ class ScenarioTests(unittest.TestCase):
                 "steps": [{"id": "a", "lua": {
                     "target": "ui", "code": "X2World:LeaveWorld()"}}]})
 
+    def test_default_server_tags(self) -> None:
+        attack = scenario.load_scenario(SCENARIOS / "auto_attack.yaml")
+        by_id = {step["id"]: step for step in attack["steps"]}
+        self.assertEqual(by_id["first_clip"]["server_tag"], "server")
+        self.assertEqual(by_id["repeat_1"]["server_tag"], "server")
+        self.assertEqual(by_id["walked_away"]["server_tag"], "server")
+        self.assertEqual(by_id["reset_cooldowns"]["server_tag"], "script")
+        self.assertEqual(by_id["safe_spot"]["server_tag"], "script")
+        self.assertEqual(by_id["bind_auto_attack"]["server_tag"], "script")
+
+    def test_exit_widget_click_rejected(self) -> None:
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.validate_scenario({
+                "name": "x",
+                "steps": [{"id": "a", "click-ui": "gameExitFrame"}]})
+        with self.assertRaises(scenario.ScenarioError):
+            scenario.validate_scenario({
+                "name": "x",
+                "steps": [{"id": "a", "click-ui": "menuWindow.quitButton"}]})
+
     def test_condition_evaluation(self) -> None:
         state = {"vehicle": {"mounted": True}, "target": {"name": "rat_brown "}}
         self.assertTrue(scenario.condition_holds(

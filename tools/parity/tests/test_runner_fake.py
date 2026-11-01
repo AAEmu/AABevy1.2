@@ -61,6 +61,11 @@ class FakeRunnerTests(unittest.TestCase):
             wait = next(row for row in steps if row["id"] == "wait_cond")
             self.assertEqual(wait["condition_source"], "server")
             self.assertTrue(wait["result"]["met"])
+            self.assertIsNotNone(wait["result"]["met_client_ms"])
+            self.assertIsNotNone(wait["result"]["met_ui_ms"])
+            self.assertLess(abs(wait["result"]["met_t_ms"]), 5_000)
+            self.assertGreater(wait["ui_ms"], 1_010_000)
+            self.assertLess(abs(wait["t_ms"]), 5_000)
             snap = next(row for row in steps if row["id"] == "snap_one")
             self.assertEqual(snap["result"]["entity_count"], 1)
             self.assertEqual(snap["result"]["ui_widgets"], 1)
@@ -73,6 +78,9 @@ class FakeRunnerTests(unittest.TestCase):
             self.assertEqual(entities["unit_state"]["player"]["name"], "Mini")
             self.assertEqual(entities["animation"]["player"]["state"], "idle")
             self.assertIn("mode_actions", entities)
+            self.assertLess(entities["client_ms"], 1_010_000)
+            self.assertGreater(entities["ui_ms"], 1_010_000)
+            self.assertLess(abs(entities["t_ms"]), 5_000)
 
             with (run / "shots" / "snap_one.png").open("rb") as handle:
                 self.assertEqual(handle.read(8), b"\x89PNG\r\n\x1a\n")
@@ -154,6 +162,8 @@ class FakeRunnerTests(unittest.TestCase):
             rows = [json.loads(line) for line in
                     (run / "steps.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertFalse(rows[0]["result"]["met"])
+            self.assertIsNotNone(rows[0]["ui_ms"])
+            self.assertLess(abs(rows[0]["t_ms"]), 5_000)
             meta = json.loads((run / "meta.json").read_text(encoding="utf-8"))
             self.assertFalse(meta["result"]["ok"])
             self.assertIn("condition not met", meta["result"]["error"])
