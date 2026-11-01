@@ -10,7 +10,8 @@ from the 1.2 game database and the model's own animation data.
 > **Time base (2026-11-01, T0).** The only Bevy/1.2 combat side-by-side (2026-10-26, `tools/combat-side`) ran the Bevy
 > side on `TimeUpdateStrategy::ManualDuration(1/60)` while its headless loop delivered about 94 fps, so game time
 > advanced 1.56x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by 1.56 (the old branch's
-> real-time rerun measured 1.502 s against the original's 1.496 s), so that cast mismatch is an artefact.
+> report, recovered from the 2026-10-27 history bundle, reran it in real time at 1.502 s against the original's
+> 1.496 s), so that cast mismatch is an artefact.
 > "Stance exit 10.017 s vs 0.861 s" is not explained by 1.56x (6.41 s remains) and stays a real suspect. Every timing
 > below that came from that run is marked **suspect (time base)**; no raw run data is retained. The current client
 > reads wall clocks for server-facing timing (`hud/cast.rs` `Instant`, `aa-net` `Instant`, `hud/cooldown.rs`
