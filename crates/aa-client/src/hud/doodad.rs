@@ -322,9 +322,9 @@ pub(super) struct View {
     chosen: Vec<i64>,
     /// The doodad under the pointer (its name tooltip is up).
     hover: Option<u32>,
-    /// The pointer is over a climb doodad: a right click grabs it and must not fall through to a
-    /// ship or NPC behind the rungs.
-    cursor_climb: bool,
+    /// Ray distance to the climb doodad under the pointer when it is the nearest doodad and in
+    /// grab reach: a right click grabs it instead of a ship or NPC behind the rungs.
+    cursor_climb: Option<f32>,
     /// What the doodad tooltip shows now.
     tip: Option<Tip>,
     /// The doodad last right clicked: the bar is about it while it is in reach.
@@ -402,8 +402,8 @@ impl View {
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
     }
-    /// The pointer is over a climb doodad: a right click grabs it, not the ship or NPC behind it.
-    pub(super) fn cursor_climb(&self) -> bool {
+    /// Ray distance to the climb doodad under the pointer (the nearest doodad, in grab reach).
+    pub(super) fn cursor_climb(&self) -> Option<f32> {
         self.cursor_climb
     }
 }
@@ -614,7 +614,13 @@ fn hit(ray: Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
 }
 
 /// The usable doodad the ray picks, unless an NPC is in front of it.
-fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) -> Option<u32> {
+fn pick(
+    ray: Ray3d,
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    own: u32,
+) -> Option<(f32, u32)> {
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
@@ -634,7 +640,7 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
         hit(ray, to_vec(u.pos) + Vec3::Z * 0.9 * u.scale.max(0.5), 1.1 * u.scale.max(0.7)).is_some_and(|a| a < along)
     });
-    (!npc_in_front).then_some(obj_id)
+    (!npc_in_front).then_some((along, obj_id))
 }
 
 /// The climb doodad under the ray, tested along the whole `$ladder` segment. A ship ladder's
@@ -647,7 +653,7 @@ fn pick_climb(
     doodads: &Doodads,
     units: &Units,
     segments: &[(u32, Vec3, Vec3)],
-) -> Option<u32> {
+) -> Option<(f32, u32)> {
     let mut best: Option<(f32, u32)> = None;
     for &(obj_id, a, b) in segments {
         let Some(pos) = doodads.by_id.get(&obj_id).and_then(|o| doodad_world(o, units)) else {
@@ -663,11 +669,18 @@ fn pick_climb(
                 && best.is_none_or(|(x, _)| along < x)
             {
                 best = Some((along, obj_id));
-                break;
             }
         }
     }
-    best.map(|(_, id)| id)
+    best
+}
+
+/// The nearer of two ray hits, `(distance, obj_id)`; `None` when neither hit.
+fn nearest_hit(a: Option<(f32, u32)>, b: Option<(f32, u32)>) -> Option<(f32, u32)> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, b) => a.or(b),
+    }
 }
 
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
@@ -806,23 +819,45 @@ fn track(
             .collect()
     });
     let climb = ray.and_then(|r| pick_climb(r, &d, &doodads, &units, &ladder_segments));
+    let usable = ray.and_then(|r| pick(r, &d, &doodads, &units, own));
+    // the ladder must be the nearest doodad along the ray, not one behind a closer one
+    let nearest = nearest_hit(climb, usable);
+    // ... and it must be within grab reach: a far click falls through to the unit/doodad pick.
+    let ladder_click = climb.filter(|(_, id)| {
+        nearest.is_some_and(|(_, n)| n == *id)
+            && doodads
+                .by_id
+                .get(id)
+                .and_then(|o| doodad_world(o, &units))
+                .is_some_and(|p| d.pos.distance(p) <= crate::ingame::ladder::REACH)
+    });
     let mut clicked = None;
     if !blocked && pointer.mouse.just_released(MouseButton::Right)
-        && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
+        && let (Some(start), Some(end)) = (pressed_at.take(), cursor)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = climb.or_else(|| pick(ray, &d, &doodads, &units, own));
+        // a climb doodad out of reach is not passed to the skill bar: leave the click to the
+        // unit/other-doodad path instead of consuming it silently
+        clicked = nearest
+            .map(|(_, id)| id)
+            .filter(|id| {
+                ladder_click.is_some_and(|(_, ladder)| ladder == *id)
+                    || !doodads
+                        .by_id
+                        .get(id)
+                        .is_some_and(|o| db.as_deref().is_some_and(|db| db.ladder_kind(o.func_group_id).is_some()))
+            });
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
         clicked = (!blocked).then(|| nearest_usable(&d, &doodads, &units)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
     }
-    // A right click on a climb doodad is its use: the native use-target path (`FUN_393b8f40`)
-    // is the only CSHang sender. Hand it to the ladder controller instead of the skill bar.
-    if let Some(id) = clicked
-        && let Some(o) = doodads.by_id.get(&id)
-        && db.as_deref().is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
+    // A right click on a climb doodad is taken as its use (inferred: the native use-target path
+    // `FUN_393b8f40` is the only CSHang sender, but no right-click-on-ladder capture exists).
+    // Hand it to the ladder controller only when it is the nearest hit and in reach.
+    if let Some((_, id)) = ladder_click
+        && clicked == Some(id)
     {
         if let Some(grab) = grab.as_mut() {
             grab.0 = Some(id);
@@ -834,11 +869,11 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = climb
-        .or_else(|| ray.and_then(|r| pick(r, &d, &doodads, &units, own)))
+    let hover = nearest
+        .map(|(_, id)| id)
         .or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
-    d.doodad.cursor_climb = climb.is_some();
+    d.doodad.cursor_climb = ladder_click.map(|(along, _)| along);
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
@@ -2209,9 +2244,70 @@ mod tests {
         // the drawn segment: the `$ladder` helper in the doodad root at the origin
         let segments = [(77, Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0))];
         assert_eq!(
-            pick_climb(ray, &data, &doodads, &Units::default(), &segments),
+            pick_climb(ray, &data, &doodads, &Units::default(), &segments)
+                .map(|(_, id)| id),
             Some(77),
             "the visible rungs are picked"
         );
+        // a ray from above the top pointing down: the bottom sample is the first and the
+        // farthest; the nearest sample (the top) must win.
+        let from_above = Ray3d::new(
+            Vec3::new(0.0, 11.0, 0.4),
+            bevy::math::Dir3::NEG_Y,
+        );
+        let long = [(77, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0))];
+        let (along, id) = pick_climb(
+            from_above,
+            &data,
+            &doodads,
+            &Units::default(),
+            &long,
+        )
+        .expect("the segment is under the ray");
+        assert_eq!(id, 77);
+        assert!(along < 2.0, "nearest sample, not the first: {along}");
+    }
+
+    #[test]
+    fn the_nearest_hit_keeps_a_closer_doodad_over_a_ladder_behind_it() {
+        assert_eq!(
+            nearest_hit(Some((5.0, 77)), Some((3.0, 78))),
+            Some((3.0, 78))
+        );
+        assert_eq!(
+            nearest_hit(Some((3.0, 77)), Some((5.0, 78))),
+            Some((3.0, 77))
+        );
+        assert_eq!(nearest_hit(None, Some((5.0, 78))), Some((5.0, 78)));
+        assert_eq!(nearest_hit(None, None), None);
+    }
+
+    /// The Eznan Cutter's ladder doodads must light up: the owner hovered one and saw no
+    /// highlight. `slave_doodad_bindings` for owner 21 lists templates 1187/3299/3300; their
+    /// `doodad_almighties.use_target_highlight` is on.
+    #[test]
+    fn the_eznan_cutter_ladder_templates_glow() {
+        let Some(conn) = real_db() else { return };
+        let tables = Tables::load(&conn).unwrap();
+        let mut q = conn
+            .prepare(
+                "SELECT d.id, d.model FROM slave_doodad_bindings b
+                 JOIN doodad_almighties d ON d.id = b.doodad_id
+                 WHERE b.owner_id = 21 AND b.owner_type = 'Slave' AND d.model LIKE '%ladder%'",
+            )
+            .unwrap();
+        let rows = q
+            .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))
+            .unwrap();
+        let mut found = 0;
+        for row in rows {
+            let (template, model) = row.unwrap();
+            found += 1;
+            assert!(
+                tables.glows(template),
+                "the Eznan Cutter ladder template {template} ({model}) does not glow"
+            );
+        }
+        assert!(found > 0, "the Eznan Cutter has a ladder doodad binding");
     }
 }

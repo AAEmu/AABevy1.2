@@ -561,7 +561,7 @@ pub struct Pointer<'w, 's> {
 }
 
 /// The NPC a right click released over the 3D view picked (not a drag, not on the HUD).
-fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<u32> {
+fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<(f32, u32)> {
     if blocked { *pressed_at = None; return None; }
     let window = p.windows.single().ok()?;
     let cursor = window.cursor_position();
@@ -591,7 +591,13 @@ fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Optio
             best = Some((along, u.obj_id));
         }
     }
-    best.map(|(_, id)| id)
+    best
+}
+
+/// The climb doodad under the cursor takes the right click only when it is not behind a nearer
+/// unit or ship (the distances are along the same ray).
+fn climb_takes_click(climb: Option<f32>, unit: Option<f32>) -> bool {
+    climb.is_some_and(|c| unit.is_none_or(|u| c <= u))
 }
 
 /// `--hud-talk-nearest T` (talk to the nearest NPC that has something for the player, T seconds
@@ -733,14 +739,15 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    // a climb doodad under the cursor takes the click: the right click grabs it, not the ship or
-    // NPC behind the rungs (`cursor_climb` is this frame's doodad pick)
+    // A climb doodad under the cursor takes the click only when it is in front of the unit/ship
+    // pick: a nearer unit (the hull included) keeps the right click (`cursor_climb` is this
+    // frame's nearest ladder distance along the ray).
     let over_climb = bridge.0.borrow().doodad.cursor_climb();
-    let picked = if over_climb {
-        pressed_at.take();
+    let unit = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked);
+    let picked = if climb_takes_click(over_climb, unit.map(|(along, _)| along)) {
         None
     } else {
-        right_click_pick(&pointer, &units, own, &mut pressed_at, blocked)
+        unit.map(|(_, id)| id)
     };
     let scripted_pick = script_pick.take_right();
     let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
@@ -1114,6 +1121,17 @@ pub fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_climb_doodad_keeps_the_click_only_in_front_of_a_unit() {
+        assert!(climb_takes_click(Some(3.0), Some(5.0)), "ladder in front");
+        assert!(climb_takes_click(Some(3.0), None), "no unit behind");
+        assert!(
+            !climb_takes_click(Some(5.0), Some(3.0)),
+            "a nearer unit or the hull keeps the right click"
+        );
+        assert!(!climb_takes_click(None, Some(3.0)), "no ladder");
+    }
 
     #[test]
     fn a_before_bubble_start_cinema_starts_when_the_dialog_opens() {

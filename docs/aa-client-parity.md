@@ -140,17 +140,21 @@ Ships (merged after the checkpoint was written):
   (kind 1/6 ladder, 2 rope, 3 wood, 4 net, 5 horizontal rope, 7 mast, 8 guardrail, 9 45-degree ladder,
   10 tree) and whose model has an exact `$ladder` helper; the climb segment is the box of the mesh chunk
   that helper names (`FUN_393aaad0`), not the whole model. F grabs the nearest one within the 1.5 m use
-  reach and the body is placed before the server answers (`CSHang` 0x0cb); a right click on a ladder
-  is the same use-target grab (the only native `CSHang` sender is `FUN_393b8f40`; no separate
-  proximity path was found). The body stands on the `$ladder` helper's front (+Y) side in the
-  doodad's world frame, so a ladder parented to a hull uses the hull transform and a grab from the
-  deck puts the body outside the wall, not between the rungs and the deck. A picked ladder lights
-  up (`use_target_highlight`) and does not fall through to the ship or NPC behind it. The grab is
-  refused on a seat, glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its
-  seat `+0x3af4`, `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck
-  does not refuse it,
-  and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates accept
-  claims F over NPC talk and loot-all. W/S climb with the clip's root speed scaled by the buffs'
+  reach and the body is placed before the server answers (`CSHang` 0x0cb). A right click on a ladder
+  is taken as the same use-target grab: inferred, since `FUN_393b8f40` is the only `CSHang` sender
+  found but there is no right-click-on-ladder capture. The owner's real 1.2 client grabbed a ship
+  ladder while walking toward it (2026-11-01 ~13:45, `CSHang` on the doodad); a contact-trigger path
+  was not found in the decompile, so proximity grab is not implemented. The fixed-frame kinds
+  (1/4/5/8/9) stand on the `$ladder` helper's front (+Y) side in the doodad's world frame, so a
+  ladder parented to a hull uses the hull transform and a grab from the deck puts the body outside
+  the wall, not between the rungs and the deck; kinds 2/3/6/7/10 keep the player's own side
+  (`FUN_3916c520`). A picked ladder lights up (`use_target_highlight`) and only takes the click
+  when it is the nearest hit along the ray (a nearer unit, hull or doodad keeps it); an out-of-reach
+  ladder click is left to that path instead of being swallowed. The grab is refused on a seat,
+  glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its seat `+0x3af4`,
+  `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck does not refuse
+  it, and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates
+  accept claims F over NPC talk and loot-all. W/S climb with the clip's root speed scaled by the buffs'
   `ladder_speed_mul`, and every hanging `CSMoveUnit` carries actor flag `0x40`, gcId 1 and the grab's
   climb data (`FUN_390cbee0` bit layout, truncating, angle 127 for kinds 1/4/5/8/9). The sender sends
   every 0.1 s while climbing, one `moving: false` stop packet no sooner than the native 100 ms minimum

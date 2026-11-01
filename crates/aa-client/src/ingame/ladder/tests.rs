@@ -777,6 +777,37 @@ fn a_ship_ladder_hangs_on_its_front_side_and_jumps_outboard() {
 }
 
 #[test]
+fn only_the_fixed_frame_kinds_use_the_helper_front_side() {
+    // Native FUN_3916c520: kinds 1/4/5/8/9 keep the identity hang rotation, so the body sits on
+    // the helper's front; 2/3/6/7/10 build the rotation from the player's own quaternion and
+    // stay on the player's side.
+    let grab = |kind: u8| {
+        let mut app = app_with(kind, 0);
+        {
+            let mut q = app.world_mut().query::<&mut Mover>();
+            // the helper faces +X; stand on its back (-X)
+            q.single_mut(app.world_mut()).unwrap().pos = Vec3::new(-0.5, 0.0, 0.0);
+        }
+        tap(&mut app, "do_interaction_1");
+        app.update();
+        ladder_of(&mut app).expect("the ladder is grabbed");
+        let mut q = app.world_mut().query::<&Mover>();
+        q.single(app.world()).unwrap().pos
+    };
+    for kind in [1u8, 4, 5, 8, 9] {
+        let pos = grab(kind);
+        assert!(pos.x > 0.25, "kind {kind} is on the helper front: {pos:?}");
+    }
+    for kind in [2u8, 3, 6, 7, 10] {
+        let pos = grab(kind);
+        assert!(
+            pos.x < -0.25,
+            "kind {kind} keeps the player's side: {pos:?}"
+        );
+    }
+}
+
+#[test]
 fn a_right_click_grab_request_grabs_the_named_doodad() {
     {
         let mut app = app(0);

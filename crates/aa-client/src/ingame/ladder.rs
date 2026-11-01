@@ -13,13 +13,18 @@
 //!   phase and the frame from the model's `$ladder` element (`Db::ladder_kind`,
 //!   [`super::doodad_model::LadderHelper`]);
 //! * F (`do_interaction_1`) grabs the nearest climbable doodad within 1.5 m (the reach
-//!   `FUN_390c1130` uses without an actor-model reach block); a right click on a ladder is the
-//!   same use-target grab (the native `FUN_393b8f40` is the only `CSHang` sender, so there is no
-//!   separate proximity grab). The local body is placed at once, before the server answers, and
-//!   `CSHang` is sent (`FUN_39363410`). The body stands on the `$ladder` helper's front (+Y)
-//!   side, computed in the doodad's world frame: a ship ladder includes the hull transform, so
-//!   grabbing from the deck still puts the body outside the wall. A picked ladder lights up
-//!   (`use_target_highlight`) and does not fall through to the ship or NPC behind it;
+//!   `FUN_390c1130` uses without an actor-model reach block); a right click on a ladder is taken
+//!   as the same use-target grab (inferred: `FUN_393b8f40` is the only `CSHang` sender found,
+//!   but no right-click-on-ladder capture exists). The owner's real 1.2 client grabbed a ship
+//!   ladder while walking toward it (2026-11-01 ~13:45, `CSHang` on the doodad); a decompile
+//!   path that starts a hang on contact was not found, so this client keeps F/right-click and
+//!   does not grab on proximity. The local body is placed at once, before the server answers,
+//!   and `CSHang` is sent (`FUN_39363410`). The fixed-frame kinds (1/4/5/8/9) stand on the
+//!   `$ladder` helper's front (+Y), computed in the doodad's world frame (a ship ladder includes
+//!   the hull transform, so grabbing from the deck still puts the body outside the wall); kinds
+//!   2/3/6/7/10 keep the player's own side (`FUN_3916c520` builds their rotation from the player
+//!   quaternion). A picked ladder lights up (`use_target_highlight`) and only takes the click
+//!   when it is the nearest hit along the ray;
 //! * W/S move along the ladder. 1.2 has no climb-speed constant: the vertical motion is the
 //!   clip's root motion, scaled by the buffs' `ladder_speed_mul` (unit attribute 93 [0x5d]). The
 //!   clip's root speed is the fallback when the model has no climb clips (1.5 m/s,
@@ -112,8 +117,9 @@ pub struct LadderWorld<'w> {
     pub grab: ResMut<'w, LadderGrab>,
 }
 
-/// A HUD request to grab the climb doodad `obj_id` (a right click on it). [`control_ladder`]
-/// consumes it; a request for a doodad out of reach or not climbable does nothing.
+/// A HUD request to grab the climb doodad `obj_id` (a right click on it; inferred from the native
+/// use-target path). [`control_ladder`] consumes it; a request for a doodad out of reach or not
+/// climbable does nothing.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LadderGrab(pub Option<u32>);
 
@@ -867,16 +873,24 @@ pub fn control_ladder(
             return;
         };
         let helper_forward_game = bevy_to_cry(root_rotation * helper.forward).normalize_or_zero();
-        // The body stands on the ladder's own front side (its `$ladder` helper +Y, the native
-        // frame's outward direction), not on the side the player came from. A ship ladder is used
-        // from the deck, inside the hull: a player-relative normal would put the body inside the
-        // wall and send the jump further in.
-        let mut normal = helper_forward_game;
+        // The fixed-frame kinds (1/4/5/8/9) stand on the ladder's own front side (its `$ladder`
+        // helper +Y, `FUN_3916c520` keeps the identity hang rotation for them). The relative
+        // kinds (2 rope, 3 wood, 6, 7 mast, 10 big tree) build the hang rotation from the
+        // player's own quaternion, so they keep the player's side. A ship ladder is used from the
+        // deck, inside the hull: for the fixed kinds a player-relative normal would put the body
+        // inside the wall and send the jump further in.
+        let fixed_frame = matches!(kind, 1 | 4 | 5 | 8 | 9);
+        let mut normal = if fixed_frame {
+            helper_forward_game
+        } else {
+            Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0)
+        };
         normal.z = 0.0;
         normal = normal.normalize_or_zero();
         if normal == Vec3::ZERO {
-            // A helper without a horizontal forward: face the player's side.
-            normal = Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0);
+            // On the segment: use the helper's front.
+            normal = helper_forward_game;
+            normal.z = 0.0;
             normal = normal.normalize_or_zero();
         }
         let facing = facing_of_normal(normal);
