@@ -102,9 +102,20 @@ impl Track {
 
     /// A report arrived at `now` (app clock, s).
     pub fn push(&mut self, now: f32, report: Report) {
+        self.push_inner(now, report, true);
+    }
+
+    /// A report arrived after the caller seeded the track at the current drawn point (a rider
+    /// stepping onto another hull): a large step is blended over the delay rather than snapped.
+    pub fn push_blend(&mut self, now: f32, report: Report) {
+        self.push_inner(now, report, false);
+    }
+
+    fn push_inner(&mut self, now: f32, report: Report, permit_teleport: bool) {
         let last = *self.snaps.back().expect("a track always has a report");
         let arrival_gap = if last.arrival.is_finite() { now - last.arrival } else { f32::INFINITY };
-        let teleport = Vec2::new(report.pos.x - last.report.pos.x, report.pos.y - last.report.pos.y).length() > TELEPORT;
+        let teleport = permit_teleport
+            && Vec2::new(report.pos.x - last.report.pos.x, report.pos.y - last.report.pos.y).length() > TELEPORT;
         if teleport {
             // nothing to glide over: the unit is simply somewhere else
             self.snaps.clear();

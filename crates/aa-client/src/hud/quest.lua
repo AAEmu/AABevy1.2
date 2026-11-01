@@ -307,6 +307,7 @@ end
 
 local function playLines(which, qtype, ctype, atype)
   play = { chain = HUD.quest_bubbles(which, qtype, ctype or 0) or {}, pos = 1, qtype = qtype, ctype = ctype or 0, atype = atype or 0 }
+  HUD.quest_cinema_permission(qtype, which)
   startCloseUp(qtype)
   if #play.chain == 0 then
     -- a step without lines: what it asks

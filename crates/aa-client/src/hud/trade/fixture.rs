@@ -134,6 +134,7 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Inv
             attached_to: None,
             doodad_bond: None,
             house_posture: None,
+            turret: None,
             state_attachments: None,
         },
     );

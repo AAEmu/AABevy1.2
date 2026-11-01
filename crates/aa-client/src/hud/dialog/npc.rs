@@ -15,7 +15,7 @@ pub(super) mod fixture;
 mod runtime_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::hud) struct Scope {
+pub(crate) struct Scope {
     epoch: u64,
     attempt: u64,
     selection: u64,

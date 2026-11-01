@@ -49,7 +49,7 @@ use super::api::{HudBridge, HudData, Shared};
 use crate::ingame::quest_camera::{Frame as QuestFrame, QuestTalkCamera};
 use crate::ingame::units::doodad_world;
 use super::data::GameData;
-use super::quests::{PlayerFacts, Texts, kind};
+use super::quests::{CinemaDef, PlayerFacts, Texts, kind};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// How far the player reaches to talk to an NPC (F, a right click), metres.
@@ -63,7 +63,7 @@ const DIRECTING_WIDGETS: [&str; 2] = ["questDirecting", "QuestDirectingFadeWindo
 
 /// What the scripts asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Req {
+pub(crate) enum Req {
     Accept(u32),
     /// The quest and the chosen reward (1 based, 0 for none).
     Complete(u32, i32),
@@ -74,6 +74,8 @@ pub(super) enum Req {
     End,
     /// `X2Quest:EnterQuestDirectingMode()` / `LeaveQuestDirectingMode()`.
     Directing(bool),
+    /// The directing window about to play a step (`HUD.quest_cinema_permission`): 0x0d0.
+    CinemaPermission { quest: u32, kind: u8 },
     /// The talk's close-up camera on or off (`quest_camera::set_active`).
     Camera(bool),
     /// The quest bubble about to be said frames its speaker (`quest_camera::frame_bubble`).
@@ -105,6 +107,12 @@ pub struct DialogView {
     pub directing: bool,
     /// The top-level widgets hidden for it.
     hidden: Vec<aa_ui::tree::Id>,
+    /// The movie wants every top-level widget hidden (C5).
+    pub cinema_hidden: bool,
+    /// The UI tree has the movie's hidden set applied and its restore is still owed.
+    cinema_applied: bool,
+    pub(super) cinema_restore_pending: bool,
+    cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
     pub version: u64,
@@ -113,7 +121,7 @@ pub struct DialogView {
     /// The message of the last quest event ("Quest accepted: [A Friendly Reminder]"):
     /// `X2Quest:GetActiveQuestContextConditionMessage()`.
     pub condition: String,
-    pub(super) requests: Vec<Req>,
+    pub(crate) requests: Vec<Req>,
     pointer_talk: Option<PointerTalk>,
     npc_flow: npc::Flow,
 }
@@ -357,6 +365,19 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     request("quest_drop", |a| Some(Req::Drop(num(&a, 0) as u32)))?;
     request("quest_end", |_| Some(Req::End))?;
     request("quest_directing", |a| Some(Req::Directing(matches!(a.front(), Some(mlua::Value::Boolean(true))))))?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_cinema_permission",
+        lua.create_function(move |_, (quest, which): (u32, String)| {
+            let kind = match which.as_str() {
+                "start" => kind::START,
+                "complete" => kind::READY,
+                _ => return Ok(()),
+            };
+            b.borrow_mut().dialog.requests.push(Req::CinemaPermission { quest, kind });
+            Ok(())
+        })?,
+    )?;
     // the close-up camera's requests follow the talk itself, not the NPC's scope: the camera must come off even after the scope ended
     let camera_request = |name: &str, f: fn(mlua::MultiValue) -> Req| -> mlua::Result<()> {
         let b = bridge.clone();
@@ -814,6 +835,21 @@ pub(super) fn talk_pointer(
     }
 }
 
+/// The cinema of the quest's `kind` component (`quest_components.cinema_id`).
+fn component_cinema(game: &GameData, quest: u32, kind: u8) -> Option<(u32, CinemaDef)> {
+    let def = game.quests.def(quest)?;
+    def.components.iter().filter_map(|id| game.quests.parts.get(id)).find_map(|c| (c.kind == kind).then_some(c).and_then(|c| c.cinema.clone().map(|cinema| (c.id, cinema))))
+}
+
+/// A component cinema may only drive the quest from the directing dialog; the quest log, item and
+/// scripted paths send their request without a movie (capture case C3 for the unproven ones).
+fn directing_cinema(d: &HudData, game: &GameData, quest: u32, kind: u8) -> Option<(u32, CinemaDef)> {
+    if !d.dialog.directing {
+        return None;
+    }
+    component_cinema(game, quest, kind)
+}
+
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
 /// offer (`SCDoodadQuestAccept`, when the player used a notice board ...) opens the dialog on it.
 pub fn handle_dialog(
@@ -823,6 +859,7 @@ pub fn handle_dialog(
     mut net: MessageWriter<NetCommand>,
     units: Res<Units>,
     mut camera: Option<ResMut<QuestTalkCamera>>,
+    mut cinema: Option<ResMut<super::cinema::CinemaPlayer>>,
 ) {
     for NetEvent(e) in events.read() {
         if let Event::Interaction(InteractEvent::DoodadQuestAccept { doodad_obj_id, quest_id }) = e
@@ -860,8 +897,49 @@ pub fn handle_dialog(
             net.write(NetCommand(Command::Interact(m)));
         };
         match r {
-            Req::Accept(quest_id) => send(&mut net, Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 }),
-            Req::Complete(quest_id, selected) => send(&mut net, Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }),
+            Req::Accept(quest_id) => {
+                let then = Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 };
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::START))) {
+                    (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
+                        player,
+                        &mut net,
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, then: Some(then.clone()), hide_dialog: !cinema_def.before_bubble },
+                    ),
+                    _ => false,
+                };
+                if !started {
+                    send(&mut net, then);
+                }
+            }
+            Req::Complete(quest_id, selected) => {
+                let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
+                let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::READY))) {
+                    (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
+                        player,
+                        &mut net,
+                        super::cinema::StartCinema { quest_id, component_id, cinema: &cinema_def, then: Some(then.clone()), hide_dialog: !cinema_def.before_bubble },
+                    ),
+                    _ => false,
+                };
+                if !started {
+                    send(&mut net, then);
+                }
+            }
+            Req::CinemaPermission { quest, kind } => {
+                let found = d.game.get().and_then(|g| component_cinema(g, quest, kind));
+                if d.dialog.directing
+                    && let (Some((component_id, cinema_def)), Some(player)) = (found, cinema.as_deref_mut())
+                {
+                    send(&mut net, Interact::CinemaPermission { component_id, npc_obj_id, doodad_obj_id });
+                    if cinema_def.before_bubble {
+                        super::cinema::start_quest_cinema(
+                            player,
+                            &mut net,
+                            super::cinema::StartCinema { quest_id: quest, component_id, cinema: &cinema_def, then: None, hide_dialog: false },
+                        );
+                    }
+                }
+            }
             Req::Talk(quest_id, component_id, act_id) => send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id }),
             Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
             Req::Drop(quest_id) => send(&mut net, Interact::QuestDrop { quest_id }),
@@ -936,6 +1014,44 @@ fn stop_directing(lua: &Lua, dialog: &mut DialogView) {
     }
 }
 
+/// Hides every top-level widget for a movie (capture C5: no talk window or bars while it plays).
+pub(super) fn cinema_hide(rt: Option<&UiRuntime>, dialog: &mut DialogView, on: bool) {
+    dialog.cinema_hidden = on;
+    if on {
+        let Some(rt) = rt else { return };
+        if dialog.cinema_applied {
+            return;
+        }
+        let mut u = aa_ui::lua::ui(&rt.lua);
+        let shown: Vec<aa_ui::tree::Id> = u.tree.top.iter().copied().filter(|&id| {
+            let o = u.tree.get(id);
+            o.alive && o.shown
+        }).collect();
+        for id in shown {
+            u.tree.get_mut(id).shown = false;
+            dialog.cinema_restore.push(id);
+        }
+        dialog.cinema_applied = true;
+        dialog.cinema_restore_pending = false;
+    } else if dialog.cinema_applied {
+        let Some(rt) = rt else {
+            dialog.cinema_restore_pending = true;
+            return;
+        };
+        let mut u = aa_ui::lua::ui(&rt.lua);
+        for id in std::mem::take(&mut dialog.cinema_restore) {
+            let o = u.tree.get(id);
+            if o.alive && !DIRECTING_WIDGETS.contains(&o.name.as_str()) {
+                u.tree.get_mut(id).shown = true;
+            }
+        }
+        drop(u);
+        stop_directing(&rt.lua, dialog);
+        dialog.cinema_applied = false;
+        dialog.cinema_restore_pending = false;
+    }
+}
+
 /// Hides the top-level widgets shown besides the dialog's own, remembering them.
 fn hide_others(rt: &UiRuntime, dialog: &mut DialogView) {
     let mut u = aa_ui::lua::ui(&rt.lua);
@@ -981,4 +1097,75 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, npc::track_npc.before(aa_ui::UiInput).before(super::sync_hud).before(super::prebuild_hud).before(super::build_hud));
     app.insert_resource(ScriptedTalk::from_args()).add_systems(OnExit(crate::Screen::InGame), reset)
         .add_systems(Update, talk_pointer.after(super::PointerFinished).after(talk_input).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_before_bubble_start_cinema_starts_when_the_dialog_opens() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
+        let before = game.quests.def(1352).and_then(|def| def.components.iter().filter_map(|id| game.quests.parts.get(id)).find(|c| c.kind == kind::START)).and_then(|c| c.cinema.clone());
+        let Some(cinema) = before.filter(|c| c.before_bubble) else { return };
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        {
+            let mut data = shared.borrow_mut();
+            data.game = super::super::SharedGameData::default();
+            let _ = data.game.0.set(game);
+            data.dialog.directing = true;
+            data.dialog.npc = Some((1, 1));
+            data.dialog.requests.push(Req::CinemaPermission { quest: 1352, kind: kind::START });
+        }
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .init_resource::<Units>()
+            .init_resource::<super::super::cinema::CinemaPlayer>()
+            .insert_non_send(HudBridge(shared))
+            .add_systems(Update, handle_dialog);
+        app.update();
+        let packets: Vec<Interact> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter_map(|NetCommand(command)| if let Command::Interact(packet) = command { Some(packet) } else { None })
+            .collect();
+        assert_eq!(
+            packets,
+            [
+                Interact::CinemaPermission { component_id: 6758, npc_obj_id: 1, doodad_obj_id: 0 },
+                Interact::Cinema { completed: false }
+            ],
+            "the {} movie must start after 0x0d0 at the dialog open",
+            cinema.name
+        );
+    }
+
+    #[test]
+    fn a_movie_hides_and_restores_the_talk_window() {
+        let mut dialog = DialogView::default();
+        cinema_hide(None, &mut dialog, true);
+        assert!(dialog.cinema_hidden);
+        cinema_hide(None, &mut dialog, false);
+        assert!(!dialog.cinema_hidden);
+    }
+
+    #[test]
+    fn quest_cinemas_need_the_directing_dialog() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
+        let mut d = HudData::default();
+        assert!(directing_cinema(&d, &game, 1065, kind::READY).is_none());
+        d.dialog.directing = true;
+        assert!(directing_cinema(&d, &game, 1065, kind::READY).is_some());
+        assert!(directing_cinema(&d, &game, 1065, kind::START).is_none());
+    }
 }

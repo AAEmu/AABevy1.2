@@ -366,12 +366,32 @@ struct Approach {
     best_at: f32,
 }
 
+/// Starts the walk to a doodad that was right clicked out of reach; a mount walk gives way.
+pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
+    super::pets::cancel_mount_walk(data);
+    data.doodad.approach = Some(Approach {
+        obj_id,
+        best: dist,
+        best_at: now,
+    });
+}
+
 /// How near the character walks to a doodad whose use reaches `reach` metres: well inside it.
 fn stop_distance(reach: f32) -> f32 {
     (reach - 1.0).clamp(1.5, 3.0)
 }
 
 impl View {
+    /// Ends a doodad walk because a mount walk takes over: no use follows. Returns whether a walk was running.
+    pub(super) fn cancel_walk(&mut self) -> bool {
+        self.approach.take().is_some()
+    }
+
+    /// A doodad walk is running (it owns the scripted forward key).
+    pub(super) fn walking(&self) -> bool {
+        self.approach.is_some()
+    }
+
     pub(super) fn has_menu(&self) -> bool { self.menu.is_some() }
     /// F (`do_interaction_1`) uses the doodad in reach instead of talking to an NPC.
     pub(super) fn claims_key(&self) -> bool {
@@ -872,7 +892,7 @@ fn advance(
 /// turns to it and W is held, like the script runner's `walk`) until it is near enough, and the doodad is returned to be
 /// used. A key of the player's, a doodad that is gone, no progress for [`STUCK_SECS`] or a use that is in reach already
 /// end the walk.
-fn walk_to(
+pub(super) fn walk_to(
     d: &mut HudData,
     doodads: &Doodads,
     units: &Units,
@@ -968,20 +988,26 @@ fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> 
 fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions) -> bool {
     let Some(o) = doodads.by_id.get(&obj_id) else { return false };
     let Some(pos) = doodad_world(o, units) else { return false };
-    let Some(game) = d.game.get() else { return false };
-    let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
-    let name = game.doodad.name(o.template_id).unwrap_or("?").to_string();
+    let (name, uses) = {
+        let Some(game) = d.game.get() else { return false };
+        let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
+        (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
+    };
     let dist = d.pos.distance(pos);
     let reach = reach(d, &uses);
     d.doodad.preferred = Some(obj_id);
-    if d.doodad.approach.take().is_some() {
+    // a doodad use is a new target action: a mount walk to the pet must not keep steering
+    super::pets::cancel_mount_walk(d);
+    // a click that replaces a running doodad walk takes the forward key it was holding
+    if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
     }
     if dist > reach {
         info!("doodad: {name} ({obj_id}) is {dist:.1} m away (reach {reach:.1} m): walking there");
-        d.doodad.approach = Some(Approach { obj_id, best: dist, best_at: now });
+        start_walk(d, obj_id, dist, now);
         return false;
     }
+    let Some(game) = d.game.get() else { return false };
     let mut entries: Vec<Entry> = uses
         .skills
         .iter()
@@ -1176,6 +1202,7 @@ pub(super) fn plugin(app: &mut App) {
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
                 .after(super::sync_hud)
+                .after(super::pets::walk_to_mount)
                 .after(aa_ui::UiInput)
                 .before(super::dialog::talk_input)
                 .run_if(super::hud_up)

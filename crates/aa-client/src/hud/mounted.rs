@@ -98,6 +98,8 @@ struct Actor {
     name: Vec<u8>,
     slave_template: Option<u32>,
     slave_tl: Option<u16>,
+    /// `UnitKind::Slave.id`: 7 siege weapon, 8 ship cannon/equipment. A cart is 6.
+    slave_kind: Option<u32>,
     /// Latest replicated unit-movement velocity, in (m/s)^2, and when it arrived. The native
     /// unbind check reads an engine getter (`vtable+0xa4`, `FUN_39345aa0`); this source is
     /// unverified.
@@ -173,11 +175,14 @@ impl View {
         if unit.obj_id == 0 || self.actors.contains_key(&unit.obj_id) {
             return;
         }
-        let (slave_template, slave_tl) = match unit.kind {
+        let (slave_template, slave_tl, slave_kind) = match unit.kind {
             UnitKind::Slave {
-                tl_id, template_id, ..
-            } => (Some(template_id), Some(tl_id)),
-            _ => (None, None),
+                id,
+                tl_id,
+                template_id,
+                ..
+            } => (Some(template_id), Some(tl_id), Some(id)),
+            _ => (None, None, None),
         };
         let now = Instant::now();
         self.actors.insert(
@@ -186,6 +191,7 @@ impl View {
                 name: c_name(&unit.name),
                 slave_template,
                 slave_tl,
+                slave_kind,
                 speed_squared: movement_speed_squared(unit.movement.as_ref()),
                 speed_at: unit.movement.as_ref().map(|_| now),
                 link: snapshot_link(unit),
@@ -256,12 +262,19 @@ impl View {
     /// of the slave skill bar (`slave_mount_skills`). A passenger seat, a mate and walking read `None`; the
     /// capture's bar came with `CSBindSlave driver=true` and `SCUnitAttached` point 1.
     pub(super) fn driver_slave(&self) -> Option<(u32, u32)> {
+        self.driver_slave_kind()
+            .map(|(obj_id, template, _)| (obj_id, template))
+    }
+
+    /// The driver's slave with its `slave_kind_id`: a kind-7/8 slave with a gunner bar uses its
+    /// `mount_attached_skills` skill (14372/24501/20161), not the slave's own mount-skill list.
+    pub(super) fn driver_slave_kind(&self) -> Option<(u32, u32, u32)> {
         let link = self.player_attachment()?;
         if !crate::ingame::driver_seat(link.point) {
             return None;
         }
         let actor = self.slave(link.obj_id)?;
-        Some((link.obj_id, actor.slave_template?))
+        Some((link.obj_id, actor.slave_template?, actor.slave_kind?))
     }
 
     /// Whether the player sits on a unit that is not a slave (a mate: riding a mount).

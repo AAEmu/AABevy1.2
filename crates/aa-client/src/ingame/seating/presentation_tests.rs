@@ -365,7 +365,7 @@ fn remote_reports_after_the_release_boundary_survive_the_world_pose_handoff() {
             .insert(RemoteUnit::fixture(47, Vec3::ZERO));
         app.world_mut()
             .resource_mut::<Views>()
-            .fixture_unit(47, actor);
+            .track_unit_entity(47, actor);
         app.add_systems(
             Update,
             units::receive_moves
@@ -584,7 +584,7 @@ fn old_release_does_not_reset_a_same_id_replacement_to_its_first_report() {
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(20)))
         .insert_resource(aa_world::TerrainQuery::new("__no_seating_test_world__"));
     app.world_mut().entity_mut(actor).remove::<(LocalPlayer, Mover)>().insert(RemoteUnit::fixture(47, Vec3::ZERO));
-    app.world_mut().resource_mut::<Views>().fixture_unit(47, actor);
+    app.world_mut().resource_mut::<Views>().track_unit_entity(47, actor);
     app.add_systems(Update, (
         units::receive_moves.after(super::super::track).before(units::move_units),
         units::move_units.before(follow),
@@ -613,7 +613,7 @@ fn replacement_snapshot_release_is_not_the_new_incarnations_movement_boundary() 
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(Duration::from_millis(20)))
         .insert_resource(aa_world::TerrainQuery::new("__no_seating_test_world__"));
     app.world_mut().entity_mut(actor).remove::<(LocalPlayer, Mover)>().insert(RemoteUnit::fixture(47, Vec3::ZERO));
-    app.world_mut().resource_mut::<Views>().fixture_unit(47, actor);
+    app.world_mut().resource_mut::<Views>().track_unit_entity(47, actor);
     app.add_systems(Update, (
         units::receive_moves.after(super::super::track).before(units::move_units),
         units::move_units.before(follow),

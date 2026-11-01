@@ -24,7 +24,7 @@ pub mod morph;
 pub mod pose;
 pub mod rope;
 
-pub use animator::{AnimPlugin, Animator, ClipLibrary, Playing, RandomIdle, spawn_bones};
+pub use animator::{AnimPlugin, AnimSet, Animator, ClipLibrary, Playing, RandomIdle, spawn_bones};
 pub use caf::{Clip, Track};
 pub use cal::Cal;
 pub use cdf::Cdf;

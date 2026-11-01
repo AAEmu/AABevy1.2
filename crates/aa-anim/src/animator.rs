@@ -333,6 +333,11 @@ impl Animator {
     }
 }
 
+/// The animation pass that writes the bones' local transforms (PostUpdate, before propagation).
+/// A system that rotates a bone after a clip (a turret's `bone_yaw` / `bone_pitch`) runs after it.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnimSet;
+
 /// Registers the animation system. Add once.
 pub struct AnimPlugin;
 
@@ -341,7 +346,7 @@ impl Plugin for AnimPlugin {
         use crate::rope::{RopeSettings, attach_ropes, mask_ropes, track_ropes};
         app.init_resource::<ClipLibrary>()
             .init_resource::<RopeSettings>()
-            .add_systems(PostUpdate, (attach_ropes, mask_ropes, track_ropes, animate).chain().before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, (attach_ropes, mask_ropes, track_ropes, animate).chain().in_set(AnimSet).before(TransformSystems::Propagate));
     }
 }
 

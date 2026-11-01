@@ -29,7 +29,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<crate::ingame::ground_target::plant::PlantLock>()
         .init_resource::<placement::GhostJobs>()
         .init_resource::<render::DrawnHouses>()
-        .add_systems(PreUpdate, placement::input.after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(PreUpdate, placement::input.in_set(crate::hud::cinema::CinemaInputRead).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
         .add_systems(OnEnter(Screen::InGame), placement::arm_on_entry)
         .add_systems(Update, placement::arm_on_world_load.before(placement::start).run_if(in_state(Screen::InGame)))
         .add_systems(Update, (placement::start, placement::follow, placement::ghost).chain().run_if(in_state(Screen::InGame)))

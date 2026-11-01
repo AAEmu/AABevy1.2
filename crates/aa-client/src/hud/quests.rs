@@ -153,6 +153,14 @@ fn counts_as_objective(ty: &str) -> bool {
     )
 }
 
+/// The cinema a component plays (`quest_components.cinema_id`, `cinemas.name`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CinemaDef {
+    pub name: String,
+    /// `play_cinema_before_bubble`: the movie comes before the step's lines instead of after them.
+    pub before_bubble: bool,
+}
+
 /// A component (`quest_components`).
 #[derive(Clone, Debug, Default)]
 pub struct ComponentDef {
@@ -164,6 +172,8 @@ pub struct ComponentDef {
     pub acts: Vec<ActDef>,
     /// The bubble the step's talk starts with (`is_start`), 0 for none.
     pub first_bubble: u32,
+    /// The cinema played for this step, if any.
+    pub cinema: Option<CinemaDef>,
 }
 
 impl ComponentDef {
@@ -409,6 +419,17 @@ impl QuestTables {
                 t.parts.insert(id, ComponentDef { id, quest, kind, ..ComponentDef::default() });
                 if let Some(d) = t.defs.get_mut(&quest) {
                     d.components.push(id);
+                }
+            }
+        }
+        if let Ok(mut q) = conn.prepare(
+            "SELECT qc.id, c.name, qc.play_cinema_before_bubble FROM quest_components qc JOIN cinemas c ON c.id = qc.cinema_id",
+        ) {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id = any_int(r, 0)? as u32;
+                if let Some(c) = t.parts.get_mut(&id) {
+                    c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)? });
                 }
             }
         }
@@ -907,6 +928,21 @@ mod tests {
         assert_eq!(t.mark(3597, &facts), None);
         // Gallagher then offers "The Mayor's Advice"
         assert_eq!(t.offers(3511, &facts), vec![6198]);
+    }
+
+    #[test]
+    fn quest_component_cinemas_come_from_the_component_row() {
+        let Some(t) = tables() else { return };
+        // 1065 "Evacuation Protocol": the Ready component 5336 reports through cinema 17 (fly_east)
+        if let Some(c) = t.parts.get(&5336) {
+            assert_eq!(c.quest, 1065);
+            assert_eq!(c.cinema, Some(CinemaDef { name: "fly_east".to_string(), before_bubble: false }));
+        }
+        // 2246: the Start component 10186 plays zq_20_karl
+        if let Some(c) = t.parts.get(&10186) {
+            assert_eq!(c.quest, 2246);
+            assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false }));
+        }
     }
 
     #[test]

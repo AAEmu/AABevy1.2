@@ -17,6 +17,9 @@ use super::data::Db;
 /// Models to hang on a character's bones, resolved when it is built.
 #[derive(Component)]
 pub struct Carried(pub Vec<CarriedItem>);
+/// The stowed backpack or glider on a character's back: hidden while its glider is open (`glide::show_glider`).
+#[derive(Component)]
+pub struct StowedPack;
 /// Includes models that never move to a hand, such as backpacks.
 #[derive(Component)]
 pub(super) struct CarriedModelOwner(pub Entity);
@@ -387,6 +390,9 @@ pub fn attach_carried(mut commands: Commands, mut cry: CryAssets, characters: Qu
                 _ => commands.spawn((Name::new("weapon"), Transform::default(), Visibility::default())).add_children(&parts).id(),
             };
             commands.entity(model).insert((item.transform, ChildOf(bone), CarriedModelOwner(entity)));
+            if item.grip == Grip::Pack {
+                commands.entity(model).insert(StowedPack);
+            }
             if remote.is_some_and(|remote| !remote.casts_shadow()) {
                 commands.queue(move |world: &mut World| super::units::no_shadows(world, model));
             }

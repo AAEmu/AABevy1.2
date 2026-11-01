@@ -21,8 +21,11 @@
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
 //! (live capture 2026-10-28, case e), never 0x068.
 //!
-//! Skills 13863 (passenger) and 19165 (destroy) go to `CSStartSkill` in 1.2; this client has no
-//! generic interaction skill-cast path yet, so they are ignored. Any other first skill (0 or
+//! Skills 13863 (passenger) goes to `CSStartSkill` in 1.2; 19165 (destroy) needs the same
+//! generic interaction cast but is not ported. The passenger request targets the slave, not the
+//! player, and the server attaches point 2 (`AttachTo` value1 2). A second seat needs leaving the
+//! first: there is no change-seat packet, and this client does not refuse a passenger request
+//! while already seated; the server decides (capture-pending S11-C2). Any other first skill (0 or
 //! unknown) does nothing.
 //!
 //! The interactive key (F) sends nothing for a cart; NPC talk keeps the path it had. The player
@@ -74,7 +77,7 @@ const MSG_CANT_DO_WHILE_YOU_DEAD: i16 = 0x14c;
 
 /// What a boarding or leaving request did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Outcome {
+pub(crate) enum Outcome {
     /// Queued as `Request::Slave`.
     Sent,
     /// Refused without a message (already bound to this slave).
@@ -167,10 +170,32 @@ pub(super) fn interact(
 }
 
 /// `FUN_393be850` / `FUN_393be280`: `SCNpcInteractionSkillList` 0x07b for a slave acts on the
-/// first skill at once. 12076 is the bind route; 13863 (passenger), 19165 (destroy) and any
-/// other skill need a generic interaction skill cast this client does not have yet.
-pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
-    const SKILL_OCCUPY: u32 = 12076;
+/// first skill at once. The two skills the 1.2 tables name for a slave:
+/// * 12076 "occupy" -> `CSBindSlave` 0x031 (the driver seat, point 1);
+/// * 13863 "passenger seat" -> a plain `CSStartSkill` 0x052 with the slave as the unit target
+///   (`AttachTo` value1 2 attaches point 2).
+/// 19165 (destroy) and any other skill do nothing here.
+const SKILL_OCCUPY: u32 = 12076;
+const SKILL_PASSENGER: u32 = 13863;
+
+/// Which seat a slave interaction skill asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SlaveSeat {
+    Driver,
+    Passenger,
+}
+
+impl SlaveSeat {
+    fn of_skill(skill: u32) -> Option<SlaveSeat> {
+        match skill {
+            SKILL_OCCUPY => Some(SlaveSeat::Driver),
+            SKILL_PASSENGER => Some(SlaveSeat::Passenger),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
     }) = event
@@ -180,7 +205,10 @@ pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     let Some(unit) = units.get(*npc_obj_id) else {
         return Outcome::Silent;
     };
-    if !matches!(unit.kind, UnitKind::Slave { .. }) || skills.first() != Some(&SKILL_OCCUPY) {
+    let Some(seat) = skills.first().copied().and_then(SlaveSeat::of_skill) else {
+        return Outcome::Silent;
+    };
+    if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
     let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
@@ -193,7 +221,28 @@ pub(super) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     if gap >= interact_reach(data) {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
-    bind(data, units, *npc_obj_id)
+    match seat {
+        SlaveSeat::Driver => bind(data, units, *npc_obj_id),
+        SlaveSeat::Passenger => passenger(data, units, *npc_obj_id),
+    }
+}
+
+/// The passenger seat request: `CSStartSkill` 13863 with the slave as the unit target. The
+/// original client goes from the interaction range check straight to the skill
+/// (`FUN_393bf310` -> `FUN_39362f50`); the bind checks of `FUN_39346290` belong to 12076.
+/// `FUN_39362f50` refuses a dead target with 0x144 for 13863/19165 and has no seated refusal, so
+/// this port keeps only the dead check. A right click while seated never reaches this path: it
+/// sends only `CSChangeTarget` (`interact`). Riding a mate only widens the interaction reach; the
+/// port does not refuse it (capture-pending S11-C5).
+fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+    if units.get(target).is_some_and(|unit| unit.dead) {
+        return Outcome::Refused(MSG_SLAVE_CANNOT_BIND_WHILE_IS_DEAD);
+    }
+    data.requests.push(Request::UseSkill {
+        skill_id: SKILL_PASSENGER,
+        target_obj_id: target,
+    });
+    Outcome::Sent
 }
 
 /// Feeds `SCNpcInteractionSkillList` 0x07b for slaves to [`receive`].

@@ -100,23 +100,37 @@ fn spindle_arms(model: &aa_cry::mesh::Model) -> Option<SpindleArms> {
 #[derive(Component, Default)]
 pub struct SeatHelpers(pub HashMap<String, Affine3A>);
 
+/// The helper key of a body bone or node: the attach strings name `$driver`, `$passenger0`, ..., but some vehicle
+/// bodies (the red ox cart's `transfers_trailer_c.chr`) name the seat bones `driver` / `passenger0` without the `$`.
+/// Both spellings are the same helper; other un-prefixed body bones are not helpers (capture-pending S11-C3 checks
+/// the original helper lookup).
+fn helper_key(name: &str) -> Option<String> {
+    let lower = name.to_ascii_lowercase();
+    let stripped = lower.strip_prefix('$').unwrap_or(&lower);
+    (lower.starts_with('$') || stripped.starts_with("driver") || stripped.starts_with("passenger"))
+        .then(|| stripped.to_string())
+}
+
 fn helper_nodes(
     model: &aa_cry::mesh::Model,
     placement: Affine3A,
     out: &mut HashMap<String, Affine3A>,
 ) {
-    if let Some(skeleton) = &model.skeleton {
-        for bone in &skeleton.bones {
-            if let Some(name) = bone.name.strip_prefix('$') {
-                out.entry(name.to_ascii_lowercase())
-                    .or_insert(placement * bone.bind_model);
+    // `$`-prefixed helpers first, so a bare `driver`/`passenger` bone never displaces an authored `$driver` node
+    for prefixed in [true, false] {
+        let pass = |name: &str| name.starts_with('$') == prefixed;
+        if let Some(skeleton) = &model.skeleton {
+            for bone in skeleton.bones.iter().filter(|bone| pass(&bone.name)) {
+                if let Some(name) = helper_key(&bone.name) {
+                    out.entry(name).or_insert(placement * bone.bind_model);
+                }
             }
         }
-    }
-    for (index, node) in model.nodes.iter().enumerate() {
-        if let Some(name) = node.name.strip_prefix('$') {
-            out.entry(name.to_ascii_lowercase())
-                .or_insert_with(|| placement * model.world_transform(index));
+        for (index, node) in model.nodes.iter().enumerate().filter(|(_, node)| pass(&node.name)) {
+            if let Some(name) = helper_key(&node.name) {
+                out.entry(name)
+                    .or_insert_with(|| placement * model.world_transform(index));
+            }
         }
     }
 }
@@ -641,6 +655,37 @@ mod tests {
             driver.translation.distance(expected.into()) < 0.01,
             "driver at {:?}",
             driver.translation
+        );
+    }
+
+    #[test]
+    fn helper_names_match_with_or_without_the_dollar_prefix() {
+        assert_eq!(helper_key("$driver").as_deref(), Some("driver"));
+        assert_eq!(helper_key("$Passenger3").as_deref(), Some("passenger3"));
+        assert_eq!(
+            helper_key("driver").as_deref(),
+            Some("driver"),
+            "the red ox cart names it without $"
+        );
+        assert_eq!(helper_key("passenger0").as_deref(), Some("passenger0"));
+        assert_eq!(helper_key("Bone_spindle"), None);
+        assert_eq!(helper_key("dummy_passenger"), None);
+    }
+
+    /// The red ox cart's body names its two seats without the `$` the attach strings use; with only a `$` prefix scan
+    /// its passenger seat fell back to the cart origin.
+    #[test]
+    #[ignore = "requires the client pak and the game database"]
+    fn the_red_ox_cart_exposes_both_seat_helpers() {
+        let Some(db) = super::super::data::Db::open() else { return };
+        let look = db.vehicle_look(1553).expect("the red ox cart's look");
+        let helpers = body_helpers(&look);
+        let driver = helpers.get("driver").expect("the cart's driver helper");
+        let passenger = helpers.get("passenger0").expect("the cart's passenger helper");
+        assert!(driver.translation.length() > 0.1);
+        assert!(
+            passenger.translation.distance(driver.translation.into()) > 0.1,
+            "the passenger and driver helpers are different places"
         );
     }
 

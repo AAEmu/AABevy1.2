@@ -283,10 +283,12 @@ impl Units {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.attached_to = None;
             }
-            Event::UnitPosture { obj_id, kind, anim_action, activate } => {
+            Event::UnitPosture { obj_id, kind, anim_action, activate, turret } => {
                 let Some(u) = self.by_id.get_mut(obj_id) else { return false };
                 u.anim_action = if *kind == 4 && *activate { *anim_action } else { 0 };
                 if *kind != 1 { u.house_posture = None; }
+                // Type 8 is the stored turret aim; every other posture means the unit left it.
+                u.turret = if *kind == 8 { *turret } else { None };
             }
             Event::Housing(crate::housing::HousingEvent::UnitPosture { obj_id, posture }) => {
                 let Some(unit) = self.by_id.get_mut(obj_id) else { return false; };
@@ -741,6 +743,7 @@ pub(crate) mod tests {
             buffs: Vec::new(),
             anim_action: 0,
             house_posture: None,
+            turret: None,
             state_attachments: None,
             attached_to: None,
             doodad_bond: None,
@@ -813,9 +816,9 @@ pub(crate) mod tests {
         assert_eq!(units.get(5).unwrap().attached_to, None);
         assert!(!units.apply(&Event::UnitDetached { obj_id: 99, reason: 4 }));
         // an NPC takes a pose, and leaves it (the packet repeats the animation action)
-        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: true }));
+        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: true, turret: None }));
         assert_eq!(units.get(5).unwrap().anim_action, 104);
-        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: false }));
+        assert!(units.apply(&Event::UnitPosture { obj_id: 5, kind: 4, anim_action: 104, activate: false, turret: None }));
         assert_eq!(units.get(5).unwrap().anim_action, 0);
         // standing on a deck: the unit is where its world position says, not at the deck-relative one
         let mut movement = Movement::unit(Pos::new(1.0, 2.0, 0.5), 0.0, 1);

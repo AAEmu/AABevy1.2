@@ -111,6 +111,8 @@ pub enum ClientMsg {
     /// Native SaveNotes item cast with type5 composition grade; no staged upload.
     ComposeMusic { self_obj_id: u32, request: crate::MusicComposeRequest },
     StartSkill { skill_id: u32, self_obj_id: u32, caster: StartCaster, target: SkillTarget },
+    /// `CSTurretState` 0x036: the manned slave and the aim of its model (radians).
+    TurretState(crate::turret::TurretState),
     /// `CSStopCasting`: the player cancels its cast or channel. `tl` is the timeline of a plain skill, `plot_tl` that of a plot
     /// (the real client sends 0 for the other one); the server checks `obj_id` is the player's unit.
     StopCasting { tl: u16, plot_tl: u16, obj_id: u32 },
@@ -231,6 +233,7 @@ impl ClientMsg {
             Self::ItemLook { request, .. } => request.opcode(),
             Self::ComposeMusic { .. } => cs::CSStartSkillPacket,
             Self::StartSkill { .. } => cs::CSStartSkillPacket,
+            Self::TurretState(_) => cs::CSTurretStatePacket,
             Self::StopCasting { .. } => cs::CSStopCastingPacket,
             Self::RemoveBuff { .. } => cs::CSRemoveBuffPacket,
             Self::ExecuteCraft { .. } => cs::CSExecuteCraft,
@@ -353,6 +356,7 @@ impl ClientMsg {
             Self::StartSkill { skill_id, self_obj_id, caster, target } => {
                 crate::skill::write_start_skill(&mut w, *skill_id, *self_obj_id, *caster, target);
             }
+            Self::TurretState(state) => state.write(&mut w),
             Self::StopCasting { tl, plot_tl, obj_id } => {
                 w.u16(*tl).u16(*plot_tl).bc(*obj_id);
             }
