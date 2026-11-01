@@ -1823,6 +1823,7 @@ mod tests {
             "a code that published the camera hit would fail here: {impact:?} vs {far:?}"
         );
         assert_eq!(sight.refusal, None, "the preview passed");
+        drop(app);
         let _ = std::fs::remove_file(path);
     }
 
