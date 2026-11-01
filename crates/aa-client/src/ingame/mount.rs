@@ -1413,7 +1413,7 @@ pub fn track_local_mount(
             LocalSeat {
                 mount: a.obj_id,
                 point: a.point,
-                drives: driver_seat(a.point) && !parented,
+                drives: driver_seat(a.point) && (!parented || turret),
                 cart: slave && !ship && (!turret || drivable),
                 ship,
                 turret,
@@ -3389,8 +3389,8 @@ mod child_seat_tests {
             .insert_resource(Player::default())
             .insert_resource(Views::default())
             .insert_resource(Units::default())
-            .insert_resource(TerrainQuery::fixture("test"))
-            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture("test")))
+            .insert_resource(TerrainQuery::fixture_flat("test", expected.z))
+            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture_flat("test", expected.z)))
             .insert_resource(WaterQuery::fixture("test"))
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
@@ -3495,7 +3495,7 @@ mod child_seat_tests {
         let first = first_move(&mut app).expect("the first CSMoveUnit");
         let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
         assert!(
-            pos.truncate().distance(expected.truncate()) < 0.1,
+            pos.distance(expected) < 0.1,
             "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
         );
         assert!(
@@ -3517,7 +3517,7 @@ mod child_seat_tests {
         let first = first_move(&mut app).expect("the first CSMoveUnit");
         let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
         assert!(
-            pos.truncate().distance(expected.truncate()) < 0.1,
+            pos.distance(expected) < 0.1,
             "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
         );
     }
@@ -3617,6 +3617,51 @@ mod child_seat_tests {
         );
     }
 
+    struct CannonFixture {
+        path: std::path::PathBuf,
+        db: Db,
+    }
+
+    impl CannonFixture {
+        fn new() -> Option<Self> {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static NEXT: AtomicU32 = AtomicU32::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "aa-client-cannon-{}-{}.sqlite3",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_file(&path);
+            {
+                let conn = rusqlite::Connection::open(&path).ok()?;
+                conn.execute_batch(
+                    "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+                     CREATE TABLE slaves(id INTEGER PRIMARY KEY, slave_kind_id INTEGER);
+                     INSERT INTO slaves VALUES (10, 8);
+                     CREATE TABLE vehicle_models(id INTEGER PRIMARY KEY,
+                         turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
+                         turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
+                         turret_yaw_angvel REAL, turret_pitch_angvel REAL,
+                         velocity REAL, installed_turret TEXT);
+                     INSERT INTO models VALUES (117, 'VehicleModel', 10);
+                     INSERT INTO vehicle_models VALUES (10, -20, 35, -22, 22, 35, 20, 0, 'f');
+                     CREATE TABLE ship_models(id INTEGER PRIMARY KEY, normal TEXT, steer_vel REAL);
+                     INSERT INTO models VALUES (393, 'ShipModel', 11);
+                     INSERT INTO ship_models VALUES (11, 'prefab://test/none', 6.0);",
+                )
+                .ok()?;
+            }
+            let db = Db::open_path(path.to_str()?)?;
+            Some(Self { path, db })
+        }
+    }
+
+    impl Drop for CannonFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
     /// The real `track_local_mount` classification of a server cannon: `UnitKind::Slave.id` is
     /// the persisted slave id, while the 1.2 client reads the slave kind from the template id
     /// (the `slaves.id` the unit state carries). `deck` injects a synthetic hull floor.
@@ -3632,7 +3677,8 @@ mod child_seat_tests {
         let ship_yaw = 0.63;
         let local = Vec3::new(-4.5703, -3.6836, 4.8404);
         let seat = Vec3::new(0.0, -0.8, 0.0);
-        let mut db = Db::open()?;
+        let fixture = CannonFixture::new()?;
+        let db = fixture.db.clone();
         if deck {
             let quad = |z: f32| {
                 [
@@ -3679,8 +3725,8 @@ mod child_seat_tests {
             .insert_resource(Views::default())
             .insert_resource(Units::default())
             .insert_resource(db)
-            .insert_resource(TerrainQuery::fixture("test"))
-            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture("test")))
+            .insert_resource(TerrainQuery::fixture_flat("test", expected.z))
+            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture_flat("test", expected.z)))
             .insert_resource(WaterQuery::fixture("test"))
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
@@ -3757,12 +3803,19 @@ mod child_seat_tests {
             return;
         };
         tick(&mut app, 0.1);
-        let seat = app.world().resource::<LocalMount>().0.expect("a seat");
+        let mount = app.world().resource::<LocalMount>();
+        let seat = mount.0.expect("a seat");
         assert_eq!(
             (seat.turret, seat.cart, seat.drives),
-            (true, false, false),
+            (true, false, true),
             "a ship cannon (slaves.id 10, kind 8) was not recognised as a turret"
         );
+        assert!(
+            !mount.passenger(),
+            "the gunner must not take the passenger path (it keeps the slave bar)"
+        );
+        assert_eq!(mount.turret_seat(), Some(7));
+        assert_eq!(mount.driving(), None, "a turret seat never drives the mount");
         let cannon = app
             .world()
             .resource::<Views>()
@@ -3846,7 +3899,7 @@ mod child_seat_tests {
         let first = first_move(&mut app).expect("the first CSMoveUnit");
         let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
         assert!(
-            pos.truncate().distance(expected.truncate()) < 0.1,
+            pos.distance(expected) < 0.1,
             "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
         );
         assert!(pos.distance(local) > 1000.0, "the local offset was sent");
