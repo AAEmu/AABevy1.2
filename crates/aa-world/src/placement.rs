@@ -380,10 +380,13 @@ pub fn parse_named_effect_entities(xml: &str) -> Vec<NamedEffect> {
             if chain.len() > 64 {
                 return None;
             }
+            // an empty parent attribute is a root; an unresolved one is skipped like the static
+            // entity slots (`entities::transform`): its position is local to a space we lack
             let Some(parent) = current
                 .attribute("Parent")
                 .or_else(|| current.attribute("ParentGUID"))
                 .map(str::trim)
+                .filter(|p| !p.is_empty())
             else {
                 break;
             };
