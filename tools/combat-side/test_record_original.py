@@ -34,6 +34,17 @@ def input_row(key: str, before_wall_ms: float) -> dict:
     return {"channel": "inputs", "key": key, "before_wall_ms": before_wall_ms}
 
 
+def cast_channel(starts: list[int]) -> list[dict]:
+    rows = []
+    for start in starts:
+        rows.append({"channel": "castbar", "clock": "ui", "native_ms": start - 100,
+                     "player_name": "", "player_show": "false", "player_current": ""})
+        rows.append({"channel": "castbar", "clock": "ui", "native_ms": start,
+                     "player_name": "Flamebolt", "player_show": "true",
+                     "player_current": "0"})
+    return rows
+
+
 class ClockTests(unittest.TestCase):
     def make_clock(self, span_s: int, drift_ppm: float = 20.0) -> rec.Clock:
         clock = rec.Clock()
@@ -56,6 +67,11 @@ class ClockTests(unittest.TestCase):
         self.assertTrue(report["drift_applied"])
         self.assertAlmostEqual(report["drift_ppm"], 20.0, places=2)
         self.assertFalse(report["drift_warning"])
+
+    def test_large_applied_drift_warns_without_gating(self) -> None:
+        report = self.make_clock(70, drift_ppm=500.0).report()
+        self.assertTrue(report["ui"]["drift_warning"])
+        self.assertIn("not gated", report["drift_warning_policy"])
 
 
 class GcdSelfCheckTests(unittest.TestCase):
@@ -107,6 +123,25 @@ class GcdSelfCheckTests(unittest.TestCase):
         self.assertEqual(report["gcd"]["complete_rises"], 2)
         self.assertEqual(report["gcd"]["linked_complete_rises"], 1)
 
+    def short_run(self, start: int) -> list[dict]:
+        return [gcd_row(start + step * 50, 200 - step * 50, 200)
+                for step in range(5)]
+
+    def test_one_press_cannot_start_two_rises(self) -> None:
+        rows = [gcd_row(0, 0, 0)]
+        rows.extend(self.short_run(100))
+        rows.extend(self.short_run(400))
+        report = self.check(rows, [input_row("1", 50.0)])
+        self.assertEqual(report["gcd"]["complete_rises"], 2)
+        self.assertEqual(report["gcd"]["linked_complete_rises"], 1)
+        self.assertFalse(report["gcd"]["changed"])
+
+    def test_press_outside_the_window_is_not_linked(self) -> None:
+        report = self.check(self.complete_rows(), [input_row("1", -1000.0)])
+        self.assertEqual(report["gcd"]["complete_rises"], 1)
+        self.assertEqual(report["gcd"]["linked_complete_rises"], 0)
+        self.assertFalse(report["gcd"]["changed"])
+
 
 class MemoryUiOffsetTests(unittest.TestCase):
     def channels(self) -> dict[str, list[dict]]:
@@ -129,9 +164,14 @@ class MemoryUiOffsetTests(unittest.TestCase):
     def test_measures_and_shifts_memory_rows(self) -> None:
         measured = rec.measure_memory_ui_offset(self.channels())
         self.assertTrue(measured["measured"])
+        self.assertTrue(measured["measurable"])
         self.assertEqual(measured["pairs"], 2)
         self.assertEqual(measured["offset_ms"], 26.0)
         self.assertEqual(measured["spread_ms"], 2.0)
+        self.assertEqual(measured["status"], "measured")
+        self.assertIsNone(measured["reason"])
+        self.assertIn("same frame", measured["assumption"])
+        self.assertEqual(measured["raw_field"], "client_ms_raw")
         run = pathlib.Path(tempfile.mkdtemp())
         (run / "gcd.jsonl").write_text("\n".join(
             json.dumps(row) for row in self.channels()["gcd"]) + "\n", encoding="utf-8")
@@ -139,9 +179,63 @@ class MemoryUiOffsetTests(unittest.TestCase):
         self.assertEqual(shifted, 4)
         rows = [json.loads(line) for line in (run / "gcd.jsonl").read_text().splitlines()]
         self.assertEqual([row["client_ms"] for row in rows], [1001, 1001, 1999, 1999])
+        self.assertEqual([row["client_ms_raw"] for row in rows], [1027, 1027, 2025, 2025])
         after = rec.measure_memory_ui_offset({"gcd": rows, "castbar": self.channels()["castbar"]})
-        self.assertEqual(after["offset_ms"], 0.0)
+        self.assertEqual(after["offset_ms"], 26.0)
         self.assertLessEqual(after["residual_after_max_ms"], 1.0)
+
+    def test_instant_rise_without_a_cast_start_is_not_measurable(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1000, 1000, 1000)], "castbar": []})
+        self.assertFalse(measured["measurable"])
+        self.assertEqual(measured["pairs"], 0)
+        self.assertEqual(measured["reason"], "no-cast-starts")
+        self.assertTrue(measured["ok"])
+
+    def test_starts_that_never_pair_are_not_measurable(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(4000, 1000, 1000)],
+             "castbar": cast_channel([1000])})
+        self.assertEqual(measured["gcd_rises"], 1)
+        self.assertEqual(measured["cast_starts"], 1)
+        self.assertEqual(measured["pairs"], 0)
+        self.assertEqual(measured["reason"], "no-pairs")
+        self.assertFalse(measured["measurable"])
+        self.assertTrue(measured["ok"])
+
+    def test_outlier_pair_fails_the_residual_gate(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
+                     gcd_row(3025, 0, 0), gcd_row(3027, 1000, 1000),
+                     gcd_row(5000, 0, 0), gcd_row(5090, 1000, 1000)],
+             "castbar": cast_channel([1000, 3000, 5000])})
+        self.assertEqual(measured["pairs"], 3)
+        self.assertEqual(measured["offset_ms"], 27.0)
+        self.assertTrue(measured["measurable"])
+        self.assertFalse(measured["ok"])
+        self.assertEqual(measured["residual_after_max_ms"], 63.0)
+
+    def test_shift_only_touches_the_memory_channels(self) -> None:
+        run = pathlib.Path(tempfile.mkdtemp())
+        rows = {
+            "gcd": {"channel": "gcd", "clock": "estimate", "client_ms": 1000},
+            "anim_controller": {"channel": "anim_controller", "clock": "estimate",
+                                "client_ms": 1000},
+            "unit_state": {"channel": "unit_state", "clock": "estimate", "client_ms": 1000},
+            "meta": {"channel": "meta", "clock": "estimate", "client_ms": 1000},
+        }
+        for name, row in rows.items():
+            (run / f"{name}.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+        shifted = rec.shift_estimate_rows(run, 27)
+        self.assertEqual(shifted, 2)
+        for name in ("gcd", "anim_controller"):
+            row = json.loads((run / f"{name}.jsonl").read_text().splitlines()[0])
+            self.assertEqual(row["client_ms"], 973)
+            self.assertEqual(row["client_ms_raw"], 1000)
+        for name in ("unit_state", "meta"):
+            row = json.loads((run / f"{name}.jsonl").read_text().splitlines()[0])
+            self.assertEqual(row["client_ms"], 1000)
+            self.assertNotIn("client_ms_raw", row)
 
 
 class McpReplyTests(unittest.TestCase):
@@ -249,6 +343,50 @@ class SamplerRecoveryTests(unittest.TestCase):
         rows = [json.loads(line) for line in (run / "gcd.jsonl").read_text().splitlines()]
         self.assertTrue(any(row.get("gap") for row in rows))
         self.assertTrue(any(row.get("gcd_remaining") == 0 for row in rows))
+
+
+class SamplerRefreshTests(unittest.TestCase):
+    class NullActorMem:
+        """The actor global reads null while the old actor still reads."""
+
+        def __init__(self) -> None:
+            self.null = True
+            self.local = 0x2000
+            self.actor = 0x1000
+
+        def u32(self, address: int) -> int:
+            if address == rec.G_CONNECTION - rec.DUMP_BASE:
+                return self.local
+            if address == self.local + 0x10C:
+                return 0 if self.null else self.actor
+            return 0
+
+        def u32s_exact(self, address: int, count: int) -> list[int]:
+            return [0] * count
+
+        def u8_exact(self, address: int) -> int:
+            return 0
+
+        def u32_exact(self, address: int) -> int:
+            return 0
+
+    def test_null_actor_enters_recovery_instead_of_stale_rows(self) -> None:
+        mem = self.NullActorMem()
+        run = pathlib.Path(tempfile.mkdtemp())
+        writer = rec.ChannelWriter(run, rec.Clock())
+        sampler = rec.MemorySampler(mem, rec.Clock(), writer, 0, 0x1000, 0, 0, 0,
+                                    recovery=2.0, interval=0.01,
+                                    refresh_interval=0.05)
+        threading.Timer(0.2, setattr, args=(mem, "null", False)).start()
+        sampler.start()
+        time.sleep(0.6)
+        sampler.stop()
+        writer.close()
+        self.assertIsNone(sampler.error)
+        rows = [json.loads(line) for line in (run / "gcd.jsonl").read_text().splitlines()]
+        self.assertTrue(any(row.get("gap") for row in rows))
+        self.assertTrue(any(row.get("gcd_remaining") == 0 and not row.get("gap")
+                            for row in rows))
 
 
 class MonotonicTests(unittest.TestCase):

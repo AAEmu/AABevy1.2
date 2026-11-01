@@ -63,6 +63,17 @@ from pathlib import Path
 from typing import NamedTuple
 
 SCHEMA = "aabevy.combat-recorder/v2"
+DRIFT_WARNING_POLICY = (
+    "reported, not gated: the UI clock is stamped at frame start, so a long "
+    "run can fit a slope beyond 200 ppm by chance")
+PRESS_WINDOW_MS = 500.0
+MEMORY_SHIFT_CHANNELS = ("gcd", "anim_controller")
+MEMORY_UI_RESIDUAL_MS = 25.0
+MEMORY_UI_ASSUMPTION = (
+    "the GCD is written in the same frame the cast starts; the measured offset "
+    "absorbs UI frame-start stamping (about half a 52 ms frame), the 5 ms memory "
+    "cadence and any real 1.2 ordering, so after the shift the GCD-rise-vs-"
+    "cast-start difference is zero by construction and is not 1.2 evidence")
 DUMP_BASE = 0x38FF0000
 G_CONNECTION = 0x39B02294       # local player global (docs/research/port-combat/structs.md)
 UNIT_MAP = 0x3A169998           # tree used by FUN_39360020
@@ -475,6 +486,7 @@ class Clock:
                 "epoch_wall_ms": round(epoch, 1) if epoch is not None else None,
                 "start_client_ms": round(start.intercept, 1) if start is not None else None,
                 "wall_clock": "perf_counter",
+                "drift_warning_policy": DRIFT_WARNING_POLICY,
             }
             for kind in ("system", "ui"):
                 fit = self._fit(kind)
@@ -1002,7 +1014,8 @@ class MemorySampler(threading.Thread):
     def __init__(self, mem: Mem, clock: Clock, writer: ChannelWriter, base: int,
                  actor: int, victim_unit: int, caster_ctrl: int, victim_ctrl: int,
                  victim_id: int = 0, controllers: bool = False,
-                 interval: float = 0.005, recovery: float = 5.0):
+                 interval: float = 0.005, recovery: float = 5.0,
+                 refresh_interval: float = 1.0):
         super().__init__(daemon=True)
         self.mem = mem
         self.clock = clock
@@ -1016,6 +1029,7 @@ class MemorySampler(threading.Thread):
         self.controllers = controllers
         self.interval = interval
         self.recovery = recovery
+        self.refresh_interval = refresh_interval
         self.stop_event = threading.Event()
         self.gcd_samples = 0
         self.gcd_nonzero = 0
@@ -1112,13 +1126,17 @@ class MemorySampler(threading.Thread):
 
     def run(self) -> None:
         next_time = time.perf_counter()
-        next_refresh = next_time + 1.0
+        next_refresh = next_time + self.refresh_interval
         while not self.stop_event.is_set():
             failure: MemoryReadError | None = None
             try:
                 if time.perf_counter() >= next_refresh:
-                    self.refresh()
-                    next_refresh += 1.0
+                    next_refresh += self.refresh_interval
+                    if not self.refresh():
+                        # The old actor address can still read while the
+                        # connection global has no actor; never pass those
+                        # stale bytes off as fresh data.
+                        raise MemoryReadError("local actor is null")
                 self.sample()
             except MemoryReadError as error:
                 # A respawn or zone change frees the old actor; give the new
@@ -1523,19 +1541,27 @@ def gcd_run_complete(run: dict, slack_ms: float = 250.0) -> bool:
     return 0 <= duration <= total + slack_ms
 
 
-def gcd_run_press(run: dict, inputs: list[dict]) -> dict | None:
+def gcd_run_press(run: dict, inputs: list[dict],
+                  used: set[int] | None = None) -> tuple[int, dict] | None:
+    """The latest press before this rise, within ``PRESS_WINDOW_MS``.
+
+    A press starts at most one rise: ``used`` holds the input indexes already
+    matched to an earlier run, so two rises cannot both claim one press.
+    """
     start_wall = run["start"].get("wall_ms")
     if start_wall is None:
         return None
-    best = None
+    best: tuple[int, dict] | None = None
     best_delta = None
-    for event in inputs:
+    for index, event in enumerate(inputs):
+        if used is not None and index in used:
+            continue
         before = event.get("before_wall_ms", event.get("wall_ms"))
         if before is None:
             continue
         delta = start_wall - before
-        if 0 <= delta <= 3000 and (best_delta is None or delta < best_delta):
-            best = event
+        if 0.0 <= delta <= PRESS_WINDOW_MS and (best_delta is None or delta < best_delta):
+            best = (index, event)
             best_delta = delta
     return best
 
@@ -1560,19 +1586,22 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
     for event in inputs:
         before = event.get("before_wall_ms", event.get("wall_ms"))
         for change in changes:
-            if before is not None and 0 <= change["wall_ms"] - before <= 3000:
+            if before is not None and 0.0 <= change["wall_ms"] - before <= PRESS_WINDOW_MS:
                 if change["to"][0] <= change["from"][0]:
                     press_ticks += 1
                 break
     runs = gcd_runs(gcd_rows)
     complete = [run for run in runs if gcd_run_complete(run)]
     linked: list[tuple[dict, dict]] = []
+    used: set[int] = set()
     for run in complete:
-        event = gcd_run_press(run, inputs)
-        if event is not None:
+        match = gcd_run_press(run, inputs, used)
+        if match is not None:
+            index, event = match
+            used.add(index)
             linked.append((run, event))
-    # "Most rises follow a press": at least one and at least half of the
-    # complete rises must be press-linked.
+    # "Most rises follow a press": at least one and more than half of the
+    # complete rises must be press-linked (a tie is not a majority).
     gcd_changed = bool(linked) and len(linked) * 2 > len(complete)
     pressed_runs = []
     for run, event in linked:
@@ -1698,7 +1727,13 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
     client reports, the GCD rise is a memory row mapped through the fitted
     clock.  Their difference is the memory-to-UI offset for this run.  A small
     negative difference is allowed so the same pairs can be re-measured after
-    the offset has been applied.
+    the offset has been applied; the raw memory time (``client_ms_raw``) is
+    preferred when present, so that re-measurement still reports the real
+    difference instead of the zero the shift builds in.
+
+    ``measurable`` needs at least one matched pair.  Cast bars or GCD rises
+    that never pair leave the check unmeasurable (``ok`` true) and carry a
+    ``reason``; only a measured outlier can fail it.
     """
     gcd_rows = channels.get("gcd", [])
     cast_rows = channels.get("castbar", [])
@@ -1710,14 +1745,14 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
             continue
         current = row.get("gcd_remaining")
         if (previous is not None and current > previous
-                and row.get("client_ms") is not None):
+                and row.get("client_ms_raw", row.get("client_ms")) is not None):
             rises.append(row)
         previous = current
     starts = cast_start_rows(cast_rows)
     used: set[int] = set()
     pairs: list[dict] = []
     for rise in rises:
-        rise_ms = rise.get("client_ms")
+        rise_ms = rise.get("client_ms_raw", rise.get("client_ms"))
         best = None
         for index, start in enumerate(starts):
             if index in used:
@@ -1742,15 +1777,29 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
     offsets = [pair["offset_ms"] for pair in pairs]
     median = statistics.median(offsets) if offsets else 0.0
     residuals = sorted(abs(offset - median) for offset in offsets)
-    measurable = bool(starts) and bool(rises)
-    if pairs:
-        ok = residuals[-1] <= 25.0
+    measured = bool(pairs)
+    measurable = measured
+    if measured:
+        ok = residuals[-1] <= MEMORY_UI_RESIDUAL_MS
+        reason = None
     else:
-        ok = not measurable
+        ok = True
+        if not rises and not starts:
+            reason = "no-gcd-rises-or-cast-starts"
+        elif not rises:
+            reason = "no-gcd-rises"
+        elif not starts:
+            reason = "no-cast-starts"
+        else:
+            reason = "no-pairs"
     return {
+        "assumption": MEMORY_UI_ASSUMPTION,
+        "raw_field": "client_ms_raw",
+        "status": "measured" if measured else "not-measurable",
         "measurable": measurable,
-        "measured": bool(pairs),
+        "measured": measured,
         "ok": ok,
+        "reason": reason,
         "offset_ms": round(median, 2),
         "pairs": len(pairs),
         "gcd_rises": len(rises),
@@ -1767,7 +1816,12 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
 
 
 def shift_estimate_rows(run: Path, offset_ms: float) -> int:
-    """Move memory/estimate rows onto the UI clock; returns the row count."""
+    """Move the memory rows onto the UI clock; returns the row count.
+
+    Only ``gcd`` and ``anim_controller`` come from ReadProcessMemory.  The
+    wall-stamped estimate rows (``unit_state``, ``meta``) keep the fitted
+    clock, and the unshifted memory time stays in ``client_ms_raw``.
+    """
     if not offset_ms:
         return 0
     shifted = 0
@@ -1778,7 +1832,10 @@ def shift_estimate_rows(run: Path, offset_ms: float) -> int:
             if not line:
                 continue
             row = json.loads(line)
-            if row.get("clock") == "estimate" and isinstance(row.get("client_ms"), int):
+            if (row.get("channel") in MEMORY_SHIFT_CHANNELS
+                    and row.get("clock") == "estimate"
+                    and isinstance(row.get("client_ms"), int)):
+                row["client_ms_raw"] = row["client_ms"]
                 row["client_ms"] = int(round(row["client_ms"] - offset_ms))
                 if isinstance(row.get("t_ms"), int):
                     row["t_ms"] = int(round(row["t_ms"] - offset_ms))
@@ -1820,12 +1877,15 @@ def remap_channels(run: Path, clock: Clock) -> dict:
             lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
     memory_ui = measure_memory_ui_offset(read_channels(run))
-    memory_ui["applied_rows"] = shift_estimate_rows(run, memory_ui["offset_ms"])
     memory_ui["applied_offset_ms"] = (memory_ui["offset_ms"]
-                                      if memory_ui["applied_rows"] else 0.0)
-    if memory_ui["measured"]:
-        after = measure_memory_ui_offset(read_channels(run))
-        memory_ui["after_offset_ms"] = after["offset_ms"]
+                                      if memory_ui["measured"] else 0.0)
+    memory_ui["applied_rows"] = shift_estimate_rows(run,
+                                                    memory_ui["applied_offset_ms"])
+    memory_ui["shifted_channels"] = list(MEMORY_SHIFT_CHANNELS)
+    memory_ui["post_shift_note"] = (
+        "the shifted memory rows report 0 ms against their cast starts by "
+        "construction; use client_ms_raw and the spread/residual, never the "
+        "post-shift GCD-rise-vs-cast difference, as 1.2 evidence")
     return memory_ui
 
 
@@ -2167,8 +2227,9 @@ def main() -> int:
                 result["ok"] = False
                 result["error"] = f"{type(failure).__name__}: {failure}"
             end_wall = ms_now()
-            end_client = int(round(clock.estimate(end_wall)
-                                   - memory_ui.get("applied_offset_ms", 0.0)))
+            # Not a memory row: the same fitted clock as the start row and
+            # unit_state, not the shifted memory clock.
+            end_client = clock.estimate(end_wall)
             final_counts = dict(writer.counts)
             final_counts["meta"] = final_counts.get("meta", 0) + 1
             end_row = {
@@ -2207,12 +2268,13 @@ def main() -> int:
                 info = result["memory_ui"]
                 if info.get("measured"):
                     log("memory->UI offset", info["offset_ms"], "ms",
+                        "(assumes the GCD is written in the same frame the cast starts)",
                         "spread", info["spread_ms"], "ms",
                         "pairs", info["pairs"],
                         "residual max", info["residual_after_max_ms"], "ms",
                         "applied", info.get("applied_offset_ms"), "ms")
                 else:
-                    log("memory->UI offset unmeasured",
+                    log("memory->UI offset not measurable:", info.get("reason"),
                         "rises", info.get("gcd_rises"),
                         "cast starts", info.get("cast_starts"))
             if isinstance(result.get("quality"), dict):
