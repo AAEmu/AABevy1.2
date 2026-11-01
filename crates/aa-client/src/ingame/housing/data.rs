@@ -73,6 +73,11 @@ impl Land {
         Land { area_id, points, min, max }
     }
 
+    /// Whether this polygon's bounding box meets `min..=max` (a cheap filter before [`Self::contains`]).
+    pub fn overlaps_box(&self, min: Vec2, max: Vec2) -> bool {
+        self.max.x >= min.x && self.min.x <= max.x && self.max.y >= min.y && self.min.y <= max.y
+    }
+
     /// The server's crossing test (`subzone::is_inside`): horizontal edges never cross.
     pub fn contains(&self, p: Vec2) -> bool {
         if self.points.len() < 3 || p.cmplt(self.min).any() || p.cmpgt(self.max).any() {
@@ -331,6 +336,27 @@ pub fn get() -> Option<&'static HousingData> {
     DATA.get()
 }
 
+/// The tables of `AA_DB` and the land polygons of `world` from the pak (blocking).
+pub(crate) fn load_now(world: &str) -> HousingData {
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    let mut data = match Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .and_then(|conn| HousingData::load_tables(&conn))
+    {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("housing: database {path}: {e}");
+            HousingData::default()
+        }
+    };
+    data.land = load_land(world);
+    data
+}
+
+/// The one housing data set (the first caller wins).
+pub(crate) fn set(data: HousingData) -> bool {
+    DATA.set(data).is_ok()
+}
+
 /// Loads the tables and the land of `world` on a thread of its own (once).
 pub fn load_in_background(world: &'static str) {
     static STARTED: OnceLock<()> = OnceLock::new();
@@ -339,17 +365,7 @@ pub fn load_in_background(world: &'static str) {
     }
     let spawned = std::thread::Builder::new().name("housing-data".into()).spawn(move || {
         let t = web_time::Instant::now();
-        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
-        let tables = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-            .and_then(|conn| HousingData::load_tables(&conn));
-        let mut data = match tables {
-            Ok(d) => d,
-            Err(e) => {
-                warn!("housing: database {path}: {e}");
-                HousingData::default()
-            }
-        };
-        data.land = load_land(world);
+        let data = load_now(world);
         info!(
             "housing: {} designs, {} design items, {} furniture items, {} land polygons in {:.0} ms",
             data.designs.len(),
@@ -358,7 +374,7 @@ pub fn load_in_background(world: &'static str) {
             data.land.len(),
             t.elapsed().as_secs_f32() * 1000.0
         );
-        let _ = DATA.set(data);
+        let _ = set(data);
     });
     if let Err(e) = spawned {
         warn!("housing: cannot start the loader: {e}");

@@ -97,6 +97,7 @@ fn main() -> AppExit {
             aa_dev::DevPlugin,
             aa_cry::CryPlugin,
             aa_anim::AnimPlugin,
+            ingame::vehicle::VehiclePlugin,
             aa_anim::facial::FacialPlugin,
             aa_world::pipelines::build,
         ))
@@ -384,7 +385,8 @@ fn board_passenger_through_hud(units: &Units) -> bool {
         interactable: true,
         modifier_keys: 0,
     });
-    let _ = hud::slave::receive(&mut data, units, &event);
+    let world = |id| units.get(id).and_then(|u| ingame::units::unit_world_pose_in(u, units));
+    let _ = hud::slave::receive(&mut data, units, &event, &world);
     data.requests.iter().any(|request| {
         matches!(
             request,

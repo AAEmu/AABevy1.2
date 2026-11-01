@@ -105,6 +105,14 @@ const LANDING_GRACE: f32 = 1.5;
 const COLLISION_WAIT: f32 = 5.0;
 /// Interval between movement packets while moving.
 const SEND_INTERVAL: f32 = 0.1;
+/// The forced maximum send period of the native movement sender while nothing changes
+/// (`DAT_3a59f850`, cvar descriptor 0x39ac4640, default 0xbb8 = 3000 ms). A hanging climber sends
+/// one idle movement at this period; the on-foot controller has no equivalent and uses
+/// [`SEND_INTERVAL`] while active.
+const LADDER_KEEP_ALIVE: f32 = 3.0;
+/// The native minimum between movement packets (`DAT_3a59f84c`, 100 ms): the stop packet waits for
+/// it after the last moving one.
+const LADDER_MIN_INTERVAL: f32 = 0.1;
 
 /// Unit vectors of a game yaw: forward (north at 0, counter-clockwise) and right.
 pub fn forward(yaw: f32) -> Vec2 {
@@ -351,6 +359,7 @@ pub fn control_player(
         Option<&super::mount::Rider>,
         Has<super::ship::DeckRide>,
         Option<&mut CarriedVelocity>,
+        Has<super::ladder::Ladder>,
     )>,
     stats: Option<Res<aa_net::state::PlayerStats>>,
     terrain: Res<TerrainQuery>,
@@ -364,8 +373,12 @@ pub fn control_player(
     focus: HudFocus,
     (mut trace, sprint, mut local_jump, mount, mut dismount_trace): (Local<(f32, Option<bool>)>, Option<Res<super::sprint::Sprint>>, ResMut<LocalJump>, Option<Res<super::mount::LocalMount>>, Local<DismountTrace>),
 ) {
-    let Ok((entity, local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider, deck, carried)) = player.single_mut() else { return };
+    let Ok((entity, local, mut mover, mut transform, mut motion, actor, dead, skill_moving, seated, dismount, rider, deck, carried, on_ladder)) = player.single_mut() else { return };
     let dt = time.delta_secs().min(0.1);
+    // a ladder owns the body: `ladder::control_ladder` moves it and sends the hanging packets
+    if on_ladder {
+        return;
+    }
     // the scripted clock runs for every controller path, including the deck
     state.since_spawn += dt;
     // a glider flies the character: `glide::control_glide` has moved it and sent its packets this frame
@@ -743,7 +756,7 @@ pub fn control_player(
         *local_jump = jump_now;
     }
     // the swim clips are driven by `swim::drive_swim`; the locomotion sees a character standing still
-    *motion = if swimming { Motion::default() } else { Motion { speed: if moving { actual.length() } else { 0.0 }, local_dir, airborne } };
+    *motion = if swimming { Motion::default() } else { Motion { speed: if moving { actual.length() } else { 0.0 }, local_dir, airborne, climb: None } };
     let turned = (mover.facing - before_facing).abs() > 1e-4;
     let input = PlayerInput { moving, jumped, turned };
     if *input_state != input {
@@ -845,6 +858,8 @@ pub struct SendState {
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
+    /// The last hanging packet said "moving": the next idle one is the stop packet.
+    ladder_moving: bool,
 }
 
 impl SendState {
@@ -856,6 +871,44 @@ impl SendState {
     /// Reports the position in the next step, moving or not (getting on and off a mount).
     pub fn send_now(&mut self) {
         self.sent_first = false;
+    }
+
+    /// The ladder controller's send clock: [`SEND_INTERVAL`] since the last hanging packet.
+    pub(super) fn ladder_clock(&mut self, dt: f32) {
+        self.since_sent += dt;
+    }
+
+    /// A hanging movement packet is due: every [`SEND_INTERVAL`] while climbing, one stop packet
+    /// once [`LADDER_MIN_INTERVAL`] has passed since the last moving one (the native 100 ms
+    /// minimum), then the native [`LADDER_KEEP_ALIVE`].
+    pub(super) fn ladder_due(&self, moving: bool) -> bool {
+        if moving {
+            self.since_sent >= SEND_INTERVAL
+        } else if self.ladder_moving {
+            self.since_sent >= LADDER_MIN_INTERVAL
+        } else {
+            self.since_sent >= LADDER_KEEP_ALIVE
+        }
+    }
+
+    /// A hanging movement packet was sent.
+    pub(super) fn ladder_sent(&mut self, moving: bool) {
+        self.since_sent = 0.0;
+        self.sent_first = true;
+        self.was_active = moving;
+        self.ladder_moving = moving;
+    }
+
+    /// The ladder was grabbed or left: the on-foot packet cadence starts over without a stop
+    /// packet, and the jump/fall state does not leak across the hang.
+    pub(super) fn after_ladder(&mut self) {
+        self.since_sent = 0.0;
+        self.sent_first = true;
+        self.was_active = false;
+        self.swimming = false;
+        self.took_off = false;
+        self.freefall = false;
+        self.ladder_moving = false;
     }
 
     /// The script clock the `--walk` time windows use.
@@ -1072,6 +1125,7 @@ pub fn follow_server(
         commands
             .entity(entity)
             .remove::<super::ship::DeckRide>()
+            .remove::<super::ladder::Ladder>()
             .remove::<CarriedVelocity>();
         info!("teleported to ({:.1}, {:.1}, {:.1})", pos.x, pos.y, pos.z);
         mover.pos = Vec3::new(pos.x, pos.y, pos.z);

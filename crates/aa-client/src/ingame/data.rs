@@ -24,9 +24,15 @@ pub struct Db {
 struct Lookups {
     conn: Connection,
     actor_files: HashMap<u32, Option<String>>,
+    /// `models.id` -> the `prefab://` element of its first (alive) state.
+    prefab_references: HashMap<u32, Option<String>>,
+    /// `shipyards.id` -> its template and stages.
+    shipyard_templates: HashMap<u32, Option<ShipyardTemplate>>,
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
+    /// `doodad_func_groups.id` -> the phase's `DoodadFuncClimb` kind (`doodad_func_climbs.climb_type_id`).
+    ladder_kinds: HashMap<u32, Option<u8>>,
     /// `(group id, sim radius in metres)` of a doodad template.
     doodad_shapes: HashMap<u32, (u32, f32)>,
     doodad_visuals: HashMap<(u32, u32), Option<String>>,
@@ -47,6 +53,11 @@ struct Lookups {
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
+    /// `slaves.id` -> the `BallisticPos` gunner skill its point-1 seat fires.
+    cannon_skills: HashMap<u32, Option<super::turret::CannonSkill>>,
+    /// `slaves.id` -> whether any of its mount skills is `BallisticPos` (11) or `ArtilleryPos`
+    /// (15), the skills whose use enters the native camera-aim mode (8).
+    cannon_seats: HashMap<u32, bool>,
     /// `models.id` -> the normal and per-state prefab refs of a vehicle or ship.
     vehicle_variants: HashMap<u32, Option<VehicleVariants>>,
     /// `(slaves.id, level)` -> the unit attribute 6 (`MaxHealth`) of the template.
@@ -54,6 +65,13 @@ struct Lookups {
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
+    /// `skills.link_equip_slot_id` >= 0: the equip slot a skill is cast through (`FUN_393925c0`).
+    skill_links: HashMap<u32, Option<SkillLink>>,
+    /// `item_backpacks` of an item template: its backpack type and the skill using it casts.
+    backpack_items: HashMap<u32, Option<ItemBackpack>>,
+
+    /// The hull's vertical extent from `ship_models.mass_center_z` and `mass_box_size_z`.
+    ship_hull: HashMap<u32, Option<(f32, f32)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -114,6 +132,54 @@ impl CameraDistance {
     }
 }
 
+/// One construction stage of a shipyard (`shipyard_steps`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardStep {
+    pub step: i32,
+    pub model_id: u32,
+    pub num_actions: i32,
+}
+
+/// A shipyard template (`shipyards`) and its `shipyard_steps`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardTemplate {
+    /// `shipyards.main_model_id`: the finished hull at `step == steps.len()`, the extra entry
+    /// `FUN_394d8600` appends after the steps (`tpl+0x18`).
+    pub main_model_id: u32,
+    /// `shipyards.ceremony_model_id` (`tpl+0x10`): the launch ceremony model step 1000 swaps to.
+    pub ceremony_model_id: u32,
+    /// `shipyards.ceremony_anim_key` (`tpl+8`): the animation the 1.2 client plays with the ceremony
+    /// model (`FUN_394d5140`). Kept for the ceremony; the prefab is drawn statically today.
+    pub ceremony_anim_key: Option<String>,
+    /// `shipyards.build_radius` (metres): the drydock footprint the server uses for build skills.
+    pub build_radius: i32,
+    /// The construction stages, in `step` order.
+    pub steps: Vec<ShipyardStep>,
+}
+
+impl ShipyardTemplate {
+    /// `ShipyardSteps.Values.Sum(NumActions)` (`ShipyardTemplate.all_actions` on the server).
+    pub fn all_actions(&self) -> i32 {
+        self.steps.iter().map(|s| s.num_actions).sum()
+    }
+
+    /// The model of `step` as `FUN_394d5140` picks it from the vector `FUN_394d8600` fills: the
+    /// stages by position, `steps.len()` is the appended `main_model_id`, and 1000 is the ceremony
+    /// model. Any other out-of-range step changes nothing (`None`).
+    pub fn model_at_step(&self, step: i32) -> Option<u32> {
+        let model = if step == 1000 {
+            self.ceremony_model_id
+        } else if step >= 0 && (step as usize) < self.steps.len() {
+            self.steps[step as usize].model_id
+        } else if step >= 0 && step as usize == self.steps.len() {
+            self.main_model_id
+        } else {
+            0
+        };
+        (model != 0).then_some(model)
+    }
+}
+
 /// How a growing doodad phase scales (`doodad_func_growths`): from `start_scale` to `end_scale` over `delay_ms`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DoodadGrowth {
@@ -154,6 +220,23 @@ impl DoodadGrowth {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Glider {
     pub model: String,
+    pub use_skill: u32,
+}
+
+/// `skills.link_equip_slot_id` / `skills.link_backpack_type_id` of a skill cast through an equipped item
+/// (`FUN_393925c0`): the equip slot index and the `item_backpacks.backpack_type_id` the item there must have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SkillLink {
+    pub slot: usize,
+    pub backpack_type: i64,
+}
+
+/// An item template's `item_backpacks` row (when it has one: `backpack_type`) and the skill using it casts
+/// (`items.use_skill_id`). `FUN_393925c0` accepts an item with no `item_backpacks` row; only a row of another type
+/// refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemBackpack {
+    pub backpack_type: Option<i64>,
     pub use_skill: u32,
 }
 
@@ -255,8 +338,11 @@ impl Lookups {
         Lookups {
             conn,
             actor_files: HashMap::new(),
+            prefab_references: HashMap::new(),
+            shipyard_templates: HashMap::new(),
             doodad_models: HashMap::new(),
             doodad_phase_models: HashMap::new(),
+            ladder_kinds: HashMap::new(),
             doodad_shapes: HashMap::new(),
             doodad_visuals: HashMap::new(),
             doodad_growths: HashMap::new(),
@@ -274,10 +360,15 @@ impl Lookups {
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
+            cannon_skills: HashMap::new(),
+            cannon_seats: HashMap::new(),
             vehicle_variants: HashMap::new(),
             slave_max_hp: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
+            skill_links: HashMap::new(),
+            backpack_items: HashMap::new(),
+            ship_hull: HashMap::new(),
         }
     }
 }
@@ -308,6 +399,40 @@ impl Db {
             game: Arc::new(Mutex::new(game)),
             lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// The linked-item rows the skill-use tests need, with the real 1.2 ids: glider 14901 -> slot 26 / type 2,
+    /// glider item 14677 (use skill 12373), instrument 14900 -> slot 18 / type 1 with the row-less lute 20480
+    /// (use skill 11951), trade-pack skill 14902 -> type 3 and item 23605, and a plain skill.
+    #[cfg(test)]
+    pub(crate) fn skill_link_fixture() -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-skill-link-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        Connection::open(&path)
+            .ok()?
+            .execute_batch(
+                "CREATE TABLE skills(id INTEGER PRIMARY KEY, link_equip_slot_id INTEGER, link_backpack_type_id INTEGER);
+                 CREATE TABLE items(id INTEGER PRIMARY KEY, use_skill_id INTEGER);
+                 CREATE TABLE item_backpacks(item_id INTEGER, backpack_type_id INTEGER);
+                 INSERT INTO skills VALUES(14900, 18, 1);
+                 INSERT INTO skills VALUES(14901, 26, 2);
+                 INSERT INTO skills VALUES(14902, 26, 3);
+                 INSERT INTO skills VALUES(18132, -1, 1);
+                 INSERT INTO items VALUES(14677, 12373);
+                 INSERT INTO items VALUES(20480, 11951);
+                 INSERT INTO items VALUES(19742, 19903);
+                 INSERT INTO items VALUES(23605, 0);
+                 INSERT INTO item_backpacks VALUES(14677, 2);
+                 INSERT INTO item_backpacks VALUES(23605, 3);",
+            )
+            .ok()?;
+        Db::open_path(path.to_str()?)
     }
 
     /// A catalog with just one ship model row (the tests use the real pak
@@ -352,6 +477,38 @@ impl Db {
         })
     }
 
+    /// A catalog with one climb phase (`doodad_func_group_id` -> kind) so the ladder
+    /// flow tests do not need the game database.
+    #[cfg(test)]
+    pub(crate) fn ladder_fixture(func_group_id: u32, kind: u8) -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-ladder-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).ok()?;
+        conn.execute_batch(
+            "CREATE TABLE doodad_funcs(id INTEGER PRIMARY KEY, doodad_func_group_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
+             CREATE TABLE doodad_func_climbs(id INTEGER PRIMARY KEY, climb_type_id INTEGER);",
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_func_climbs VALUES(1, ?1)",
+            params![kind],
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_funcs VALUES(1, ?1, 'DoodadFuncClimb', 1)",
+            params![func_group_id],
+        )
+        .ok()?;
+        drop(conn);
+        Db::open_path(path.to_str()?)
+    }
+
     /// The ship catalog with a synthetic floor already cached (the tests that
     /// need a raised deck do not read a hull brush).
     #[cfg(test)]
@@ -366,6 +523,17 @@ impl Db {
             l.ship_floors.insert(model_id, Some(floor));
         }
         Some(db)
+    }
+
+    /// The hull's vertical range for the aim box, on a fixture whose `ship_models` row has no
+    /// mass box columns.
+    #[cfg(test)]
+    pub(crate) fn seed_ship_hull_height(&self, model_id: u32, low: f32, high: f32) {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_hull
+            .insert(model_id, Some((low, high)));
     }
 
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
@@ -401,6 +569,85 @@ impl Db {
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// The `prefab://` element of a prefab model's first (alive) state: the complete authored layout
+    /// (`models.sub_type = PrefabModel`), for the models 1.2 draws as prefabs (houses, shipyards, doodads).
+    pub fn prefab_reference(&self, model_id: u32) -> Option<String> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(p) = l.prefab_references.get(&model_id) {
+            return p.clone();
+        }
+        let prefab = l
+            .conn
+            .query_row(
+                "SELECT e.file_path FROM models m JOIN prefab_elements e ON e.prefab_model_id = m.sub_id AND m.sub_type = 'PrefabModel' WHERE m.id = ?1 ORDER BY e.state_id LIMIT 1",
+                params![model_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        l.prefab_references.insert(model_id, prefab.clone());
+        prefab
+    }
+
+    /// A shipyard template and its stages (`shipyards` / `shipyard_steps`, the server's
+    /// `ShipyardTemplate.ShipyardSteps`). `None` while the rows or the database are missing.
+    pub fn shipyard_template(&self, template_id: u32) -> Option<ShipyardTemplate> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(t) = l.shipyard_templates.get(&template_id) {
+            return t.clone();
+        }
+        let template_row = l
+            .conn
+            .query_row(
+                "SELECT main_model_id, ceremony_model_id, ceremony_anim_key, build_radius FROM shipyards WHERE id = ?1",
+                params![template_id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
+                    ))
+                },
+            )
+            .ok();
+        let main_model_id = template_row
+            .as_ref()
+            .and_then(|(m, ..)| *m)
+            .map_or(0, |m| m.max(0) as u32);
+        let ceremony_model_id = template_row
+            .as_ref()
+            .and_then(|(_, c, ..)| *c)
+            .map_or(0, |c| c.max(0) as u32);
+        let ceremony_anim_key = template_row
+            .as_ref()
+            .and_then(|(_, _, k, _)| k.as_deref())
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_owned);
+        let build_radius = template_row
+            .as_ref()
+            .and_then(|(.., b)| *b)
+            .map_or(0, |b| b.max(0) as i32);
+        let template = template_row.is_some().then(|| {
+            let mut steps = Vec::new();
+            if let Ok(mut q) = l.conn.prepare(
+                "SELECT step, model_id, num_actions FROM shipyard_steps WHERE shipyard_id = ?1 ORDER BY step",
+            ) && let Ok(mut rows) = q.query(params![template_id]) {
+                while let Ok(Some(row)) = rows.next() {
+                    steps.push(ShipyardStep {
+                        step: row.get::<_, i64>(0).unwrap_or(0) as i32,
+                        model_id: row.get::<_, i64>(1).unwrap_or(0).max(0) as u32,
+                        num_actions: row.get::<_, i64>(2).unwrap_or(0) as i32,
+                    });
+                }
+            }
+            ShipyardTemplate { main_model_id, ceremony_model_id, ceremony_anim_key, build_radius, steps }
+        });
+        l.shipyard_templates.insert(template_id, template.clone());
+        template
     }
 
     /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
@@ -483,6 +730,55 @@ impl Db {
             .flatten()
     }
 
+    /// The ship hull's vertical extent relative to the hull root: `ship_models.mass_center_z`
+    /// +/- `mass_box_size_z / 2`, the physics box's keel to deck/rail range. `None` for a
+    /// non-ship, a missing row or a non-positive box.
+    pub fn ship_hull_height(&self, model_id: u32) -> Option<(f32, f32)> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(height) = l.ship_hull.get(&model_id) {
+            return *height;
+        }
+        let height = l
+            .conn
+            .query_row(
+                "SELECT s.mass_center_z, s.mass_box_size_z FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?)),
+            )
+            .ok()
+            .and_then(|(centre, size)| {
+                let (centre, size) = (centre as f32, size as f32);
+                (centre.is_finite() && size.is_finite() && size > 0.0)
+                    .then(|| (centre - size * 0.5, centre + size * 0.5))
+            });
+        l.ship_hull.insert(model_id, height);
+        height
+    }
+
+    /// Whether the slave has a mount skill whose `skills.target_type_id` is `BallisticPos` (11)
+    /// or `ArtilleryPos` (15). Using such a skill is what enters the native camera-aim mode 8;
+    /// a drivable VehicleModel with a turret block but no such skill is not a gunner seat.
+    pub fn has_cannon_skill(&self, template: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(seat) = l.cannon_seats.get(&template) {
+            return *seat;
+        }
+        let seat = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id IN (11, 15)
+                 LIMIT 1",
+                params![template],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.cannon_seats.insert(template, seat);
+        seat
+    }
+
     /// The turret block of a vehicle model: its `vehicle_models` pitch/yaw range and rates, or
     /// `None` when the model is no vehicle or the row is incomplete (a text value in an angle
     /// column; skip the row rather than treat it as zero).
@@ -538,6 +834,64 @@ impl Db {
         );
         l.turrets.insert(model_id, limits);
         limits
+    }
+
+    /// The shot a gunner's seat fires for slave template `template`: the mount skill's own
+    /// `skills` row (`slave_mount_skills` -> `mount_skills.skill_id`) with `target_type_id` 11
+    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc), its range and the
+    /// `target_angle` cone (`FUN_393594c0` +0x17c). The bar casts the same row (a point-1
+    /// `mount_attached_skills` skill is only the displayed one); rows of other types (the tower
+    /// deployment, the drums) are not shots. A slave with several BallisticPos rows (the siege
+    /// thrower, slave 1, has three ammo throws) takes its first BallisticPos row; those rows
+    /// share the ballistic data here, and a caller that knows the slot can use
+    /// [`Db::cannon_skill_for`].
+    pub fn cannon_skill(&self, template: u32) -> Option<super::turret::CannonSkill> {
+        self.cannon_skill_for(template, None)
+    }
+
+    /// [`Db::cannon_skill`] for a specific `slave_mount_skills` row when the caller knows the
+    /// slot it will cast, else the first BallisticPos row.
+    pub fn cannon_skill_for(
+        &self,
+        template: u32,
+        mount_skill: Option<u32>,
+    ) -> Option<super::turret::CannonSkill> {
+        let mut l = self.lookups.lock().unwrap();
+        if mount_skill.is_none()
+            && let Some(skill) = l.cannon_skills.get(&template)
+        {
+            return *skill;
+        }
+        let skill = {
+            let mut query = match l.conn.prepare(
+                "SELECT ms.skill_id, s.effect_speed, s.min_range, s.max_range, s.target_angle
+                 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id = 11
+                     AND s.effect_speed > 0 AND s.max_range > 0
+                     AND (?2 IS NULL OR sm.mount_skill_id = ?2)
+                 ORDER BY sm.id LIMIT 1",
+            ) {
+                Ok(query) => query,
+                Err(_) => return None,
+            };
+            query
+                .query_row(params![template, mount_skill], |r| {
+                    Ok(super::turret::CannonSkill {
+                        id: r.get(0)?,
+                        speed: r.get(1)?,
+                        min_range: r.get(2)?,
+                        max_range: r.get(3)?,
+                        target_angle: r.get(4)?,
+                    })
+                })
+                .ok()
+        };
+        if mount_skill.is_none() {
+            l.cannon_skills.insert(template, skill);
+        }
+        skill
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
@@ -918,6 +1272,56 @@ impl Db {
         glider
     }
 
+    /// The equip slot a skill is cast through (`skills.link_equip_slot_id` >= 0) and the backpack type the item there
+    /// must have (`skills.link_backpack_type_id`). `None` for every other skill (`FUN_393925c0` returns at once).
+    pub fn skill_link(&self, skill_id: u32) -> Option<SkillLink> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(link) = l.skill_links.get(&skill_id) {
+            return *link;
+        }
+        let link = l
+            .conn
+            .query_row(
+                "SELECT link_equip_slot_id, link_backpack_type_id FROM skills WHERE id = ?1",
+                params![skill_id],
+                |r| {
+                    let slot = r.get::<_, Option<i64>>(0)?.unwrap_or(-1);
+                    let backpack_type = r.get::<_, Option<i64>>(1)?.unwrap_or(0);
+                    Ok((slot >= 0).then(|| SkillLink { slot: slot as usize, backpack_type }))
+                },
+            )
+            .ok()
+            .flatten();
+        l.skill_links.insert(skill_id, link);
+        link
+    }
+
+    /// An item template's `item_backpacks` row (`backpack_type_id`) and its `items.use_skill_id`: what a skill cast
+    /// through the item needs to check its type and send (`FUN_393925c0`, `FUN_397cf7a0`). The join is a LEFT one:
+    /// an item without an `item_backpacks` row (`backpack_type` `None`) is accepted by the decompile, not refused.
+    pub fn item_backpack(&self, item_id: u32) -> Option<ItemBackpack> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(item) = l.backpack_items.get(&item_id) {
+            return *item;
+        }
+        let item = l
+            .conn
+            .query_row(
+                "SELECT b.backpack_type_id, i.use_skill_id
+                 FROM items i LEFT JOIN item_backpacks b ON b.item_id = i.id WHERE i.id = ?1",
+                params![item_id],
+                |r| {
+                    Ok(ItemBackpack {
+                        backpack_type: r.get::<_, Option<i64>>(0)?,
+                        use_skill: r.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as u32,
+                    })
+                },
+            )
+            .ok();
+        l.backpack_items.insert(item_id, item);
+        item
+    }
+
     /// The model a backpack / glider item template wears on the back (`item_backpacks`): its stowed look when it has one
     /// (`asset2_id`: a glider's folded `_back.cgf`), else `asset_id`. [`Weapon::code`] is `backpack`. A glider without a stowed look
     /// (`glider_bx.chr`, 5 items) is only its flying model, a 6 m canopy: nothing is drawn for it.
@@ -1048,6 +1452,29 @@ impl Db {
         let shape = shape_of(&l.conn, template_id);
         l.doodad_shapes.insert(template_id, shape);
         shape
+    }
+
+    /// The climb kind of a doodad phase: a `DoodadFuncClimb` row of the phase's func group and its
+    /// `doodad_func_climbs.climb_type_id` (1/6 ladder, 2 rope, 3 wood, 4 net, 5 hanging rope,
+    /// 7 mast, 8 guardrail, 9 45-degree ladder, 10 big tree; `FUN_39132be0`). `None` when the phase
+    /// is not climbable.
+    pub fn ladder_kind(&self, func_group_id: u32) -> Option<u8> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(kind) = l.ladder_kinds.get(&func_group_id) {
+            return *kind;
+        }
+        let kind: Option<u8> = l
+            .conn
+            .query_row(
+                "SELECT c.climb_type_id FROM doodad_funcs f JOIN doodad_func_climbs c ON c.id = f.actual_func_id                  WHERE f.doodad_func_group_id = ?1 AND f.actual_func_type = 'DoodadFuncClimb' ORDER BY f.id LIMIT 1",
+                params![func_group_id],
+                |r| Ok(r.get::<_, Option<i64>>(0)?.unwrap_or(0)),
+            )
+            .ok()
+            .and_then(|kind| u8::try_from(kind).ok())
+            .filter(|kind| *kind != 0);
+        l.ladder_kinds.insert(func_group_id, kind);
+        kind
     }
 
     /// How a phase grows (`doodad_phase_funcs` -> `doodad_func_growths`), `None` when it does not.
@@ -1336,6 +1763,61 @@ mod tests {
         assert_eq!(db.ship_steer_vel(129), 6.0, "rowboat");
         assert_eq!(db.ship_steer_vel(393), 1.0, "galleon");
         assert_eq!(db.ship_steer_vel(u32::MAX), DEFAULT_SHIP_STEER_VEL, "no ship row");
+    }
+
+    /// `FUN_394d5140` indexes the vector `FUN_394d8600` fills: the stages by position, one
+    /// appended entry for `steps.len()` (the main model) and the 1000 ceremony branch.
+    #[test]
+    fn shipyard_model_at_step_includes_the_appended_main_model() {
+        let template = ShipyardTemplate {
+            main_model_id: 680,
+            ceremony_model_id: 683,
+            ceremony_anim_key: Some("ceremony".into()),
+            build_radius: 25,
+            steps: vec![
+                ShipyardStep {
+                    step: 0,
+                    model_id: 673,
+                    num_actions: 2,
+                },
+                ShipyardStep {
+                    step: 1,
+                    model_id: 674,
+                    num_actions: 3,
+                },
+            ],
+        };
+        assert_eq!(template.model_at_step(0), Some(673));
+        assert_eq!(template.model_at_step(1), Some(674));
+        assert_eq!(template.model_at_step(2), Some(680), "the appended entry");
+        assert_eq!(
+            template.model_at_step(3),
+            None,
+            "out of range changes nothing"
+        );
+        assert_eq!(template.model_at_step(-1), None);
+        assert_eq!(
+            template.model_at_step(1000),
+            Some(683),
+            "the ceremony model"
+        );
+    }
+
+    /// The real template 5: the last-stage form is the main hull 680; the launch ceremony is 683
+    /// (`galleon.step_09ceremony`), the same ceremony model as templates 1 and 11.
+    #[test]
+    fn shipyard_template_5_separates_the_ceremony_model_from_the_hull() {
+        let Some(db) = Db::open() else { return };
+        let Some(template) = db.shipyard_template(5) else {
+            return;
+        };
+        assert_eq!(
+            (template.main_model_id, template.ceremony_model_id),
+            (680, 683)
+        );
+        assert_eq!(template.ceremony_anim_key.as_deref(), Some("ceremony"));
+        assert_eq!(template.model_at_step(7), Some(680));
+        assert_eq!(template.model_at_step(1000), Some(683));
     }
 
     /// The load drops the `lookups` guard; the cache then returns the inserted

@@ -17,6 +17,7 @@ use aa_net::model::{Unit, UnitKind};
 use aa_net::state::Units;
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
+use bevy::math::Affine3A;
 use bevy::prelude::*;
 
 use super::data;
@@ -56,6 +57,29 @@ pub fn prepare(loader: &aa_cry::CryLoader, model_id: u32, options: &ModelOptions
             }
         })
         .collect()
+}
+
+/// The local-space bounds (cry space) of the prepared parts, each in its prefab placement:
+/// `FUN_3908d400`'s model box for the builder's terrain check and spot height.
+pub fn bounds(parts: &[PreparedPart]) -> Option<(Vec3, Vec3)> {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for PreparedPart { part, prepared } in parts {
+        let Some((lo, hi)) = prepared.loaded().model.bounds() else { continue };
+        let placement = Affine3A::from_scale_rotation_translation(part.scale, part.rot, part.pos);
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = placement.transform_point3(corner);
+            out = Some(match out {
+                None => (p, p),
+                Some((a, b)) => (a.min(p), b.max(p)),
+            });
+        }
+    }
+    out
 }
 
 /// Spawns prepared parts under `root` (a Bevy-space entity at the prefab's origin).

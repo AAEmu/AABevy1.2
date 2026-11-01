@@ -45,6 +45,39 @@ fn game() -> crate::hud::data::GameData {
     game
 }
 
+/// The buff/player skills of the shown bar (entries in order).
+fn players(entries: &[Entry]) -> Vec<u32> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Player(skill) => Some(*skill),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every skill id of the shown bar: the slave's and the player's, functions dropped.
+fn skill_ids(entries: &[Entry]) -> Vec<u32> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Player(skill) => Some(*skill),
+            Entry::Skill(skill) => Some(skill.skill),
+            Entry::Function(_) => None,
+        })
+        .collect()
+}
+
+fn functions(entries: &[Entry]) -> Vec<Function> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Function(function) => Some(*function),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A cannon's gunner bar: the point-1 attached skill is shown (14372), the slot casts the linked
 /// mount skill (10473, `target_type_id` 11). The two extra skills make the gate visible.
 fn cannon_game() -> crate::hud::data::GameData {
@@ -66,7 +99,11 @@ fn cannon_game() -> crate::hud::data::GameData {
     game.mode_actions
         .slave_skills
         .insert(10, vec![SlaveSkill::new(10473, 16)]);
-    game.mode_actions.attached_point1.insert((10, 16), 14372);
+    game.mode_actions.attached.insert((10, 16, 1), 14372);
+    game.mode_actions.first_attached.insert((10, 16), 1);
+    // `cannon_game` bypasses `Tables::load`; slave 10 is the stationary cannon row whose
+    // bar shows its point-1 attached skill (the `velocity == 0` rule).
+    game.mode_actions.turret_slaves.insert(10);
     game
 }
 
@@ -84,6 +121,14 @@ fn cannon_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
 
 /// Press one driver-bar slot with a fresh world and return the commands it wrote.
 fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
+    press_driver_slot_details(state, slot).0
+}
+
+/// The same press, with the client-side refusals it published.
+fn press_driver_slot_details(
+    state: &Shared,
+    slot: usize,
+) -> (Vec<aa_net::Command>, Vec<crate::hud::alerts::UseFailed>) {
     use crate::hud::{
         alerts::UseFailed,
         usable::{Env, InFlight},
@@ -115,11 +160,16 @@ fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
         &mut failed,
     );
     drop(data);
-    world
+    let commands = world
         .resource_mut::<Messages<aa_net::NetCommand>>()
         .drain()
         .map(|command| command.0)
-        .collect()
+        .collect();
+    let failures = world
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    (commands, failures)
 }
 
 fn runtime(loaded: bool) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
@@ -184,7 +234,7 @@ fn receipt(rt: &UiRuntime, state: &Shared, event: Event) {
 fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
 -> Result<(), Box<dyn std::error::Error>> {
     let Ok(db) = Connection::open_with_flags(
-        aa_anim::db::DEFAULT_DB,
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) else {
         eprintln!("skip: no client database");
@@ -207,7 +257,7 @@ fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
 fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dyn std::error::Error>>
 {
     let Ok(db) = Connection::open_with_flags(
-        aa_anim::db::DEFAULT_DB,
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) else {
         eprintln!("skip: no client database");
@@ -236,7 +286,71 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
         |r| r.get(0),
     )?;
     assert_eq!((cooldown, casting), (10_000, 5_000));
+    assert!(
+        !tables.has_passenger_point(60),
+        "the Farm Wagon model 1008 has no point 2"
+    );
+    assert!(
+        tables.has_passenger_point(146),
+        "the Red Farm Hauler has point 2"
+    );
+    // No Farm Wagon row has an attached list, so all five count at point 1 and none at point 2.
+    assert_eq!(
+        tables
+            .bar(60, 1, false)
+            .expect("Farm Wagon driver bar")
+            .len(),
+        5
+    );
+    assert!(
+        tables.bar(60, 2, false).unwrap_or_default().is_empty(),
+        "the Farm Wagon has no point-2 seat skill"
+    );
+    assert_eq!(
+        tables.text(Function::Unbind),
+        "Disembark from current device."
+    );
+    assert_eq!(
+        tables.text(Function::ShowSlaveInfo),
+        "Check details on a summon."
+    );
+    assert_eq!(tables.text(Function::CommandUnmount), "Dismount");
     Ok(())
+}
+
+/// `FUN_39347260` filters every seat, the driver's included: the tank 46's rows are 201 (no
+/// attached list), 45 (first `mount_attached_skills` entry point 1) and 51 (first entry point 2).
+/// The native driver bar is therefore 201 and 45; only the point-2 seat lists 51. The old port
+/// kept every row for point 1, so the passenger skill 20238 appeared on the driver bar too.
+#[test]
+fn the_real_tank_46_bars_follow_the_seat_point() {
+    let Some(conn) = Connection::open_with_flags(
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok() else {
+        eprintln!("skip: no client database");
+        return;
+    };
+    let tables = Tables::load(&conn).expect("mode action tables");
+    let driver = tables.bar(46, 1, false).expect("tank 46 driver bar");
+    assert_eq!(
+        driver
+            .iter()
+            .map(|s| (s.skill, s.mount_skill, s.fire))
+            .collect::<Vec<_>>(),
+        [(14373, 45, None), (20704, 201, None)],
+        "the driver keeps only the rows whose first attached point is 1 or absent"
+    );
+    let passenger = tables.bar(46, 2, false).expect("tank 46 passenger bar");
+    assert_eq!(
+        passenger
+            .iter()
+            .map(|s| (s.skill, s.mount_skill, s.cast_skill()))
+            .collect::<Vec<_>>(),
+        [(20238, 51, 15235)],
+        "the point-2 seat shows 20238 and casts 15235"
+    );
 }
 
 fn slave_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
@@ -260,7 +374,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
     own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
     crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
     assert_eq!(actions(&state.borrow()).len(), 8);
-    // a passenger seat keeps the normal bar
+    // a passenger seat gets the slave's bar: 1.2 appends `unbind` for any seat
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
@@ -278,7 +392,12 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         },
         None,
     );
-    assert_eq!(actions(&state.borrow()).len(), 8);
+    assert_eq!(actions(&state.borrow()).len(), 1);
+    assert_eq!(
+        functions(actions(&state.borrow())),
+        [Function::Unbind],
+        "a passenger gets only the unbind function slot"
+    );
     // the driver's seat switches to the slave's skills (the native window also appends two function
     // buttons, slots 6 and 7: not skills, not part of this list)
     crate::hud::enchant::dispatch(
@@ -306,15 +425,30 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         Some((20, 60)),
         "the mounted view sees the driver seat"
     );
+    let driver = state.borrow();
     assert_eq!(
-        actions(&state.borrow()),
-        [20704, 20291, 15622, 15450, 15546]
+        skill_ids(actions(&driver)),
+        [20704, 20291, 15622, 15450, 15546],
+        "the capture's five skill slots"
     );
+    assert_eq!(
+        functions(actions(&driver)),
+        [Function::Unbind, Function::ShowSlaveInfo],
+        "slots 6 and 7"
+    );
+    assert_eq!(super::function_at(&driver, 5), Some(Function::Unbind));
+    assert_eq!(
+        super::function_at(&driver, 6),
+        Some(Function::ShowSlaveInfo)
+    );
+    assert_eq!(super::function_at(&driver, 7), None);
+    assert_eq!(super::function_at(&driver, 0), None);
+    drop(driver);
     assert_eq!(
         rt.lua
             .load("return X2Unit:GetModeActionsCount()")
             .eval::<usize>()?,
-        5
+        7
     );
     // leaving the driver's seat returns to the buff skills
     crate::hud::enchant::dispatch(
@@ -345,7 +479,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         },
         None,
     );
-    assert_eq!(actions(&state.borrow()), [15622, 17000]);
+    assert_eq!(skill_ids(actions(&state.borrow())), [15622, 17000]);
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
@@ -369,7 +503,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     rt.lua.load("SAVED=#OBS").exec()?;
@@ -379,6 +513,136 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
     // an unrelated removal does not publish the restored bar again
     crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitsRemoved(vec![999]), None);
     rt.lua.load("assert(#OBS==SAVED+2)").exec()?;
+    Ok(())
+}
+
+/// 39 of the 140 slaves have no `slave_mount_skills` rows (the carriage 7, the rowboats 55/91 and
+/// the ship 23 among them). `FUN_39204500` appends `unbind` after the skill loop whether or not it
+/// produced anything, and the driver still gets `showSlaveInfo` (DEC 404388-404393).
+#[test]
+fn a_slave_with_no_mount_skills_keeps_the_function_slots() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 55))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    let bar = state.borrow();
+    assert!(
+        skill_ids(actions(&bar)).is_empty(),
+        "the rowboat has no mount skills"
+    );
+    assert_eq!(
+        functions(actions(&bar)),
+        [Function::Unbind, Function::ShowSlaveInfo],
+        "the driver keeps slot 6 and slot 7"
+    );
+    assert_eq!(actions(&bar).len(), 2);
+    drop(bar);
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        2
+    );
+    // a passenger of the same slave: `unbind` only (the native appends it on any seat)
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+        None,
+    );
+    assert_eq!(skill_ids(actions(&state.borrow())).len(), 0);
+    assert_eq!(functions(actions(&state.borrow())), [Function::Unbind]);
+    Ok(())
+}
+
+/// A point-2 seat lists the slave's mount skills attached to that point (`FUN_39347260` with the
+/// seat point), before `unbind`. The tank 46's row mount skill 51 has `mount_attached_skills`
+/// 20238 at point 2 and casts its `mount_skills.skill_id` 15235, like a gunner row.
+#[test]
+fn a_passenger_bar_lists_the_point_2_attached_skills_before_unbind()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    {
+        let data = state.borrow_mut();
+        let mut game = game();
+        game.mode_actions
+            .slave_skills
+            .insert(46, vec![SlaveSkill::new(15235, 51)]);
+        game.mode_actions.attached.insert((46, 51, 2), 20238);
+        game.mode_actions.first_attached.insert((46, 51), 2);
+        data.game.0.set(game).ok().unwrap();
+    }
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(slave_unit(20, 46))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+        None,
+    );
+    let bar = state.borrow();
+    assert_eq!(skill_ids(actions(&bar)), [20238], "the point-2 row");
+    let Entry::Skill(skill) = actions(&bar)[0] else {
+        panic!("a skill entry");
+    };
+    assert_eq!((skill.mount_skill, skill.cast_skill()), (51, 15235));
+    assert_eq!(functions(actions(&bar)), [Function::Unbind]);
+    drop(bar);
+    // the slot casts as the ridden slave, not as the player
+    let sent = press_driver_slot(&state, 0);
+    assert!(matches!(
+        sent.as_slice(),
+        [aa_net::Command::UseMateSkill {
+            skill_id: 15235,
+            mate_obj_id: 20,
+            mount_skill_id: 51,
+            ..
+        }]
+    ));
     Ok(())
 }
 
@@ -416,7 +680,7 @@ fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
 
@@ -541,20 +805,22 @@ fn schema_unit(id: u32, kind: u32, template: u32, model: u32) -> aa_net::model::
 }
 
 fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
-    driver_skills(&state.borrow())
+    seat_bar(&state.borrow())
         .expect("driver bar")
         .iter()
-        .map(|skill| (skill.skill, skill.cast_skill()))
+        .filter_map(|entry| match entry {
+            Entry::Skill(skill) => Some((skill.skill, skill.cast_skill())),
+            _ => None,
+        })
         .collect()
 }
 
-/// `driver_skills` on the same rows the real data has: the cart 73 keeps its mount skills, the
-/// cannon 10 shows the attached skill when the engine's seat flag names it or, before that flag
-/// arrives, when the template gate says it is a turret. A stale flag for another slave also
-/// falls back to the template gate.
+/// `seat_bar` on the same rows the real data has: the drivable `VehicleModel` cart 73 keeps
+/// its mount skills (a cart is not a gunner seat), and the cannon 10 shows its attached skill
+/// from the template gate, with the engine's seat flag and a stale flag for another slave not
+/// changing it.
 #[test]
-fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
--> Result<(), Box<dyn std::error::Error>> {
+fn seat_bar_keeps_a_drivable_cart_on_its_mount_skills() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("AA_PAK").is_err() {
         eprintln!("skip: no client pak");
         return Ok(());
@@ -630,7 +896,8 @@ fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
 
 /// A cannon gunner's bar shows the point-1 attached skill (14372) but casts the linked mount
 /// skill (10473). With a published sight that BallisticPos cast goes to the aimed spot; without
-/// one it keeps the ordinary unit target. This is the real 1.2 split: the bar skill has
+/// one it is refused locally with `NO_TARGET` and sends nothing (a Unit fallback would be read
+/// as the caster's own position). This is the real 1.2 split: the bar skill has
 /// `target_type_id` 0, the mount skill it casts has 11.
 #[test]
 fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::error::Error>> {
@@ -660,7 +927,7 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [14372],
         "the real gunner bar skill"
     );
@@ -671,7 +938,8 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
             yaw: -0.2,
         },
         pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-        rot: 0.7,
+        skill: 10473,
+        refusal: None,
     });
     let sent = press_driver_slot(&state, 0);
     let [
@@ -688,26 +956,65 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
     };
     assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (10473, 20, 16));
     assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
-    assert_eq!(*rot, 0.7);
+    assert_eq!(*rot, 0.0, "FUN_390f3b20 writes rot 0");
 
-    // Not manning the cannon (no sight): the same cast keeps the selected unit.
+    // No sight (the camera or the cannon root is not ready): a BallisticPos cast must not fall
+    // back to a Unit target, which the server reads as the caster's own position and refuses as
+    // too close. It is the same local NO_TARGET as a ray that hit nothing.
     state.borrow_mut().turret = None;
-    let sent = press_driver_slot(&state, 0);
-    let [
-        aa_net::Command::UseMateSkill {
-            skill_id,
-            mate_obj_id,
-            mount_skill_id,
-            target_obj_id,
-        },
-    ] = &sent[..]
-    else {
-        panic!("{sent:?}")
-    };
-    assert_eq!(
-        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
-        (10473, 20, 16, 777)
+    let (sent, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        sent.is_empty(),
+        "a cast without a sight sends nothing: {sent:?}"
     );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
+    Ok(())
+}
+
+/// `FUN_390f3b20`: a preview refusal (`DAT_3a5a4ea4`, result 9 for a screen ray that hit
+/// nothing) shows the result and sends no packet.
+#[test]
+fn a_refused_cannon_preview_sends_nothing() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    state.borrow().game.0.set(cannon_game()).ok().unwrap();
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(cannon_unit(20, 10))),
+        None,
+    );
+    state.borrow_mut().turret_seat = Some(20);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
+        slave: 20,
+        aim: aa_net::TurretAim::default(),
+        pos: aa_net::Pos::default(),
+        skill: 10473,
+        refusal: Some(aa_net::skill::result::NO_TARGET),
+    });
+    let (commands, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        commands.is_empty(),
+        "a refused preview sends nothing: {commands:?}"
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
     Ok(())
 }
 
@@ -747,7 +1054,7 @@ fn driver_setup() -> Result<(UiRuntime, Shared, World), Box<dyn std::error::Erro
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     let mut world = World::new();
@@ -1148,7 +1455,7 @@ fn a_seated_driver_ready_publishes_the_bar_once() -> Result<(), Box<dyn std::err
         super::ready(Some(&rt), &state);
     }
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     let drawn: usize = rt.lua.load("return DRAWN").eval()?;
@@ -1169,16 +1476,24 @@ fn native_cap_follows_existing_actions_and_keeps_duplicates() {
     let mut checked = 0;
     if let Some(controls) = controls {
         for row in controls {
-            let mut actions = vec![9; row["base_actions"].as_u64().unwrap() as usize];
-            append(&mut actions, &[1, 1, 2, 3, 4, 5, 6, 7]);
+            let mut actions =
+                vec![Entry::Player(9); row["base_actions"].as_u64().unwrap() as usize];
+            let entries: Vec<Entry> = [1, 1, 2, 3, 4, 5, 6, 7]
+                .into_iter()
+                .map(Entry::Player)
+                .collect();
+            append(&mut actions, &entries);
             assert_eq!(actions.len(), row["total"].as_u64().unwrap() as usize);
             checked += 1;
         }
     }
     assert_eq!(checked, 5, "native cap controls must be present");
     let mut actions = vec![];
-    append(&mut actions, &[0, 1, 1, 0, 2]);
-    assert_eq!(actions, [1, 1, 2]);
+    append(&mut actions, &[0, 1, 1, 0, 2].map(Entry::Player));
+    assert_eq!(
+        actions,
+        [Entry::Player(1), Entry::Player(1), Entry::Player(2)]
+    );
 }
 
 #[test]
@@ -1230,7 +1545,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
             buff(1, 0, BuffKind::Good),
         ],
     );
-    assert_eq!(actions(&state.borrow()), [71, 72, 73]);
+    assert_eq!(players(actions(&state.borrow())), [71, 72, 73]);
     receipt(
         &rt,
         &state,
@@ -1240,7 +1555,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
         },
     );
     // Removal excludes7, so native row0 participates in this publication.
-    assert_eq!(actions(&state.borrow()), [71]);
+    assert_eq!(players(actions(&state.borrow())), [71]);
     assert_eq!(
         crate::hud::user_music::own_buffs(&state.borrow())
             .unwrap()
@@ -1249,7 +1564,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
     );
     receipt(&rt, &state, created(5068, 9));
     assert_eq!(
-        actions(&state.borrow()),
+        players(actions(&state.borrow())),
         [
             20848, 20849, 20850, 20851, 20852, 20853, 20854, 20855, 72, 73
         ]
@@ -1292,7 +1607,7 @@ fn startup_replays_receipts_and_decode_loss_needs_snapshot_without_native_notifi
     let mut unit = crate::hud::expansion::fixture::spawn().unit;
     unit.buffs = vec![buff(6010, 11, BuffKind::Hidden)];
     receipt(&rt, &state, Event::OwnUnitSnapshot(Box::new(unit)));
-    assert_eq!(actions(&state.borrow()), [22213, 22214, 22217]);
+    assert_eq!(players(actions(&state.borrow())), [22213, 22214, 22217]);
     rt.lua.load("assert(#OBS==SAVED)").exec()?;
     Ok(())
 }
@@ -1570,7 +1885,8 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
                 yaw: -0.2,
             },
             pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-            rot: 0.7,
+            skill: fire,
+            refusal: None,
         };
         let command = slave_cast(entry, Some(&game), Some(sight), 20, 0);
         if aimed {
@@ -1591,7 +1907,7 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
             };
             assert_eq!(
                 (skill_id, mate_obj_id, mount_skill_id, pos, rot),
-                (fire, 20, mount, sight.pos, sight.rot)
+                (fire, 20, mount, sight.pos, 0.0)
             );
         } else {
             let aa_net::Command::UseMateSkill {
@@ -1611,14 +1927,43 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
     }
 }
 
-/// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a turret seat a row with
-/// a point-1 attached skill shows that skill and casts the mount skill; every other row shows
-/// and casts its mount skill. This is the regression that dropped rows (tank 53's 14332, slave
-/// 54's 14344, ladder 5's 21723, harpoons 37/48/90's 13750) and gave the cotton cart 73 the
-/// attached 15548 instead of its mount skill 15622.
+/// A row with an attached list counts only at the FIRST entry's point, on every seat: mount
+/// skill 188 has `mount_attached_skills` 35 then 1 (row ids 299, 300), so it counts at 35 and
+/// never at point 1, which a point-only lookup would accept.
+#[test]
+fn the_first_attached_entry_chooses_the_seat() {
+    let mut tables = Tables::default();
+    tables
+        .slave_skills
+        .insert(5, vec![SlaveSkill::new(20161, 188)]);
+    tables.attached.insert((5, 188, 35), 20161);
+    tables.attached.insert((5, 188, 1), 20161);
+    tables.first_attached.insert((5, 188), 35);
+    assert!(
+        tables.bar(5, 1, false).expect("rows").is_empty(),
+        "point 1 is not the first attached entry"
+    );
+    assert_eq!(
+        tables
+            .bar(5, 35, false)
+            .expect("rows")
+            .iter()
+            .map(|row| row.mount_skill)
+            .collect::<Vec<_>>(),
+        [188]
+    );
+}
+
+/// Every kind-7/8 driver bar applies the native seat filter (`FUN_39347260`): a row without an
+/// attached list counts at point 1, a row whose FIRST attached entry is another point does not
+/// (tank 53's row 39 at point 2, slave 54's row 44, ladder 5's row 236 at point 81). The kept
+/// rows are unchanged otherwise: a stationary turret (`vehicle_models.velocity == 0`) shows its
+/// point-1 attached skill and casts the mount skill (the cotton cart 73's mount 65 has attached
+/// 15548 at point 1 but is not a turret, so it keeps 15622), and the harpoon rows without an
+/// attached list stay.
 #[test]
 #[ignore = "requires AA_DB"]
-fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills() {
+fn every_real_kind_7_8_bar_filters_by_the_seat_and_only_turrets_show_attached_skills() {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     if !std::path::Path::new(&path).exists() {
         return;
@@ -1626,35 +1971,39 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
     let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("read the game database");
     let tables = Tables::load(&conn).expect("mode action tables");
-    let Some(db) = crate::ingame::data::Db::open() else {
-        return;
-    };
     let mut query = conn
-        .prepare(
-            "SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)",
-        )
+        .prepare("SELECT id, name FROM slaves WHERE slave_kind_id IN (7, 8)")
         .expect("slave query");
     let rows = query
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, u32>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, u32>(2)?,
-                r.get::<_, u32>(3)?,
-            ))
-        })
+        .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))
         .expect("query slaves")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("read slaves");
     let mut checked = 0;
-    for (id, name, kind, model) in rows {
+    let mut dropped = 0;
+    for (id, name) in rows {
         let mounts = tables.slave_skills.get(&id).cloned().unwrap_or_default();
-        let turret = crate::ingame::turret::turret_seat_model(kind, model, &db);
-        let bar = tables.bar(id, turret).unwrap_or_default();
-        assert_eq!(bar.len(), mounts.len(), "slave {id} {name} keeps every row");
-        for (entry, mount) in bar.iter().zip(&mounts) {
+        let turret = tables.turret_slave(id);
+        let bar = tables.bar(id, 1, turret).unwrap_or_default();
+        let level = tables.slave_levels.get(&id).copied().unwrap_or(u8::MAX);
+        let expected = mounts
+            .iter()
+            .filter(|row| tables.skill_levels.get(&row.skill).copied().unwrap_or(1) <= level)
+            .filter(|row| {
+                tables
+                    .first_attached
+                    .get(&(id, row.mount_skill))
+                    .is_none_or(|first| *first == 1)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bar.len(),
+            expected.len(),
+            "slave {id} {name} keeps the rows of its seat"
+        );
+        for (entry, mount) in bar.iter().zip(&expected) {
             assert_eq!(entry.mount_skill, mount.mount_skill);
-            match tables.attached_point1.get(&(id, mount.mount_skill)) {
+            match tables.attached.get(&(id, mount.mount_skill, 1)) {
                 Some(attached) if turret => {
                     assert_eq!(entry.skill, *attached, "slave {id} {name} attached skill");
                     assert_eq!(
@@ -1669,31 +2018,54 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
                 }
             }
         }
+        dropped += mounts.len() - expected.len();
         checked += 1;
     }
     assert!(checked >= 40, "checked {checked} kind-7/8 rows");
+    assert!(
+        dropped >= 3,
+        "the point-2 and point-81 rows are filtered out ({dropped} dropped)"
+    );
 
-    let cart = tables.bar(73, false).expect("cotton cart bar");
+    let cart = tables.bar(73, 1, false).expect("cotton cart bar");
     assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
-    let tank = tables.bar(53, false).expect("tank 53 bar");
     assert!(
-        tank.iter().any(|row| row.skill == 14332),
-        "tank 53 keeps 14332"
+        !tables.turret_slave(73),
+        "the drivable cotton cart is not a bar turret seat"
     );
-    let ladder = tables.bar(5, false).expect("siege ladder bar");
+    assert!(tables.turret_slave(10), "the stationary galleon cannon is");
     assert!(
-        ladder.iter().any(|row| row.skill == 21723),
-        "ladder 5 keeps 21723"
+        !tables.turret_slave(53),
+        "the drivable tank 53 keeps its mount skills"
     );
-    let tank54 = tables.bar(54, true).expect("tank 54 bar");
+    let tank = tables.bar(53, 1, false).expect("tank 53 bar");
     assert!(
-        tank54.iter().any(|row| row.skill == 14344),
-        "tank 54 keeps the point-2 row"
+        tank.iter().all(|row| row.mount_skill != 39),
+        "tank 53 drops the point-2 row 39"
+    );
+    let ladder = tables.bar(5, 1, false).expect("siege ladder bar");
+    assert!(
+        ladder.iter().all(|row| row.mount_skill != 236),
+        "ladder 5 drops the point-81 row 236"
+    );
+    let tank54 = tables.bar(54, 1, true).expect("tank 54 bar");
+    assert!(
+        tank54.iter().all(|row| row.mount_skill != 44),
+        "tank 54 drops the point-2 row on the driver seat"
+    );
+    let tank54_passenger = tables.bar(54, 2, false).expect("tank 54 passenger bar");
+    assert_eq!(
+        tank54_passenger
+            .iter()
+            .map(|row| (row.skill, row.mount_skill, row.cast_skill()))
+            .collect::<Vec<_>>(),
+        [(14299, 44, 14344)],
+        "the point-2 seat shows the attached 14299 and casts 14344"
     );
     for id in [37u32, 48] {
         assert!(
             tables
-                .bar(id, true)
+                .bar(id, 1, true)
                 .expect("harpoon bar")
                 .iter()
                 .any(|row| row.skill == 13750),
@@ -1701,7 +2073,7 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
         );
     }
     assert_eq!(
-        tables.bar(90, true).expect("harpoon bar").len(),
+        tables.bar(90, 1, true).expect("harpoon bar").len(),
         2,
         "slave 90 keeps both rows"
     );
@@ -1710,7 +2082,7 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
         (133, 24501, 24500, 341),
         (100, 20161, 20160, 184),
     ] {
-        let bar = tables.bar(id, true).expect("gunner bar");
+        let bar = tables.bar(id, 1, true).expect("gunner bar");
         let entry = bar
             .iter()
             .find(|row| row.mount_skill == mount)
@@ -1721,4 +2093,274 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
             "slave {id}"
         );
     }
+}
+
+fn mate_unit(id: u32) -> aa_net::model::Unit {
+    let mut unit = crate::hud::expansion::fixture::spawn().unit;
+    unit.obj_id = id;
+    unit.kind = aa_net::model::UnitKind::Mate {
+        tl_id: 8,
+        template_id: 1,
+        owner_id: 100,
+    };
+    unit
+}
+
+/// `FUN_392045f0` puts the mate command 9 function slot before the buff skills when the ridden
+/// mate is not the local player's own (`FUN_3933b1b0(parent) == 0`); the slave could not supply
+/// one (no seat), so this is the only function slot on that mate's bar.
+#[test]
+fn a_foreign_mate_rider_gets_command_unmount_before_the_buff_skills()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(mate_unit(40))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 40,
+            point: 1,
+            reason: 0,
+        },
+        None,
+    );
+    assert!(state.borrow().mounted.riding_mate());
+    assert!(
+        state.borrow().mounted.mate_unmount(),
+        "a foreign mate's slot"
+    );
+    let bar = state.borrow();
+    assert_eq!(
+        functions(actions(&bar)),
+        [Function::CommandUnmount],
+        "mate command 9 is the first slot"
+    );
+    assert_eq!(
+        players(actions(&bar)),
+        (20848..=20855).collect::<Vec<_>>(),
+        "the buff skills follow it"
+    );
+    assert_eq!(actions(&bar).len(), 9);
+    drop(bar);
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        9
+    );
+    Ok(())
+}
+
+/// `FUN_3933b1b0` returns 1 for the player's own mate (kind 5 and the owner is the local
+/// character), and `FUN_392045f0` adds `command_unmount` only when it returns 0: riding the own
+/// pet shows the buff skills with no function slot (the pet bar owns the dismount).
+#[test]
+fn the_players_own_mate_gets_no_command_unmount_slot() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let mut mate = mate_unit(40);
+    let aa_net::model::UnitKind::Mate { owner_id, .. } = &mut mate.kind else {
+        unreachable!()
+    };
+    *owner_id = 47; // the fixture character
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitSpawned(Box::new(mate)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 40,
+            point: 1,
+            reason: 0,
+        },
+        None,
+    );
+    assert!(!state.borrow().mounted.mate_unmount());
+    assert!(state.borrow().mounted.riding_mate());
+    assert_eq!(functions(actions(&state.borrow())), []);
+    assert_eq!(
+        players(actions(&state.borrow())),
+        (20848..=20855).collect::<Vec<_>>(),
+        "the buff skills, as on foot"
+    );
+    assert_eq!(actions(&state.borrow()).len(), 8);
+    Ok(())
+}
+
+/// `HUD.mode_slot` must not let the previous bar's cached slot stand in for a slot the current
+/// bar computes as a different kind or id (one frame between the swap and the slot refresh).
+#[test]
+fn a_stale_mode_slot_cache_from_the_previous_bar_is_not_read()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(true)?;
+    {
+        let mut data = state.borrow_mut();
+        data.mode_actions.actions = vec![Entry::Function(Function::Unbind)];
+        data.mode_actions.slots = vec![crate::hud::panels::SlotSnap {
+            kind: "skill",
+            id: 20848,
+            ..Default::default()
+        }];
+    }
+    rt.lua
+        .load(
+            r#"
+        local s=HUD.mode_slot(1)
+        assert(s and s.kind=='function' and s.id==1, 'the function slot, not the old skill')
+    "#,
+        )
+        .exec()?;
+    // the cache is still used when it is that same slot (its cooldown end lives there)
+    {
+        let mut data = state.borrow_mut();
+        data.mode_actions.actions = vec![Entry::Player(20848)];
+        data.mode_actions.slots = vec![crate::hud::panels::SlotSnap {
+            kind: "skill",
+            id: 20848,
+            name: "cached".into(),
+            ..Default::default()
+        }];
+    }
+    rt.lua
+        .load("assert(HUD.mode_slot(1).name=='cached', 'the same slot keeps the cached snapshot')")
+        .exec()?;
+    Ok(())
+}
+
+#[test]
+fn show_slave_info_queues_the_original_ui_event() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    rt.lua
+        .load(
+            r#"
+        INFO=0
+        local w=UIParent:CreateWidget('emptywidget','slaveInfoProbe','UIParent')
+        w:RegisterEvent('SHOW_SLAVE_INFO')
+        w:SetHandler('OnEvent',function() INFO=INFO+1 end)
+    "#,
+        )
+        .exec()?;
+    let outcome = super::run_function(
+        &mut state.borrow_mut(),
+        Function::ShowSlaveInfo,
+        web_time::Instant::now(),
+    );
+    assert_eq!(outcome, crate::hud::slave::Outcome::Sent);
+    super::ready(Some(&rt), &state);
+    assert_eq!(rt.lua.load("return INFO").eval::<i64>()?, 1);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    Ok(())
+}
+
+#[test]
+fn function_slots_carry_the_native_icons_and_ui_texts_keys() {
+    let mut tables = super::Tables::default();
+    tables.texts.insert(
+        (33, "unbind".into()),
+        "Disembark from current device.".into(),
+    );
+    tables.texts.insert(
+        (33, "showSlaveInfo".into()),
+        "Check details on a summon.".into(),
+    );
+    tables
+        .texts
+        .insert((19, "command_unmount".into()), "Dismount".into());
+    let unbind = function_slot(Some(&tables), Function::Unbind);
+    assert_eq!(unbind.kind, "function");
+    assert_eq!(unbind.icon, "ui/icon/icon_skill_vehicle03.dds");
+    assert_eq!(unbind.desc, "Disembark from current device.");
+    let info = function_slot(Some(&tables), Function::ShowSlaveInfo);
+    assert_eq!(info.icon, "ui/icon/icon_skill_info_view.dds");
+    assert_eq!(info.desc, "Check details on a summon.");
+    let mate = function_slot(Some(&tables), Function::CommandUnmount);
+    assert_eq!(mate.icon, "ui/icon/icon_skill_vehicle03.dds");
+    assert_eq!(mate.desc, "Dismount");
+    // without the text table the key is still the original key
+    assert_eq!(function_slot(None, Function::Unbind).desc, "unbind");
+}
+
+/// The stock Summon Info window (`slave_info.alb`) opens from the mode bar's `showSlaveInfo`
+/// slot: `SHOW_SLAVE_INFO` is the event `mode_action.alb` handles, and the window reads the
+/// already-installed `X2SiegeWeapon:GetMountedSiegeWeaponInfo`. Run with the original pak and
+/// database present; it lists what the client cannot fill in its own header (the window itself
+/// hides missing vehicle/speed rows).
+#[test]
+#[ignore = "original World UI, game pak and database: Summon Info window"]
+fn original_summon_info_window_opens_on_show_slave_info() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (rt, state, path) = crate::hud::breath::fixture::runtime(1280., 720.)?;
+    let own = crate::hud::expansion::fixture::spawn();
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::CharacterSelected(Box::new(own.state.clone())),
+        None,
+    );
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let mut cart = crate::hud::expansion::fixture::spawn().unit;
+    cart.obj_id = 20;
+    cart.name = "Farm Wagon".into();
+    cart.kind = aa_net::model::UnitKind::Slave {
+        id: 700,
+        tl_id: 8,
+        template_id: 60,
+        summoner_id: 100,
+    };
+    cart.model_id = 1008;
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitSpawned(Box::new(cart)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        7
+    );
+    assert!(super::function_at(&state.borrow(), 6) == Some(Function::ShowSlaveInfo));
+    super::run_function(
+        &mut state.borrow_mut(),
+        Function::ShowSlaveInfo,
+        web_time::Instant::now(),
+    );
+    super::ready(Some(&rt), &state);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame, 'stock Summon Info frame')
+        assert(slaveInfoFrame:IsVisible(), 'SHOW_SLAVE_INFO opens it')
+        assert(slaveInfoFrame.unitId == '14', 'the received slave key in lowercase hex')
+        assert(slaveInfoFrame.name:GetText() == 'Farm Wagon')
+        assert(slaveInfoFrame.class:GetText() ~= '', 'the descriptor class')
+        assert(slaveInfoFrame.kind:GetText() ~= '', 'the mapped slave kind')
+    "#,
+        )
+        .exec()?;
+    aa_ui::lua::tick(&rt.lua, 16.);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
 }

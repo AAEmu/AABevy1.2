@@ -53,6 +53,8 @@ pub struct DoodadVisual {
     pub rendered_func_group_id: u32,
     /// Authored bond helpers relative to the doodad, in Cry metres.
     pub bond_helpers: HashMap<String, bevy::math::Affine3A>,
+    /// The `$ladder` helper of the drawn phase, in the doodad root's Bevy space.
+    pub ladder: Option<super::doodad_model::LadderHelper>,
     /// The phase's growth, `None` when it does not grow.
     pub growth: Option<DoodadGrowth>,
     /// Milliseconds of the growth left: the server's `time_left` at the spawn / phase change, counted down locally.
@@ -255,6 +257,7 @@ pub fn phase_changes(
                 debug!("doodad {} phase {func_group_id}: model {path}", remote.obj_id);
                 visual.path = path;
                 visual.bond_helpers = spawned.helpers;
+                visual.ladder = spawned.ladder;
                 visual.rendered_func_group_id = func_group_id;
             }
             None => warn!("doodad {} phase {func_group_id}: cannot draw {path}", remote.obj_id),
@@ -308,6 +311,7 @@ mod tests {
             func_group_id: 1,
             rendered_func_group_id: 1,
             bond_helpers: HashMap::new(),
+            ladder: None,
             growth: None,
             remaining_ms: 0.0,
             total_ms: 0.0,
