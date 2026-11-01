@@ -30,10 +30,46 @@ fn slave(obj_id: u32, tl_id: u16, at: Vec3) -> Unit {
     unit
 }
 
+/// The Red Farm Hauler of the 2026-11-01 leave-while-moving capture: slave template 146, model
+/// 1553, `vehicle_models` 65 (`use_wheeled_vehicle_simulation` false).
+fn hauler(obj_id: u32, tl_id: u16, at: Vec3) -> Unit {
+    let mut unit = slave(obj_id, tl_id, at);
+    unit.kind = UnitKind::Slave {
+        id: 6,
+        tl_id,
+        template_id: 146,
+        summoner_id: 100,
+    };
+    unit.model_id = 1553;
+    unit
+}
+
+/// A wheeled-simulation vehicle: slave template 105, model 1293, `vehicle_models` 45
+/// (`use_wheeled_vehicle_simulation` true, velocity 15 m/s). The speed-car slaves (105, 106,
+/// 112, ...) are the rows that carry the flag; no cart does.
+fn wheeled_car(obj_id: u32, tl_id: u16, at: Vec3) -> Unit {
+    let mut unit = slave(obj_id, tl_id, at);
+    unit.kind = UnitKind::Slave {
+        id: 1,
+        tl_id,
+        template_id: 105,
+        summoner_id: 100,
+    };
+    unit.model_id = 1293;
+    unit
+}
+
 /// The HUD's game data with actor-model radii only (no database).
 fn game_with_radii(radii: &[(u32, f32)]) -> crate::hud::data::GameData {
     let mut game = crate::hud::data::GameData::default();
     game.model_radii.extend(radii.iter().copied());
+    game
+}
+
+/// The HUD's game data with the `vehicle_models.use_wheeled_vehicle_simulation` flags.
+fn game_with_wheeled(models: &[(u32, bool)]) -> crate::hud::data::GameData {
+    let mut game = crate::hud::data::GameData::default();
+    game.wheeled_sim.extend(models.iter().copied());
     game
 }
 
@@ -706,6 +742,65 @@ fn the_captured_farm_wagon_reaches_pass_with_the_real_model_radii()
     Ok(())
 }
 
+/// The 2026-11-01 capture and the data behind it: the Red Farm Hauler (slave 146, model 1553,
+/// `vehicle_models` 65) is not a wheeled simulation and leaves at ~6.7 m/s; a speed car (slave
+/// 105, model 1293, `vehicle_models` 45) is and refuses above 5 m/s. `X2::VehicleUnitModel::Init`
+/// copies this flag to the model (+0x2a0), and `FUN_39345aa0` only then checks the speed.
+#[test]
+#[ignore = "requires the game pak and the game database (AA_PAK, AA_DB)"]
+fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&path).exists() {
+        eprintln!("skipping: the game pak {pak} or database {path} is not there");
+        return Ok(());
+    }
+    let game = crate::hud::data::GameData::load(&path)?;
+    assert!(
+        !game.wheeled_vehicle_simulation(1553),
+        "slave 146's vehicle model 65"
+    );
+    assert!(
+        game.wheeled_vehicle_simulation(1293),
+        "slave 105's vehicle model 45"
+    );
+
+    let (state, _units) = setup(&[hauler(146, 0x5e, Vec3::new(1.0, 0.0, 0.0))]);
+    state.borrow().game.0.set(game).ok().expect("game data");
+    bound(&state, 146);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 146,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+
+    let (state, _units) = setup(&[wheeled_car(105, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(crate::hud::data::GameData::load(&path)?)
+        .ok()
+        .expect("game data");
+    bound(&state, 105);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+    movement.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 105,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+    Ok(())
+}
+
 #[test]
 fn only_a_mate_seat_switches_the_interaction_reach_to_three_point_five_metres() {
     let mut mate = crate::hud::expansion::fixture::spawn().unit;
@@ -872,8 +967,52 @@ fn discard_uses_the_seated_slave_without_a_bound_reply() {
 }
 
 #[test]
-fn discard_is_refused_while_the_slave_moves_faster_than_five() {
-    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+fn the_captured_land_dismount_at_six_point_seven_mps_sends_the_unbind() {
+    // 2026-11-01 owner session, "dismount at speed": the dismount button sent CSDiscardSlave
+    // 0x032 at once while W was held at the Eco-Fuel hauler's ~6.7 m/s (the last two CSMoveUnit
+    // type-2 reports 103 ms apart, ~0.69 m), with no 0x67. Its model 1553 is not a wheeled
+    // simulation (`vehicle_models` 65), so the native speed check never runs.
+    let (state, _units) = setup(&[hauler(146, 0x5e, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1553, false)]))
+        .ok()
+        .expect("game data");
+    bound(&state, 146);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 146,
+            movement,
+        },
+    );
+    assert_eq!(
+        discard(&state),
+        Outcome::Sent,
+        "no 0x67 for the captured land case"
+    );
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 0x5e })]
+    );
+}
+
+#[test]
+fn discard_is_refused_while_a_wheeled_simulation_slave_moves_faster_than_five() {
+    // `FUN_39345aa0` 677646 checks the speed only when the model's +0x2a0 is set; the speed cars
+    // are the models whose `vehicle_models.use_wheeled_vehicle_simulation` is true.
+    let (state, _units) = setup(&[wheeled_car(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1293, true)]))
+        .ok()
+        .expect("game data");
     bound(&state, 20);
     let mut movement = Movement::unit(Pos::default(), 0.0, 1);
     movement.velocity = [6 * 1024, 0, 0];
@@ -887,7 +1026,7 @@ fn discard_is_refused_while_the_slave_moves_faster_than_five() {
     assert_eq!(discard(&state), Outcome::Refused(0x67));
     assert!(state.borrow().requests.is_empty());
 
-    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
     movement.velocity = [5 * 1024, 0, 0];
     crate::hud::mounted::receive(
         &state,
@@ -1029,7 +1168,14 @@ fn the_captured_leave_while_moving_at_3_54_mps_sends_the_unbind() {
 
 #[test]
 fn a_stale_replicated_speed_no_longer_refuses_the_unbind() {
-    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    let (state, _units) = setup(&[wheeled_car(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1293, true)]))
+        .ok()
+        .expect("game data");
     bound(&state, 20);
     let mut movement = Movement::unit(Pos::default(), 0.0, 1);
     movement.velocity = [6 * 1024, 0, 0];
@@ -1072,7 +1218,14 @@ fn discard_siege_weapon_lua_wrapper_queues_the_same_unbind()
 #[ignore = "requires the original UI (game pak)"]
 fn fast_slave_unbind_refusal_shows_sysmsg_through_the_lua_wrapper()
 -> Result<(), Box<dyn std::error::Error>> {
-    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    let (state, _units) = setup(&[wheeled_car(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1293, true)]))
+        .ok()
+        .expect("game data");
     bound(&state, 20);
     let mut movement = Movement::unit(Pos::default(), 0.0, 1);
     movement.velocity = [6 * 1024, 0, 0];
@@ -1091,6 +1244,41 @@ fn fast_slave_unbind_refusal_shows_sysmsg_through_the_lua_wrapper()
         rt.lua.load("return sys[1]").eval::<String>()?,
         "text:SLAVE_SHUT_OFF_TO_UNBIND"
     );
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the original UI (game pak)"]
+fn the_captured_land_dismount_at_speed_shows_no_0x67_through_the_lua_wrapper()
+-> Result<(), Box<dyn std::error::Error>> {
+    // The 2026-11-01 capture's hauler at ~6.7 m/s: the dismount button sends the 0x032 and the
+    // system message window stays empty.
+    let (state, _units) = setup(&[hauler(146, 0x5e, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1553, false)]))
+        .ok()
+        .expect("game data");
+    bound(&state, 146);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 146,
+            movement,
+        },
+    );
+    let rt = runtime();
+    install_discard(&rt, &state);
+    rt.lua.load("X2SiegeWeapon:DiscardSiegeWeapon()").exec()?;
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 0x5e })]
+    );
+    assert_eq!(rt.lua.load("return #sys").eval::<i64>()?, 0);
     Ok(())
 }
 
@@ -1358,10 +1546,17 @@ fn despawning_escaping_or_losing_the_bound_slave_clears_it() {
 }
 
 #[test]
-fn the_driven_cart_uses_the_controller_speed() {
-    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+fn the_driven_wheeled_vehicle_uses_the_controller_speed() {
+    let (state, _units) = setup(&[wheeled_car(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_wheeled(&[(1293, true)]))
+        .ok()
+        .expect("game data");
     bound(&state, 20);
-    // no UnitMoved reports the cart this client drives
+    // no UnitMoved reports the vehicle this client drives
     state.borrow_mut().mounted.local_cart = Some((20, 5.5));
     assert_eq!(discard(&state), Outcome::Refused(0x67));
     state.borrow_mut().mounted.local_cart = Some((20, -4.0));

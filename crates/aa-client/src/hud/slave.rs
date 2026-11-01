@@ -34,10 +34,17 @@
 //! is unverified.
 //!
 //! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`): `CSDiscardSlave`
-//! 0x032 with the bound timeline, refused with 0x67 while the slave's speed squared is above 25.0
-//! (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
-//! `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`); that native path has no
-//! speed check. The speed source is unverified (see the docs).
+//! 0x032 with the bound timeline. The native refuses with 0x67 (`SLAVE_SHUT_OFF_TO_UNBIND`) only
+//! when BOTH hold: the slave's vehicle model has `use_wheeled_vehicle_simulation` set (the model's
+//! +0x2a0 byte, which `X2::VehicleUnitModel::Init` copies from the model descriptor's +0x72,
+//! `FUN_390f0510` 190001), and the model's entity velocity squared is above 25.0
+//! (`_DAT_3999f85c`, 5 m/s) (`FUN_39345aa0` 677646-677660, `FUN_39345970` 677552-677561).
+//!
+//! The 2026-11-01 owner capture: the Red Farm Hauler (slave template 146, model 1553,
+//! `vehicle_models` 65: `use_wheeled_vehicle_simulation` false) sent 0x032 at ~6.7 m/s with W
+//! held and the owner got off, with no 0x67. A passenger (attach point above 1) walks off on
+//! movement input through `FUN_39362170`, throttled to one request per 1500 ms
+//! (`_DAT_3a169948`); that native path has no speed check.
 
 use std::time::Duration;
 
@@ -62,7 +69,8 @@ pub(super) const INTERACT_REACH: f32 = 3.0;
 pub(super) const MOUNTED_INTERACT_REACH: f32 = 3.5;
 /// `DAT_39ac7408` (16.0): `FUN_39346290`'s bind reach, sqrt(16.0) = 4.0 m.
 pub(super) const BIND_REACH: f32 = 4.0;
-/// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
+/// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s, checked only when the slave's
+/// vehicle model is a wheeled simulation (`use_wheeled_vehicle_simulation`, the model's +0x2a0).
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
 /// `_DAT_3a169948`: the passenger walk-off throttle.
 pub(super) const WALK_OFF_THROTTLE: Duration = Duration::from_millis(1500);
@@ -328,8 +336,17 @@ fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
     let Some((obj_id, tl_id)) = data.mounted.discard_slave() else {
         return Outcome::Silent;
     };
+    // `FUN_39345aa0` 677646 puts the speed check inside `if (model[+0x2a0] != 0)`. That byte is
+    // `vehicle_models.use_wheeled_vehicle_simulation` (`FUN_390f0510` 190001 copies the model
+    // descriptor's +0x72), so a land vehicle such as the captured hauler never refuses. A model
+    // the game data does not name is treated as not wheeled; the server still decides the unbind.
+    let wheeled = data.mounted.slave_model(obj_id).is_some_and(|model| {
+        data.game
+            .get()
+            .is_some_and(|game| game.wheeled_vehicle_simulation(model))
+    });
     // No replicated movement, or one older than the staleness bound, means a standing slave.
-    if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
+    if wheeled && data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
         return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
     }
     data.requests

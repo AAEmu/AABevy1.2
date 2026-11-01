@@ -78,8 +78,11 @@ Merged:
 - **#33 cart boarding.** A right-click sends `CSChangeTarget` 0x02c when needed and `CSStartInteraction` 0x068; the
   server's first 0x07b skill 12076 binds through the 3.0 m (3.5 m mounted) surface gap and 4.0 m bind check with
   `CSBindSlave` 0x031, and leaving sends `CSDiscardSlave` 0x032. The capture and replay match the chain at
-  2.0/2.9/3.1 m and the leave (`tools/evidence/cart_boarding/`); the 3.5/4.5 m native picks never landed. Open:
-  auto-walk, passenger 13863 and destroy 19165, per-collider shapes, the dynamic action bar/F, and player flags.
+  2.0/2.9/3.1 m and the leave (`tools/evidence/cart_boarding/`); the 3.5/4.5 m native picks never landed.
+  The driver's 5 m/s 0x67 refusal is gated on the vehicle model (`vehicle_models.use_wheeled_vehicle_simulation`,
+  native model +0x2a0): the 2026-11-01 owner capture left the Red Farm Hauler (slave template 146) at ~6.7 m/s
+  with W held and no 0x67, while the speed-car models carry the flag. Open: a live car leave, auto-walk,
+  passenger 13863 and destroy 19165, per-collider shapes, the dynamic action bar/F, and player flags.
 - **#34 mount animations.** Mount reason 1-4 selects the left/right/behind/front get-on, riding uses the idle/walk/run
   bands with the idle-to-run one-shots, and dismount plays `fist_ac_horse_l_getoff_start`/`_loop`/`_end`;
   `SCUnitAttached`'s reason byte is kept for remote riders. The capture supplies the reasons and timing, the clips come

@@ -100,9 +100,12 @@ struct Actor {
     slave_tl: Option<u16>,
     /// `UnitKind::Slave.id`: 7 siege weapon, 8 ship cannon/equipment. A cart is 6.
     slave_kind: Option<u32>,
+    /// `Unit.model_id`: the model whose `vehicle_models.use_wheeled_vehicle_simulation` gates the
+    /// driver's 0x67 unbind refusal (`hud/slave.rs`).
+    model_id: u32,
     /// Latest replicated unit-movement velocity, in (m/s)^2, and when it arrived. The native
-    /// unbind check reads an engine getter (`vtable+0xa4`, `FUN_39345aa0`); this source is
-    /// unverified.
+    /// unbind check reads the model's entity velocity (`vtable+0xa4`, `FUN_39345970`); for a
+    /// replicated slave this is the same pose the client moves the model with.
     speed_squared: f32,
     speed_at: Option<Instant>,
     link: Link,
@@ -192,6 +195,7 @@ impl View {
                 slave_template,
                 slave_tl,
                 slave_kind,
+                model_id: unit.model_id,
                 speed_squared: movement_speed_squared(unit.movement.as_ref()),
                 speed_at: unit.movement.as_ref().map(|_| now),
                 link: snapshot_link(unit),
@@ -286,6 +290,12 @@ impl View {
     pub(super) fn bound_slave(&self) -> Option<(u32, u16)> {
         let id = self.bound?;
         Some((id, self.slave(id)?.slave_tl?))
+    }
+
+    /// The model of the slave `obj_id` (`Unit.model_id`), for the model-data gates of the
+    /// driver's leave (`hud/slave.rs`).
+    pub(super) fn slave_model(&self, obj_id: u32) -> Option<u32> {
+        self.slave(obj_id).map(|actor| actor.model_id)
     }
 
     /// The slave the player leaves with `DiscardSiegeWeapon`: the seated one (the attachment wins,

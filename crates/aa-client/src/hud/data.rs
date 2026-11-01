@@ -225,6 +225,10 @@ pub struct GameData {
     /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
     /// `ModelManager.GetActorModel(modelId).Radius`.
     pub(super) model_radii: HashMap<u32, f32>,
+    /// `models.id` -> `vehicle_models.use_wheeled_vehicle_simulation` for a `VehicleModel`: the
+    /// native vehicle model flag (`X2::VehicleUnitModel::Init`, `FUN_390f0510`, copies the model
+    /// descriptor byte +0x72 to the model's +0x2a0) that gates the driver's 0x67 unbind refusal.
+    pub(super) wheeled_sim: HashMap<u32, bool>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
@@ -687,6 +691,18 @@ impl GameData {
             }
         }
         {
+            // The native `VehicleUnitModel` copies this data byte to the model and the driver's
+            // discard path checks it (`FUN_390f0510` 190001 -> `FUN_39345aa0` 677646).
+            let mut q = conn.prepare(
+                "SELECT m.id, v.use_wheeled_vehicle_simulation FROM models m \
+                 JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.wheeled_sim.insert(r.get(0)?, any_flag(r, 1)?);
+            }
+        }
+        {
             let mut q = conn.prepare("SELECT zone_key, group_id, faction_id FROM zones WHERE group_id IS NOT NULL")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -922,6 +938,13 @@ impl GameData {
     /// scale, 0 when the model has no actor radius (or the database is not loaded yet).
     pub(super) fn model_size(&self, model_id: u32, scale: f32) -> f32 {
         self.model_radii.get(&model_id).copied().unwrap_or(0.0) * scale
+    }
+
+    /// `vehicle_models.use_wheeled_vehicle_simulation` of a `VehicleModel`, the flag the native
+    /// model keeps at +0x2a0 and the driver's discard check tests (`FUN_39345aa0` 677646). A model
+    /// the database does not name is not wheeled: the captured land leave (`hud/slave.rs`) sends.
+    pub(super) fn wheeled_vehicle_simulation(&self, model_id: u32) -> bool {
+        self.wheeled_sim.get(&model_id).copied().unwrap_or(false)
     }
 
     /// Zone group of a `zones.zone_key` ("Solzreed Peninsula") and the faction protecting the zone.
