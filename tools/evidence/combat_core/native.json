@@ -4,6 +4,11 @@
   "client": "ArcheAge 1.2 r208022, pid 77088, hidden; account clienttest, character Combatt1 (level 45, Battlerage/Sorcery/Auramancy, one-hand sword 21377)",
   "server": "AAEmu lane combatcap (our server replies are stimulus, not 1.2 evidence)",
   "capture_root": "<capture-root>/2026-11-01-combat-k2k3",
+  "evidence_classes": {
+    "client": "the 1.2 client's own send, memory/UI byte or animation, with no server reply or scripted step in the causal path",
+    "server-dependent": "includes our server's reply (SCSkillStarted, SCSkillFired, SCCombatCleared, the auto-attack repeat timer, the range check) or a scripted step",
+    "inferred": "not separable from our server's reply at localhost, or a one-sample ordering; stated as inferred, never as a 1.2 rule"
+  },
   "runs": {
     "run": {
       "status": "ok",
@@ -76,7 +81,9 @@
         },
         "first_attack_anim_t_ms": 10086,
         "delay_ms_from_before_stamp": 280,
-        "first_attack_state": "onehand_co_attack_r_slash+Combat Start"
+        "first_attack_state": "onehand_co_attack_r_slash+Combat Start",
+        "evidence_class": "server-dependent",
+        "evidence_note": "the clip is our server's SCSkillFired.fire_anim_id; the 280 ms includes the driver, the client frame and our reply"
       },
       "swing_anim_starts_t_ms": [
         10086,
@@ -120,8 +127,6 @@
       "target_hp_zero_t_ms": 45691,
       "target_lost_t_ms": 58550,
       "stance_1_to_0_t_ms": 59322,
-      "stance_exit_after_target_lost_ms": 772,
-      "stance_exit_after_no_target_press_ms": 613,
       "weapon_active_transitions": [
         [
           10061,
@@ -253,16 +258,70 @@
           "max_remaining": 0,
           "gcd_rise": false
         }
-      ]
+      ],
+      "evidence_classes": {
+        "first_press.input_row": "client",
+        "first_press.first_attack_anim_t_ms": "server-dependent",
+        "first_press.delay_ms_from_before_stamp": "server-dependent",
+        "first_press.first_attack_state": "server-dependent",
+        "swing_anim_starts_t_ms": "server-dependent",
+        "swing_cadence_ms": "server-dependent",
+        "target_hp_zero_t_ms": "server-dependent",
+        "target_lost_t_ms": "server-dependent",
+        "stance_1_to_0_t_ms": "server-dependent",
+        "weapon_active_transitions": "client",
+        "no_target_press_t_ms": "client",
+        "repress.input": "client",
+        "repress.wait": "server-dependent",
+        "walk.input": "client",
+        "walk.run_state_t_ms": "client",
+        "walk.distance_at_110274": "client",
+        "walk.distance_at_113454": "client",
+        "walk.distance_at_114592": "client",
+        "walk.distance_at_115540": "client",
+        "out_of_range_press": "client",
+        "gcd_at_presses": "client"
+      },
+      "evidence_notes": {
+        "swing": "one CSStartSkill 2 per press; our server schedules the repeat at the weapon speed (2000 ms) and sends SCSkillFired",
+        "target_lost": "our server's SCCombatCleared; the script cleared the target at t=58529",
+        "stance": "the stance byte drops with the client's combat state after our server's SCCombatCleared; it is not a client timer. Decompile rule: FUN_391d6a60 (OnCombatCleared) clears the +0x3bba latch through vtable +0x48 = FUN_39355ec0, and FUN_39355ee0 refreshes a 10 s deadline while the latch is set (1b0066d4:docs/research/port-combat/side-by-side.md:52-68)",
+        "repress": "the re-press sent another CSStartSkill 2 (server_slice.log:24360); no CSStopCasting; our server stopped the damage",
+        "walk": "the client sent no packet while walking; our server's auto_attack_tick skips the swing when distance > max_range",
+        "out_of_range": "the client sent CSStartSkill 2 (server_slice.log:43513); our server accepted it as a repeat start and did nothing, so no clip followed",
+        "gcd": "who writes the pair (the request or our SCSkillStarted) is unknown at localhost, so the skill-2 exemption is inferred"
+      },
+      "removed": "stance_exit_after_target_lost_ms and stance_exit_after_no_target_press_ms are removed: they are not a client timer; see evidence_notes.stance"
     },
     "answers": {
-      "first_swing_delay": "the first attack clip starts 280 ms after the key-press before-stamp (187 ms after the driver returned); the first damage after the clip starts is at t=11081 (995 ms into the clip, 1.28 s after the press); the target was already 155 HP down at the press, so the pre-run auto-attack state is not clean",
-      "auto_repeat": "one press repeats the swing (client attack clip every ~2.0 s) until the target dies; the re-press toggles it off after in-flight swings",
-      "stance_exit": "stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the fight-ending no-target press; UnitCombatState false at the same frame. The 12.86 s from the last hit to the target loss is the corpse/target lifetime; the stance exit adds 0.77 s (13.63 s total), not a client 10 s timer",
-      "battle_start_end": "the 'Combat Start' overlay is part of the first attack clip at t=10086; no chat 'Battle End'; the client combat state goes false at t=59323 and the stance byte 1->0 at t=59322",
-      "repress": "toggles the auto-attack off: target HP 3317 at t=67344 -> 2454 at t=99332, then stable for the 25 s wait; no attack clip after the in-flight swings",
-      "walk_away": "walking switches to onehand_combat_RUN at t=113119 and stops the attack clips; the target stays at its spawn (distance 3.0 -> 10.5 m); the post-walk press at t=117394 produces no clip and no StartSkill",
-      "gcd_exempt": "the auto-attack never changes the cooldown-manager pair (0/1000 before, during and after the presses); skill 2 is the GCD-exempt action"
+      "first_swing_delay": {
+        "evidence_class": "server-dependent",
+        "text": "the first attack clip starts 280 ms after the key-press before-stamp (187 ms after the driver returned); the clip is our server's SCSkillFired.fire_anim_id, so the 280 ms includes the driver, the client frame and our reply. The first damage after the clip starts is at t=11081 (995 ms into the clip, 1.28 s after the press); the target was already 155 HP down at the press, so the pre-run auto-attack state is not clean"
+      },
+      "auto_repeat": {
+        "evidence_class": "server-dependent",
+        "text": "the client sends one CSStartSkill 2 per press; our server schedules the repeat at the weapon speed (2000 ms) and sends SCSkillFired, so the client attack clip starts every ~2.0 s until the target dies. A re-press sends another CSStartSkill 2 (server_slice.log:24360), not a stop packet; our server stopped the damage"
+      },
+      "stance_exit": {
+        "evidence_class": "server-dependent",
+        "text": "stance_perm 1->0 at t=59322 and UnitCombatState false at t=59323, after the script cleared the target (t=58529) and the no-target press (t=58709). The former stance-exit delays are removed because they are not a 1.2 stance timer: the script cleared the target, the no-target press sent nothing, and the byte drops after our server's SCCombatCleared. Decompile rule (client): FUN_391d6a60 (OnCombatCleared) clears the +0x3bba latch through vtable +0x48 = FUN_39355ec0, and FUN_39355ee0 refreshes a 10 s deadline while the latch is set (1b0066d4:docs/research/port-combat/side-by-side.md:52-68)"
+      },
+      "battle_start_end": {
+        "evidence_class": "server-dependent",
+        "text": "the 'Combat Start' overlay is part of the first attack clip at t=10086 (the clip is our server's SCSkillFired.fire_anim_id); no chat 'Battle End'; the client combat state goes false at t=59323 and the stance byte 1->0 at t=59322, after our server's SCCombatCleared"
+      },
+      "repress": {
+        "evidence_class": "server-dependent",
+        "text": "the re-press sent another CSStartSkill 2 (server_slice.log:24360) and no CSStopCasting. Our server stopped the repeat/damage: target HP 3317 at t=67344 -> 2454 at t=99332, then stable for the 25 s wait, with no attack clip after the in-flight swings. The client facts are the send and the absent clips, not a client toggle"
+      },
+      "walk_away": {
+        "evidence_class": "server-dependent",
+        "text": "walking switches to onehand_combat_RUN at t=113119; the client sent no packet and our server's auto_attack_tick skips the swing when distance > max_range, so the attack clips stop. The target stays at its spawn (distance 3.0 -> 10.5 m). The post-walk press at t=117444 sent CSStartSkill 2 (server_slice.log:43513); our server accepted it as a repeat start and did nothing, so no clip followed"
+      },
+      "gcd_exempt": {
+        "evidence_class": "inferred",
+        "text": "the auto-attack never changes the cooldown-manager pair (0/1000 before, during and after the presses); skill 2 is the GCD-exempt action if the pair is written at request. Who writes the pair (the request or our SCSkillStarted) is unknown, so the exemption is inferred, not proven"
+      }
     }
   },
   "k3": {
@@ -287,7 +346,16 @@
           "empty": "false"
         }
       },
-      "answer": "the 10 s cast bar is present (total 10000); only the 1000 ms GCD is on the slot during the cast, the 30 min skill cooldown is not started at the request"
+      "evidence_classes": {
+        "cast_start_t_ms": "client",
+        "last_cast_row_t_ms": "client",
+        "action_slot_1": "client",
+        "answer": "server-dependent"
+      },
+      "answer": {
+        "evidence_class": "server-dependent",
+        "text": "the 10 s cast bar is present (total 10000), but that total is our SCSkillStarted.real_cast_time_div10; the client UI only displays it. The slot shows only the 1000 ms GCD during the cast and the 30 min skill cooldown is not started at the request (client memory)"
+      }
     },
     "cd_10152": {
       "rows": [
@@ -299,9 +367,13 @@
           "t_ms": 47167,
           "cd_ex": "30000,28895,30000,28895"
         }
-      ]
+      ],
+      "evidence_class": "inferred",
+      "note": "the slot values are client memory; whether the cooldown starts at the request or at our SCSkillStarted/SCSkillFired is not separable at localhost"
     },
     "gcd_per_skill": {
+      "evidence_class": "client",
+      "note": "cooldown-manager pair, 5 ms; buff 3024 is applied by our server; 18132's 2000 ms producer is inferred (client plot or our SCSkillStarted)",
       "12026": {
         "no_buff_ms": 1000,
         "buff_3024_ms": 500
@@ -309,6 +381,7 @@
       "18132": {
         "no_buff_ms": 2000,
         "buff_3024_ms": 1000,
+        "producer_class": "inferred",
         "note": "the memory global is 2000 ms; the action slot shows a 500 ms custom cooldown"
       },
       "11991": {
@@ -335,15 +408,30 @@
       },
       "2": {
         "no_buff_ms": 0,
-        "note": "auto-attack is GCD-exempt"
+        "note": "auto-attack is GCD-exempt (inferred)"
       }
     },
     "second_press": {
-      "during_cast_11991": "12026 at t=177900 during the Health Lift cast: 'Already performing an action.' at t=177952; no StartSkill; the cast runs to its end",
-      "during_gcd_18132": "the same skill at t=34029, 550 ms into a 2000 ms GCD: silently dropped (no text, no new GCD, no StartSkill)",
-      "during_gcd_frenzy": "18132 at t=40659, 420 ms into Frenzy's 500 ms GCD: queued; a new 2000 ms GCD starts at t=41132 and the server logs StartSkill 18132 at 10:36:26",
-      "after_gcd": "18132 at t=36859 after the GCD is accepted",
-      "rule": "a second press is buffered only when the current GCD ends within about 0.25 s; otherwise it is dropped; during a cast it is refused"
+      "during_cast_11991": {
+        "evidence_class": "server-dependent",
+        "text": "12026 at t=177900 during the Health Lift cast: 'Already performing an action.' at t=177952; no StartSkill; the cast runs to its end. The cast state itself came from our SCSkillStarted"
+      },
+      "during_gcd_18132": {
+        "evidence_class": "client",
+        "text": "the same skill at t=34029, about 1.68 s left by the memory GCD (the report's 550 ms uses press stamps): silently dropped (no text, no new GCD, no StartSkill)"
+      },
+      "during_gcd_frenzy": {
+        "evidence_class": "server-dependent",
+        "text": "18132 at t=40659, about 0.23 s left by the memory GCD (Frenzy rise ~40389, end ~40889): queued; a new 2000 ms GCD starts at t=41132, about the normal press->rise lag, and our server logs StartSkill 18132 at 10:36:26"
+      },
+      "after_gcd": {
+        "evidence_class": "client",
+        "text": "18132 at t=36859 after the GCD is accepted"
+      },
+      "rule": {
+        "evidence_class": "inferred",
+        "text": "a second press during a cast is refused. During a GCD, one queued sample (~0.23 s left) and one dropped sample (~1.68 s left) bound the window only between about 0.23 s and 1.68 s; 0.25 s is not measured. The queued skill's new GCD starts about 0.2 s after the current GCD ends, the same press->rise lag as a normal press, so that delay is our reply/pipeline latency, not a queue rule"
+      }
     },
     "refusals": {
       "run": [
@@ -386,6 +474,8 @@
           "text": "Can't be used right now."
         }
       ],
+      "texts_class": "client",
+      "order_class": "inferred",
       "order": [
         "cast in progress ('Already performing an action.')",
         "combat restriction ('Can't be used in combat.')",
@@ -394,30 +484,46 @@
         "range (probe only, not recorded: 'Target is too far.' for a skill; 'Invalid target.' for auto-attack)",
         "dead (run2 only, invalid run: 'Can't be used while dead.')"
       ],
+      "order_note": "no press met two conditions at once; this is a list of separate observations, not an observed priority",
       "sound": "not captured: the lane starts the client with -aaemu-silent and s_SoundEnable 0; the X2Sound hook saw no PlayUISound calls"
     },
     "cooldown_display": {
-      "instant_10152": "30000,30000 at t=46057 (+178 ms after the t=45879 press), then 29816 at t=46247 -> starts at the request",
-      "instant_12026": "21000,14073 at t=222058; the countdown matches the t=215083 press -> starts at the request",
-      "cast_10594": "no 1800000 during the 10 s cast; the slot shows only 1000,858 -> 1000,0; the fire start was not observed (cancelled at 8.3 s to avoid the zone change)"
+      "instant_10152": {
+        "evidence_class": "inferred",
+        "text": "30000,30000 at t=46057 (+178 ms after the t=45879 press), then 29816 at t=46247; the slot starts within 178 ms, but the request and our SCSkillStarted/SCSkillFired are within about 1 ms of each other, so 'at request' is not separable from the reply"
+      },
+      "instant_12026": {
+        "evidence_class": "inferred",
+        "text": "21000,14073 at t=222058; the countdown matches the t=215083 press, but the request, start and fire are within about 1 ms, so 'at request' is inferred"
+      },
+      "cast_10594": {
+        "evidence_class": "server-dependent",
+        "text": "no 1800000 during the 10 s cast; the slot shows only 1000,858 -> 1000,0; the cast length is our SCSkillStarted and the fire start was not observed (cancelled at 8.3 s to avoid the zone change)"
+      }
     },
-    "missing_4s_cast": "the 3.5 s Rampage (14166) is learned server-side but not in the client's general skill book: SetActionSpell(9,14166) left the slot empty (9:None:?:true at t=128608). The 4 s skills 11347/14679 are also general skills not in the book. No ~4 s cast is available on this character without a new character/learn path"
+    "missing_4s_cast": {
+      "evidence_class": "client",
+      "text": "the 3.5 s Rampage (14166) is learned server-side but not in the client's general skill book: SetActionSpell(9,14166) left the slot empty (9:None:?:true at t=128608). The 4 s skills 11347/14679 are also general skills not in the book. No ~4 s cast is available on this character without a new character/learn path"
+    }
   },
   "verification": {
-    "K2_first_swing": "CAP (client animation + input bracket; the pre-press target damage makes the exact start state ambiguous)",
-    "K2_toggle_repeat_walk": "CAP (client animation/HP; the server's damage cadence differs)",
-    "K2_stance_exit": "CAP (client stance byte; the 10 s/13.6 s corpse and combat linger are our server's behaviour)",
-    "K3_gcd": "CAP (cooldown-manager pair, 5 ms); the 2000 ms for 18132 is client-observed but its producer (plot vs server SCSkillStarted) is not proven",
-    "K3_buff": "CAP (the client halves the GCD after the server adds buff 3024)",
-    "K3_cast_bar": "CAP (UnitCastingInfo; UI frame 52 ms)",
-    "K3_cooldown": "CAP (action slot GetActionCooldownEx; instant at request, cast start not at request)",
-    "K3_second_press": "CAP (chat + GCD + server StartSkill trace)",
-    "K3_refusals": "CAP for the recorded texts; range texts are probe-only"
+    "K2_first_swing": "server-dependent (the clip is our server's SCSkillFired.fire_anim_id; the pre-press target damage also makes the exact start state ambiguous)",
+    "K2_toggle_repeat_walk": "server-dependent (our repeat timer and range check; the client sends one CSStartSkill 2 per press and nothing while walking)",
+    "K2_stance_exit": "server-dependent timing + client decompile rule (the stance clears on OnCombatCleared; the 10 s deadline is refreshed while engaged). The former stance-exit delays are removed; they are not a client timer",
+    "K3_gcd": "client (cooldown-manager pair, 5 ms); the 2000 ms for 18132 is client-observed but its producer (plot vs our SCSkillStarted) is inferred",
+    "K3_buff": "client (the client halves the GCD); buff 3024 is applied by our server",
+    "K3_cast_bar": "server-dependent durations (our SCSkillStarted.real_cast_time_div10); the UI frame is client",
+    "K3_cooldown": "inferred (the action slot GetActionCooldownEx; the request and our SCSkillStarted/SCSkillFired are within about 1 ms, so instant start cannot be told apart from fire)",
+    "K3_second_press": "client texts/pair + server-dependent cast state and repeat; the queue window and its ~0.2 s latency are inferred",
+    "K3_refusals": "client for the recorded texts; the order is inferred; range texts are probe-only"
   },
   "caveats": [
-    "Our server's replies (SCCombatCleared, SCSkillStarted, damage ticks, refusals) are stimulus, not 1.2 server evidence.",
+    "Our server's replies (SCCombatCleared, SCSkillStarted, SCSkillFired, damage ticks, refusals) are stimulus, not 1.2 server evidence.",
     "The character died before run2 (the gap while the runs were analysed); run2 is invalid and kept only for the 'Can't be used while dead.' row.",
-    "The first K2 target was already 155 HP down at the find; the auto-attack may have been on from the pre-run probe. The toggle conclusion rests on the re-press and no-target press.",
+    "The first K2 target was already 155 HP down at the find; the auto-attack may have been on from the pre-run probe.",
+    "The K2 re-press sent another CSStartSkill 2 (no stop packet) and our server stopped the damage; a client auto-attack toggle is not proven.",
+    "The K2 no-target press sent nothing; the script cleared the target and our server sent SCCombatCleared.",
+    "The K2 out-of-range press sent CSStartSkill 2; our server accepted it as a repeat start and did nothing.",
     "The weapon byte weapon_active stayed 1 after the first draw; no sheathe was observed. The stance evidence is the stance_perm byte.",
     "The client's system clock drifted 813 ppm in run; the UI clock is the stable reference. Input-to-UI comparisons are within the 52 ms frame plus the clock residual."
   ]

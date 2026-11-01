@@ -321,6 +321,23 @@ offset-0 shifting, and the shift touching only the memory channels),
 stale-reply skipping, the KeyboardInterrupt self-check, sampler gap recovery
 and a null actor that must enter recovery instead of writing stale rows.
 
+## Evidence classes (K2/K3 summary)
+
+`tools/evidence/combat_core/native.json` labels every K2/K3 value with one of these classes:
+
+* **client** - the 1.2 client's own send, memory/UI byte or animation, with no server reply or scripted step in
+  the causal path (the GCD pair, the `CSStartSkill 2` send, the stance byte).
+* **server-dependent** - the value includes our server's reply (`SCSkillStarted`, `SCSkillFired`,
+  `SCCombatCleared`, the auto-attack repeat timer, the range check) or a scripted step (the swing cadence, the
+  cast-bar total, the target loss).
+* **inferred** - not separable from our server's reply at localhost, or a one-sample ordering: stated as
+  inferred, never as a 1.2 rule (the GCD exemption, the queue window, the refusal order).
+
+The stance rule is decompile-proven (client): `FUN_391d6a60` (`OnCombatCleared`) clears the `+0x3bba` latch
+through vtable `+0x48` = `FUN_39355ec0`, and `FUN_39355ee0` refreshes a 10 s deadline while the latch is set
+(`1b0066d4:docs/research/port-combat/side-by-side.md:52-68`). The captured stance drop is timed by our server's
+`SCCombatCleared`, not by a client timer.
+
 ## Limits
 
 * The client clock was read from `X2Time:GetUiMsec` (UI) and
