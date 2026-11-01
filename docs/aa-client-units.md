@@ -428,11 +428,18 @@ and explicit controls").
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
 * **Interact key and Grab Machine.** F on foot next to a slave is the dynamic action bar's
-  "Grab Machine" entry (`FUN_393bdad0` -> `FUN_393bbb80`), not NPC talk: the slave in front within
-  `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate, and F sends `CSBindSlave` 0x031
-  (`FUN_393b1de0` -> `FUN_393be280`). The 2026-10-28 capture with a cart targeted and an NPC at
-  1.24 m produced no packet; the 2026-11-01 owner capture shows the prompt and F taking the driver
-  seat. NPC talk keeps the path it had when the bar has nothing to claim.
+  "Grab Machine" entry (`FUN_393bdad0` -> `FUN_393bbb80`), not NPC talk: every slave within
+  `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate and F sends `CSBindSlave` 0x031
+  (`FUN_393b1de0` -> `FUN_393be280`). The facing is only the ordering key, `gap - (1 + facing)`
+  (`FUN_393601a0`, `FUN_3902ed20`), so a slave behind or beside the player is still offered. The
+  units and the doodads share that one sorted set (`FUN_3902f010` adds the doodads), and
+  `hud/doodad.rs` arbitrates its two producers on the same key: the Farm Wagon's storage boxes
+  (doodads 3446 at attach points 9-12) are often nearer in centre terms but behind or beside the
+  player, and the wagon in front then keeps the prompt. While the player sits on a bonded seat
+  doodad (`player+0x3b94`, `FUN_393635e0` `BondLazyDoodad`) neither prompt is built. The
+  2026-10-28 capture with a cart targeted and an NPC at 1.24 m produced no packet; the 2026-11-01
+  owner capture shows the prompt and F taking the driver seat. NPC talk keeps the path it had when
+  the bar has nothing to claim.
 * **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
   character as master stores the slave object; `hud/mounted.rs` keeps it with the slave's timeline
   from the loaded unit. `SCUnitAttached` 0x076 remains the authoritative seat state
@@ -450,12 +457,16 @@ and explicit controls").
   seat: `Player::apply` clears `attached_to` (`aa-net/src/state.rs`), and `hud/mounted.rs` clears
   the cached seat link and the bound fallback with it (no separate `SCUnitDetached` is needed).
 * **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
-  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. While the slave's speed squared is above
-  `_DAT_3999f85c` 25.0 (5 m/s) it is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 instead. The
-  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s,
-  30/32767 m/s for a type-2 vehicle body), or the controller speed for the cart this client drives
-  (`cart::CartDrive`, which no `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
-  getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. The
+  driver branch is keyed on `this+0x14`, the slave SCSlaveBound named as the local player's master,
+  not on the seat point. With it the unbind is refused while the slave's speed squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170`
+  sends only from an attachment above point 1 (no speed check, 1500 ms throttle) and is silent for
+  a point-1 seat that is not the player's. The speed is the latest replicated
+  `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s, 30/32767 m/s for a type-2 vehicle
+  body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
+  `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
+  value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
   the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
@@ -489,9 +500,11 @@ and explicit controls").
 * `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
   `DAT_39ac796c`.
 * The auto-walk to a slave out of reach (`FUN_390a6af0`) and its re-entry into the interaction.
-* The dynamic action bar's slave candidate (12076/13863) is decompile-backed: the exact facing
-  rule (this port requires the slave in the front half-plane, the native scores it), the
-  `player+0x3b94` non-empty state, and the two `showSlaveInfo` gates remain capture-pending.
+* The dynamic action bar's slave candidate (12076/13863) is decompile-backed: the native key
+  `gap - (1 + facing)` orders one unit/doodad set, but a live capture of a slave beside/behind the
+  player and of the wagon's storage-box arbitration was not taken. The `player+0x3b94` gate is
+  ported from the received bond (`FUN_393635e0`); the two `showSlaveInfo` gates remain
+  capture-pending.
 * 13863 (passenger) and 19165 (destroy) `CSStartSkill` targets and fields; the port ignores them.
 * Server side: the lane's `CSStartInteraction068` only answers NPCs/mates; a target server must
   answer a slave with `[12076]`.

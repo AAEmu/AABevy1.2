@@ -843,7 +843,7 @@ fn discard_siege_weapon_sends_unbind_for_the_bound_slave() {
 }
 
 #[test]
-fn discard_uses_the_seated_slave_without_a_bound_reply() {
+fn a_point_1_seat_without_a_master_bound_reply_is_silent() {
     let (state, _units) = setup(&[
         slave(20, 8, Vec3::new(1.0, 0.0, 0.0)),
         slave(21, 9, Vec3::new(2.0, 0.0, 0.0)),
@@ -858,16 +858,15 @@ fn discard_uses_the_seated_slave_without_a_bound_reply() {
             reason: 0,
         },
     );
-    assert_eq!(discard(&state), Outcome::Sent);
+    // `FUN_39345aa0` needs `this+0x14`: an SCSlaveBound naming the local player as master.
+    // Without it `FUN_39362170` sends nothing for an attachment at point 1.
+    assert_eq!(discard(&state), Outcome::Silent);
     // the seat wins over a SCSlaveBound naming another slave
     bound(&state, 20);
     assert_eq!(discard(&state), Outcome::Sent);
     assert_eq!(
         state.borrow().requests,
-        vec![
-            Request::Slave(SlaveCommand::Unbind { tl_id: 9 }),
-            Request::Slave(SlaveCommand::Unbind { tl_id: 9 }),
-        ]
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 9 })]
     );
 }
 
@@ -1368,11 +1367,11 @@ fn the_driven_cart_uses_the_controller_speed() {
     assert_eq!(discard(&state), Outcome::Sent);
 }
 
-/// A slave in front of the player (north, the fixture's forward) is the interaction-indicator
-/// candidate; `_DAT_399d3230` 6.25 -> 2.5 m surface gap and the native `1 + facing dot toward - gap`
-/// score. Behind or past the reach, or while riding a mate, there is none.
+/// A slave within `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate whatever the facing;
+/// the native key `gap - (1 + facing)` only orders the one set (`FUN_393601a0`,
+/// `FUN_3902ed20`). In front gives 0, beside 1 and behind 2 here.
 #[test]
-fn the_candidate_is_the_slave_in_front_within_2_5_metres() {
+fn the_candidate_is_any_slave_in_front_beside_or_behind_within_2_5_metres() {
     let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 2.0, 0.0))]);
     state
         .borrow_mut()
@@ -1385,6 +1384,7 @@ fn the_candidate_is_the_slave_in_front_within_2_5_metres() {
     assert_eq!(candidate.obj_id, 20);
     assert_eq!(candidate.skills, vec![12076]);
     assert_eq!(candidate.template, 60);
+    assert_eq!(candidate.key, 0.0, "gap 2 - (1 + facing 1)");
 
     let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 3.0, 0.0))]);
     state
@@ -1400,7 +1400,33 @@ fn the_candidate_is_the_slave_in_front_within_2_5_metres() {
         "3 m is past the 2.5 m candidate reach"
     );
 
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, -2.0, 0.0))]);
+    for (at, expected, label) in [
+        (Vec3::new(0.0, -2.0, 0.0), 2.0, "behind"),
+        (Vec3::new(2.0, 0.0, 0.0), 1.0, "beside"),
+    ] {
+        let (state, units) = setup(&[slave(20, 8, at)]);
+        state
+            .borrow_mut()
+            .game
+            .0
+            .set(crate::hud::data::GameData::default())
+            .ok()
+            .unwrap();
+        let candidate = super::candidate(&state.borrow(), &units)
+            .unwrap_or_else(|| panic!("{label}: {at:?} is within the reach"));
+        assert_eq!(candidate.obj_id, 20, "{label}");
+        assert_eq!(candidate.key, expected, "{label}: gap 2 - (1 + facing)");
+    }
+}
+
+/// While seated the HUD position and yaw can stay at the boarding point (the server moves only
+/// the slave): the candidate is measured from the attached unit's replicated position and yaw.
+#[test]
+fn the_candidate_is_measured_from_the_seat_and_its_facing() {
+    let (state, units) = setup(&[
+        slave(20, 8, Vec3::new(10.0, 10.0, 0.0)),
+        slave(21, 9, Vec3::new(10.0, 12.0, 0.0)),
+    ]);
     state
         .borrow_mut()
         .game
@@ -1408,11 +1434,47 @@ fn the_candidate_is_the_slave_in_front_within_2_5_metres() {
         .set(crate::hud::data::GameData::default())
         .ok()
         .unwrap();
-    assert_eq!(
-        super::candidate(&state.borrow(), &units),
-        None,
-        "behind the player"
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
     );
+    {
+        let mut data = state.borrow_mut();
+        data.pos = Vec3::new(10.0, 20.0, 0.0);
+        data.yaw = std::f32::consts::PI;
+    }
+    let candidate = super::candidate(&state.borrow(), &units).expect("2 m from the wagon");
+    assert_eq!(candidate.obj_id, 21);
+    assert_eq!(
+        candidate.dist, 2.0,
+        "from the wagon, not the stale HUD point"
+    );
+    assert_eq!(
+        candidate.key, 0.0,
+        "from the wagon's yaw, not the stale yaw"
+    );
+}
+
+/// `player+0x3b94` (`FUN_393635e0`): while sitting on a bonded seat doodad 1.2 builds no
+/// interaction candidate, so neither the slave prompt nor the doodad bar appears.
+#[test]
+fn no_candidate_while_sitting_on_a_seat_doodad() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 1.0, 0.0))]);
+    state
+        .borrow_mut()
+        .game
+        .0
+        .set(crate::hud::data::GameData::default())
+        .ok()
+        .unwrap();
+    assert!(super::candidate(&state.borrow(), &units).is_some());
+    state.borrow_mut().doodad.seated = true;
+    assert_eq!(super::candidate(&state.borrow(), &units), None);
 }
 
 #[test]
@@ -1504,6 +1566,7 @@ fn the_unbind_function_slot_sends_cs_discard_slave() {
             reason: 1,
         },
     );
+    bound(&state, 20);
     let outcome = crate::hud::mode_actions::run_function(
         &mut state.borrow_mut(),
         crate::hud::mode_actions::Function::Unbind,
@@ -1533,6 +1596,7 @@ fn the_unbind_function_slot_refuses_above_five_metres_per_second_with_0x67() {
             reason: 1,
         },
     );
+    bound(&state, 20);
     let mut movement = Movement::unit(Pos::default(), 0.0, 1);
     movement.velocity = [6 * 1024, 0, 0];
     crate::hud::mounted::receive(

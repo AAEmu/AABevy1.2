@@ -120,8 +120,10 @@ pub(crate) struct Tables {
     /// `slave_mount_skills` per slave template id, in row order: the driver's mode bar (1.2's
     /// `GetSlaveMountSkillList`; the capture's Farm Wagon order matches the row ids).
     slave_skills: HashMap<u32, Vec<SlaveSkill>>,
-    /// `(slave template, mount skill)` -> its point-1 `mount_attached_skills.skill_id`.
-    attached_point1: HashMap<(u32, u32), u32>,
+    /// `(slave template, mount skill, attach point)` -> its `mount_attached_skills.skill_id`.
+    /// Point 1 is the driver/gunner seat; the same table has point-2 rows for the tank seats
+    /// (`FUN_39347260` filters the list by the seat's point).
+    attached: HashMap<(u32, u32, u8), u32>,
     /// Slave templates whose point-1 seat is a turret (kind 7/8, `vehicle_models.velocity == 0`
     /// and a non-zero turret range): only their rows show the point-1 attached skill. This is
     /// the same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a
@@ -173,13 +175,14 @@ impl Tables {
                 .or_default()
                 .push(SlaveSkill::new(skill, mount_skill));
         }
-        // The per-row attached skill: only point 1 is the operator/gunner seat. A row without
-        // one keeps its mount skill (the server's `GetMountAttachedSkills` is per attach point).
+        // The per-row attached skill, for every seat point: point 1 is the operator/gunner, and
+        // the point-2 rows are the passenger skills (`FUN_39347260` filters by the seat point).
+        // A row without one keeps its mount skill (the server's `GetMountAttachedSkills` is per
+        // attach point).
         let mut query = db.prepare(
-            "SELECT sm.slave_id, sm.mount_skill_id, mas.skill_id
+            "SELECT sm.slave_id, sm.mount_skill_id, mas.attach_point_id, mas.skill_id
              FROM slave_mount_skills sm
              JOIN mount_attached_skills mas ON mas.mount_skill_id = sm.mount_skill_id
-                 AND mas.attach_point_id = 1
              WHERE sm.slave_id IS NOT NULL AND mas.skill_id > 0
              ORDER BY sm.id",
         )?;
@@ -187,11 +190,12 @@ impl Tables {
             Ok((
                 row.get::<_, u32>(0)?,
                 row.get::<_, u32>(1)?,
-                row.get::<_, u32>(2)?,
+                row.get::<_, u8>(2)?,
+                row.get::<_, u32>(3)?,
             ))
         })? {
-            let (slave, mount_skill, skill) = row?;
-            out.attached_point1.insert((slave, mount_skill), skill);
+            let (slave, mount_skill, point, skill) = row?;
+            out.attached.insert((slave, mount_skill, point), skill);
         }
         // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a numeric
         // `vehicle_models.velocity` of 0, and a non-zero parsed pitch/yaw range. The text
@@ -286,7 +290,8 @@ impl Tables {
 
     /// The slave's bar, one entry per `slave_mount_skills` row. On a turret seat a row with a
     /// point-1 attached skill shows that skill and casts the mount skill; every other row shows
-    /// and casts the mount skill. No row is dropped.
+    /// and casts the mount skill. No row is dropped. `None` when the slave has no rows at all
+    /// (the native still appends its function slots; the caller uses `unwrap_or_default`).
     pub(crate) fn bar(&self, template: u32, turret: bool) -> Option<Vec<SlaveSkill>> {
         let rows = self.slave_skills.get(&template)?;
         if rows.is_empty() {
@@ -296,7 +301,7 @@ impl Tables {
             rows.iter()
                 .map(|row| {
                     if turret
-                        && let Some(skill) = self.attached_point1.get(&(template, row.mount_skill))
+                        && let Some(skill) = self.attached.get(&(template, row.mount_skill, 1))
                     {
                         return SlaveSkill::gunner(*skill, row.mount_skill, row.skill);
                     }
@@ -304,6 +309,22 @@ impl Tables {
                 })
                 .collect(),
         )
+    }
+
+    /// A passenger seat's skills: the rows whose mount skill has a `mount_attached_skills` entry
+    /// at `point` (`FUN_39347260` with the seat point). Like a gunner's rows, the bar shows the
+    /// attached skill and casts the mount skill's own skill. An empty list is a seat with nothing
+    /// but the function slots.
+    pub(crate) fn passenger_bar(&self, template: u32, point: u8) -> Vec<SlaveSkill> {
+        self.slave_skills
+            .get(&template)
+            .into_iter()
+            .flatten()
+            .filter_map(|row| {
+                let skill = self.attached.get(&(template, row.mount_skill, point))?;
+                Some(SlaveSkill::gunner(*skill, row.mount_skill, row.skill))
+            })
+            .collect()
     }
 
     /// The turret-seat view of [`Tables::bar`], used by the fire-path tests and the example.
@@ -343,7 +364,8 @@ pub(super) struct View {
     /// A slave seat's bar while the local player sits on any of its seats; it replaces the buff
     /// skills until the player leaves (`FUN_39345f10` returns any slave seat, not only point 1).
     vehicle: Option<Vec<Entry>>,
-    /// The player rides a mate (`player+0x3c26`): its `command_unmount` function slot comes first.
+    /// The player rides a mate that is not their own: its `command_unmount` function slot comes
+    /// first (`FUN_392045f0` adds it only when `FUN_3933b1b0(parent) == 0`).
     mate: bool,
     actions: Vec<Entry>,
     slots: Vec<super::panels::SlotSnap>,
@@ -407,14 +429,15 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
     )
 }
 
-/// The bar of the slave seat the local player sits on, built like `FUN_39204500`: the seat's
-/// mount skills, then `unbind` on any seat, then `showSlaveInfo` on the driver seat. A passenger
-/// gets `unbind` only (the native also lists mount skills attached to that point; none of the
-/// 1.2 point-2 models have one here, so this port leaves them out). `None` on foot, on a mate, or
-/// with the catalog not loaded yet.
+/// The bar of the slave seat the local player sits on, built like `FUN_39204500`: the mount
+/// skills attached to that seat point, then `unbind` on any seat, then `showSlaveInfo` on the
+/// driver seat. A slave with no `slave_mount_skills` rows (a carriage, a rowboat) still gets the
+/// function slots: the native appends `unbind` after the skill loop whether or not it ran.
+/// `None` on foot, on a mate, or with the catalog not loaded yet.
 fn seat_bar(data: &HudData) -> Option<Vec<Entry>> {
     let tables = &data.game.get()?.mode_actions;
-    if let Some((slave, template, kind)) = data.mounted.driver_slave_kind() {
+    let (slave, template, kind, point) = data.mounted.slave_seat()?;
+    let mut out: Vec<Entry> = if point == 1 {
         // A turret seat is this slave when the engine's seat flag names it, or, before that flag
         // reaches the HUD (the attach event can arrive first), when the template passes the same
         // kind/velocity/range gate as `turret_seat_model`.
@@ -422,20 +445,27 @@ fn seat_bar(data: &HudData) -> Option<Vec<Entry>> {
             Some(seated) if seated == slave => true,
             _ => tables.turret_slave(template),
         };
-        let mut out: Vec<Entry> = tables
-            .bar(template, matches!(kind, 7 | 8) && turret)?
+        tables
+            .bar(template, matches!(kind, 7 | 8) && turret)
+            .unwrap_or_default()
             .into_iter()
             .map(Entry::Skill)
-            .collect();
-        out.push(Entry::Function(Function::Unbind));
+            .collect()
+    } else {
+        tables
+            .passenger_bar(template, point)
+            .into_iter()
+            .map(Entry::Skill)
+            .collect()
+    };
+    out.push(Entry::Function(Function::Unbind));
+    if point == 1 {
         // The native gates this on `local_8 == 1` (the driver) and two undecoded conditions
         // (`slave+0x3af0 == DAT_39d1fb98`, `FUN_3901be50() == 0`); the driver seat is the
         // evidence-backed part, and the owner's capture shows it on the Farm Wagon.
         out.push(Entry::Function(Function::ShowSlaveInfo));
-        return Some(out);
     }
-    data.mounted.slave_seat()?;
-    Some(vec![Entry::Function(Function::Unbind)])
+    Some(out)
 }
 
 /// The function entry at `slot` (0 based) of the shown bar.
@@ -523,7 +553,7 @@ pub(super) fn reduce(data: &mut HudData, event: &Event, removed: Option<u32>) {
     if seat_changed {
         data.mode_actions.vehicle = seat;
     }
-    let mate = data.mounted.riding_mate();
+    let mate = data.mounted.mate_unmount();
     let mate_changed = data.mode_actions.mate != mate;
     data.mode_actions.mate = mate;
     let snapshot = matches!(event, Event::PlayerSpawn(_));
@@ -664,7 +694,7 @@ pub(super) fn ready(rt: Option<&UiRuntime>, state: &Shared) {
     {
         let seat = seat_bar(&state.borrow());
         let mut data = state.borrow_mut();
-        let mate = data.mounted.riding_mate();
+        let mate = data.mounted.mate_unmount();
         // the catalog may finish loading while the player is already driving: publish the seat bar then
         if data.mode_actions.vehicle != seat || data.mode_actions.mate != mate {
             data.mode_actions.vehicle = seat;
@@ -728,8 +758,8 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
                 Entry::Function(function) => {
                     function_slot(data.game.get().map(|game| &game.mode_actions), function)
                 }
-                Entry::Skill(skill) => match data.mounted.driver_slave() {
-                    Some((slave, _)) => super::panels::slave_skill_slot(
+                Entry::Skill(skill) => match data.mounted.slave_seat() {
+                    Some((slave, ..)) => super::panels::slave_skill_slot(
                         data.game.get(),
                         Some(&data.cooldowns),
                         slave,
@@ -750,7 +780,15 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
                     data.start,
                 ),
             };
-            if let Some(current) = data.mode_actions.slots.get(index - 1) {
+            // The cache is the snapshot Lua last saw: it may still be the previous bar's slot
+            // for one frame (a seat change clears the list after the swap), so only its own
+            // kind and id may stand in for the slot computed here.
+            if let Some(current) = data
+                .mode_actions
+                .slots
+                .get(index - 1)
+                .filter(|current| current.kind == slot.kind && current.id == slot.id)
+            {
                 slot = current.clone();
             }
             super::panels::slot_table(lua, &slot).map(Some)
@@ -766,14 +804,14 @@ pub(super) fn refresh_slots(world: &bevy::prelude::World, data: &mut HudData) {
         .get_resource::<aa_net::state::Buffs>()
         .map_or(&[][..], |b| b.of(skills.map_or(0, |s| s.obj_id)));
     let env = super::usable::Env::of(data, skills, buffs, inventory);
-    let driver = data.mounted.driver_slave();
+    let seat = data.mounted.slave_seat().map(|(slave, ..)| slave);
     let tables = data.game.get().map(|game| &game.mode_actions);
     let slots = actions(data)
         .iter()
         .map(|entry| match entry {
             Entry::Function(function) => function_slot(tables, *function),
-            Entry::Skill(skill) => match driver {
-                Some((slave, _)) => super::panels::slave_skill_slot(
+            Entry::Skill(skill) => match seat {
+                Some(slave) => super::panels::slave_skill_slot(
                     data.game.get(),
                     skills,
                     slave,
@@ -880,9 +918,9 @@ pub(super) fn use_slot(
         });
         return;
     };
-    // The bar belongs to the driven slave: without it (a seat that has just ended) nothing is
-    // sent rather than a player-cast skill the server refuses for a slave skill.
-    let Some((slave, _)) = data.mounted.driver_slave() else {
+    // The bar belongs to the slave seat (driver or passenger): without it (a seat that has just
+    // ended) nothing is sent rather than a player-cast skill the server refuses for a slave skill.
+    let Some((slave, ..)) = data.mounted.slave_seat() else {
         return;
     };
     // The player-centric range/mana/cast checks do not describe the slave; its recorded own

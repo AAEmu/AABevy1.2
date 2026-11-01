@@ -97,6 +97,8 @@ enum Link {
 struct Actor {
     name: Vec<u8>,
     slave_template: Option<u32>,
+    /// `UnitKind::Mate.owner_id`, the character the mate belongs to (the native `+0x420`).
+    mate_owner: Option<u32>,
     slave_tl: Option<u16>,
     /// `UnitKind::Slave.id`: 7 siege weapon, 8 ship cannon/equipment. A cart is 6.
     slave_kind: Option<u32>,
@@ -184,12 +186,17 @@ impl View {
             } => (Some(template_id), Some(tl_id), Some(id)),
             _ => (None, None, None),
         };
+        let mate_owner = match unit.kind {
+            UnitKind::Mate { owner_id, .. } => Some(owner_id),
+            _ => None,
+        };
         let now = Instant::now();
         self.actors.insert(
             unit.obj_id,
             Actor {
                 name: c_name(&unit.name),
                 slave_template,
+                mate_owner,
                 slave_tl,
                 slave_kind,
                 speed_squared: movement_speed_squared(unit.movement.as_ref()),
@@ -258,9 +265,10 @@ impl View {
         }
     }
 
-    /// The slave the local player drives (the driver's seat, attach point 1) and its template id: the source
-    /// of the slave skill bar (`slave_mount_skills`). A passenger seat, a mate and walking read `None`; the
-    /// capture's bar came with `CSBindSlave driver=true` and `SCUnitAttached` point 1.
+    /// The slave the local player drives (the driver's seat, attach point 1) and its template id.
+    /// A passenger seat, a mate and walking read `None`; the bar itself is built from
+    /// [`View::slave_seat`] now, so this is kept for the seat tests.
+    #[allow(dead_code)]
     pub(super) fn driver_slave(&self) -> Option<(u32, u32)> {
         self.driver_slave_kind()
             .map(|(obj_id, template, _)| (obj_id, template))
@@ -268,6 +276,7 @@ impl View {
 
     /// The driver's slave with its `slave_kind_id`: a kind-7/8 slave with a gunner bar uses its
     /// `mount_attached_skills` skill (14372/24501/20161), not the slave's own mount-skill list.
+    #[allow(dead_code)]
     pub(super) fn driver_slave_kind(&self) -> Option<(u32, u32, u32)> {
         let link = self.player_attachment()?;
         if !crate::ingame::driver_seat(link.point) {
@@ -298,6 +307,20 @@ impl View {
                 .get(&link.obj_id)
                 .is_some_and(|actor| actor.slave_template.is_none())
         })
+    }
+
+    /// `FUN_392045f0`'s mate function slot: the parent is a mate (kind 5) and
+    /// `FUN_3933b1b0(parent) == 0`. That predicate is 1 when the mate's `+0x420` owner is the
+    /// local character (the client's other paths use it to act through the player's own mount),
+    /// so riding the player's own pet gets no `command_unmount` here.
+    pub(super) fn mate_unmount(&self) -> bool {
+        let Some(link) = self.player_attachment() else {
+            return false;
+        };
+        self.actors
+            .get(&link.obj_id)
+            .and_then(|actor| actor.mate_owner)
+            .is_some_and(|owner| self.character != Some(owner))
     }
 
     /// The slave SCSlaveBound marked as the player's, with its timeline id.

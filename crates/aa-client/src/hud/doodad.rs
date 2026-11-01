@@ -66,8 +66,6 @@ const KEYS: usize = 4;
 /// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
 /// 4.5 m, so there is no extra slack.
 const BASE_REACH: f32 = 4.0;
-/// How much further away a doodad right behind the player may be than one in front of it and still be preferred, metres.
-const BEHIND: f32 = 3.0;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
 /// A press that moves more than this many pixels before it is released was a camera drag.
@@ -299,6 +297,9 @@ fn cstr(s: &str) -> &str {
 struct Focus {
     obj_id: u32,
     skills: Vec<u32>,
+    /// The native ordering key (see `slave::native_key`): lower sorts first.
+    key: f32,
+    /// Centre distance, metres (the HUD's NPC-talk priority uses it).
     dist: f32,
 }
 
@@ -312,6 +313,10 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct View {
     focus: Option<Focus>,
+    /// The local player sits on a bonded seat doodad (`player+0x3b94`, `FUN_393635e0`
+    /// `BondLazyDoodad`): 1.2 builds no interaction indicator candidate then, so neither the
+    /// doodad bar nor the slave Grab Machine prompt is shown.
+    pub(super) seated: bool,
     /// F goes to the doodad (it is nearer than any NPC).
     claims_key: bool,
     /// The interaction list: the doodad and its rows.
@@ -432,28 +437,48 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
 }
 
 /// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked, else the
-/// nearest, a doodad behind the player counting up to [`BEHIND`] metres further away than one in front (an inn's
-/// chairs around the Memory Tome). The capture's bar beside tome 851 (a chair 0.7 m away, the tome 4.9 m) was the
-/// chair's skill 15857, as here; beside tome 850 (the Mailbox 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's
-/// "Open Mailbox", which is not listed here yet (see the module doc). The tomes' own 14602 was not observed.
+/// lowest native interaction key (`slave::native_key`: surface gap minus `1 + facing`, the same key the slave
+/// producer uses and the one `FUN_3902ed20` orders the combined unit/doodad candidate set by). The capture's bar
+/// beside tome 851 (a chair 0.7 m away, the tome 4.9 m ahead) was the chair's skill 15857; beside tome 850 (the
+/// Mailbox 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see
+/// the module doc). The tomes' own 14602 was not observed. The doodad's collider radius is not loaded, so its gap
+/// uses the centre distance minus the player's radius (a zero doodad radius).
 fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
+    if data.doodad.seated {
+        return None;
+    }
     let game = data.game.get()?;
-    let forward = Vec2::new(-data.yaw.sin(), data.yaw.cos());
+    let from = super::slave::player_centre(data, units);
+    let forward = super::slave::player_forward(data, units);
     let candidates = doodads.by_id.values().filter_map(|o| {
         let uses = game.doodad.uses(o.func_group_id)?;
         if uses.skills.is_empty() {
             return None;
         }
         let pos = doodad_world(o, units)?;
-        let dist = data.pos.distance(pos);
+        let dist = from.distance(pos);
         if dist > reach(data, uses) {
             return None;
         }
-        let toward = (pos - data.pos).truncate().normalize_or_zero();
-        let score = if data.doodad.preferred == Some(o.obj_id) { f32::MIN } else { dist + BEHIND * 0.5 * (1.0 - forward.dot(toward)) };
-        Some((score, Focus { obj_id: o.obj_id, skills: uses.skills.clone(), dist }))
+        let key = if data.doodad.preferred == Some(o.obj_id) {
+            f32::MIN
+        } else {
+            let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
+            super::slave::native_key(from, forward, pos, gap)
+        };
+        Some((
+            key,
+            Focus {
+                obj_id: o.obj_id,
+                skills: uses.skills.clone(),
+                key,
+                dist,
+            },
+        ))
     });
-    candidates.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, f)| f)
+    candidates
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, f)| f)
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
@@ -628,10 +653,38 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     (!npc_in_front).then_some(obj_id)
 }
 
+/// The bar the two interaction producers ask for: the one with the lower [`super::slave::native_key`]
+/// (`FUN_3902ed20` orders the native unit/doodad set by it). A tie keeps the doodad, and the returned
+/// number is the chosen candidate's centre distance, which F's NPC-talk priority compares against.
+fn arbitrate(
+    doodad: Option<(super::dynamic_actions::Shown, f32, f32)>,
+    slave: Option<(super::dynamic_actions::Shown, f32, f32)>,
+) -> (Option<super::dynamic_actions::Shown>, Option<f32>) {
+    match (doodad, slave) {
+        (Some((doodad, doodad_key, doodad_dist)), Some((slave, slave_key, slave_dist))) => {
+            if slave_key < doodad_key {
+                (Some(slave), Some(slave_dist))
+            } else {
+                (Some(doodad), Some(doodad_dist))
+            }
+        }
+        (Some((doodad, _, dist)), None) => (Some(doodad), Some(dist)),
+        (None, Some((slave, _, dist))) => (Some(slave), Some(dist)),
+        (None, None) => (None, None),
+    }
+}
+
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
 /// target decal after it (it reads the `DoodadTargetDecal` this writes).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TrackDoodads;
+
+/// `player+0x3b94` (`FUN_393635e0` `BondLazyDoodad`): the local player sits on a bonded seat
+/// doodad. 1.2 then builds no interaction indicator candidate, so [`track`] gates both the doodad
+/// and the slave producer on [`View::seated`].
+fn sync_seated(bridge: NonSend<HudBridge>, seats: Option<Res<crate::ingame::seating::Seats>>) {
+    bridge.0.borrow_mut().doodad.seated = seats.as_ref().is_some_and(|seats| seats.own_seated());
+}
 
 /// Finds the doodad in reach, shows / hides the bar, reads the keys, the right click and the pointer.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -665,8 +718,11 @@ fn track(
     let mut d = bridge.0.borrow_mut();
     let focus = find_focus(&d, &doodads, &units);
     let slave = super::slave::candidate(&d, &units);
-    // the bar: the native candidate list holds units and doodads together, nearest first; the
-    // two producers here are arbitrated by centre distance the same way
+    // The bar: 1.2 puts units (`FUN_393601a0`) and doodads (`FUN_3902f010`) in one set keyed by
+    // the same `native_key` (surface gap minus `1 + facing`, `FUN_3902ed20` orders it ascending).
+    // The two producers are arbitrated on that key, not on centre distance: a Farm Wagon's four
+    // storage boxes (doodads 3446 at attach points 9-12) are often nearer in centre terms but
+    // behind or beside the player, while the wagon is in front.
     let doodad_wanted = focus.as_ref().and_then(|f| {
         let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
         let generation = views.doodad_generation(f.obj_id)?;
@@ -679,6 +735,7 @@ fn track(
                 },
                 skills: f.skills.clone(),
             },
+            f.key,
             f.dist,
         ))
     });
@@ -691,21 +748,11 @@ fn track(
                 },
                 skills: candidate.skills.clone(),
             },
+            candidate.key,
             candidate.dist,
         )
     });
-    let (wanted, key_dist) = match (doodad_wanted, slave_wanted) {
-        (Some((doodad, doodad_dist)), Some((slave, slave_dist))) => {
-            if slave_dist < doodad_dist {
-                (Some(slave), Some(slave_dist))
-            } else {
-                (Some(doodad), Some(doodad_dist))
-            }
-        }
-        (Some((doodad, dist)), None) => (Some(doodad), Some(dist)),
-        (None, Some((slave, dist))) => (Some(slave), Some(dist)),
-        (None, None) => (None, None),
-    };
+    let (wanted, key_dist) = arbitrate(doodad_wanted, slave_wanted);
     let directing = d.dialog.directing;
     d.doodad.claims_key = key_dist.is_some_and(|dist| {
         !units.iter().any(|u| {
@@ -1278,7 +1325,13 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
         .add_systems(
             Update,
-            (track.in_set(TrackDoodads), coffer_window, results, phase_messages)
+            (
+                sync_seated,
+                track.in_set(TrackDoodads),
+                coffer_window,
+                results,
+                phase_messages,
+            )
                 .chain()
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
@@ -1484,6 +1537,7 @@ mod tests {
             d.doodad.focus = Some(Focus {
                 obj_id: 2075,
                 skills: vec![13990],
+                key: -3.0,
                 dist: 3.0,
             });
             d.dynamic_actions.replace(Some(Shown {
@@ -2081,5 +2135,114 @@ mod tests {
                 tl_id: 8
             })]
         ));
+    }
+
+    /// The Farm Wagon's storage box (a doodad at its rear) is nearer in centre terms but stands
+    /// behind or beside the player, while the wagon is in front: the native key (surface gap
+    /// minus `1 + facing`) picks the wagon, which is the Grab Machine prompt the owner sees.
+    /// Both producers are real (`find_focus` and `slave::candidate`), and the real `arbitrate`
+    /// decides between them.
+    #[test]
+    fn the_native_key_arbitrates_the_rear_storage_box_against_the_grab_machine() {
+        let mut game = GameData::default();
+        game.doodad.add(1, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let (mut data, doodads) = herb_field(game);
+        // The player stands at the rear of the wagon (10, 10) facing north (+y), 1 m behind it.
+        // The storage box is at (10, 8.6), 0.4 m behind the player: nearer, but behind.
+        data.pos = Vec3::new(10.0, 9.0, 0.0);
+        data.yaw = 0.0;
+        let box_doodad = world_doodad(3446, 850, 1, Vec3::new(10.0, 8.6, 0.0));
+        let mut doodads = doodads;
+        doodads.by_id.insert(3446, box_doodad);
+        let mut units = Units::default();
+        let mut wagon = crate::hud::expansion::fixture::spawn().unit;
+        wagon.obj_id = 20;
+        wagon.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 60,
+            summoner_id: 100,
+        };
+        wagon.model_id = 1008;
+        wagon.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
+        units.by_id.insert(20, wagon);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the storage box in reach");
+        assert_eq!(focus.obj_id, 3446);
+        assert!(
+            (focus.dist - 0.4).abs() < 1e-4,
+            "the box is the nearer centre: {}",
+            focus.dist
+        );
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the wagon in reach");
+        assert_eq!(candidate.obj_id, 20);
+        assert_eq!(candidate.dist, 1.0);
+        assert!(
+            candidate.key < focus.key,
+            "wagon key {} vs box key {}",
+            candidate.key,
+            focus.key
+        );
+        let doodad = (
+            Shown {
+                source: Source::Doodad {
+                    obj_id: focus.obj_id,
+                    phase: 1,
+                    generation: 0,
+                },
+                skills: focus.skills,
+            },
+            focus.key,
+            focus.dist,
+        );
+        let slave = (
+            Shown {
+                source: Source::Npc {
+                    obj_id: candidate.obj_id,
+                    template: candidate.template,
+                },
+                skills: candidate.skills,
+            },
+            candidate.key,
+            candidate.dist,
+        );
+        let (wanted, dist) = arbitrate(Some(doodad), Some(slave));
+        let wanted = wanted.expect("a bar");
+        assert!(
+            matches!(
+                wanted.source,
+                Source::Npc {
+                    obj_id: 20,
+                    template: 60
+                }
+            ),
+            "the wagon wins over the nearer but behind storage box"
+        );
+        assert_eq!(dist, Some(1.0));
+    }
+
+    /// `player+0x3b94`: sitting on a bonded seat doodad shows no doodad bar either.
+    #[test]
+    fn no_doodad_bar_while_sitting_on_a_seat_doodad() {
+        let mut game = GameData::default();
+        game.doodad.add(4513, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let (mut data, doodads) = herb_field(game);
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
+        data.doodad.seated = true;
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), None);
     }
 }

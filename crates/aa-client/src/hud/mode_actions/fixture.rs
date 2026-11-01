@@ -87,9 +87,11 @@ pub(in crate::hud) fn run_vehicle_bar() {
         None,
     );
     crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
-    // the driven wagon, then a second one 2 m north (in front of the default yaw 0 facing)
-    let driven = cart(20, 8, "Farm Wagon", Vec3::ZERO);
-    let ahead = cart(21, 9, "Farm Wagon", Vec3::new(0.0, 2.0, 0.0));
+    // The driven wagon, then a second one 2 m north (in front of its yaw 0). The HUD's own
+    // position and yaw are the stale boarding point: the candidate must be measured from the
+    // attached wagon (`player_centre`) and its current facing.
+    let driven = cart(20, 8, "Farm Wagon", Vec3::new(10.0, 10.0, 0.0));
+    let ahead = cart(21, 9, "Farm Wagon", Vec3::new(10.0, 12.0, 0.0));
     let mut units = aa_net::state::Units::default();
     for unit in [driven, ahead] {
         units.by_id.insert(unit.obj_id, unit.clone());
@@ -106,10 +108,23 @@ pub(in crate::hud) fn run_vehicle_bar() {
         },
         None,
     );
+    {
+        let mut data = state.borrow_mut();
+        data.pos = Vec3::new(10.0, 20.0, 0.0);
+        data.yaw = std::f32::consts::PI;
+    }
     let candidate = crate::hud::slave::candidate(&state.borrow(), &units)
-        .expect("the second wagon 2 m ahead is a candidate");
+        .expect("the second wagon 2 m ahead of the driven one is a candidate");
     assert_eq!(candidate.obj_id, 21);
     assert_eq!(candidate.skills, vec![12076]);
+    assert_eq!(
+        candidate.dist, 2.0,
+        "measured from the driven wagon, not the stale HUD position"
+    );
+    assert_eq!(
+        candidate.key, 0.0,
+        "the driven wagon's current yaw faces it (stale yaw would give 2.0)"
+    );
     {
         let mut data = state.borrow_mut();
         data.dynamic_actions

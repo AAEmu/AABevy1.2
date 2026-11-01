@@ -3,21 +3,28 @@
 ## Vehicle mode bar and Grab Machine checkpoint, 2026-11-01
 
 The Farm Wagon's mode bar now carries the two native `function` slots and the slave F prompt.
-`FUN_39204500` / `FUN_392045f0` fill the bar natively: any slave seat (`FUN_39345f10`) appends
-`unbind` (`ui_texts` 33, `icon_skill_vehicle03.dds`, `CSDiscardSlave` 0x032 via `FUN_39345aa0`),
-the driver seat appends `showSlaveInfo` (event `SHOW_SLAVE_INFO`, `icon_skill_info_view.dds`), and
-a mate rider gets `command_unmount` first (mate command 9 via `FUN_39361e80`). The driver's unbind
-refuses above `_DAT_3999f85c` 25.0 (5 m/s) with 0x67; a passenger takes `FUN_39362170`'s no-speed
-branch throttled at `_DAT_3a169948` 1500 ms. The dynamic action bar gets a slave candidate from
-`FUN_393bbb80`: reach `_DAT_399d3230` 6.25 -> 2.5 m surface gap, score
-`1 + facing·toward - gap`, no prompt for the slave already bound/sat on or while riding a mate;
-F sends `CSBindSlave` 0x031 for 12076, or 13863 when `model_bindings` has a free point 2. The stock
-Summon Info window opens from `SHOW_SLAVE_INFO` and shows the received header/equipment; the
-vehicle-gear and speed getters stay stubs (listed in [HUD](aa-client-hud.md)). Unit, click and
-producer tests are in `hud/mode_actions/tests.rs`, `hud/slave/tests.rs` and `hud/doodad/tests.rs`;
-the `vehicle_bar` example shows the 7-slot bar and the F prompt in one frame. Open: the two
-`showSlaveInfo` gates, the exact facing rule (the port gates the front half-plane), a live
-passenger bar and >5 m/s 0x67, and the `player+0x3b94` state.
+`FUN_39204500` / `FUN_392045f0` fill the bar natively: any slave seat (`FUN_39345f10`) lists the
+mount skills attached to its seat point (`FUN_39347260`; the point-2 rows of the tank seats show
+20238/14299/14343 and cast the row's `mount_skills.skill_id`) and appends `unbind` even when the
+slave has no `slave_mount_skills` rows (`ui_texts` 33, `icon_skill_vehicle03.dds`, `CSDiscardSlave`
+0x032 via `FUN_39345aa0`), the driver seat appends `showSlaveInfo` (event `SHOW_SLAVE_INFO`,
+`icon_skill_info_view.dds`), and a rider of a mate that is not their own
+(`FUN_3933b1b0(parent) == 0`) gets `command_unmount` first (mate command 9 via `FUN_39361e80`). The
+unbind's driver branch is the SCSlaveBound master (`this+0x14`), not the seat point: it refuses
+above `_DAT_3999f85c` 25.0 (5 m/s) with 0x67, and the passenger branch is `FUN_39362170`'s no-speed
+path throttled at `_DAT_3a169948` 1500 ms (a point-1 seat without the master stays silent). The
+dynamic action bar gets a slave candidate from `FUN_393bbb80`: reach `_DAT_399d3230` 6.25 -> 2.5 m
+surface gap and the native key `gap - (1 + facing)`, one sorted unit/doodad set (`FUN_3902ed20`),
+so the doodad producer is arbitrated on the same key (the wagon beats its nearer rear storage box);
+no prompt for the slave already bound/sat on, while riding a mate, or while sitting on a bonded seat
+doodad (`player+0x3b94`). F sends `CSBindSlave` 0x031 for 12076, or 13863 when `model_bindings` has
+a free point 2. The stock Summon Info window opens from `SHOW_SLAVE_INFO` and shows the received
+header/equipment; the vehicle-gear and speed getters stay stubs (listed in
+[HUD](aa-client-hud.md)). Unit, click and producer tests are in `hud/mode_actions/tests.rs`,
+`hud/slave/tests.rs` and the inline tests in `hud/doodad.rs`; the `vehicle_bar` example shows the
+7-slot bar and the F prompt in one frame, measured from the driven wagon. Open: the two
+`showSlaveInfo` gates, the buff skills 1.2 appends after the seat bar (`FUN_392044a0`), a live
+passenger bar and >5 m/s 0x67, and the exact `player+0x3b94` state.
 
 ## Mount-walk checkpoint, 2026-10-31
 
