@@ -256,19 +256,40 @@ syntax:
 | `velocity: [i16; 3]` | velocity, 1/1024 m/s, world axes | |
 | `delta_movement: [i8; 3]` | delta movement | pressed direction `[right, forward, up]`, -127..=127; forward is `[0, 127, 0]` as the server's own movers send it |
 | `moving` | move flag `0x02` moving, else `0x04` stopping | send one `moving: false` packet when the movement ends |
-| `state: MoveState` | actor flags | `Ground` = `0x04` standing on solid, `Jump` = `0x10` jumping (move flags `0x06`), `Fall` = no ground flag |
+| `state: MoveState` | actor flags | `Ground` = `0x04` standing on solid, `Jump` = `0x10` jumping (move flags `0x06`), `Fall` = no ground flag, `Hang` = `0x40` hanging from an object (see "Hanging") |
 | `fall_vel: u16` | actor flag `0x80` + `u16` | set once, in the packet of the landing; `FALL_VELOCITY_PER_MPS` = 506 per m/s; the server applies fall damage from it (nothing below 20 m/s) |
 | `stance`, `alertness`, `in_combat` | stance byte, alertness byte, move flag `0x08` | `model::stance`, `model::alertness` |
+| `support: Option<MoveSupport>` | actor flag `0x20` (with `world`), `0x40` (with `climb`) | the object a unit stands on or hangs from; a hull-local `pos` goes with `0x20` and `support.world` is the world point |
 
 Walking vs running is not a flag: it is the velocity (and the animation the other clients pick from
-it). The `0x20` (standing on an object) and `0x40` (hanging) actor blocks are not written. The server
-needs no sequence number: `time` is milliseconds since the session started and only has to grow.
+it). The `0x20` (standing on an object) block is written when `support.world` is set; the `0x40`
+(hanging) block when `support.climb` is set. The server needs no sequence number: `time` is
+milliseconds since the session started and only has to grow.
+
+### Hanging (`0x40`, S13)
+
+`MoveState::Hang` writes the 1.2 hanging movement: after the actor flags and fall velocity, the
+`u32 gcId` (for either `0x20` or `0x40`) and then `u32 climbData`. `gcId` is **1** for a plain hang
+(the writer `FUN_390cbee0` sets it so); a hang on a ladder of a moving hull also sets `0x20`, and
+`gcId` is then the hull, with the primary position hull-local and the world point in the auxiliary
+frame. The climb block is not written during the top exit.
+
+`climb` packs the three fields exactly as `FUN_390cbee0`: `x14 = trunc(clamp(x_m * 0.01, 0, 1) *
+16383)`, `y10 = trunc(clamp(y_m * 0.05, 0, 1) * 1023)`, `angle8 = trunc(clamp((a + pi) / 2pi, 0, 1)
+* 255)`, `bits = angle8 << 24 | y10 << 14 | x14` (truncation, not rounding). The decoder is
+`FUN_3909db50`: `x = bits/16383 * 100`, `y = bits/1023 * 20`, `a = bits/255 * 2pi - pi`. Kinds 1, 4,
+5, 8 and 9 carry the identity relative rotation, so their angle is 127. The values are the ladder
+frame's grab point and stay constant for the hang; the client re-places the body along the ladder
+instead of updating the field. The AAEmu lane server reads the same order
+(`models/movement.rs::UnitMove::read/write`) and rebroadcasts the movement unchanged; its
+`standing_on` treats `gcId` 1 as "the current parent", so a plain hang must send `0x40` alone
+(no `0x20`).
 
 Commands (`session::Command`):
 `Login`, `RefreshWorldList`, `EnterWorld { world_id }`, `CancelEnterWorld`, `ConnectToWorld`,
 `RefreshCharacters`, `CreateCharacter(CreateCharacter)`, `DeleteCharacter`, `CancelDeleteCharacter`,
 `EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`,
-`MoveVehicle(VehicleMoveRequest)`, `Chat`,
+`MoveVehicle(VehicleMoveRequest)`, `Hang { target_obj_id }`, `Unhang { reason }`, `Chat`,
 `LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`, `ReturnToWorldSelect`, `Disconnect`.
 
 Events (`session::Event`), in the order of a normal run:
@@ -2071,7 +2092,7 @@ undecoded; they are decoded, see their sections).
 * Client → server: requests exist for the systems the HUD drives (skills, items, chat, NPC talk,
   quests, shops, bank, mail, trade, auction, party, family, expedition, duel, salon, lobby refresh /
   labor power manager ...). Not written: the cash shop (`CSICS*`), `CSCharDetail` (inspect), user
-  music, vehicle / ship / hanging movement (N4).
+  music and vehicle / ship movement (N4); hanging movement is written (`MoveState::Hang`).
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
@@ -2082,9 +2103,9 @@ undecoded; they are decoded, see their sections).
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the
   template id.
-* Movement: we only write a plain unit movement (ground, jump, fall with landing velocity); vehicles, ships,
-  standing on / hanging from objects are read (`Movement::read_typed`) but not written. The server does not
-  echo our own movement back.
+* Movement: plain unit movements (ground, jump, fall with landing velocity), standing on an object
+  (`0x20`) and hanging (`0x40`, `aa_net::climb`) are written; type-2/3 vehicle bodies are read and the
+  ship helm sends type 4. The server does not echo our own movement back.
 * A dropped game connection is not reconnected, as in the 1.2 client: the session reports
   `Disconnected` and returns to idle, the HUD shows the original disconnect dialog (see "Small server
   messages", reconnect).
@@ -9191,15 +9212,17 @@ Original producers393b9012..393b9037/39187350 and serializers397bb360/397bb400
 pin those contracts. The native serializer span397bb360..397bb466 has SHA256
 16d46374d051207895c725e94a4c1cb8a1da3389bd38d883ca6a28fe3bd4c0ad.
 
-This is packet construction only: there is no new `Command`, Session write
-path, Requested/rejected event, received-state reducer, pending action or
-predicted hanging/controller state. Existing receive carriers remain unchanged.
-Native Hang eligibility and sentinel inputs remain unresolved. A future
-session adapter needs captured
-active character/own-actor identity, a source-backed live candidate and native
-eligibility/cooldown inputs, plus lifecycle generations. **Unhang must capture
-and recheck its expected current target before writing**, so a queued stale
-request cannot unhang a replacement target. This local guard adds no wire field.
+This is packet construction and, since S13 (2026-11-01), the session wraps it
+with `Command::Hang { target_obj_id }` and `Command::Unhang { reason }`: the
+session fills the active character's own actor and sends only in `InWorld`.
+The application still owns target eligibility (a `$ladder` climb doodad in
+reach), the pessimistic local target in `Ladder`, and lifecycle generations.
+There is no Requested/rejected event, received-state reducer, pending action or
+predicted hanging/controller state; the receipts stay `Event::Transport`.
+Native Hang eligibility and sentinel inputs remain unresolved. **Unhang has no
+target field and the server uses its sticky parent**, so the app keeps the
+expected target and drops the hang on `SCUnhung`/a vanished doodad rather than
+queuing a stale request against a replacement.
 
 The read-only bevy lane at3d6ec02e62b4e6c25102dfee11dd4b65cebeecec registers
 both requests and requires the active character's actor. It reads Unhang's

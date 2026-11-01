@@ -143,6 +143,8 @@ pub struct Sprint {
     pub dashing: bool,
     /// The own buffs' move speed multiplier (1 without any).
     pub speed_mul: f32,
+    /// The own buffs' `ladder_speed_mul` (unit attribute 93 [0x5d]), 1 without any.
+    pub ladder_speed_mul: f32,
     /// The same of the mount the player rides (its gallop and the like), 1 on foot.
     pub mount_speed_mul: f32,
     /// One of the own buffs has `sprint_motion`: the run plays the sprint tier of the run group.
@@ -157,6 +159,7 @@ pub struct Sprint {
     /// What was asked last and when (s), so a request waits for the server's answer.
     asked: Option<(DashAsk, f64)>,
     rows: Option<HashMap<u32, Vec<SpeedRow>>>,
+    ladder_rows: Option<HashMap<u32, Vec<SpeedRow>>>,
     /// The buffs with `sprint_motion` (Dash, the speed songs, ...).
     sprint_buffs: Option<HashSet<u32>>,
     /// The blur setting (0..1) and when it was read (s).
@@ -168,6 +171,7 @@ impl Default for Sprint {
         Sprint {
             dashing: false,
             speed_mul: 1.0,
+            ladder_speed_mul: 1.0,
             mount_speed_mul: 1.0,
             sprint_motion: false,
             blur: 0.0,
@@ -176,14 +180,16 @@ impl Default for Sprint {
             was_dashing: false,
             asked: None,
             rows: None,
+            ladder_rows: None,
             sprint_buffs: None,
             blur_setting: (0.0, f64::NEG_INFINITY),
         }
     }
 }
 
-/// The `MoveSpeedMul` rows of every buff (533 rows in r208022's database).
-fn load_rows() -> HashMap<u32, Vec<SpeedRow>> {
+/// The rows of `unit_attribute_id` for every buff (`MoveSpeedMul` 10: 533 rows in r208022's
+/// database; `LadderSpeedMul` 93: three).
+fn load_rows(attribute: i64) -> HashMap<u32, Vec<SpeedRow>> {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     let mut rows: HashMap<u32, Vec<SpeedRow>> = HashMap::new();
     let Ok(conn) = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI) else {
@@ -191,9 +197,9 @@ fn load_rows() -> HashMap<u32, Vec<SpeedRow>> {
         return rows;
     };
     let read = conn
-        .prepare("SELECT owner_id, unit_modifier_type_id, value, linear_level_bonus FROM unit_modifiers WHERE owner_type = 'Buff' AND unit_attribute_id = 10")
+        .prepare("SELECT owner_id, unit_modifier_type_id, value, linear_level_bonus FROM unit_modifiers WHERE owner_type = 'Buff' AND unit_attribute_id = ?1")
         .and_then(|mut st| {
-            st.query_map([], |r| {
+            st.query_map([attribute], |r| {
                 Ok((r.get::<_, i64>(0)? as u32, SpeedRow {
                     kind: r.get::<_, Option<i64>>(1)?.unwrap_or(0) as i32,
                     value: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0) as f32,
@@ -253,6 +259,7 @@ pub fn drive_sprint(
     let Ok(local) = player.single() else {
         sprint.dashing = false;
         sprint.speed_mul = 1.0;
+        sprint.ladder_speed_mul = 1.0;
         sprint.mount_speed_mul = 1.0;
         sprint.sprint_motion = false;
         sprint.blur = 0.0;
@@ -263,14 +270,23 @@ pub fn drive_sprint(
     sprint.dashing = dash.is_some();
     // the speed of every own buff, Dash's among them
     if sprint.rows.is_none() {
-        sprint.rows = Some(load_rows());
+        sprint.rows = Some(load_rows(10));
+    }
+    if sprint.ladder_rows.is_none() {
+        sprint.ladder_rows = Some(load_rows(93));
     }
     let rows = sprint.rows.as_ref().expect("loaded above");
     let of = |entries: &[aa_net::state::BuffEntry]| speed_multiplier(entries.iter().flat_map(|e| rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))));
+    let ladder_rows = sprint.ladder_rows.as_ref().expect("loaded above");
+    let ladder_of = |entries: &[aa_net::state::BuffEntry]| {
+        speed_multiplier(entries.iter().flat_map(|e| ladder_rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))))
+    };
     let speed = of(own);
+    let ladder_speed = ladder_of(own);
     let mount = spawn.as_deref().and_then(|p| p.spawn.as_ref()).and_then(|s| s.unit.attached_to).map(|a| a.obj_id);
     let mount_speed = mount.map_or(1.0, |m| of(buffs.as_deref().map_or(&[], |b| b.of(m))));
     sprint.speed_mul = speed;
+    sprint.ladder_speed_mul = ladder_speed;
     sprint.mount_speed_mul = mount_speed;
     if sprint.sprint_buffs.is_none() {
         sprint.sprint_buffs = Some(load_sprint_buffs());
@@ -474,7 +490,7 @@ mod tests {
     /// The database's Dash row is the one the rule was read from (needs `AA_DB`).
     #[test]
     fn the_database_holds_dash_s_speed_row() {
-        let rows = load_rows();
+        let rows = load_rows(10);
         let Some(dash) = rows.get(&DASH_BUFF) else {
             eprintln!("no game database: skipped");
             return;

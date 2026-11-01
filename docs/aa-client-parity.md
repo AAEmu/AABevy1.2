@@ -136,7 +136,22 @@ Ships (merged after the checkpoint was written):
   `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
   (`docs/aa-client-units.md`, S12).
 
-Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
+- **S13 ladders and hanging.** A climbable doodad is one whose current phase has a `DoodadFuncClimb` row
+  (kind 1/6 ladder, 2 rope, 3 wood, 4 net, 5 horizontal rope, 7 mast, 8 guardrail, 9 45-degree ladder,
+  10 tree) and whose model has a `$ladder` element; F grabs the nearest one within the 1.5 m use reach and
+  the body is placed before the server answers (`CSHang` 0x0cb). W/S climb with the clip's root speed
+  scaled by the buffs' `ladder_speed_mul`, and every hanging `CSMoveUnit` carries actor flag `0x40`, gcId 1
+  and the grab's climb data (`FUN_390cbee0` bit layout, truncating, angle 127 for kinds 1/4/5/8/9). A
+  ladder whose doodad is parented to a hull also carries the `0x20` block (hull id, hull-local primary point
+  and world backup). The top starts the 0.5 s exit (no climb bit), then steps over and sends `CSUnhang` 1;
+  the bottom stands, F releases and Space jumps (mode 6). Remote hangers use the `SCHung` target's kind and
+  the climb data; a hull hanger rides the drawn hull. Covered by `examples/ladder_climb`, byte-exact climb
+  tests in `aa-net/src/climb.rs`, the start/stop/top/bottom/moving-hull tests in `ingame/ladder` and remote
+  hanger tests in `ingame/units`. Open (capture-pending): which key produces exit modes 3-9, the exact
+  climb `deltaMovement`/velocity, net/guardrail lateral `y`, top-step distance, camera pitch clamp, and the
+  remote client's own hanger animation consumer.
+
+Still open across these slices: vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
 the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
 to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
 [units](aa-client-units.md) and the PR

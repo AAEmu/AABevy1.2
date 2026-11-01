@@ -17,16 +17,111 @@ struct Piece {
     model: PreparedModel,
 }
 
+/// The `$ladder` helper of a doodad model, in the doodad root's Bevy space.
+///
+/// 1.2 reads an element named `$ladder` (`FUN_393aaad0`); its matrix and the box of its child give
+/// the climb frame. Here the helper's local Z is the climb axis and the model geometry's extent
+/// along it gives the segment. The helper's local Y is kept for the relative-angle kinds
+/// (2, 3, 6, 7, 10); kinds 1, 4, 5, 8 and 9 ignore it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LadderHelper {
+    /// Bottom and top of the climb segment, in the doodad's local Bevy space.
+    pub bottom: Vec3,
+    pub top: Vec3,
+    /// Unit bottom-to-top direction.
+    pub axis: Vec3,
+    /// The helper's local Y in the doodad's local Bevy space.
+    pub forward: Vec3,
+}
+
 pub struct Prepared {
     prefab: bool,
     pieces: Vec<Piece>,
     helpers: HashMap<String, Affine3A>,
+    ladder: Option<LadderHelper>,
 }
 
 pub struct Spawned {
     pub entity: Entity,
     /// Prefab-local Cry metres; attachment applies the doodad world transform separately.
     pub helpers: HashMap<String, Affine3A>,
+    /// The climb helper, when the model has a usable `$ladder`.
+    pub ladder: Option<LadderHelper>,
+}
+
+/// The model's bounds including mesh boxes whose vertices are not kept (a prefab brush can
+/// carry only its box in the file); in model space.
+fn model_bounds(model: &aa_cry::mesh::Model) -> Option<(Vec3, Vec3)> {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for i in 0..model.nodes.len() {
+        let Some(&aa_cry::mesh::Node { mesh: Some(mesh), kind, .. }) = model.nodes.get(i) else { continue };
+        if matches!(kind, aa_cry::mesh::NodeKind::Lod(_)) {
+            continue;
+        }
+        let Some(m) = model.meshes.get(mesh) else { continue };
+        let tm = if m.skin.is_some() { Affine3A::IDENTITY } else { model.world_transform(i) };
+        let (min, max) = (m.bbox_min, m.bbox_max);
+        if !min.is_finite() || !max.is_finite() {
+            continue;
+        }
+        for corner in 0..8 {
+            let p = Vec3::new(
+                if corner & 1 == 0 { min.x } else { max.x },
+                if corner & 2 == 0 { min.y } else { max.y },
+                if corner & 4 == 0 { min.z } else { max.z },
+            );
+            let p = tm.transform_point3(p);
+            out = Some(match out {
+                None => (p, p),
+                Some((a, b)) => (a.min(p), b.max(p)),
+            });
+        }
+    }
+    out
+}
+
+/// The `$ladder` helper of a model part, in the doodad root's Bevy space. The helper's matrix is
+/// `part * node` in Cry space; the model box is transformed into helper-local space so its Z
+/// extent is the climb segment. `None` without a `$ladder` element or a usable box (1.2 also
+/// requires the element and its child box, `FUN_393aaad0`).
+fn ladder_of(part: &Part, model: &aa_cry::mesh::Model) -> Option<LadderHelper> {
+    let index = model.nodes.iter().position(|n| n.name.trim_start_matches('$').eq_ignore_ascii_case("ladder"))?;
+    let node = model.world_transform(index);
+    let boxes: Vec<(Vec3, Vec3)> = match model_bounds(model) {
+        Some(b) => vec![b],
+        None => model.mesh_boxes.clone(),
+    };
+    if boxes.is_empty() {
+        return None;
+    }
+    let inverse = node.inverse();
+    let mut lo = f32::INFINITY;
+    let mut hi = f32::NEG_INFINITY;
+    for (min, max) in boxes {
+        for corner in 0..8 {
+            let p = Vec3::new(
+                if corner & 1 == 0 { min.x } else { max.x },
+                if corner & 2 == 0 { min.y } else { max.y },
+                if corner & 4 == 0 { min.z } else { max.z },
+            );
+            let p = inverse.transform_point3(p);
+            lo = lo.min(p.z);
+            hi = hi.max(p.z);
+        }
+    }
+    if !(hi - lo).is_finite() || hi - lo < 0.2 {
+        return None;
+    }
+    let part = Affine3A::from_scale_rotation_translation(part.scale, part.rot, part.pos);
+    let helper = part * node;
+    let bottom = cry_to_bevy(helper.transform_point3(Vec3::new(0.0, 0.0, lo)));
+    let top = cry_to_bevy(helper.transform_point3(Vec3::new(0.0, 0.0, hi)));
+    let axis = (top - bottom).normalize_or_zero();
+    if axis == Vec3::ZERO {
+        return None;
+    }
+    let forward = cry_to_bevy(helper.transform_vector3(Vec3::Y)).normalize_or_zero();
+    Some(LadderHelper { bottom, top, axis, forward })
 }
 
 fn helpers_of(part: &Part, model: &aa_cry::mesh::Model, out: &mut HashMap<String, Affine3A>) {
@@ -55,6 +150,7 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
     };
     let mut pieces = Vec::new();
     let mut helpers = HashMap::new();
+    let mut ladder = None;
     for part in parts {
         let options = ModelOptions {
             material: part
@@ -66,6 +162,9 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
         match loader.prepare_model(&part.model, &options) {
             Ok(model) => {
                 helpers_of(&part, &model.loaded().model, &mut helpers);
+                if ladder.is_none() {
+                    ladder = ladder_of(&part, &model.loaded().model);
+                }
                 pieces.push(Piece { part, model });
             }
             Err(error) => {
@@ -82,6 +181,7 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
         prefab,
         pieces,
         helpers,
+        ladder,
     })
 }
 
@@ -90,6 +190,7 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, prepared: Prepared) -
         prefab,
         pieces,
         helpers,
+        ladder,
     } = prepared;
     let root = prefab.then(|| {
         commands
@@ -124,6 +225,7 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, prepared: Prepared) -
     Spawned {
         entity: root.or(single).expect("prepared doodad contains geometry"),
         helpers,
+        ladder,
     }
 }
 
@@ -185,6 +287,55 @@ mod tests {
             !helpers.contains_key("bond0"),
             "signed spot is not replaced with a default"
         );
+    }
+
+    /// The `$ladder` helper and the model box give the climb segment (needs `AA_PAK`).
+    #[test]
+    fn the_original_ladder_models_have_a_usable_climb_segment() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        for (path, length, tolerance) in [
+            ("objects/env/01_nuia/001_ndeco/climb/ndeco_do_ladder01.cgf", 5.067, 0.01),
+            ("objects/env/06_unit/01_ship/smallboat/smallboat_a_ladder_left.cgf", 1.71, 0.05),
+        ] {
+            let model = aa_cry::mesh::Model::load(path).expect(path);
+            let part = Part { model: path.into(), material: None, pos: Vec3::ZERO, rot: Quat::IDENTITY, scale: Vec3::ONE };
+            let ladder = ladder_of(&part, &model).unwrap_or_else(|| panic!("{path}: no $ladder segment"));
+            assert!((ladder.bottom.distance(ladder.top) - length).abs() < tolerance, "{path}: {ladder:?}");
+            // Cry Z (up) is Bevy Y
+            assert!(ladder.axis.y > 0.99, "{path}: {:?}", ladder.axis);
+            assert!(ladder.forward.length() > 0.99, "{path}: {ladder:?}");
+        }
+    }
+
+    /// A ship-side ladder prefab carries the `$ladder` in its ladder CGF (needs `AA_PAK`).
+    #[test]
+    fn the_original_ship_side_ladder_prefabs_are_climbable() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        for reference in [
+            "prefab://Prefabs/galleon.xml/galleon.galleon_ladder",
+            "prefab://Prefabs/galleon.xml/galleon.ladder_rear_left",
+            "prefab://prefabs/smallboat.xml/smallboat.smallboat_a_ladder_left",
+        ] {
+            let parts = super::super::housing::prefab::load(reference);
+            assert!(!parts.is_empty(), "{reference}");
+            let mut ladder = None;
+            for part in &parts {
+                if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {
+                    ladder = ladder_of(part, &model);
+                    if ladder.is_some() {
+                        break;
+                    }
+                }
+            }
+            let ladder = ladder.unwrap_or_else(|| panic!("{reference}: no $ladder"));
+            assert!(ladder.bottom.distance(ladder.top) > 0.5, "{reference}: {ladder:?}");
+        }
     }
 
     #[test]

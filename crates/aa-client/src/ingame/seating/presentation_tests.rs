@@ -82,6 +82,7 @@ pub(crate) fn app() -> (App, Entity, Entity) {
                     Affine3A::from_translation(Vec3::new(0.0, -1.3, 0.0)),
                 )]
                 .into(),
+                ladder: None,
                 growth: None,
                 remaining_ms: 0.0,
                 total_ms: 0.0,

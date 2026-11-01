@@ -35,6 +35,7 @@
 mod anim;
 pub(crate) mod cam_fov;
 mod jump;
+pub(crate) mod ladder;
 pub(crate) mod sprint;
 pub(crate) mod attachments;
 mod bench;
@@ -182,6 +183,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(flow::plugin)
             .add_plugins(prewarm::plugin)
             .add_plugins(units::plugin)
+            .add_plugins(ladder::plugin)
             .add_plugins(doodad_visual::plugin)
             .add_plugins(doodad_affordance::plugin)
             .add_plugins(world_switch::plugin)

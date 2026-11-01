@@ -97,6 +97,10 @@ pub enum MoveState {
     Jump,
     /// In the air without a jump, or on the way down: no ground under the feet.
     Fall,
+    /// Hanging from a ladder, rope or net: actor flag `0x40` and the [`crate::climb`] data follow.
+    /// A supporting-object block (`0x20`) is written too when `support.world` is set (a ladder on a
+    /// moving hull).
+    Hang,
 }
 
 /// A movement the app wants to send for the local player. All fields are public; build one with
@@ -201,7 +205,7 @@ impl MoveCommand {
         m.actor_flags = match self.state {
             MoveState::Ground => actor_flags::STANDING_ON_SOLID,
             MoveState::Jump => actor_flags::JUMPING,
-            MoveState::Fall => 0,
+            MoveState::Fall | MoveState::Hang => 0,
         };
         if self.state == MoveState::Jump {
             m.flags = move_flags::JUMPING;
@@ -214,15 +218,22 @@ impl MoveCommand {
             m.fall_vel = self.fall_vel;
         }
         if let Some(support) = &self.support {
-            // The 2026-10-29 deck capture has header 0x40 on every standing/walking packet
-            // (idle included: neither MOVING nor STOPPING) and 0x44 only on the jump; the
-            // actor block keeps the ground bits, plus 0x04 on a deck jump (0x34).
-            m.flags &= !(move_flags::MOVING | move_flags::STOPPING);
-            m.flags |= move_flags::STANDING_ON_OBJECT;
-            m.actor_flags |= actor_flags::STANDING_ON_OBJECT;
-            if self.state == MoveState::Jump {
-                m.flags |= move_flags::STOPPING;
-                m.actor_flags |= actor_flags::STANDING_ON_SOLID;
+            // The supporting-object block is only present when there is a world frame (a deck, a
+            // ladder on a moving hull). A plain hang carries the climbing bit alone.
+            if support.world.is_some() {
+                // The 2026-10-29 deck capture has header 0x40 on every standing/walking packet
+                // (idle included: neither MOVING nor STOPPING) and 0x44 only on the jump; the
+                // actor block keeps the ground bits, plus 0x04 on a deck jump (0x34).
+                m.flags &= !(move_flags::MOVING | move_flags::STOPPING);
+                m.flags |= move_flags::STANDING_ON_OBJECT;
+                m.actor_flags |= actor_flags::STANDING_ON_OBJECT;
+                if self.state == MoveState::Jump {
+                    m.flags |= move_flags::STOPPING;
+                    m.actor_flags |= actor_flags::STANDING_ON_SOLID;
+                }
+            }
+            if support.climb.is_some() {
+                m.actor_flags |= actor_flags::HANGING_FROM_OBJECT;
             }
             m.support = Some(support.clone());
         }
@@ -259,6 +270,12 @@ pub enum Command {
     /// Select the character and enter the world (select, spawn, notify in game).
     EnterGame { character_id: u32 },
     Move(MoveCommand),
+    /// `CSHang` for the local player and `target_obj_id` (a climb doodad): the server makes it the
+    /// sticky parent and broadcasts `SCHung`. Admission (an own unit, a climbable target in reach)
+    /// is the app's; the session only checks the nonzero 24-bit ids.
+    Hang { target_obj_id: u32 },
+    /// `CSUnhang` with `reason` (no target on the wire; the server uses the sticky parent).
+    Unhang { reason: i32 },
     /// Drive a controlled land vehicle (cart, car, tractor) with the native
     /// `CSMoveUnit` type-2 body. The session fills the send time. There is no
     /// driver/controller admission yet.
@@ -1301,6 +1318,20 @@ impl Session {
                 self.send_game(game::ClientMsg::SelectCharacter { id: character_id }).await;
             }
             Command::Move(m) => self.send_move(self.self_obj, m).await,
+            Command::Hang { target_obj_id } => {
+                if self.phase == Phase::InWorld
+                    && let Ok(request) = crate::HangingRequest::hang(self.self_obj, target_obj_id)
+                {
+                    self.send_game(game::ClientMsg::Hanging(request)).await;
+                }
+            }
+            Command::Unhang { reason } => {
+                if self.phase == Phase::InWorld
+                    && let Ok(request) = crate::HangingRequest::unhang(self.self_obj, reason)
+                {
+                    self.send_game(game::ClientMsg::Hanging(request)).await;
+                }
+            }
             Command::MoveUnit { obj_id, movement } => self.send_move(obj_id, movement).await,
             Command::MoveVehicle(request) => self.send_move_vehicle(request).await,
             Command::ShipControl(request) => self.send_ship_control(request).await,
@@ -4828,6 +4859,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn hang_and_unhang_commands_write_the_native_bodies() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let (tx, _events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        let (connection, accepted) = tokio::join!(GameConn::connect(&address), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        session.self_obj = 0x112233;
+
+        session.command(Command::Hang { target_obj_id: 0xaabbcc }).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0xcb, 0]);
+        assert_eq!(&frame[6..], &[0x33, 0x22, 0x11, 0xcc, 0xbb, 0xaa]);
+
+        session.command(Command::Unhang { reason: 6 }).await;
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        assert_eq!(&frame[4..6], &[0xcc, 0]);
+        assert_eq!(&frame[6..], &[0x33, 0x22, 0x11, 6, 0, 0, 0]);
+    }
+
+    #[tokio::test]
     async fn ship_control_sends_the_type_4_body_with_the_session_time() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap().to_string();
@@ -4922,6 +4980,42 @@ mod tests {
         assert_eq!(MoveCommand { moving: false, ..base.clone() }.to_movement(0).flags, 0x40);
         let jump = MoveCommand { state: MoveState::Jump, ..base }.to_movement(0);
         assert_eq!((jump.flags, jump.actor_flags), (0x44, 0x34));
+    }
+
+    #[test]
+    fn a_plain_hang_carries_only_the_climb_bit_and_gc_id_one() {
+        use crate::model::MoveSupport;
+        let bits = crate::climb::pack_ladder(1.25, 0.0);
+        let hang = MoveCommand {
+            stance: stance::CROUCH,
+            support: Some(MoveSupport { obj_id: 1, climb: Some(bits), ..MoveSupport::default() }),
+            ..MoveCommand::new(Pos::new(10.0, 20.0, 30.0), 0.0).with_state(MoveState::Hang)
+        }
+        .to_movement(0);
+        assert_eq!(hang.flags, move_flags::MOVING);
+        assert_eq!(hang.actor_flags, actor_flags::HANGING_FROM_OBJECT);
+        assert_eq!(hang.stance, stance::CROUCH);
+        assert_eq!(hang.support.as_ref().unwrap().obj_id, 1);
+        assert_eq!(hang.support.as_ref().unwrap().climb, Some(bits));
+
+        // A ladder on a moving hull also carries the standing-on-object block: both flags.
+        let hull = MoveCommand {
+            pos: Pos::new(0.5, 1.0, 2.0),
+            support: Some(MoveSupport {
+                obj_id: 8911,
+                kind: 1,
+                part: 24,
+                world: Some((Pos::new(4308.5, 4128.0, 100.5), [0, 0, -37])),
+                climb: Some(bits),
+            }),
+            ..MoveCommand::new(Pos::new(0.5, 1.0, 2.0), 0.0).with_state(MoveState::Hang)
+        }
+        .to_movement(0);
+        assert_eq!(hull.flags, move_flags::STANDING_ON_OBJECT);
+        assert_eq!(hull.actor_flags, 0x60);
+        assert_eq!(hull.support.as_ref().unwrap().obj_id, 8911);
+        assert_eq!(hull.support.as_ref().unwrap().part, 24);
+        assert_eq!(hull.support.as_ref().unwrap().climb, Some(bits));
     }
 
     #[test]

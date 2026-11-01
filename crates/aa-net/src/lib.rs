@@ -53,6 +53,7 @@ pub mod auction;
 pub mod buff;
 pub mod bank;
 mod compression;
+pub mod climb;
 pub mod clock;
 pub use clock::{ServerClock, NativeTimeKeeper, ClockSample};
 pub mod combat_status;

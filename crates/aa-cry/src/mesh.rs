@@ -62,6 +62,9 @@ pub struct Model {
     /// Material name stored in the file (MtlName chunk of the first rendered node), usually the
     /// `.mtl` file name without extension, relative to the model's folder.
     pub material_name: Option<String>,
+    /// Bounding boxes of every mesh chunk, in model space, kept also for proxy / helper meshes
+    /// whose vertices are not parsed (a ship ladder stores only its box).
+    pub mesh_boxes: Vec<(Vec3, Vec3)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,6 +172,11 @@ impl Model {
         let skeleton = Skeleton::from_chunks(file)?;
         let mut model = Model { skeleton, ..Default::default() };
         let mut mesh_of_chunk: Vec<(i32, Option<usize>)> = Vec::new();
+        for c in file.of_type(ty::MESH) {
+            if let Some(b) = mesh_bbox(c) {
+                model.mesh_boxes.push(b);
+            }
+        }
         let node_chunks: Vec<_> = file.of_type(ty::NODE).collect();
         if node_chunks.is_empty() && file.of_type(ty::MESH).next().is_some() {
             // No hierarchy: one node per mesh.
@@ -385,6 +393,20 @@ fn i16n(b: &[u8], i: usize) -> f32 {
 }
 
 /// Reads a compiled mesh; `None` when it has nothing to render (no indices or positions).
+/// The box of a mesh chunk without reading its vertices (proxy / helper meshes have no kept
+/// vertices but keep the box).
+fn mesh_bbox(c: &crate::chunk::Chunk<'_>) -> Option<(Vec3, Vec3)> {
+    if c.version != 0x800 {
+        return None;
+    }
+    let mut r = c.reader();
+    // flags, flags2, counts x3, subsets chunk, vertex animation, 16 stream ids, 4 physics ids
+    r.skip(7 * 4 + 16 * 4 + 4 * 4).ok()?;
+    let min = r.vec3().ok()?;
+    let max = r.vec3().ok()?;
+    (min.is_finite() && max.is_finite() && min.cmple(max).all()).then_some((min, max))
+}
+
 fn read_mesh(file: &ChunkFile<'_>, c: &crate::chunk::Chunk<'_>, skinned: bool) -> Result<Option<MeshData>> {
     if c.version == 0x744 {
         return read_mesh_744(c.data);
