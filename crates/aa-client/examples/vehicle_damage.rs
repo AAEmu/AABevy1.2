@@ -1,14 +1,15 @@
-//! Vehicle damage states (S15) on the real rowboat prefabs: a row of the five state looks and one
-//! live boat stepped through them by `FUN_3989f8b0`'s thresholds.
+//! Vehicle damage states (S15) on the real prefabs: a row of the rowboat's state looks and one live
+//! Farm Wagon stepped through the HP thresholds and then through a death.
 //!
 //! The example builds the `smallboat.smallboat_a` prefab for 100 %, 74 %, 50 %, 25 % and 0 % of the
-//! template's attribute-6 maximum (template 15: 4796 formula base + 1420 `unit_modifiers` = 6216 HP), then
-//! drives a sixth boat through 74 -> 50 -> 25 -> 0 % through `vehicle::update_damage` (the `SCUnitPoints`
-//! path is in the unit tests). It asserts the state and the prefab ref of every step (2 `damege50`,
-//! 3 `damege50`, 4 `damege75`, 6 `dead`) and exits non-zero on a mismatch. `--shot` keeps it open for the
-//! picture.
+//! rowboat's attribute-6 maximum (template 15: 4796 formula base + 1420 `unit_modifiers` = 6216 HP), then
+//! drives a Farm Wagon (model 1008, template 60: 7296 HP) through 74 -> 50 -> 25 -> 0 % and finally
+//! `SCUnitDeath` through `vehicle::update_damage` (the packet path is in the unit tests). It asserts the
+//! state and the prefab ref of every step (2 normal, 3 normal, 4 `tractor_body_damage75`, 6
+//! `tractor_body_dead`, then the death: 5 `tractor_body_dying` for `models.dying_time` 3.3 s, then 6
+//! `tractor_body_dead`) and exits non-zero on a mismatch. `--shot` keeps it open for the picture.
 //!
-//! `cargo run -p aa-client --example vehicle_damage -- --mute --offscreen-shot shots/aa-client/vehicle_damage.png --shot-after 5`
+//! `cargo run -p aa-client --example vehicle_damage -- --mute --offscreen-shot shots/aa-client/vehicle_damage.png --shot-after 8`
 
 #![allow(dead_code)]
 #[path = "../src/graphics.rs"]
@@ -47,20 +48,24 @@ pub enum Screen {
     InGame,
 }
 
-/// The rowboat's `models` row (`ShipModel` 4) and slave template 15 (1420 HP).
+/// The rowboat's static row: `models` row (`ShipModel` 4) and slave template 15 (1420 HP).
 const MODEL: u32 = 129;
 const TEMPLATE: u32 = 15;
-/// The live boat's object id.
+/// The live Farm Wagon: `models` row (`VehicleModel` 38), slave template 60 (2500 HP) and its dying window.
+const LIVE_MODEL: u32 = 1008;
+const LIVE_TEMPLATE: u32 = 60;
+const LIVE_DYING_TIME: f32 = 3.3;
+/// The live wagon's object id.
 const LIVE: u32 = 900;
 const GAP: f32 = 9.0;
 /// HP percentages of the static row, from the state's own definition.
 const ROW: [(i32, u8); 5] = [(100, 1), (74, 2), (50, 3), (25, 4), (0, 6)];
 /// The live steps after the initial 100 %: (HP %, expected state, expected prefab suffix).
 const STEPS: [(i32, u8, &str); 4] = [
-    (74, 2, "smallboat.smallboat_damege50"),
-    (50, 3, "smallboat.smallboat_damege50"),
-    (25, 4, "smallboat.smallboat_damege75"),
-    (0, 6, "smallboat.smallboat_dead"),
+    (74, 2, "vehicle_tractor.tractor_body"),
+    (50, 3, "vehicle_tractor.tractor_body"),
+    (25, 4, "vehicle_tractor.tractor_body_damage75"),
+    (0, 6, "vehicle_tractor.tractor_body_dead"),
 ];
 
 #[derive(Resource)]
@@ -69,6 +74,8 @@ struct Check {
     timer: Timer,
     pending: Option<(u8, &'static str)>,
     max_hp: i32,
+    /// 0 before the death, 1 while dying (5) is expected, 2 while the dead (6) result is expected.
+    death_phase: u8,
 }
 
 impl Default for Check {
@@ -78,6 +85,7 @@ impl Default for Check {
             timer: Timer::from_seconds(0.6, TimerMode::Repeating),
             pending: None,
             max_hp: 1,
+            death_phase: 0,
         }
     }
 }
@@ -88,11 +96,11 @@ struct Live;
 fn ship_unit(obj_id: u32, hp: i32) -> aa_net::model::Unit {
     aa_net::model::Unit {
         obj_id,
-        name: format!("rowboat {obj_id}"),
+        name: format!("farm wagon {obj_id}"),
         kind: aa_net::model::UnitKind::Slave {
-            id: TEMPLATE,
+            id: LIVE_TEMPLATE,
             tl_id: obj_id as u16,
-            template_id: TEMPLATE,
+            template_id: LIVE_TEMPLATE,
             summoner_id: 1,
         },
         owner_name: String::new(),
@@ -100,7 +108,7 @@ fn ship_unit(obj_id: u32, hp: i32) -> aa_net::model::Unit {
         rotation: [0.0; 3],
         scale: 1.0,
         level: 50,
-        model_id: MODEL,
+        model_id: LIVE_MODEL,
         equipment: aa_net::model::Equipment::default(),
         model_params: aa_net::model::ModelParams::default(),
         hp,
@@ -149,10 +157,15 @@ fn main() -> AppExit {
         eprintln!("vehicle_damage: skipped, the game database cannot be opened");
         return AppExit::Success;
     };
-    let max_hp = db
+    let row_max = db
         .slave_max_hp(TEMPLATE, 50)
         .expect("rowboat template 15's MaxHealth");
-    assert_eq!(max_hp, 6_216, "4796 formula base + 1420 unit_modifiers");
+    assert_eq!(row_max, 6_216, "4796 formula base + 1420 unit_modifiers");
+    let max_hp = db
+        .slave_max_hp(LIVE_TEMPLATE, 50)
+        .expect("Farm Wagon template 60's MaxHealth");
+    assert_eq!(max_hp, 7_296, "4796 formula base + 2500 unit_modifiers");
+    assert_eq!(db.vehicle_dying_time(LIVE_MODEL), LIVE_DYING_TIME);
     App::new()
         .add_plugins((
             aa_dev::default_plugins("Vehicle damage states"),
@@ -238,6 +251,10 @@ fn scene(
                 variant: variant.clone(),
                 max_hp: check.max_hp,
                 requested: None,
+                dying_start: None,
+                dying_time: 0.0,
+                death_seen: false,
+                dead_effect_played: false,
             });
         ingame::vehicle::spawn_state_effects(&mut commands, root, &variant, false);
         info!(
@@ -245,14 +262,18 @@ fn scene(
             percent
         );
     }
-    // the live boat starts healthy and is stepped down by `check_states`
+    // the live Farm Wagon starts healthy and is stepped down, then killed, by `check_states`
+    let live_look = db.vehicle_look(LIVE_MODEL).expect("the Farm Wagon");
+    let live_variants = db
+        .vehicle_variants(LIVE_MODEL)
+        .expect("the Farm Wagon's state rows");
     let unit = ship_unit(LIVE, check.max_hp);
-    let variant = variants.for_state(1).to_string();
+    let variant = live_variants.for_state(1).to_string();
     let pieces = ingame::vehicle::prepare(
         &loader,
         &ingame::data::VehicleLook {
             normal: variant.clone(),
-            wheels: look.wheels,
+            wheels: live_look.wheels,
         },
     );
     let transform = Transform::from_xyz(ROW.len() as f32 * GAP, 0.0, 0.0).with_rotation(rotation);
@@ -260,9 +281,18 @@ fn scene(
     commands.entity(root).insert((
         Live,
         ingame::units::RemoteUnit::announced(&unit),
-        ingame::vehicle::VehicleDamage { state: 1, variant, max_hp: check.max_hp, requested: None },
+        ingame::vehicle::VehicleDamage {
+            state: 1,
+            variant,
+            max_hp: check.max_hp,
+            requested: None,
+            dying_start: None,
+            dying_time: LIVE_DYING_TIME,
+            death_seen: false,
+            dead_effect_played: false,
+        },
     ));
-    ingame::vehicle::spawn_state_effects(&mut commands, root, variants.for_state(1), false);
+    ingame::vehicle::spawn_state_effects(&mut commands, root, live_variants.for_state(1), false);
     units.by_id.insert(LIVE, unit);
 }
 
@@ -279,7 +309,7 @@ fn check_states(
         return;
     }
     if let Some((state, variant)) = check.pending.take() {
-        let damage = live.single().expect("the live boat");
+        let damage = live.single().expect("the live wagon");
         assert_eq!(damage.state, state, "state after step {}", check.stage);
         assert!(
             damage.variant.ends_with(variant),
@@ -287,32 +317,51 @@ fn check_states(
             damage.variant
         );
         info!("vehicle_damage: verified state {state} {}", damage.variant);
-        if check.stage == STEPS.len() {
-            info!("vehicle_damage: ok");
-            if !aa_dev::args()
-                .iter()
-                .any(|a| matches!(a.as_str(), "--shot" | "--offscreen-shot" | "--exit-after"))
-            {
-                exit.write(AppExit::Success);
+        match check.death_phase {
+            2 => {
+                info!("vehicle_damage: ok");
+                if !aa_dev::args()
+                    .iter()
+                    .any(|a| matches!(a.as_str(), "--shot" | "--offscreen-shot" | "--exit-after"))
+                {
+                    exit.write(AppExit::Success);
+                }
+                return;
             }
-            return;
+            1 => {
+                // the death entered dying (5): wait out `models.dying_time` before the dead prefab
+                check.death_phase = 2;
+                check.pending = Some((6, "tractor_body_dead"));
+                check
+                    .timer
+                    .set_duration(std::time::Duration::from_secs_f32(LIVE_DYING_TIME + 0.5));
+                return;
+            }
+            _ => {}
         }
     }
-    if check.stage >= STEPS.len() {
+    if check.stage < STEPS.len() {
+        let (percent, state, suffix) = STEPS[check.stage];
+        let Some(unit) = units.by_id.get_mut(&LIVE) else {
+            return;
+        };
+        unit.hp = check.max_hp * percent / 100;
+        check.pending = Some((state, suffix));
+        check.stage += 1;
+        let variants = db
+            .vehicle_variants(LIVE_MODEL)
+            .expect("the Farm Wagon's state rows");
+        assert!(
+            variants.for_state(state).ends_with(suffix),
+            "state {state} prefab"
+        );
         return;
     }
-    let (percent, state, suffix) = STEPS[check.stage];
-    let Some(unit) = units.by_id.get_mut(&LIVE) else {
-        return;
-    };
-    unit.hp = check.max_hp * percent / 100;
-    check.pending = Some((state, suffix));
-    check.stage += 1;
-    let variants = db
-        .vehicle_variants(MODEL)
-        .expect("the rowboat's state rows");
-    assert!(
-        variants.for_state(state).ends_with(suffix),
-        "state {state} prefab"
-    );
+    if check.death_phase == 0 {
+        // `SCUnitDeath`: the wagon was already drawn dead from its 0 hp; the death still enters dying
+        units.apply(&aa_net::Event::UnitDeath { obj_id: LIVE });
+        check.death_phase = 1;
+        check.pending = Some((5, "tractor_body_dying"));
+        check.timer.set_duration(std::time::Duration::from_secs_f32(0.6));
+    }
 }

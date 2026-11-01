@@ -49,6 +49,8 @@ pub enum UnitBuild {
         state: u8,
         variant: String,
         max_hp: i32,
+        /// `models.dying_time` seconds, cached by [`super::vehicle::VehicleDamage`].
+        dying_time: f32,
     },
     /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
     Effects(Vec<aa_world::placement::PlacedEffect>),
@@ -85,6 +87,8 @@ pub struct VehiclePlan {
     pub state: u8,
     /// Unit attribute 6 (the formula base plus `unit_modifiers`), cached by [`super::vehicle::VehicleDamage`].
     pub max_hp: i32,
+    /// `models.dying_time` seconds, cached by [`super::vehicle::VehicleDamage`].
+    pub dying_time: f32,
 }
 
 /// What a unit is made of, decided from the database before any model is read ([`plan_unit`]).
@@ -100,9 +104,10 @@ pub enum UnitPlan {
 pub fn plan_unit(db: &Db, unit: &Unit) -> UnitPlan {
     if let Some(look) = db.vehicle_look(unit.model_id) {
         // a damaged slave that comes into view is built in its state's prefab at once (`FUN_390e8b30` /
-        // `FUN_390f0510`), not in the normal one and then swapped
+        // `FUN_390f0510`), not in the normal one and then swapped; a unit announced at 0 hp is a death
+        // (`FUN_3936b000` / `FUN_39364db0` call Die), so it is built dying (5)
         let max_hp = super::vehicle::slave_max_hp(db, unit);
-        let state = super::vehicle::damage_state(db, unit);
+        let state = super::vehicle::initial_state(db, unit);
         let normal = db
             .vehicle_variants(unit.model_id)
             .map(|variants| variants.for_state(state).to_string())
@@ -111,6 +116,7 @@ pub fn plan_unit(db: &Db, unit: &Unit) -> UnitPlan {
             look: super::data::VehicleLook { normal, wheels: look.wheels },
             state,
             max_hp,
+            dying_time: db.vehicle_dying_time(unit.model_id),
         });
     }
     let file = db.actor_model_file(unit.model_id);
@@ -195,6 +201,7 @@ pub fn build_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit,
                     state: plan.state,
                     variant: plan.look.normal,
                     max_hp: plan.max_hp,
+                    dying_time: plan.dying_time,
                 },
             }
         }

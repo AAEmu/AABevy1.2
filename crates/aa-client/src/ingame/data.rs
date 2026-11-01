@@ -561,7 +561,8 @@ impl Db {
     }
 
     /// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`):
-    /// state 2 is `damaged25`, 3 `damaged50`, 4 `damaged75`, 6 `dead` ([`VehicleVariants::for_state`]).
+    /// state 2 is `damaged25`, 3 `damaged50`, 4 `damaged75`, 5 `dying` (the vehicle column only; a ship has
+    /// none), 6 `dead` ([`VehicleVariants::for_state`]).
     pub fn vehicle_variants(&self, model_id: u32) -> Option<VehicleVariants> {
         let mut l = self.lookups.lock().unwrap();
         if let Some(variants) = l.vehicle_variants.get(&model_id) {
@@ -571,7 +572,7 @@ impl Db {
             .conn
             .query_row(
                 "SELECT COALESCE(v.normal, s.normal), v.damaged25, s.damaged25, v.damaged50, s.damaged50,
-                        v.damaged75, s.damaged75, v.dead, s.dead
+                        v.damaged75, s.damaged75, v.dead, s.dead, v.dying
                  FROM models m
                  LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
                  LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
@@ -591,6 +592,7 @@ impl Db {
                         damaged25: variant(1, 2)?,
                         damaged50: variant(3, 4)?,
                         damaged75: variant(5, 6)?,
+                        dying: text(9)?,
                         dead: variant(7, 8)?,
                     })
                 },
@@ -599,6 +601,22 @@ impl Db {
             .filter(|v: &VehicleVariants| !v.normal.is_empty());
         l.vehicle_variants.insert(model_id, variants.clone());
         variants
+    }
+
+    /// `models.dying_time` in seconds: the template field at +0x14 that `FUN_390eaac0` compares with the elapsed
+    /// time since the dying start (+0x274). 0 (no dying window) when the row is missing or negative.
+    pub fn vehicle_dying_time(&self, model_id: u32) -> f32 {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT dying_time FROM models WHERE id = ?1",
+                params![model_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .ok()
+            .flatten()
+            .filter(|time| time.is_finite())
+            .map_or(0.0, |time| time.max(0.0) as f32)
     }
 
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
@@ -1216,19 +1234,23 @@ pub struct VehicleVariants {
     pub damaged25: Option<String>,
     pub damaged50: Option<String>,
     pub damaged75: Option<String>,
+    /// The `vehicle_models.dying` prefab (5). Ships have no such column.
+    pub dying: Option<String>,
     pub dead: Option<String>,
 }
 
 impl VehicleVariants {
-    /// The model ref for a model state, walking down to the next lower non-empty row as `FUN_397a7810` does:
-    /// state 6 tries `dead`, `damaged75`, `damaged50`, `damaged25`, `normal`; 4 and 5 try `damaged75` down.
-    /// The `dying` column is not read: `FUN_3989f8b0` never returns 5 and no code writes 5 to the state.
+    /// The model ref for a model state, walking down to the next lower non-empty row as `FUN_397a7980` /
+    /// `FUN_397a7810` do: 6 `dead`, 5 `dying`, 4 `damaged75`, 3 `damaged50`, 2 `damaged25`, else `normal`.
+    /// A state with no row takes the next lower one (so a vehicle without a `dying` prefab shows its
+    /// `damaged75` one while dying, and a ship, which has no dying column, does the same).
     pub fn for_state(&self, state: u8) -> &str {
         let wanted = match state {
             0 | 1 => 1,
             2 => 2,
             3 => 3,
-            4 | 5 => 4,
+            4 => 4,
+            5 => 5,
             _ => 6,
         };
         for step in (1..=wanted).rev() {
@@ -1236,6 +1258,7 @@ impl VehicleVariants {
                 2 => self.damaged25.as_deref(),
                 3 => self.damaged50.as_deref(),
                 4 => self.damaged75.as_deref(),
+                5 => self.dying.as_deref(),
                 6 => self.dead.as_deref(),
                 _ => None,
             };
@@ -1333,7 +1356,7 @@ mod tests {
         );
     }
 
-    /// `FUN_397a7810`: a state with no row uses the next lower one; the `dying` column is never read.
+    /// `FUN_397a7980` / `FUN_397a7810`: a state with no row uses the next lower one; 5 reads `dying`.
     #[test]
     fn a_variant_falls_back_to_the_next_lower_state() {
         let all = VehicleVariants {
@@ -1341,15 +1364,25 @@ mod tests {
             damaged25: None,
             damaged50: Some("damaged50".into()),
             damaged75: Some("damaged75".into()),
+            dying: Some("dying".into()),
             dead: None,
         };
         assert_eq!(all.for_state(1), "normal");
         assert_eq!(all.for_state(2), "normal", "no damaged25 row");
         assert_eq!(all.for_state(3), "damaged50");
         assert_eq!(all.for_state(4), "damaged75");
-        assert_eq!(all.for_state(5), "damaged75", "state 5 is never produced");
-        assert_eq!(all.for_state(6), "damaged75", "no dead row");
-        let none = VehicleVariants { normal: "normal".into(), ..VehicleVariants::default() };
+        assert_eq!(all.for_state(5), "dying");
+        assert_eq!(all.for_state(6), "dying", "no dead row: down through 5");
+        let no_dying = VehicleVariants {
+            dying: None,
+            ..all.clone()
+        };
+        assert_eq!(no_dying.for_state(5), "damaged75", "no dying row");
+        assert_eq!(no_dying.for_state(6), "damaged75", "no dead row");
+        let none = VehicleVariants {
+            normal: "normal".into(),
+            ..VehicleVariants::default()
+        };
         for state in 0..=6 {
             assert_eq!(none.for_state(state), "normal", "state {state}");
         }
@@ -1367,15 +1400,24 @@ mod tests {
         assert!(galleon.for_state(2).ends_with("galleon.damaged25"), "{}", galleon.for_state(2));
         assert!(galleon.for_state(3).ends_with("galleon.damaged25"), "{}", galleon.for_state(3));
         assert!(galleon.for_state(4).ends_with("galleon.damaged75"), "{}", galleon.for_state(4));
+        assert_eq!(galleon.for_state(5), galleon.for_state(4), "a ship has no dying column");
         assert!(galleon.for_state(6).ends_with("galleon.dead"), "{}", galleon.for_state(6));
 
         let tractor = db.vehicle_variants(1008).expect("the Farm Wagon");
         assert!(tractor.for_state(4).ends_with("vehicle_tractor.tractor_body_damage75"));
+        assert!(
+            tractor.for_state(5).ends_with("vehicle_tractor.tractor_body_dying"),
+            "{}",
+            tractor.for_state(5)
+        );
         assert!(tractor.for_state(6).ends_with("vehicle_tractor.tractor_body_dead"));
+        assert_eq!(db.vehicle_dying_time(1008), 3.3, "models.dying_time");
+        assert_eq!(db.vehicle_dying_time(129), 0.0, "the rowboat has no dying window");
 
         // the airship has only `normal`, so every state keeps it
         let airship = db.vehicle_variants(657).expect("the airship");
         assert_eq!(airship.for_state(1), airship.normal);
+        assert_eq!(airship.for_state(5), airship.normal);
         assert_eq!(airship.for_state(6), airship.normal);
         assert_eq!(db.vehicle_variants(139), None, "a mount is no vehicle");
     }

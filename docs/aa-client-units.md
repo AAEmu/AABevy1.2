@@ -328,10 +328,23 @@ world-prop path.
 
 The drawn body follows the unit's health. `vehicle::model_state` is `FUN_3989f8b0` (x2game.dll.c:1935601):
 `hp == 0` or `max_hp == 0` -> 6 (dead); otherwise `pct = hp * 100 / max_hp` in C integer division
-(truncating), `pct > 75` -> 1, `pct > 50` -> 2, `pct >= 26` -> 3, else 4. State 5 (dying) is never
-produced: the `dying` prefab column is dead data in 1.2. Table: 100/76 -> 1, 75/51 -> 2, 50/26 -> 3,
-25/0 % -> 4, hp 0 -> 6 (`examples/vehicle_damage` checks 5/50/75 with the truncation).
+(truncating), `pct > 75` -> 1, `pct > 50` -> 2, `pct >= 26` -> 3, else 4. Table: 100/76 -> 1, 75/51 -> 2,
+50/26 -> 3, 25/0 % -> 4, hp 0 -> 6 (`examples/vehicle_damage` checks 5/50/75 with the truncation). That
+poller never returns 5: dying is entered by the death path below.
 
+* **Death enters dying (5).** `SCUnitDeath` (0x071) -> `FUN_391d51c0` "OnUnitDeath" (DEC 364259), directly or
+  through the death queue `FUN_39396160` -> `FUN_39369c10` (DEC 706442). That calls the model's Die slot 0x258
+  (`FUN_390eaa80`, DEC 186831), which calls slot 0x2b0 `0x390e7ad0`: it stores **5** at `0x390e7af1`, sets the
+  dying start `+0x274`, logs "try switching to dying" and calls `FUN_390e7910(5,1)`. If that fails it goes
+  straight to 6 (`FUN_390eaa80`). A unit created or re-modelled with `hp == 0` also calls Die
+  (`FUN_3936b000`, `FUN_39364db0`), so `prepare::plan_unit` starts it in 5 (`vehicle::initial_state`). An HP-0
+  update that arrives before the death packet may show 6 first through the poller; the later death still
+  forces 5 (`0x390e7ad0` has no state guard).
+* **Dying lasts `models.dying_time`.** `FUN_390eb610` (DEC 187379) runs `FUN_390eaac0` while the state is 5
+  instead of recomputing from HP; that compares the template's `+0x14` (`models.dying_time`) with now minus
+  `+0x274`, then clears the start, sets 6 and calls `FUN_390e7910(6,1)`. With 0 it expires on the next update
+  (one tick). `VehicleDamage::dying_start` / `dying_time` hold the same two values; the port starts the
+  window on the death update and does not recompute the state from HP while it runs.
 * **Maximum HP.** The client gets no maximum on the wire: `FUN_390b4a70` (x2game.dll.c:149223) reads
   unit attribute 6 through `FUN_398a0bc0`: the `unit_formulas` base of the attribute, plus the flat
   `unit_modifiers` (`owner_type='Slave'`, `unit_attribute_id=6`), then one summed percent multiplier on
@@ -343,27 +356,42 @@ produced: the `dying` prefab column is dead data in 1.2. Table: 100/76 -> 1, 75/
   wire `max_hp` and `SCMySlave.max_hp` are not used (all 104 Slave attribute-6 rows are flat today).
   The maximum is cached in `VehicleDamage::max_hp` at spawn, so the per-frame check locks no database.
 * **Variant.** `FUN_397a7810` / `FUN_397a7980` walk down from the state to 1 and take the first non-empty
-  `vehicle_models` / `ship_models` row: state 2 `damaged25`, 3 `damaged50`, 4 `damaged75`, 6 `dead`,
-  else `normal` (`VehicleVariants::for_state`). A slave that comes into view already damaged is built in
-  its state's prefab at once (`FUN_390e8b30` / `FUN_390f0510` -> `prepare::plan_unit`). The rowboat
-  (129) has distinct `damege50` / `damege75` / `dead` hulls; the airship has only `normal`.
+  `vehicle_models` / `ship_models` row: state 2 `damaged25`, 3 `damaged50`, 4 `damaged75`, 5 `dying`
+  (`vehicle_models` only; `ship_models` has no such column), 6 `dead`, else `normal`
+  (`VehicleVariants::for_state`). The per-type selectors at `0x397a71d0` / `0x397a72a0` read the dying field
+  for state 5, and the generic loop lets 6 fall through 5 as well. A slave that comes into view already
+  damaged is built in its state's prefab at once (`FUN_390e8b30` / `FUN_390f0510` ->
+  `prepare::plan_unit`). The rowboat (129) has distinct `damege50` / `damege75` / `dead` hulls; the
+  airship has only `normal`; the Farm Wagon (1008) has `dying` for 3.3 s.
 * **Swap.** `vehicle::update_damage` runs after `units::sync_views`: `FUN_390eb610` (`UpdateModelChange`)
-  recomputes the state from the cached maximum and `FUN_390e7b20` stores it. The new variant's models are
-  read on the workers (`VehicleSwaps`, like `prepare::plan_unit`); `vehicle::finish_damage_swaps` then
-  despawns the old parts/wheels/effects and installs the new parts and `$` helpers, and drops the stale
-  `Spindle` and `TurretGun` caches. The old body therefore stays visible while the new prefab is read, and
-  a failed read keeps it instead of leaving an empty vehicle. A state change that keeps the same prefab
-  only updates the state (`FUN_390e7910`'s "same model" return). `SCMySlave.max_hp` does not take part.
+  recomputes the state from the cached maximum (outside dying) and `FUN_390e7b20` stores it. The new
+  variant's models are read on the workers (`VehicleSwaps`, like `prepare::plan_unit`);
+  `vehicle::finish_damage_swaps` then despawns the old parts/wheels/effects and installs the new parts and
+  `$` helpers, and drops the stale `Spindle` and `TurretGun` caches. The old body therefore stays visible
+  while the new prefab is read, and a failed read keeps it instead of leaving an empty vehicle. A state
+  change that keeps the same prefab only updates the state (`FUN_390e7910`'s "same model" return); that
+  early path (and a missing `vehicle_look` / `vehicle_variants`) still ends the dying window when the new
+  state is not 5, so a model without a `dead` / `dying` row can leave 6 again. `SCMySlave.max_hp` does not
+  take part.
 * **Effects.** The new prefab's active `ParticleEffect` entities are spawned with it (damaged fire,
-  dead smoke). On a worsening state (`old < new`, also 1 -> 6) the prefab's `_spawn_effect*` entities
-  are played once (`FUN_39109120`, x2game.dll.c:206810). `_despawn_effect` has no traced caller and is
-  left out. The spawn-time filter is exactly `FUN_390eaf40`'s lists: type-5 particles named `exhaust`
-  (the +0x2c0 list), `splash_l` / `splash_r` (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the
-  ship's speed and angular velocity, which this slice does not draw. A sweep of the 89 `normal` vehicle /
-  ship prefabs found 116 `ParticleEffect` objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7
-  inactive `splash_l` + 7 `splash_r`, 10 inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2
-  active `_spawn` + 2 active named particles (`caravel_cruise_pool`, `airship_smoke`); only the exact
-  speed-driven names are filtered, the other active authored emitters stay.
+  dead smoke, the dying prefab's own emitters). The `_spawn_effect*` entities are played once
+  (`FUN_39109120`, x2game.dll.c:206810) when the state worsens (`old < new`, also 1 -> 6), and on every
+  entry to dying: `FUN_390e7910(5,1)` passes 1, so the 6 -> 5 route of an HP-0 update followed by the
+  death packet plays the dying prefab's effects too. The dead prefab's one-shots are not replayed on the
+  following 5 -> 6 when the poller already showed 6 for this death. `_despawn_effect` has no traced caller
+  and is left out. The spawn-time filter is exactly
+  `FUN_390eaf40`'s lists: type-5 particles named `exhaust` (the +0x2c0 list), `splash_l` / `splash_r`
+  (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the ship's speed and angular velocity, which
+  this slice does not draw. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
+  objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
+  inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2 active `_spawn` + 2 active named
+  particles (`caravel_cruise_pool`, `airship_smoke`); only the exact speed-driven names are filtered, the
+  other active authored emitters stay.
+* **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
+  (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
+  brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying
+  body is drawn. The prefab's own `Animation="dead_01"` attribute is not selected by the part reader; the
+  `.cdf` is spawned with its default pose, which is the remaining approximation of the dying look.
 * **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
   their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule accepts that (the mesh is
   still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). A sweep of every
@@ -373,11 +401,10 @@ produced: the `dying` prefab column is dead data in 1.2. Table: 100/76 -> 1, 75/
   motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle gate at
   states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
 
-Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the dying state
-(5), the ship deck floor of a dead hull (the deck still uses `ship_models.normal`), and the engine
-sound (`FUN_390c6780`, needed only once the idle branch lands). Combat effects anchored to a body bone
-(`super::attachments`) go away with the old parts on a swap; re-anchoring them by bone name is not
-implemented.
+Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
+of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed
+only once the idle branch lands). Combat effects anchored to a body bone (`super::attachments`) go away
+with the old parts on a swap; re-anchoring them by bone name is not implemented.
 
 ### Vehicle and creature seats
 
