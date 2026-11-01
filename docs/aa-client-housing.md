@@ -61,8 +61,10 @@ Using a design item does not cast: `placement::start` reads the `SkillPressed` o
 The end of a world load or instance load (`FUN_39426520`, including `SCLoadInstance`) arms the 30 s placement lock
 (`FUN_393a6de0`, `_DAT_39ac7748` = 30000 ms; teleport.rs raises `WorldLoadFinished` then): using a design item during
 it shows `CANNOT_LOCATE_DOODAD_NOW` with the seconds left (the recapture2 "22 second(s)") and does not start the
-builder. The house builder reads the same `plant::PlantLock` as the seed builder, so the two can never disagree;
-upstream's `plant::lock_on_arrival` still arms it on `Event::Teleported` until the separate farm-plant PR lands.
+builder. The house builder reads the same `plant::PlantLock` as the seed builder, so the two can never disagree. It arms
+only at the end of a world or instance load (`WorldLoadFinished` / `OnEnter(InGame)`), not on a short
+`SCTeleportUnit` (`FUN_39426520` is the only caller of `FUN_393a6de0`); planting keeps its separate 2 s
+post-send cooldown (`0x163`).
 
 A right click goes back a step (Rotate -> Position, Position -> end), Escape ends it. `BUILDER_STEP` (`0x224`) is raised
 on every step, `BUILDER_END` (`0x225`) when it ends (the build window closes with it).

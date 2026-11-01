@@ -28,8 +28,9 @@
 //!   `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA`, also when the centre is outside every polygon);
 //! * every 4 m cell of the `n x n` footprint (`n = int((2r + 3) / 4)`, `r` the garden radius) lies inside one housing
 //!   polygon (`HOUSE_CANNOT_LOCATE_INVALID_AREA`);
-//! * the footprint does not overlap another house's snapped axis-aligned footprint (`HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE`)
-//!   or a unit/doodad standing in it (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`);
+//! * no 4 m footprint cell's centre lies in another house's snapped axis-aligned footprint: the placement-mode cell
+//!   query answers `HOUSE_CANNOT_LOCATE_INVALID_AREA` first (recapture2), before the 0x71 house-overlap test;
+//! * the footprint contains no unit or doodad (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`);
 //! * the terrain under the footprint changes by at most 6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`).
 //!
 //! The account's other houses do not break the group's rules (`houseless`:
@@ -172,12 +173,12 @@ pub enum BuilderSignal {
 }
 
 /// The 30 s placement lock is the farm's [`PlantLock`] (`FUN_393a6de0`); both read one timer, so
-/// a house and a seed can never disagree. This module arms it only on the world-load points;
-/// upstream's `plant::lock_on_arrival` still arms the shared lock on `Event::Teleported`, which the
-/// separate farm-plant PR fixes.
+/// a house and a seed can never disagree. It is armed at the end of a world load (`WorldLoadFinished`,
+/// also on `OnEnter(InGame)`); a short `SCTeleportUnit` does not reach `FUN_39426520` and does not lock.
 pub(crate) use crate::ingame::ground_target::plant::PlantLock;
 
-/// Arms the placement lock when the game screen starts (`FUN_39426520`'s end-of-load point).
+/// Arms the placement lock when the game screen starts (`FUN_39426520`'s end-of-load point). The
+/// `Teleport` guard keeps test/example harnesses that start in-game from locking, as the plant's does.
 pub fn arm_on_entry(mut lock: ResMut<PlantLock>, time: Res<Time>) {
     lock.hold(f64::from(time.elapsed_secs()));
 }
@@ -344,17 +345,17 @@ pub fn check(
         // a centre outside every polygon, or one whose group has no row for the design's
         // category, is 0x244 ("Building doesn't fit in this area."). Unrestricted designs skip
         // this check (the client and the server both do).
-            return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
-        }
+        return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
+    }
     if let Some((_, group)) = allowed {
         if group.houseless && !around.own_categories.is_empty() {
-        return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
-    }
+            return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
+        }
         if group.existing_category_id != 0
             && around.own_categories.contains(&group.existing_category_id)
         {
-        return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
-    }
+            return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
+        }
     }
     let lower = site.pos - Vec2::splat(half);
     let upper = site.pos + Vec2::splat(half);
@@ -373,21 +374,21 @@ pub fn check(
             .iter()
             .filter(|land| land.overlaps_box(lower, upper))
             .collect();
-    for cy in 0..n {
-        for cx in 0..n {
-            let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
+        for cy in 0..n {
+            for cx in 0..n {
+                let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
                 let cell = [
                     corner,
                     corner + Vec2::X * CELL,
                     corner + Vec2::Y * CELL,
                     corner + Vec2::splat(CELL),
                 ];
-            let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
-                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-            };
-            if cell[1..].iter().any(|p| !area.contains(*p)) {
-                return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-            }
+                let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                };
+                if cell[1..].iter().any(|p| !area.contains(*p)) {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                }
                 // `FUN_39333e20`'s cell callback asks the housing manager whether the cell can be
                 // built on; a house already standing there is not buildable, and the client
                 // answers 0x70 (recapture2), before the 0x71 house-overlap test.
@@ -399,8 +400,8 @@ pub fn check(
                         && centre.y < c.y + h
                 }) {
                     return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
-        }
-    }
+                }
+            }
         }
     }
     if around
