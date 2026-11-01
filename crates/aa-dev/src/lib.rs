@@ -18,9 +18,10 @@
 //! * `--allow-lua-error <text>`  (repeatable) a Lua error whose message contains the text is not counted, see [`capture`]
 //! * `--require-wall-clock`  exit non-zero when game time does not run at wall rate (a comparison run; see [`clock`])
 //!
-//! FPS, frame time and the app clock are logged every 2 s (`aa-dev: fps=… frame_ms=… clock=… game_per_wall=…`) so
-//! performance can be compared from the console and a timing run can prove (or divide by) its time base. With `--shot`
-//! or `--exit-after` the app also runs uncapped when the window is unfocused. Typical check:
+//! FPS, frame time and the app clock are logged every 2 s
+//! (`aa-dev: fps=… frame_ms=… clock=… game_per_wall=… real_per_wall=…`) so performance can be compared from the
+//! console and a timing run can prove (or divide by) its time base. With `--shot`, `--exit-after` or
+//! `--require-wall-clock` the app also runs uncapped when the window is unfocused. Typical check:
 //!
 //! ```text
 //! cargo run -p aa-ui --example login -- --shot shots/aa-ui/login.png
@@ -210,9 +211,14 @@ impl Plugin for DevPlugin {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
         let args = DevArgs::from_env();
-        if !args.headless && (args.shot.is_some() || args.exit_after.is_some() || args.record.is_some()) {
+        if !args.headless
+            && (args.shot.is_some()
+                || args.exit_after.is_some()
+                || args.record.is_some()
+                || args.require_wall_clock)
+        {
             // Unattended runs usually have no focus; don't let Bevy cap them at 60 Hz, or the
-            // logged FPS is meaningless.
+            // logged FPS is meaningless (and a comparison run must not be throttled).
             app.insert_resource(WinitSettings::continuous());
         }
         let require_wall_clock = args.require_wall_clock;
@@ -252,9 +258,10 @@ fn log_fps(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
     info!(
-        "aa-dev: fps={fps:.1} frame_ms={ms:.2} clock={} game_per_wall={:.3}",
+        "aa-dev: fps={fps:.1} frame_ms={ms:.2} clock={} game_per_wall={:.3} real_per_wall={:.3}",
         audit.mode_name(),
-        audit.ratio()
+        audit.ratio(),
+        audit.real_ratio()
     );
 }
 

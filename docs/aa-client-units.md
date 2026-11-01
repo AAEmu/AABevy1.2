@@ -794,8 +794,8 @@ rendered path is broken:
 `cargo run -p aa-client --example remote_vehicle_motion -- --headless`.
 
 The replay uses a deterministic fixed step (`TimeUpdateStrategy::ManualDuration(1/60)`, game time);
-its `aa-dev: … clock=manual game_per_wall=…` line records the wall ratio. The checks are game-time
-durations and must not be read as wall-clock timings.
+its `aa-dev: … clock=manual game_per_wall=… real_per_wall=…` line records the wall ratios. The checks
+are game-time durations and must not be read as wall-clock timings.
 
 ## What is drawn (the census)
 

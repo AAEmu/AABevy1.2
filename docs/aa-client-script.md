@@ -20,14 +20,15 @@ echo $?          # 0 = PASS, 1 = a command, expect or problem failed, 2 = the sc
 | `--headless-fps N` | Loop rate (default 30). |
 | `--offscreen-shot out.png` | Headless **with** the GPU: every camera that would draw into the window draws into an `Image` of the window size; the image is saved after `--shot-after` s (default 5). Without `--script` the process then exits; with a script, `shot <file>` takes more. |
 | `--allow-lua-error TEXT` | Repeatable. A Lua error whose message contains TEXT is not a failure (known harmless ones, see below). |
-| `--require-wall-clock` | Comparison runs: exit non-zero when game time does not advance at wall rate (see `aa-dev.md`, Clock). |
+| `--require-wall-clock` | Comparison runs: after a 1 s warm-up, exit non-zero on any frame where the app clock is not the wall clock (a manual step, a scaled or paused virtual clock) or where game time runs faster than wall time, and judge the final ratio again at exit (see `aa-dev.md`, Clock). |
 
 `--shot` (a window screenshot) is not available with `--headless`.
 
 `wait`, `hold`, the command deadlines and the combat visuals all read the app clock (`Time`). It is wall time unless a
 fixed step was installed (`--record`, a deterministic replay): a comparison script must pass `--require-wall-clock`
 so a `ManualDuration(1/60)` run at a faster loop cannot report inflated seconds (the 2026-10-26 combat side-by-side
-did, 1.56x).
+did: `--headless-fps 120` with `--feel-fps 60`, recorded in 561ebd1b as 1.562x). The check is per frame, not a
+one-second sample, so a clock installed after login (the old `feel START` step) is also caught.
 
 ## Failures (exit code 1)
 

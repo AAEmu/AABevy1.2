@@ -23,7 +23,8 @@
 //!
 //! This is a fixed-step mode: its game time is the frame step, not the wall clock. The final log line reports the measured
 //! `game/wall` ratio (also in the 2 s `aa-dev: … game_per_wall=…` line); divide any timestamp taken from a recorded run by
-//! it before claiming a wall duration, or do not use `--record` for a timing comparison (`--require-wall-clock`).
+//! it before claiming a wall duration, or do not use `--record` for a timing comparison (`--require-wall-clock` fails at
+//! once, because `ManualDuration` is not the wall clock).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -120,10 +121,11 @@ fn capture(
     if total.is_some_and(|n| rec.frames >= n) {
         if !rec.busy() {
             info!(
-                "aa-dev: recorded {} frames in {dir} (clock={} game/wall {:.3})",
+                "aa-dev: recorded {} frames in {dir} (clock={} game/wall {:.3} real/wall {:.3})",
                 rec.frames,
                 audit.mode_name(),
-                audit.ratio()
+                audit.ratio(),
+                audit.real_ratio()
             );
             exit.write(AppExit::Success);
         }

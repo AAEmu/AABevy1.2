@@ -263,9 +263,10 @@ fn replay(rows: &[Row], feed: f64, until: f64, rendered: bool) -> Vec<(f64, Vec3
     }
     let audit = app.world().resource::<aa_dev::ClockAudit>();
     info!(
-        "remote_vehicle_motion: replay fixed {:.0} Hz game step, game/wall {:.3} (game time, not wall time)",
+        "remote_vehicle_motion: replay fixed {:.0} Hz game step, game/wall {:.3} real/wall {:.3} (game time, not wall time)",
         1.0 / FRAME,
-        audit.ratio()
+        audit.ratio(),
+        audit.real_ratio()
     );
     drawn
 }

@@ -16,6 +16,9 @@ Usage:
 No game files or live server are needed. Exit code 1 means the capture is malformed or
 contradicts the packet layout; timing/direction differences are reported, not failures,
 because the native fall is still unverified.
+
+Exempt from --require-wall-clock: this tool launches no client. It measures the capture's
+own wall-clock timestamps and compares them with the client's constants.
 """
 from __future__ import annotations
 

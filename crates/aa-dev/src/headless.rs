@@ -61,12 +61,11 @@ fn offscreen_shot(mut commands: Commands, time: Res<Time>, args: Res<DevArgs>, t
 /// Set by a script runner: `--offscreen-shot` then leaves the exit to the script.
 pub static SCRIPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-#[allow(clippy::unnecessary_to_owned)]
 fn take(commands: &mut Commands, target: &OffscreenTarget, path: &str) {
     if let Some(dir) = std::path::Path::new(path).parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    commands.spawn(Screenshot::image(target.0.clone())).observe(save_to_disk(path.to_string()));
+    commands.spawn(Screenshot::image(target.0.clone())).observe(save_to_disk(std::path::PathBuf::from(path)));
     info!("aa-dev: offscreen screenshot -> {path}");
 }
 

@@ -8,15 +8,16 @@ The server only reports results (`aa_net::Event`, see `docs/aa-net.md`, "Combat 
 from the 1.2 game database and the model's own animation data.
 
 > **Time base (2026-11-01, T0).** The only Bevy/1.2 combat side-by-side (2026-10-26, `tools/combat-side`) ran the Bevy
-> side on `TimeUpdateStrategy::ManualDuration(1/60)` while its headless loop delivered about 94 fps, so game time
-> advanced 1.56x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by 1.56 (the old branch's
-> report, recovered from the 2026-10-27 history bundle, reran it in real time at 1.502 s against the original's
-> 1.496 s), so that cast mismatch is an artefact.
-> "Stance exit 10.017 s vs 0.861 s" is not explained by 1.56x (6.41 s remains) and stays a real suspect. Every timing
-> below that came from that run is marked **suspect (time base)**; no raw run data is retained. The current client
+> side with `--headless-fps 120` and `--feel-fps 60`, which pins `TimeUpdateStrategy::ManualDuration(1/60)`; 561ebd1b
+> records that as game time advancing 1.562x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by
+> 1.562, so that cast mismatch was a time-base artefact (**suspect (time base)**, and the only one); no raw run data is
+> retained.
+> The "stance exit 10.017 s vs 0.861 s" is **not** a time-base artefact: the client holds `Drawn` for 10 s of game
+> time (6.41 s wall in that run), `combat.rs` / `weapons.rs` never read `CombatChanged` (only the HUD does), and the
+> native client exits the stance 0.861 s after the kill. It is an **open bug** (see Weapon draw). The current client
 > reads wall clocks for server-facing timing (`hud/cast.rs` `Instant`, `aa-net` `Instant`, `hud/cooldown.rs`
-> `Time<Real>`); a comparison run must pass `--require-wall-clock` or divide by the logged `game_per_wall` ratio
-> (`docs/aa-dev.md`, Clock).
+> `Time<Real>`); a comparison run must pass `--require-wall-clock` (judged every frame, see `docs/aa-dev.md`, Clock)
+> or divide by the logged `game_per_wall` ratio.
 
 ## How 1.2 data links a skill to its visuals
 
@@ -109,7 +110,7 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 | `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
 | `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it; a unit other than the player is also thrown away from its last attacker (`Thrown`, see Death) |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
-| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once, the unit takes its combat stance (`<weapon>_ba_combat_idle`) and turns to the target, and the server's events of that skill wait until `DRAW_LEAD` (0.6 s) after the key (`Combat::held`): the first swing starts as late as in the real client (see Weapon draw). A refused skill (not `OUTOF_ANGLE`) puts the weapon back. **suspect (time base):** the 2026-10-26 comparison's draw/plot lead rows were measured on a 1.56x clock; re-measure before relying on the 0.6 s hold |
+| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once, the unit takes its combat stance (`<weapon>_ba_combat_idle`) and turns to the target, and the server's events of that skill wait until `DRAW_LEAD` (0.6 s) after the key (`Combat::held`): the first swing starts as late as in the real client (see Weapon draw). A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
 | the player presses another skill during a cast time (`preempt_cast`) | the cast is cancelled (`CSStopCasting`, clip and held effects end) and the skill is asked for again 0.25 s later (the server answers `ON_CASTING` to it while the cast runs); the same skill again waits for its cast |
 | the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | the casts of skills with `source_not_swim` are cancelled the same way (36 skills of the data, none in the ten player trees: the other skills are cast swimming as on land, the server refuses a `source_not_swim` skill in water with `CANNOT_CAST_IN_SWIMMING`) |
 | the local player moves or jumps during a cast time (or turns, for `stop_casting_by_turn`), or moves during a `channeling_cancelable` channel (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
@@ -150,8 +151,9 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
   weapon comes out for the clip's prefix (`weapon_for_clip`: `bow_` the bow, `onehand_` / `twohand_` the main hand weapon (a two
   handed one hangs on `item_back_c` and goes to the right hand), `twoswords_` both swords, `music_` the instrument, which is hidden
-  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw). **suspect (time base):**
-  the 2026-10-26 side-by-side's 10.017 s stance exit vs 0.861 s cannot be explained by its 1.56x clock; the 10 s hold is unverified.
+  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw). **Open bug:**
+  the native client exits the stance 0.861 s after the kill, while this 10 s hold keeps the stance and the weapon out far
+  longer; the 2026-10-26 skew does not explain that (6.41 s wall remains), and `CombatChanged` is not read here.
 * **Controller and instrument clips**: a skill that has no clip of its own plays its `skill_controllers.start_anim_id` when its first
   step or fire comes (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...); a song plays `*_instrument_start_anim_id` (the cast loop) and
   `*_instrument_fire_anim_id` of the instrument held, else the skill's own clips.
@@ -184,8 +186,10 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
-  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). **suspect (time base):**
-  the old side-by-side's 10.017 s stance exit vs 0.861 s is not explained by its 1.56x clock. The shield is on the arm only while
+  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). **Open bug:**
+  that 10 s is game time (6.41 s wall in the skewed run) and still far from the native 0.861 s stance exit; `weapons.rs` and
+  `combat.rs` never read `CombatChanged` (only the HUD does), so nothing ends the stance when the server reports the fight
+  cleared. The shield is on the arm only while
   the sword is out (the real client shows none on a character at peace: it comes onto the arm with the sword, `Grip::Shield` in
   `weapons.rs`; with the bow or an instrument out it is away too). The `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
@@ -221,10 +225,10 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
     (also dual wield), `twohand`, `music`, else `fist`. The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
     shared by the characters of a skeleton).
   * The weapon stays out 10 s after the last action with it (`Drawn::after_action`; 4 s for an instrument): a lower bound from
-    `combat_death_2`, where the shield is up at the last frame 7 s after the kill; **suspect (time base):** the 2026-10-26
-    side-by-side measured a 10.017 s stance exit against 0.861 s, which 1.56x does not explain, and this branch still does not
-    read `CombatChanged` (the server only reports "cleared"; the kill is also when the real client says "Battle End"). Then
-    `sheathe` plays the holster clip
+    `combat_death_2`, where the shield is up at the last frame 7 s after the kill; **open bug:** the 2026-10-26
+    side-by-side measured a 10.017 s stance exit against the native 0.861 s, which its 1.562x skew does not explain
+    (6.41 s wall remains), and this branch still does not read `CombatChanged` (the server only reports "cleared"; the
+    kill is also when the real client says "Battle End"). Then `sheathe` plays the holster clip
     (`onehand_ac_holster_side_l`, `twohand_ac_holster_back_r`) on a standing unit, ends the stance and moves the weapon into its
     sheath at the clip's `aw_none` event (0.43 s into the one handed clip); a unit that is running has no holster clip (the real
     `_ub` variant is 1 s long) and puts the weapon away at once; a unit that starts to run during the clip leaves it; the bow and
