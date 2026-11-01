@@ -31,6 +31,8 @@ struct Lookups {
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
+    /// `doodad_func_groups.id` -> the phase's `DoodadFuncClimb` kind (`doodad_func_climbs.climb_type_id`).
+    ladder_kinds: HashMap<u32, Option<u8>>,
     /// `(group id, sim radius in metres)` of a doodad template.
     doodad_shapes: HashMap<u32, (u32, f32)>,
     doodad_visuals: HashMap<(u32, u32), Option<String>>,
@@ -340,6 +342,7 @@ impl Lookups {
             shipyard_templates: HashMap::new(),
             doodad_models: HashMap::new(),
             doodad_phase_models: HashMap::new(),
+            ladder_kinds: HashMap::new(),
             doodad_shapes: HashMap::new(),
             doodad_visuals: HashMap::new(),
             doodad_growths: HashMap::new(),
@@ -472,6 +475,38 @@ impl Db {
             game: Arc::new(Mutex::new(game)),
             lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// A catalog with one climb phase (`doodad_func_group_id` -> kind) so the ladder
+    /// flow tests do not need the game database.
+    #[cfg(test)]
+    pub(crate) fn ladder_fixture(func_group_id: u32, kind: u8) -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-ladder-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).ok()?;
+        conn.execute_batch(
+            "CREATE TABLE doodad_funcs(id INTEGER PRIMARY KEY, doodad_func_group_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
+             CREATE TABLE doodad_func_climbs(id INTEGER PRIMARY KEY, climb_type_id INTEGER);",
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_func_climbs VALUES(1, ?1)",
+            params![kind],
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_funcs VALUES(1, ?1, 'DoodadFuncClimb', 1)",
+            params![func_group_id],
+        )
+        .ok()?;
+        drop(conn);
+        Db::open_path(path.to_str()?)
     }
 
     /// The ship catalog with a synthetic floor already cached (the tests that
@@ -1417,6 +1452,29 @@ impl Db {
         let shape = shape_of(&l.conn, template_id);
         l.doodad_shapes.insert(template_id, shape);
         shape
+    }
+
+    /// The climb kind of a doodad phase: a `DoodadFuncClimb` row of the phase's func group and its
+    /// `doodad_func_climbs.climb_type_id` (1/6 ladder, 2 rope, 3 wood, 4 net, 5 hanging rope,
+    /// 7 mast, 8 guardrail, 9 45-degree ladder, 10 big tree; `FUN_39132be0`). `None` when the phase
+    /// is not climbable.
+    pub fn ladder_kind(&self, func_group_id: u32) -> Option<u8> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(kind) = l.ladder_kinds.get(&func_group_id) {
+            return *kind;
+        }
+        let kind: Option<u8> = l
+            .conn
+            .query_row(
+                "SELECT c.climb_type_id FROM doodad_funcs f JOIN doodad_func_climbs c ON c.id = f.actual_func_id                  WHERE f.doodad_func_group_id = ?1 AND f.actual_func_type = 'DoodadFuncClimb' ORDER BY f.id LIMIT 1",
+                params![func_group_id],
+                |r| Ok(r.get::<_, Option<i64>>(0)?.unwrap_or(0)),
+            )
+            .ok()
+            .and_then(|kind| u8::try_from(kind).ok())
+            .filter(|kind| *kind != 0);
+        l.ladder_kinds.insert(func_group_id, kind);
+        kind
     }
 
     /// How a phase grows (`doodad_phase_funcs` -> `doodad_func_growths`), `None` when it does not.

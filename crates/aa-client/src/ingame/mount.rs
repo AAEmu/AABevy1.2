@@ -1571,7 +1571,7 @@ pub fn drive_mount(
     if let Some(mut motion) = motion {
         let speed = mover.velocity.truncate().length();
         let moving = speed > 0.3;
-        *motion = Motion { speed: if moving { speed } else { 0.0 }, local_dir: if moving { Vec2::Y } else { Vec2::ZERO }, airborne: false };
+        *motion = Motion { speed: if moving { speed } else { 0.0 }, local_dir: if moving { Vec2::Y } else { Vec2::ZERO }, airborne: false, climb: None };
     }
 }
 

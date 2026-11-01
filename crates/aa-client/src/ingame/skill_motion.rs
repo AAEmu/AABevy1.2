@@ -783,7 +783,7 @@ pub(super) fn drive_local(
         }
         *transform = placement(mover.pos, mover.facing, 1.0);
         lag.push(mover.pos - before);
-        *motion = Motion { speed: 0.0, local_dir: Vec2::ZERO, airborne: step.airborne && mv.flight.lift() > 0.4 };
+        *motion = Motion { speed: 0.0, local_dir: Vec2::ZERO, airborne: step.airborne && mv.flight.lift() > 0.4, climb: None };
         mv.sent += dt;
         let ending = step.done;
         if mv.sent >= SEND_INTERVAL || ending || mv.flight.eta == 0.0 {

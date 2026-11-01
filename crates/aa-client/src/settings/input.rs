@@ -53,6 +53,29 @@ impl Actions {
         self.tapped.iter().map(|a| (a.name.as_str(), a.index, a.button))
     }
 
+    /// A scripted tap (examples and flow tests): the action is held this frame and reported once
+    /// by [`Actions::just_pressed`].
+    pub fn script_tap(&mut self, action: &str) {
+        let action = Action { name: action.into(), index: 0, button: false };
+        self.pressed.insert(action.clone());
+        self.tapped.push(action);
+    }
+
+    /// A scripted hold (no tap).
+    pub fn script_hold(&mut self, action: &str) {
+        self.pressed.insert(Action { name: action.into(), index: 0, button: false });
+    }
+
+    /// Releases a scripted hold.
+    pub fn script_release(&mut self, action: &str) {
+        self.pressed.remove(&Action { name: action.into(), index: 0, button: false });
+    }
+
+    /// Clears the one-frame taps after a scripted frame (the input system does this in the app).
+    pub fn script_clear_taps(&mut self) {
+        self.tapped.clear();
+    }
+
     /// A tap of `action` as if its key had just gone down (flow tests of the systems that read it).
     #[cfg(test)]
     pub(crate) fn tap_for_test(&mut self, action: &str) {

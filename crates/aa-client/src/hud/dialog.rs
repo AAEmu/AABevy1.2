@@ -685,7 +685,10 @@ pub fn talk_input(
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut pressed_at: Local<Option<Vec2>>,
-    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
+    (teleport, ladder_claim): (
+        Option<Res<crate::ingame::teleport::Teleport>>,
+        Option<Res<crate::ingame::ladder::LadderClaim>>,
+    ),
     suspended: Res<super::HudSuspended>,
 ) {
     let Some(rt) = rt else { return };
@@ -767,10 +770,13 @@ pub fn talk_input(
     }
     // a right click on a slave (cart, ship ...) sends the 1.2 interaction request (0x02c + 0x068,
     // never 0x031); the interact key (F) sends nothing for a slave and keeps the NPC talk path
+    let ladder_owns_key = ladder_claim
+        .as_deref()
+        .is_some_and(|claim| claim.0.is_some());
     let interact_key = !scripted_talk
         && pressed("do_interaction_1", 0, 'f')
         && d.loot.nearest.is_none()
-        && (scripted_key == Some('f') || !d.doodad.claims_key());
+        && (scripted_key == Some('f') || (!d.doodad.claims_key() && !ladder_owns_key));
     if let Some(obj_id) = super::slave::action_target(&units, picked) {
         super::slave::interact(&mut d, &units, target.obj_id, obj_id);
         if scripted_pick == Some(obj_id) {
