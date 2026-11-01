@@ -18,9 +18,10 @@ the process) and samples the client itself, never the server's replies:
 * ``inputs``          every driver key press with client-clock stamps.
 
 Every row carries ``client_ms`` from a client clock (``X2Time:GetUiMsec`` for UI
-rows, ``System.GetCurrTime`` for system rows, and the last synced offset for
-ReadProcessMemory samples) and a ``wall_ms`` recorder stamp.  See README.md in
-this directory for the row schema and the decompile citations for the GCD pair.
+rows, ``System.GetCurrTime`` for system rows, and the fitted clock model for
+ReadProcessMemory samples) and a ``wall_ms`` recorder stamp.  The first and
+last rows of the ``meta`` channel bracket the run.  See README.md in this
+directory for the row schema and the decompile citations for the GCD pair.
 
 The client is hidden before any sampling.  The tool never sends desktop input,
 never calls ``X2World:LeaveWorld``, and stops the attached client by pid unless
@@ -37,7 +38,7 @@ started the client):
         --client <client>/bin32/archeage.exe --login <login-host:port> \\
         --password-file <password-file> \\
         --character CombatT1 --character-ability 2 \\
-        --spawn-npc 6409 --npc-name "rat_brown " --fight-keys 1,1,2,1,3,2,1
+        --spawn-npc 6409 --npc-name "rat_brown " --fight-keys 1,1,2,1,3,2,1,1
 
 The account must already exist and have GM (access_level 100) in the lane's
 game database; ``prepare_account.py`` does that for a lane.  The character is
@@ -94,6 +95,37 @@ def log(*a: object) -> None:
 
 def ms_now() -> float:
     return time.time() * 1000.0
+
+
+def sleep_until(deadline: float) -> None:
+    """Sleep to a perf_counter deadline; the last ~2 ms spin past timer slop."""
+    while True:
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0.0:
+            return
+        if remaining > 0.002:
+            time.sleep(remaining - 0.001)
+        else:
+            while time.perf_counter() < deadline:
+                pass
+            return
+
+
+def read_clock(mcp: Mcp, pid: int, target: str) -> tuple[float | None, float, float, str | None]:
+    """Read one client clock inside a recorder bracket; return value and stamps."""
+    before = ms_now()
+    try:
+        if target == "system":
+            text = mcp.text("client_lua", pid=pid, target="system",
+                            code="return System.GetCurrTime()")
+            value: float | None = float(text.strip()) * 1000.0
+        else:
+            text = mcp.text("client_lua", pid=pid, target="ui",
+                            code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''")
+            value = float(text.strip()) if text.strip() else None
+        return value, before, ms_now(), None
+    except Exception as error:
+        return None, before, ms_now(), str(error)
 
 
 def clean(value: object) -> str:
@@ -168,6 +200,10 @@ class Mcp:
             self.process.kill()
 
 
+class MemoryReadError(RuntimeError):
+    """ReadProcessMemory failed: the client is gone or the pointer is stale."""
+
+
 class Mem:
     PROCESS_QUERY_INFORMATION = 0x0400
     PROCESS_VM_READ = 0x0010
@@ -191,6 +227,21 @@ class Mem:
     def u32(self, address: int) -> int:
         data = self.read(address, 4)
         return struct.unpack("<I", data)[0] if data and len(data) == 4 else 0
+
+    def read_exact(self, address: int, size: int) -> bytes:
+        data = self.read(address, size)
+        if data is None or len(data) != size:
+            raise MemoryReadError("read %d bytes at 0x%08x failed" % (size, address))
+        return data
+
+    def u32_exact(self, address: int) -> int:
+        return struct.unpack("<I", self.read_exact(address, 4))[0]
+
+    def u8_exact(self, address: int) -> int:
+        return self.read_exact(address, 1)[0]
+
+    def u32s_exact(self, address: int, count: int) -> list[int]:
+        return list(struct.unpack("<%dI" % count, self.read_exact(address, 4 * count)))
 
     def u8(self, address: int) -> int:
         data = self.read(address, 1)
@@ -231,55 +282,141 @@ class Mem:
 
 
 class Clock:
-    """Last known client wall clock beside the recorder wall clock."""
+    """Client clock model: offset and drift fitted over bracketed samples.
+
+    One sample brackets a single client clock read between two recorder stamps.
+    The read happened somewhere inside the bracket, so its wall time is the
+    midpoint and its uncertainty is half the round trip.  Each clock gets a
+    weighted least-squares line through all of its samples, weighted by
+    ``1 / rtt^2`` so the smallest round trips dominate.  Samples keep arriving
+    while the run goes on, and every row is remapped through the final fit when
+    the run ends.
+    """
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
-        self.system_offset: float | None = None
-        self.ui_offset: float | None = None
-        self.start_client_ms: float | None = None
+        self.samples: dict[str, list[tuple[float, float, float]]] = {"system": [], "ui": []}
+        self.fits: dict[str, tuple[float, float] | None] = {"system": None, "ui": None}
+        self.epoch: float | None = None
 
-    def sample(self, system_ms: float | None, ui_ms: float | None,
-               wall_ms: float) -> None:
+    def add(self, kind: str, client_ms: float, wall_before: float,
+            wall_after: float) -> None:
+        midpoint = (wall_before + wall_after) / 2.0
+        rtt = max(0.0, wall_after - wall_before)
         with self.lock:
-            if system_ms is not None:
-                self.system_offset = system_ms - wall_ms
-            if ui_ms is not None:
-                self.ui_offset = ui_ms - wall_ms
-            start = self.ui_offset if self.ui_offset is not None else self.system_offset
-            if self.start_client_ms is None and start is not None:
-                self.start_client_ms = wall_ms + start
+            self.samples[kind].append((float(client_ms), midpoint, rtt))
+            self.fits[kind] = None
+            if self.epoch is None:
+                self.epoch = midpoint
+
+    def _fit(self, kind: str) -> tuple[float, float] | None:
+        """Return (client at epoch, slope) for one clock; caller holds the lock."""
+        samples = self.samples[kind]
+        if not samples:
+            return None
+        cached = self.fits[kind]
+        if cached is not None:
+            return cached
+        epoch = self.epoch if self.epoch is not None else samples[0][1]
+        sw = swx = swy = swxx = swxy = 0.0
+        for client, midpoint, rtt in samples:
+            x = midpoint - epoch
+            weight = 1.0 / max(rtt, 0.5) ** 2
+            sw += weight
+            swx += weight * x
+            swy += weight * client
+            swxx += weight * x * x
+            swxy += weight * x * client
+        denominator = sw * swxx - swx * swx
+        slope = (sw * swxy - swx * swy) / denominator if abs(denominator) > 1e-12 else 1.0
+        fit = ((swy - slope * swx) / sw, slope)
+        self.fits[kind] = fit
+        return fit
+
+    def _best(self) -> tuple[tuple[float, float] | None, float | None]:
+        return (self._fit("ui") or self._fit("system"),
+                self.epoch)
 
     def estimate(self, wall_ms: float | None = None) -> int:
         wall = ms_now() if wall_ms is None else wall_ms
         with self.lock:
-            offset = self.ui_offset if self.ui_offset is not None else self.system_offset
-        return int(round(wall + (offset or 0.0)))
+            fit, epoch = self._best()
+        if fit is None or epoch is None:
+            return int(round(wall))
+        return int(round(fit[0] + fit[1] * (wall - epoch)))
 
     def wall_for_ui(self, ui_ms: float) -> float:
         with self.lock:
-            offset = self.ui_offset
-        return float(ui_ms) - (offset or 0.0)
+            fit, epoch = self._best()
+        if fit is None or epoch is None or abs(fit[1]) < 1e-6:
+            return float(ui_ms)
+        return epoch + (float(ui_ms) - fit[0]) / fit[1]
 
     def wall_for_system(self, system_ms: float) -> float:
         with self.lock:
-            offset = self.system_offset
-        return float(system_ms) - (offset or 0.0)
+            fit, epoch = self._fit("system"), self.epoch
+        if fit is None or epoch is None or abs(fit[1]) < 1e-6:
+            return float(system_ms)
+        return epoch + (float(system_ms) - fit[0]) / fit[1]
 
     def ui_for_system(self, system_ms: float) -> int:
         with self.lock:
-            system = self.system_offset
-            ui = self.ui_offset
-        if system is None or ui is None:
-            return int(round(system_ms))
-        return int(round(system_ms + (ui - system)))
+            system_fit = self._fit("system")
+            ui_fit = self._fit("ui")
+            epoch = self.epoch
+        if system_fit is None or ui_fit is None or epoch is None or abs(system_fit[1]) < 1e-6:
+            return int(round(float(system_ms)))
+        wall = epoch + (float(system_ms) - system_fit[0]) / system_fit[1]
+        return int(round(ui_fit[0] + ui_fit[1] * (wall - epoch)))
+
+    @property
+    def start_client_ms(self) -> float | None:
+        with self.lock:
+            fit, epoch = self._best()
+        if fit is None or epoch is None:
+            return None
+        return float(fit[0])
 
     def relative(self, client_ms: float | int | None) -> int | None:
-        with self.lock:
-            start = self.start_client_ms
+        start = self.start_client_ms
         if client_ms is None or start is None:
             return None
         return int(round(float(client_ms) - start))
+
+    def report(self) -> dict:
+        with self.lock:
+            epoch = self.epoch
+            start = self._best()[0]
+            out: dict[str, object] = {
+                "epoch_wall_ms": round(epoch, 1) if epoch is not None else None,
+                "start_client_ms": round(start[0], 1) if start is not None else None,
+            }
+            for kind in ("system", "ui"):
+                fit = self._fit(kind)
+                samples = list(self.samples[kind])
+                if fit is None or epoch is None:
+                    out[kind] = None
+                    continue
+                residuals = [client - (fit[0] + fit[1] * (mid - epoch))
+                             for client, mid, _ in samples]
+                absolute = sorted(abs(value) for value in residuals)
+                rtts = sorted(rtt for _, _, rtt in samples)
+                best_index = min(range(len(samples)), key=lambda i: samples[i][2])
+                out[kind] = {
+                    "samples": len(samples),
+                    "offset_ms": round(fit[0] - epoch, 3),
+                    "drift_ppm": round((fit[1] - 1.0) * 1e6, 2),
+                    "residual_min_ms": round(absolute[0], 3),
+                    "residual_median_ms": round(absolute[len(absolute) // 2], 3),
+                    "residual_max_ms": round(absolute[-1], 3),
+                    "residual_rms_ms": round(math.sqrt(sum(v * v for v in residuals) / len(residuals)), 3),
+                    "rtt_min_ms": round(rtts[0], 3),
+                    "rtt_median_ms": round(rtts[len(rtts) // 2], 3),
+                    "rtt_max_ms": round(rtts[-1], 3),
+                    "best_sample_residual_ms": round(residuals[best_index], 3),
+                    "best_sample_rtt_ms": round(samples[best_index][2], 3),
+                }
+        return out
 
 
 class ChannelWriter:
@@ -357,27 +494,42 @@ class ClockSync(threading.Thread):
 
     def run(self) -> None:
         while not self.stop_event.is_set():
-            wall = ms_now()
+            before = ms_now()
             system = ui = None
+            system_error = ui_error = None
+            system_rtt = ui_rtt = None
             try:
                 text = self.mcp.text("client_lua", pid=self.pid, target="system",
                                      code="return System.GetCurrTime()")
+                after = ms_now()
                 system = float(text.strip()) * 1000.0
+                self.clock.add("system", system, before, after)
+                system_rtt = after - before
             except Exception as error:
-                self.writer.write("clock_sync", wall_ms=wall, clock_source="external",
-                                  system_ms=None, ui_ms=None, error=str(error))
-                self.stop_event.wait(self.interval)
-                continue
+                after = ms_now()
+                system_error = str(error)
+            ui_before = ms_now()
             try:
                 text = self.mcp.text("client_lua", pid=self.pid, target="ui",
                                      code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''")
+                ui_after = ms_now()
                 ui = float(text.strip()) if text.strip() else None
-            except Exception:
-                ui = None
-            self.clock.sample(system, ui, wall)
+                if ui is not None:
+                    self.clock.add("ui", ui, ui_before, ui_after)
+                ui_rtt = ui_after - ui_before
+            except Exception as error:
+                ui_after = ms_now()
+                ui_error = str(error)
+            wall = ((ui_before + ui_after) / 2.0 if ui is not None
+                    else (before + after) / 2.0)
             self.writer.write("clock_sync", wall_ms=wall, clock_source="external",
                               system_ms=round(system, 1) if system is not None else None,
-                              ui_ms=round(ui, 1) if ui is not None else None)
+                              ui_ms=round(ui, 1) if ui is not None else None,
+                              system_rtt_ms=round(system_rtt, 3) if system_rtt is not None else None,
+                              ui_rtt_ms=round(ui_rtt, 3) if ui_rtt is not None else None,
+                              system_error=system_error, ui_error=ui_error)
+            if system is None and ui is None:
+                log("clock sync failed:", system_error or ui_error)
             self.stop_event.wait(self.interval)
 
     def stop(self) -> None:
@@ -389,10 +541,10 @@ def lua_timer(name: str, interval_ms: int, sample: str) -> str:
     return r"""
 _G.CS = _G.CS or {}
 local key = %s
-_G.CS[key..'_rows'] = {}
+_G.CS[key..'_rows'] = _G.CS[key..'_rows'] or {}
 _G.CS[key..'_stop'] = false
 local function tick()
-  if _G.CS[key..'_stop'] then return end
+  if _G.CS == nil or _G.CS[key..'_stop'] or _G.CS[key..'_rows'] == nil then return end
   local ok, row = pcall(function()
 %s
   end)
@@ -407,18 +559,22 @@ return 'installed'
 """ % (json.dumps(name), sample, interval_ms, interval_ms)
 
 
-def fetch_rows(mcp: Mcp, pid: int, target: str, name: str) -> list[str]:
-    table = "_G.CS[%s..'_rows']" % json.dumps(name)
-    total = int(mcp.text("client_lua", pid=pid, target=target,
-                         code="return #%s" % table).strip() or 0)
-    rows: list[str] = []
-    for start in range(1, total + 1, 400):
-        end = min(total, start + 399)
-        text = mcp.text("client_lua", pid=pid, target=target,
-                        code="return table.concat(%s, '\\n', %d, %d)" % (table, start, end))
-        if text:
-            rows.extend(text.splitlines())
-    return rows
+def take_rows(mcp: Mcp, pid: int, target: str, name: str) -> list[str]:
+    """Atomically swap out one Lua timer buffer, so a flush loses nothing."""
+    code = ("local c=_G.CS if not c then return '' end "
+            "local t=c[%s..'_rows'] if not t then return '' end "
+            "c[%s..'_rows']={} return table.concat(t,'\\n')"
+            % (json.dumps(name), json.dumps(name)))
+    text = mcp.text("client_lua", pid=pid, target=target, code=code)
+    return text.splitlines() if text else []
+
+
+def take_chat(mcp: Mcp, pid: int) -> list[str]:
+    code = ("local o=_G.__combat_recorder if not o then return '' end "
+            "local t=o.chat if not t then return '' end o.chat={} "
+            "return table.concat(t,'\\n')")
+    text = mcp.text("client_lua", pid=pid, target="ui", code=code)
+    return text.splitlines() if text else []
 
 
 def stop_timer(mcp: Mcp, pid: int, target: str, name: str) -> None:
@@ -493,12 +649,33 @@ local function get(fn, unit)
   if ok then return v end
   return nil
 end
+local function flat(v)
+  if type(v) == 'table' then
+    local parts = {}
+    for _, key in ipairs({'x', 'y', 'z'}) do
+      if v[key] ~= nil then parts[#parts + 1] = tostring(v[key]) end
+    end
+    if #parts > 0 then return table.concat(parts, ',') end
+    for _, w in ipairs(v) do parts[#parts + 1] = tostring(w) end
+    return table.concat(parts, ',')
+  end
+  return tostring(v)
+end
+local function origin()
+  local ok, a, b, c = pcall(function() return X2Util:GetSeamlessOrigin() end)
+  if not ok or a == nil then return '' end
+  local parts = { flat(a) }
+  if b ~= nil then parts[#parts + 1] = flat(b) end
+  if c ~= nil then parts[#parts + 1] = flat(c) end
+  return q(table.concat(parts, ';'))
+end
 return table.concat({
   q(now), pn, pt, pc, pd, tn, tt, tc, td,
   q(get(X2Unit.UnitHealth, 'player')), q(get(X2Unit.UnitMaxHealth, 'player')),
   q(get(X2Unit.UnitMana, 'player')), q(get(X2Unit.UnitMaxMana, 'player')),
   q(get(X2Unit.UnitHealth, 'target')), q(get(X2Unit.UnitMaxHealth, 'target')),
   q(get(X2Unit.UnitIsDead, 'player')), q(get(X2Unit.UnitCombatState, 'player')),
+  origin(),
 }, '|')
 """
 
@@ -570,6 +747,7 @@ end
 if type(X2Chat) == 'table' and type(X2Chat.DispatchChatMessage) == 'function' then
   if not o.method_hooked then
     local original = X2Chat.DispatchChatMessage
+    o.chat_original = original
     X2Chat.DispatchChatMessage = function(self, ...)
       add('X2Chat.DispatchChatMessage', ...)
       return original(self, ...)
@@ -577,10 +755,12 @@ if type(X2Chat) == 'table' and type(X2Chat.DispatchChatMessage) == 'function' th
     o.method_hooked = true
   end
 end
+o.globals_original = o.globals_original or {}
 for _, name in ipairs({'AddMsgToChatWin', 'AddMessageToSysMsgWindow',
                        'OnCreateChatMessage', 'AddMessageTo', 'ShowEffectMsgMessage'}) do
   if not o['global_' .. name] and type(_G[name]) == 'function' then
     local original = _G[name]
+    o.globals_original[name] = original
     _G[name] = function(...)
       add(name, ...)
       return original(...)
@@ -589,6 +769,31 @@ for _, name in ipairs({'AddMsgToChatWin', 'AddMessageToSysMsgWindow',
   end
 end
 return 'hooked'
+"""
+
+
+CHAT_UNHOOK = r"""
+local o = _G.__combat_recorder
+if o then
+  if o.method_hooked and o.chat_original ~= nil then
+    X2Chat.DispatchChatMessage = o.chat_original
+  end
+  if o.globals_original then
+    for name, original in pairs(o.globals_original) do _G[name] = original end
+  end
+  o.method_hooked = nil
+  o.chat = nil
+end
+if _G.CS then
+  for key in pairs(_G.CS) do
+    if type(key) == 'string' and key:sub(-5) == '_stop' then _G.CS[key] = true end
+  end
+end
+Script.SetTimer(250, function()
+  _G.CS = nil
+  _G.__combat_recorder = nil
+end)
+return 'removed'
 """
 
 
@@ -697,6 +902,7 @@ def read_controller_entry(mem: Mem, ctrl: int, offset: int,
 class MemorySampler(threading.Thread):
     def __init__(self, mem: Mem, clock: Clock, writer: ChannelWriter, base: int,
                  actor: int, victim_unit: int, caster_ctrl: int, victim_ctrl: int,
+                 victim_id: int = 0, controllers: bool = False,
                  interval: float = 0.005):
         super().__init__(daemon=True)
         self.mem = mem
@@ -705,13 +911,16 @@ class MemorySampler(threading.Thread):
         self.base = base
         self.actor = actor
         self.victim_unit = victim_unit
+        self.victim_id = victim_id
         self.caster_ctrl = caster_ctrl
         self.victim_ctrl = victim_ctrl
+        self.controllers = controllers
         self.interval = interval
         self.stop_event = threading.Event()
         self.gcd_samples = 0
         self.gcd_nonzero = 0
         self.anim_samples = 0
+        self.error: str | None = None
 
     def sample(self) -> None:
         wall = ms_now()
@@ -719,16 +928,16 @@ class MemorySampler(threading.Thread):
         actor = self.actor
         if not actor:
             return
-        gcd = self.mem.u32s(actor + GCD_REMAINING, 2)
-        cast = self.mem.u32s(actor + UNIT_CAST + 4, 4)
-        stance = self.mem.u8(actor + UNIT_STANCE)
-        deadline = self.mem.u32(actor + UNIT_COMBAT_DEADLINE)
-        combat_in = self.mem.u8(actor + UNIT_COMBAT_IN)
-        latch_a = self.mem.u8(actor + UNIT_COMBAT_LATCH_A)
-        latch_b = self.mem.u8(actor + UNIT_COMBAT_LATCH_B)
-        weapon = self.mem.u32(actor + UNIT_WEAPON)
-        slots = self.mem.u32s(actor + UNIT_WEAPON_SLOTS, 6)
-        visual = self.mem.u8(actor + UNIT_VISUAL_BYTE)
+        gcd = self.mem.u32s_exact(actor + GCD_REMAINING, 2)
+        cast = self.mem.u32s_exact(actor + UNIT_CAST + 4, 4)
+        stance = self.mem.u8_exact(actor + UNIT_STANCE)
+        deadline = self.mem.u32_exact(actor + UNIT_COMBAT_DEADLINE)
+        combat_in = self.mem.u8_exact(actor + UNIT_COMBAT_IN)
+        latch_a = self.mem.u8_exact(actor + UNIT_COMBAT_LATCH_A)
+        latch_b = self.mem.u8_exact(actor + UNIT_COMBAT_LATCH_B)
+        weapon = self.mem.u32_exact(actor + UNIT_WEAPON)
+        slots = self.mem.u32s_exact(actor + UNIT_WEAPON_SLOTS, 6)
+        visual = self.mem.u8_exact(actor + UNIT_VISUAL_BYTE)
         self.writer.write(
             "gcd", wall_ms=wall, client_ms=client, clock_source="estimate",
             player_unit=actor, caster_ctrl=self.caster_ctrl, victim_ctrl=self.victim_ctrl,
@@ -753,13 +962,70 @@ class MemorySampler(threading.Thread):
                                   ctrl=ctrl, **entry)
                 self.anim_samples += 1
 
+    def refresh(self) -> None:
+        local = self.mem.u32(self.base + (G_CONNECTION - DUMP_BASE))
+        actor = self.mem.u32(local + 0x10C) if local else 0
+        if actor and actor != self.actor:
+            log("actor moved", hex(self.actor), "->", hex(actor))
+            self.actor = actor
+            self.caster_ctrl = 0
+            if self.controllers:
+                self.caster_ctrl, _ = resolve_controller(self.mem, actor, None, "caster")
+        if not self.victim_id:
+            return
+        unit = 0
+        for key, candidate in walk_units(self.mem, self.base):
+            if key == self.victim_id:
+                unit = candidate
+                break
+        if unit and unit != self.victim_unit:
+            log("victim unit moved", hex(self.victim_unit or 0), "->", hex(unit))
+            self.victim_unit = unit
+            self.victim_ctrl = 0
+            if self.controllers:
+                self.victim_ctrl, _ = resolve_controller(self.mem, unit, None, "victim")
+
     def run(self) -> None:
+        next_time = time.perf_counter()
+        next_refresh = next_time + 1.0
         while not self.stop_event.is_set():
+            actor_before = self.actor
+            failure: MemoryReadError | None = None
             try:
+                if time.perf_counter() >= next_refresh:
+                    self.refresh()
+                    next_refresh += 1.0
                 self.sample()
+            except MemoryReadError as error:
+                # A respawn or zone change frees the old actor; refresh and retry
+                # once before treating the read as fatal.
+                try:
+                    self.refresh()
+                except Exception:
+                    pass
+                if self.actor != actor_before:
+                    try:
+                        self.sample()
+                    except MemoryReadError as retry:
+                        failure = retry
+                else:
+                    failure = error
             except Exception as error:
+                self.error = str(error)
                 self.writer.write("gcd", clock_source="external", error=str(error))
-            self.stop_event.wait(self.interval)
+                log("sampler error; stopping:", error)
+                return
+            if failure is not None:
+                self.error = str(failure)
+                self.writer.write("gcd", clock_source="external", error=str(failure),
+                                  read_failed=True)
+                log("memory read failed; stopping:", failure)
+                return
+            next_time += self.interval
+            now = time.perf_counter()
+            if next_time < now:
+                next_time = now
+            sleep_until(next_time)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -805,6 +1071,131 @@ class UnitStateSampler(threading.Thread):
                                   buffs=state.get("buffs"),
                                   debuffs=state.get("debuffs"))
             self.stop_event.wait(self.interval)
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.join(timeout=5)
+
+
+def origin_at(origins: list[tuple[int, str]], ui_ms: int) -> str:
+    best = ""
+    best_delta = None
+    for client, value in origins:
+        delta = abs(client - ui_ms)
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best = value
+    return best
+
+
+def write_anim_rows(writer: ChannelWriter, rows: list[str], clock: Clock,
+                    origins: list[tuple[int, str]]) -> None:
+    for parts in parse_lua_rows(rows):
+        if len(parts) < 10:
+            continue
+        try:
+            ui = clock.ui_for_system(float(parts[0]))
+        except (TypeError, ValueError):
+            ui = None
+        writer.write("anim_state", client_ms=parts[0], clock_source="system",
+                     frame=parts[1], player_state=parts[2], player_clip=parts[3],
+                     player_ptr=parts[4], victim_state=parts[5], victim_clip=parts[6],
+                     victim_ptr=parts[7], player_pos=parts[8], victim_pos=parts[9],
+                     seamless_origin=origin_at(origins, ui) if ui is not None else "")
+
+
+def write_cast_rows(writer: ChannelWriter, rows: list[str]) -> None:
+    for parts in parse_lua_rows(rows):
+        if len(parts) < 17:
+            continue
+        writer.write("castbar", client_ms=parts[0], clock_source="ui",
+                     player_name=parts[1], player_total=parts[2], player_current=parts[3],
+                     player_show=parts[4], target_name=parts[5], target_total=parts[6],
+                     target_current=parts[7], target_show=parts[8],
+                     health=parts[9], max_health=parts[10], mana=parts[11],
+                     max_mana=parts[12], target_health=parts[13],
+                     target_max_health=parts[14], player_dead=parts[15],
+                     player_combat=parts[16],
+                     seamless_origin=parts[17] if len(parts) > 17 else "")
+
+
+def write_buff_rows(writer: ChannelWriter, rows: list[str]) -> None:
+    for parts in parse_lua_rows(rows):
+        if not parts:
+            continue
+        client = parts[0]
+        for entry in parts[1:]:
+            fields = entry.split("~")
+            if len(fields) < 2:
+                continue
+            tag = fields[0]
+            index = fields[1]
+            if index == "count":
+                writer.write("buffs", client_ms=client, clock_source="ui",
+                             list=tag, count=int(fields[2]) if len(fields) > 2 and fields[2].isdigit() else 0)
+            else:
+                writer.write("buffs", client_ms=client, clock_source="ui",
+                             list=tag, index=int(index) if index.isdigit() else index,
+                             values=fields[2:])
+
+
+def write_chat_rows(writer: ChannelWriter, rows: list[str]) -> None:
+    for line in rows:
+        fields = line.split("\t")
+        if len(fields) < 2:
+            continue
+        client = fields[0]
+        function = fields[1]
+        text = " ".join(fields[2:])
+        lowered = text.lower()
+        writer.write("chat", client_ms=client if client else None, clock_source="ui",
+                     function=function, args=fields[2:], text=text,
+                     likely_refusal=any(hint in lowered for hint in REFUSAL_HINTS))
+
+
+def drain_lua(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter) -> None:
+    """Move every buffered Lua channel into its JSONL file right now."""
+    batches: dict[str, list[str]] = {}
+    for name, target in (("anim", "system"), ("cast", "ui"), ("buff", "ui")):
+        try:
+            batches[name] = take_rows(mcp, pid, target, name)
+        except Exception as error:
+            log("flush", name, "failed:", error)
+            batches[name] = []
+    try:
+        chat = take_chat(mcp, pid)
+    except Exception as error:
+        log("flush chat failed:", error)
+        chat = []
+    origins: list[tuple[int, str]] = []
+    for parts in parse_lua_rows(batches["cast"]):
+        if len(parts) > 17 and parts[17]:
+            try:
+                origins.append((int(float(parts[0])), parts[17]))
+            except ValueError:
+                pass
+    write_anim_rows(writer, batches["anim"], clock, origins)
+    write_cast_rows(writer, batches["cast"])
+    write_buff_rows(writer, batches["buff"])
+    write_chat_rows(writer, chat)
+
+
+class LuaFlusher(threading.Thread):
+    """Drain the Lua buffers every few seconds so a disconnect loses little."""
+
+    def __init__(self, mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter,
+                 interval: float = 5.0):
+        super().__init__(daemon=True)
+        self.mcp = mcp
+        self.pid = pid
+        self.clock = clock
+        self.writer = writer
+        self.interval = interval
+        self.stop_event = threading.Event()
+
+    def run(self) -> None:
+        while not self.stop_event.wait(self.interval):
+            drain_lua(self.mcp, self.pid, self.clock, self.writer)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -988,24 +1379,31 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
     changes = []
     previous = None
     for row in gcd_rows:
+        if row.get("read_failed") or row.get("gcd_remaining") is None:
+            continue
         current = (row.get("gcd_remaining"), row.get("gcd_total"))
         if previous is not None and current != previous:
             changes.append({"wall_ms": row.get("wall_ms"), "client_ms": row.get("client_ms"),
                             "from": list(previous), "to": list(current)})
         previous = current
     presses = []
+    countdown_only = 0
     for event in inputs:
         before = event.get("before_wall_ms")
         for change in changes:
-            if before is not None and 0 <= change["wall_ms"] - before <= 3000:
+            if before is None or not 0 <= change["wall_ms"] - before <= 3000:
+                continue
+            old = change["from"]
+            new = change["to"]
+            rises = old[0] is not None and new[0] is not None and new[0] > old[0]
+            total_changed = new[1] != old[1]
+            if rises or total_changed:
                 presses.append({"key": event.get("key"), "before_wall_ms": before,
                                 "change": change})
-                break
-    press_linked = bool(presses)
-    if not press_linked and changes and inputs:
-        first_press = min(event.get("before_wall_ms", 0.0) for event in inputs)
-        press_linked = any(change["wall_ms"] >= first_press for change in changes)
-    gcd_changed = press_linked
+            else:
+                countdown_only += 1
+            break
+    gcd_changed = bool(presses)
     result = {
         "ok": not missing and gcd_changed,
         "channels": counts,
@@ -1014,6 +1412,7 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
         "gcd": {
             "changed": gcd_changed,
             "pressed_changes": presses,
+            "countdown_ticks_rejected": countdown_only,
             "changes": changes[:200],
             "samples": len(gcd_rows),
         },
@@ -1025,6 +1424,83 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
         },
     }
     return result
+
+
+def read_channels(run: Path) -> dict[str, list[dict]]:
+    channels: dict[str, list[dict]] = {}
+    for path in sorted(run.glob("*.jsonl")):
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line:
+                rows.append(json.loads(line))
+        channels[path.stem] = rows
+    return channels
+
+
+def monotonic_report(channels: dict[str, list[dict]]) -> dict:
+    report = {}
+    for channel, rows in channels.items():
+        previous = None
+        backsteps = []
+        for row in rows:
+            current = row.get("client_ms")
+            if previous is not None and current is not None and current < previous:
+                backsteps.append({"seq": row.get("seq"), "step_ms": current - previous})
+            previous = current if current is not None else previous
+        report[channel] = {
+            "ok": not backsteps,
+            "backsteps": len(backsteps),
+            "max_backstep_ms": min((step["step_ms"] for step in backsteps), default=0),
+            "first": backsteps[0] if backsteps else None,
+        }
+    return report
+
+
+def rate_report(channels: dict[str, list[dict]]) -> dict:
+    report = {}
+    for channel, rows in channels.items():
+        walls = [row.get("wall_ms") for row in rows if row.get("wall_ms") is not None]
+        steps = sorted(b - a for a, b in zip(walls, walls[1:]) if b > a)
+        entry: dict[str, object] = {"rows": len(rows)}
+        if steps:
+            entry.update({
+                "span_ms": round(walls[-1] - walls[0], 1),
+                "median_step_ms": round(steps[len(steps) // 2], 2),
+                "p95_step_ms": round(steps[min(len(steps) - 1, int(len(steps) * 0.95))], 2),
+                "max_step_ms": round(steps[-1], 2),
+            })
+        report[channel] = entry
+    return report
+
+
+def remap_channels(run: Path, clock: Clock) -> None:
+    """Rewrite every row through the final clock fit."""
+    for path in sorted(run.glob("*.jsonl")):
+        lines = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            row = json.loads(line)
+            source = row.get("clock")
+            native = row.get("native_ms")
+            wall = row.get("wall_ms")
+            if source == "ui" and native is not None:
+                client: int | None = int(round(float(native)))
+                wall = clock.wall_for_ui(client)
+            elif source == "system" and native is not None:
+                client = clock.ui_for_system(float(native))
+                wall = clock.wall_for_system(float(native))
+            elif source in ("ui", "system"):
+                client = row.get("client_ms")
+            else:
+                client = clock.estimate(wall) if wall is not None else row.get("client_ms")
+            if client is not None:
+                row["client_ms"] = int(client)
+                row["t_ms"] = clock.relative(client)
+            if wall is not None:
+                row["wall_ms"] = round(float(wall), 1)
+            lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
 
 
 def main() -> int:
@@ -1055,6 +1531,8 @@ def main() -> int:
     parser.add_argument("--find-npc", type=int, default=None,
                         help="template id understood by /findobject (defaults to --spawn-npc)")
     parser.add_argument("--move", default=None, help="GM /move x y z before spawning")
+    parser.add_argument("--target-range", type=float, default=4.0,
+                        help="refuse a target farther than this many metres (pass --move)")
     parser.add_argument("--fight-keys", default="1,1,2,1,3,2,1,1")
     parser.add_argument("--fight-interval", type=float, default=1.1)
     parser.add_argument("--fight-seconds", type=float, default=0.0,
@@ -1084,13 +1562,27 @@ def main() -> int:
     pid = args.pid
     sampler = None
     unit_sampler = None
+    flusher = None
     sync = None
     server_offset = 0
     inputs: list[dict] = []
     gcd_rows: list[dict] = []
     player_id = victim_id = 0
+    player_name = ""
     caster_ctrl = victim_ctrl = 0
     ctrl_tried: dict[str, list[str]] = {}
+    failure: Exception | None = None
+    result: dict[str, object] = {"ok": False}
+    timer_resolution = False
+    required = [name.strip() for name in args.required.split(",") if name.strip()]
+    started = time.monotonic()
+    try:
+        winmm = ctypes.WinDLL("winmm")
+        winmm.timeBeginPeriod(1)
+        timer_resolution = True
+    except Exception:
+        pass
+
     try:
         mcp = Mcp(args.driver, args.dll, args.launcher, args.client,
                   args.password_file, args.login, args.user, args.run_dir / "mcp")
@@ -1102,16 +1594,21 @@ def main() -> int:
                                    args.create_character)
         log("player", player_name)
 
-        # The first clock sample also fixes the relative-time origin for every row.
-        wall = ms_now()
-        system = float(mcp.text("client_lua", pid=pid, target="system",
-                                code="return System.GetCurrTime()").strip()) * 1000.0
-        ui_text = mcp.text("client_lua", pid=pid, target="ui",
-                           code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''").strip()
-        ui = float(ui_text) if ui_text else None
-        clock.sample(system, ui, wall)
+        # Bracket each clock read: the client value lies between the two stamps.
+        system, s_before, s_after, s_error = read_clock(mcp, pid, "system")
+        ui, u_before, u_after, u_error = read_clock(mcp, pid, "ui")
+        if system is not None:
+            clock.add("system", system, s_before, s_after)
+        if ui is not None:
+            clock.add("ui", ui, u_before, u_after)
+        wall = ((u_before + u_after) / 2.0 if ui is not None
+                else (s_before + s_after) / 2.0)
         writer.write("clock_sync", wall_ms=wall, clock_source="external",
-                     system_ms=round(system, 1), ui_ms=round(ui, 1) if ui is not None else None)
+                     system_ms=round(system, 1) if system is not None else None,
+                     ui_ms=round(ui, 1) if ui is not None else None,
+                     system_rtt_ms=round(s_after - s_before, 3),
+                     ui_rtt_ms=round(u_after - u_before, 3),
+                     system_error=s_error, ui_error=u_error)
 
         log("installing chat hook", mcp.text("client_lua", pid=pid, target="ui", code=CHAT_HOOK))
         mcp.text("client_lua", pid=pid, target="ui",
@@ -1180,8 +1677,9 @@ def main() -> int:
                 raise RuntimeError("no live %r target after three findobject attempts" % args.npc_name)
             distance = float(state.get("distance", 999))
             log("target", args.npc_name, "distance", distance)
-            if distance > 4.0 and args.move is None:
-                raise RuntimeError("target is out of melee range: %s (pass --move)" % distance)
+            if distance > args.target_range and args.move is None:
+                raise RuntimeError("target is out of melee range: %s (pass --move or "
+                                   "--target-range)" % distance)
 
         player = json.loads(mcp.text("client_unit_state", pid=pid, target="player"))
         player_id = int(player["unit_id"], 16) if player.get("unit_id") else mem.u32(actor + 8)
@@ -1206,13 +1704,18 @@ def main() -> int:
                     mem, victim_unit, pointers.get(args.npc_name), "victim")
                 ctrl_tried["victim"] = tried
 
-        # Timers: 16 ms animation state, 50 ms cast bar, 1000 ms buffs.
+        writer.write("meta", clock_source="estimate", kind="start", pid=pid,
+                     character=player_name, player_id=player_id, victim_id=victim_id,
+                     npc=args.spawn_npc, npc_name=args.npc_name)
+
+        # Lua timers are frame-bound: 1 ms means "every frame" for the two fast
+        # channels.  The Python sampler busy-waits for its 5 ms cadence.
         system_code = (SYSTEM_SAMPLE.replace("CHAR_NAME", json.dumps(player_name))
                        .replace("TARGET_NAME", json.dumps(args.npc_name)))
         log("system timer", mcp.text("client_lua", pid=pid, target="system",
-                                     code=lua_timer("anim", 16, system_code)))
+                                     code=lua_timer("anim", 1, system_code)))
         log("cast timer", mcp.text("client_lua", pid=pid, target="ui",
-                                   code=lua_timer("cast", 50, UI_CAST_SAMPLE)))
+                                   code=lua_timer("cast", 1, UI_CAST_SAMPLE)))
         log("buff timer", mcp.text("client_lua", pid=pid, target="ui",
                                    code=lua_timer("buff", 1000, UI_BUFF_SAMPLE)))
 
@@ -1220,8 +1723,11 @@ def main() -> int:
         sync.start()
         unit_sampler = UnitStateSampler(mcp, pid, clock, writer)
         unit_sampler.start()
+        flusher = LuaFlusher(mcp, pid, clock, writer)
+        flusher.start()
         sampler = MemorySampler(mem, clock, writer, base, actor, victim_unit,
-                                caster_ctrl, victim_ctrl)
+                                caster_ctrl, victim_ctrl, victim_id,
+                                controllers=args.controller_lists)
         sampler.start()
 
         keys = [key.strip() for key in args.fight_keys.split(",") if key.strip()]
@@ -1231,149 +1737,161 @@ def main() -> int:
             delay = target_time - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
-            before_wall = ms_now()
-            before_client = float(mcp.text("client_lua", pid=pid, target="system",
-                                           code="return System.GetCurrTime()").strip()) * 1000.0
+            before_client, before_wall, b_after, _ = read_clock(mcp, pid, "system")
+            if before_client is not None:
+                clock.add("system", before_client, before_wall, b_after)
             try:
-                result = mcp.text("client_input", pid=pid, key=key, duration_ms=80)
+                reply = mcp.text("client_input", pid=pid, key=key, duration_ms=80)
             except Exception as error:
-                result = "error: " + str(error)
-            after_client = float(mcp.text("client_lua", pid=pid, target="system",
-                                          code="return System.GetCurrTime()").strip()) * 1000.0
-            after_wall = ms_now()
+                reply = "error: " + str(error)
+            after_client, a_before, after_wall, _ = read_clock(mcp, pid, "system")
+            if after_client is not None:
+                clock.add("system", after_client, a_before, after_wall)
             event = {"key": key, "before_wall_ms": before_wall,
                      "before_client_ms": before_client, "after_client_ms": after_client,
-                     "after_wall_ms": after_wall, "result": result}
+                     "after_wall_ms": after_wall, "result": reply}
             inputs.append(event)
-            writer.write("inputs", client_ms=before_client, clock_source="system",
-                         wall_ms=before_wall, key=key, duration_ms=80,
-                         before_client_ms=before_client, after_client_ms=after_client,
-                         after_wall_ms=after_wall, result=result)
-            log("key", key, "at", round(time.monotonic() - wall0, 2), result)
+            if before_client is not None:
+                writer.write("inputs", client_ms=before_client, clock_source="system",
+                             wall_ms=before_wall, key=key, duration_ms=80,
+                             before_client_ms=before_client, after_client_ms=after_client,
+                             after_wall_ms=after_wall, result=reply)
+            log("key", key, "at", round(time.monotonic() - wall0, 2), reply)
         tail = args.fight_seconds or (args.fight_interval + 1.0)
         time.sleep(tail)
-
-        stop_timer(mcp, pid, "system", "anim")
-        stop_timer(mcp, pid, "ui", "cast")
-        stop_timer(mcp, pid, "ui", "buff")
-        time.sleep(0.3)
-        if sync is not None:
-            sync.stop()
-        if unit_sampler is not None:
-            unit_sampler.stop()
-        if sampler is not None:
-            sampler.stop()
-
-        # Animation state rows.
-        for parts in parse_lua_rows(fetch_rows(mcp, pid, "system", "anim")):
-            if len(parts) < 10:
-                continue
-            writer.write("anim_state", client_ms=parts[0], clock_source="system",
-                         frame=parts[1], player_state=parts[2], player_clip=parts[3],
-                         player_ptr=parts[4], victim_state=parts[5], victim_clip=parts[6],
-                         victim_ptr=parts[7], player_pos=parts[8], victim_pos=parts[9])
-        # Cast-bar rows.
-        for parts in parse_lua_rows(fetch_rows(mcp, pid, "ui", "cast")):
-            if len(parts) < 17:
-                continue
-            writer.write("castbar", client_ms=parts[0], clock_source="ui",
-                         player_name=parts[1], player_total=parts[2], player_current=parts[3],
-                         player_show=parts[4], target_name=parts[5], target_total=parts[6],
-                         target_current=parts[7], target_show=parts[8],
-                         health=parts[9], max_health=parts[10], mana=parts[11],
-                         max_mana=parts[12], target_health=parts[13],
-                         target_max_health=parts[14], player_dead=parts[15],
-                         player_combat=parts[16])
-        # Buff rows: one row per list sample and one per visible entry.
-        for parts in parse_lua_rows(fetch_rows(mcp, pid, "ui", "buff")):
-            if not parts:
-                continue
-            client = parts[0]
-            for entry in parts[1:]:
-                fields = entry.split("~")
-                if len(fields) < 2:
-                    continue
-                tag = fields[0]
-                index = fields[1]
-                if index == "count":
-                    writer.write("buffs", client_ms=client, clock_source="ui",
-                                 list=tag, count=int(fields[2]) if len(fields) > 2 and fields[2].isdigit() else 0)
-                else:
-                    writer.write("buffs", client_ms=client, clock_source="ui",
-                                 list=tag, index=int(index) if index.isdigit() else index,
-                                 values=fields[2:])
-        # Chat rows from the client's own dispatch.
-        chat_text = mcp.text(
-            "client_lua", pid=pid, target="ui",
-            code="local o=assert(_G.__combat_recorder) return table.concat(o.chat, '\\n')")
-        for line in chat_text.splitlines():
-            fields = line.split("\t")
-            if len(fields) < 2:
-                continue
-            client = fields[0]
-            function = fields[1]
-            text = " ".join(fields[2:])
-            lowered = text.lower()
-            writer.write("chat", client_ms=client if client else None, clock_source="ui",
-                         function=function, args=fields[2:], text=text,
-                         likely_refusal=any(hint in lowered for hint in REFUSAL_HINTS))
-
-        if args.server_log and server_offset:
-            data, server_offset = server_slice(args.server_log, server_offset)
-            (args.run_dir / "server_slice.log").write_bytes(data)
-
-        gcd_rows = []
-        gcd_path = args.run_dir / "gcd.jsonl"
-        if gcd_path.exists():
-            gcd_rows = [json.loads(line) for line in gcd_path.read_text(encoding="utf-8").splitlines() if line]
-
-        required = [name.strip() for name in args.required.split(",") if name.strip()]
-        result = self_check(writer, gcd_rows, inputs, caster_ctrl, victim_ctrl,
-                            ctrl_tried, required)
-        result.update({
-            "pid": pid,
-            "character": player_name,
-            "player_id": player_id,
-            "victim_id": victim_id,
-            "npc": args.spawn_npc,
-            "npc_name": args.npc_name,
-            "inputs": inputs,
-            "controller_tried": ctrl_tried,
-            "start_client_ms": clock.start_client_ms,
-        })
-        (args.run_dir / "self_check.json").write_text(
-            json.dumps(result, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        writer.write("meta", clock_source="estimate", kind="end", **{
-            "character": player_name, "player_id": player_id, "victim_id": victim_id,
-            "npc": args.spawn_npc, "npc_name": args.npc_name,
-            "channels": writer.counts, "self_check_ok": result["ok"],
-        })
-        log("channels", json.dumps(writer.counts, sort_keys=True))
-        log("self-check", "ok" if result["ok"] else "FAILED",
-            "missing", result["missing"], "gcd_changed", result["gcd"]["changed"])
-        return 0 if result["ok"] or args.no_self_check else 2
+    except Exception as error:
+        failure = error
+        log("recording failed:", error)
     finally:
-        if sampler is not None:
-            try:
-                sampler.stop()
-            except Exception:
-                pass
-        if unit_sampler is not None:
-            try:
-                unit_sampler.stop()
-            except Exception:
-                pass
-        if sync is not None:
-            try:
-                sync.stop()
-            except Exception:
-                pass
-        writer.close()
+        for thread in (flusher, sync, unit_sampler, sampler):
+            if thread is not None:
+                try:
+                    thread.stop()
+                except Exception:
+                    pass
         if mcp is not None:
-            if pid and not args.keep_client:
-                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
-                log("stopped client", pid)
+            if pid:
+                for target, name in (("system", "anim"), ("ui", "cast"), ("ui", "buff")):
+                    try:
+                        stop_timer(mcp, pid, target, name)
+                    except Exception:
+                        pass
+            if clock.epoch is not None:
+                try:
+                    drain_lua(mcp, pid, clock, writer)
+                except Exception as error:
+                    log("final drain failed:", error)
+            try:
+                if sampler is not None and sampler.error and failure is None:
+                    failure = RuntimeError("memory sampler: " + sampler.error)
+            except Exception:
+                pass
+            for target in ("ui", "system"):
+                try:
+                    mcp.text("client_lua", pid=pid, target=target, code=CHAT_UNHOOK)
+                except Exception as error:
+                    log("client cleanup failed on", target, ":", error)
+        writer.close()
+        try:
+            remap_channels(args.run_dir, clock)
+        except Exception as error:
+            log("clock remap failed:", error)
+            if failure is None:
+                failure = error
+        if args.server_log and server_offset:
+            try:
+                data, server_offset = server_slice(args.server_log, server_offset)
+                (args.run_dir / "server_slice.log").write_bytes(data)
+            except Exception as error:
+                log("server slice failed:", error)
+        try:
+            channels = read_channels(args.run_dir)
+            gcd_rows = channels.get("gcd", [])
+            quality = {"monotonic": monotonic_report(channels),
+                       "rates": rate_report(channels)}
+            result = self_check(writer, gcd_rows, inputs, caster_ctrl, victim_ctrl,
+                                ctrl_tried, required)
+            result.update({
+                "pid": pid,
+                "character": player_name or None,
+                "player_id": player_id,
+                "victim_id": victim_id,
+                "npc": args.spawn_npc,
+                "npc_name": args.npc_name,
+                "inputs": inputs,
+                "controller_tried": ctrl_tried,
+                "start_client_ms": clock.start_client_ms,
+                "duration_s": round(time.monotonic() - started, 1),
+                "clock": clock.report(),
+                "quality": quality,
+            })
+            if not all(entry["ok"] for entry in quality["monotonic"].values()):
+                result["ok"] = False
+            if failure is not None:
+                result["ok"] = False
+                result["error"] = str(failure)
+            end_wall = ms_now()
+            end_client = clock.estimate(end_wall)
+            final_counts = dict(writer.counts)
+            final_counts["meta"] = final_counts.get("meta", 0) + 1
+            end_row = {
+                "schema": SCHEMA, "channel": "meta",
+                "seq": writer.sequences.get("meta", 0),
+                "wall_ms": round(end_wall, 1), "client_ms": end_client,
+                "t_ms": clock.relative(end_client), "clock": "estimate",
+                "kind": "end", "character": player_name or None,
+                "player_id": player_id, "victim_id": victim_id,
+                "npc": args.spawn_npc, "npc_name": args.npc_name,
+                "channels": final_counts, "self_check_ok": bool(result.get("ok")),
+            }
+            with (args.run_dir / "meta.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(end_row, ensure_ascii=False,
+                                        separators=(",", ":")) + "\n")
+            result["channels"] = final_counts
+            (args.run_dir / "self_check.json").write_text(
+                json.dumps(result, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        except Exception as error:
+            log("self-check failed:", error)
+            failure = failure or error
+            try:
+                (args.run_dir / "self_check.json").write_text(
+                    json.dumps({"ok": False, "error": str(failure),
+                                "channels": writer.counts}, indent=1) + "\n",
+                    encoding="utf-8")
+            except Exception:
+                pass
+        log("channels", json.dumps(writer.counts, sort_keys=True))
+        if isinstance(result, dict) and "gcd" in result:
+            log("self-check", "ok" if result.get("ok") else "FAILED",
+                "missing", result.get("missing"),
+                "gcd_changed", result["gcd"]["changed"])
+            if isinstance(result.get("quality"), dict):
+                mono = result["quality"]["monotonic"]
+                bad = [name for name, entry in mono.items() if not entry["ok"]]
+                log("monotonic", "ok" if not bad else "FAILED on " + ",".join(bad))
+                clock_info = result.get("clock") or {}
+                for kind in ("system", "ui"):
+                    info = clock_info.get(kind)
+                    if info:
+                        log("clock", kind, "offset", info["offset_ms"], "ms",
+                            "drift", info["drift_ppm"], "ppm",
+                            "residual max", info["residual_max_ms"], "ms",
+                            "rtt min", info["rtt_min_ms"], "ms")
+        if pid and not args.keep_client:
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+            log("stopped client", pid)
+        if mcp is not None:
             mcp.close()
+        if timer_resolution:
+            try:
+                ctypes.WinDLL("winmm").timeEndPeriod(1)
+            except Exception:
+                pass
+    if failure is not None:
+        return 1
+    if isinstance(result, dict) and (result.get("ok") or args.no_self_check):
+        return 0
+    return 2
 
 
 if __name__ == "__main__":
