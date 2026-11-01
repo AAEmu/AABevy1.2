@@ -214,7 +214,8 @@ def main() -> int:
                                 "dies; the re-press toggles it off after in-flight swings"),
                 "stance_exit": ("stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the "
                                 "fight-ending no-target press; UnitCombatState false at the same frame. The "
-                                "13.6 s from the last hit is the corpse/target lifetime, not a client 10 s timer"),
+                                "12.86 s from the last hit to the target loss is the corpse/target lifetime; "
+                                "the stance exit adds 0.77 s (13.63 s total), not a client 10 s timer"),
                 "battle_start_end": ("the 'Combat Start' overlay is part of the first attack clip at t=10086; "
                                      "no chat 'Battle End'; the client combat state goes false at t=59323 and "
                                      "the stance byte 1->0 at t=59322"),

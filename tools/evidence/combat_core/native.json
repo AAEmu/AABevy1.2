@@ -258,7 +258,7 @@
     "answers": {
       "first_swing_delay": "the first attack clip starts 280 ms after the key-press before-stamp (187 ms after the driver returned); the first damage after the clip starts is at t=11081 (995 ms into the clip, 1.28 s after the press); the target was already 155 HP down at the press, so the pre-run auto-attack state is not clean",
       "auto_repeat": "one press repeats the swing (client attack clip every ~2.0 s) until the target dies; the re-press toggles it off after in-flight swings",
-      "stance_exit": "stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the fight-ending no-target press; UnitCombatState false at the same frame. The 13.6 s from the last hit is the corpse/target lifetime, not a client 10 s timer",
+      "stance_exit": "stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the fight-ending no-target press; UnitCombatState false at the same frame. The 12.86 s from the last hit to the target loss is the corpse/target lifetime; the stance exit adds 0.77 s (13.63 s total), not a client 10 s timer",
       "battle_start_end": "the 'Combat Start' overlay is part of the first attack clip at t=10086; no chat 'Battle End'; the client combat state goes false at t=59323 and the stance byte 1->0 at t=59322",
       "repress": "toggles the auto-attack off: target HP 3317 at t=67344 -> 2454 at t=99332, then stable for the 25 s wait; no attack clip after the in-flight swings",
       "walk_away": "walking switches to onehand_combat_RUN at t=113119 and stops the attack clips; the target stays at its spawn (distance 3.0 -> 10.5 m); the post-walk press at t=117394 produces no clip and no StartSkill",
