@@ -22,6 +22,7 @@ use crate::mate::Mates;
 use crate::slave::Slaves;
 use crate::gimmick::Gimmicks;
 use crate::housing::Houses;
+use crate::shipyard::Shipyards;
 use crate::farm::Farms;
 use crate::ui_data::UiData;
 use crate::initial_config::GameConfig;
@@ -201,6 +202,7 @@ net_state! {
     doodad_bonds: crate::DoodadBonds,
     gimmicks: Gimmicks,
     houses: Houses,
+    shipyards: Shipyards,
     farms: Farms,
     transfer_radar: crate::radar::TransferRadar,
     ship_radar: crate::radar::ShipRadar,

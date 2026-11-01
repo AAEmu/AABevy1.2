@@ -16,7 +16,7 @@ use std::rc::Rc;
 use aa_net::housing::{ConstructHouseTax, HouseCommand, HouseSnapshot, HouseTaxInfo, HousingEvent};
 use aa_net::model::UnitKind;
 use aa_net::state::{Doodads, Inventory, Units};
-use aa_net::{Command, Event, Houses, NetCommand, NetEvent};
+use aa_net::{Command, Event, Houses, NetCommand, NetEvent, Shipyards};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -25,6 +25,7 @@ use mlua::{Lua, ObjectLike, Table, Value};
 use super::api::{HudBridge, Shared};
 use super::input::HudPointerOverUi;
 use crate::Screen;
+use crate::ingame::data::Db;
 use crate::ingame::housing::data::{self as house_data, Design};
 use crate::ingame::housing::placement::{Builder, BuilderSignal};
 
@@ -59,6 +60,18 @@ struct Current {
     mine: bool,
     tax: Option<HouseTaxInfo>,
     decorations: u32,
+}
+
+/// The shipyard the player last interacted with (`X2House`'s getters answer for it, as for a house).
+#[derive(Clone, Debug, PartialEq)]
+struct CurrentShipyard {
+    obj_id: u32,
+    id: u64,
+    owner_name: String,
+    /// `GetShipyardBaseProgress`: all build actions of the template.
+    base: i32,
+    /// `GetShipyardRemainProgress`: the build actions still to do.
+    remain: i32,
 }
 
 impl Current {
@@ -112,6 +125,8 @@ struct View {
     clicks: u32,
     pointer_picked: Option<u32>,
     last_tax: Option<HouseTaxInfo>,
+    /// The shipyard the current interaction is with; the housing material window is not raised for it yet.
+    shipyard: Option<CurrentShipyard>,
 }
 
 #[derive(Clone, Default)]
@@ -223,11 +238,12 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
     // no castles, no sieges in 1.2's housing land
     getter!("IsCastle", |_v| false);
     getter!("IsSiegePeriod", |_v| false);
-    // shipyards are not built here; their window is never raised
-    getter!("GetShipyardOwnerName", |_v| String::new());
+    // The shipyard material window is not raised here yet (it needs `GetShipyardConstructionStepInfo`);
+    // these answer from the last shipyard the player interacted with, as the original does.
+    getter!("GetShipyardOwnerName", |v| v.shipyard.as_ref().map(|s| s.owner_name.clone()).unwrap_or_default());
     getter!("GetShipyardProtectionPeriod", |_v| 0);
-    getter!("GetShipyardRemainProgress", |_v| 0);
-    getter!("GetShipyardBaseProgress", |_v| 0);
+    getter!("GetShipyardRemainProgress", |v| v.shipyard.as_ref().map_or(0, |s| s.remain));
+    getter!("GetShipyardBaseProgress", |v| v.shipyard.as_ref().map_or(0, |s| s.base));
     let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetHousePermission",
@@ -540,14 +556,21 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
     }
 }
 
-/// The house a right click released over the 3D view picked: the nearest whose middle the view ray passes within its
-/// garden (not a drag, not on the HUD).
-fn pick(ray: Ray3d, units: &Units) -> Option<u32> {
-    let data = house_data::get()?;
+/// The house or shipyard a right click released over the 3D view picked: the nearest whose middle the view ray
+/// passes within its garden / drydock (not a drag, not on the HUD).
+fn pick(ray: Ray3d, units: &Units, db: Option<&Db>) -> Option<u32> {
+    let data = house_data::get();
     let mut best: Option<(f32, u32)> = None;
     for u in units.iter() {
-        let UnitKind::Housing { template_id, .. } = u.kind else { continue };
-        let radius = data.designs.get(&template_id).map_or(5.0, |d| d.garden_radius.max(3.0)) * PICK_SHARE;
+        let radius = match u.kind {
+            UnitKind::Housing { template_id, .. } => data
+                .and_then(|d| d.designs.get(&template_id))
+                .map_or(5.0, |d| d.garden_radius.max(3.0)),
+            UnitKind::Shipyard { template_id, .. } => db
+                .and_then(|d| d.shipyard_template(template_id))
+                .map_or(6.0, |t| t.build_radius.max(3) as f32),
+            _ => continue,
+        } * PICK_SHARE;
         // the house's middle: a few metres over its floor
         let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
         let along = (centre - ray.origin).dot(*ray.direction);
@@ -615,6 +638,8 @@ fn sync(
     houses: Res<Houses>,
     doodads: Res<Doodads>,
     inventory: Res<Inventory>,
+    shipyards: Res<Shipyards>,
+    db: Option<Res<Db>>,
     pointer: Pointer,
     // the builder's signals are read and written here: a reader and a writer of one message conflict
     (mut builder, mut builder_signals): (ResMut<Builder>, ParamSet<(MessageWriter<BuilderSignal>, MessageReader<BuilderSignal>)>),
@@ -637,7 +662,7 @@ fn sync(
         (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units));
+    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units, db.as_deref()));
     let mut v = state.0.borrow_mut();
     let mut last_tax = v.last_tax.take();
     v.pointer_picked = picked;
@@ -720,7 +745,7 @@ fn sync(
         }
     }
 
-    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax);
+    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax, &shipyards, db.as_deref());
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -732,6 +757,8 @@ fn interact_and_refresh(
     (units, houses, doodads, inventory): (&Units, &Houses, &Doodads, &Inventory),
     (pos, me): (Vec3, u32),
     last_tax: &mut Option<HouseTaxInfo>,
+    shipyards: &Shipyards,
+    db: Option<&Db>,
 ) {
     // the interaction: a right click or the dev hook on a house in reach
     let picked = v.interact.take().or(picked);
@@ -753,6 +780,7 @@ fn interact_and_refresh(
                 *last_tax = None;
                 v.commands
                     .push(Command::House(HouseCommand::RequestTax { tl: tl_id }));
+                v.shipyard = None;
                 started = Some(obj_id);
             }
             // a house under construction: the build action of its stage when the bag has the material
@@ -776,6 +804,23 @@ fn interact_and_refresh(
                 }
             }
         }
+    }
+    if let Some(obj_id) = picked
+        && let Some(unit) = units.get(obj_id)
+        && let UnitKind::Shipyard { id, template_id } = unit.kind
+        && let Some(state) = shipyards.of(id)
+    {
+        let (base, remain) = db
+            .and_then(|d| d.shipyard_template(template_id))
+            .map_or((0, 0), |t| crate::ingame::shipyard::progress(&t, state));
+        v.shipyard = Some(CurrentShipyard {
+            obj_id,
+            id,
+            owner_name: state.owner_name.clone(),
+            base,
+            remain,
+        });
+        v.current = None;
     }
     if let Some(obj_id) = started {
         let had = v.current.is_some();
@@ -819,6 +864,31 @@ fn interact_and_refresh(
             }
         }
     }
+    if let Some(current) = v.shipyard.as_mut() {
+        let yard = current.obj_id;
+        let near = units
+            .get(yard)
+            .filter(|u| matches!(u.kind, UnitKind::Shipyard { .. }))
+            .is_some_and(|u| {
+                let radius = match u.kind {
+                    UnitKind::Shipyard { template_id, .. } => db
+                        .and_then(|d| d.shipyard_template(template_id))
+                        .map_or(6.0, |t| t.build_radius.max(6) as f32),
+                    _ => 6.0,
+                };
+                Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= radius + LEAVE
+            });
+        if !near {
+            v.shipyard = None;
+        } else if let Some(state) = shipyards.of(current.id) {
+            current.owner_name = state.owner_name.clone();
+            if let Some(UnitKind::Shipyard { template_id, .. }) = units.get(yard).map(|u| u.kind.clone())
+                && let Some(template) = db.and_then(|d| d.shipyard_template(template_id))
+            {
+                (current.base, current.remain) = crate::ingame::shipyard::progress(&template, state);
+            }
+        }
+    }
 }
 
 fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>) {
@@ -847,6 +917,8 @@ fn pointer_interaction(
     houses: Res<Houses>,
     doodads: Res<Doodads>,
     inventory: Res<Inventory>,
+    shipyards: Res<Shipyards>,
+    db: Option<Res<Db>>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else { return };
@@ -873,6 +945,8 @@ fn pointer_interaction(
         (&units, &houses, &doodads, &inventory),
         (pos, me),
         &mut last_tax,
+        &shipyards,
+        db.as_deref(),
     );
     v.last_tax = last_tax;
     drop(v);

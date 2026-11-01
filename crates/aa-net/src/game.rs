@@ -556,6 +556,7 @@ pub enum ServerMsg {
     BlinkUnit(crate::world_msg::BlinkUnit),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Shipyard(crate::shipyard::ShipyardEvent),
     Farm(crate::farm::FarmEvent),
     Coffer(crate::coffer::CofferEvent),
     Radar(crate::radar::RadarEvent),
@@ -841,6 +842,7 @@ impl ServerMsg {
             Self::BlinkUnit(_) => "SCBlinkUnit",
             Self::Gimmick(e) => e.name(),
             Self::Housing(e) => e.name(),
+            Self::Shipyard(e) => e.name(),
             Self::Farm(e) => e.name(),
             Self::Coffer(e) => e.name(),
             Self::Radar(e) => e.name(),
@@ -1268,6 +1270,7 @@ impl ServerMsg {
             sc::SCUnitInvisiblePacket => Self::UnitInvisible { obj_id: r.bc()?, invisible: r.bool()? },
             opcode if crate::radar::RadarEvent::handles(opcode) => Self::Radar(crate::radar::RadarEvent::read(opcode, r)?),
             opcode if crate::housing::HousingEvent::handles(opcode) => Self::Housing(crate::housing::HousingEvent::read(opcode, r)?),
+            opcode if crate::shipyard::ShipyardEvent::handles(opcode) => Self::Shipyard(crate::shipyard::ShipyardEvent::read(opcode, r)?),
             opcode if crate::farm::FarmEvent::handles(opcode) => Self::Farm(crate::farm::FarmEvent::read(opcode, r)?),
             opcode if crate::coffer::CofferEvent::handles(opcode) => Self::Coffer(crate::coffer::CofferEvent::read(opcode, r)?),
             opcode if crate::gimmick::GimmickEvent::handles(opcode) => Self::Gimmick(crate::gimmick::GimmickEvent::read(opcode, r)?),
@@ -2102,6 +2105,24 @@ mod tests {
         let list = batch(&raw.finish(), 5);
         assert_eq!(list.len(), 1);
         assert!(matches!(list[0], ServerMsg::Unhandled { opcode: 0x7fff, .. }));
+    }
+
+    #[test]
+    fn an_unknown_opcode_keeps_the_packets_after_it_in_a_batch() {
+        // A packet this client does not decode is reported as `Unhandled`, and the batch still
+        // resumes at the next `[00 00][opcode]`: the packets after it are not lost.
+        let mut raw = Writer::new();
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(1);
+        raw.u16(0).u16(0x7ffe).raw(&[9, 9, 9, 9]);
+        raw.u16(0).u16(sc::SCSkillEndedPacket).u16(2);
+        assert_eq!(
+            ServerMsg::decode_batch(&raw.finish(), 3),
+            [
+                ServerMsg::SkillEnded { tl: 1 },
+                ServerMsg::Unhandled { level: LEVEL_COMPRESSED, opcode: 0x7ffe, len: 4 },
+                ServerMsg::SkillEnded { tl: 2 },
+            ]
+        );
     }
 
     #[test]

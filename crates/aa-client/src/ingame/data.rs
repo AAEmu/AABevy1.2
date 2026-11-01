@@ -23,6 +23,10 @@ pub struct Db {
 struct Lookups {
     conn: Connection,
     actor_files: HashMap<u32, Option<String>>,
+    /// `models.id` -> the `prefab://` element of its first (alive) state.
+    prefab_references: HashMap<u32, Option<String>>,
+    /// `shipyards.id` -> its template and stages.
+    shipyard_templates: HashMap<u32, Option<ShipyardTemplate>>,
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
@@ -106,6 +110,42 @@ impl CameraDistance {
     pub fn for_mode(self, mode: i64) -> Option<f32> {
         let value = if mode == 1 { self.wide } else { self.normal };
         (value > 0.0).then_some(value)
+    }
+}
+
+/// One construction stage of a shipyard (`shipyard_steps`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardStep {
+    pub step: i32,
+    pub model_id: u32,
+    pub num_actions: i32,
+}
+
+/// A shipyard template (`shipyards`) and its `shipyard_steps`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardTemplate {
+    /// The model of the finished ship (`shipyards.main_model_id`; 1.2 swaps to it at step 1000).
+    pub main_model_id: u32,
+    /// `shipyards.build_radius` (metres): the drydock footprint the server uses for build skills.
+    pub build_radius: i32,
+    /// The construction stages, in `step` order.
+    pub steps: Vec<ShipyardStep>,
+}
+
+impl ShipyardTemplate {
+    /// `ShipyardSteps.Values.Sum(NumActions)` (`ShipyardTemplate.all_actions` on the server).
+    pub fn all_actions(&self) -> i32 {
+        self.steps.iter().map(|s| s.num_actions).sum()
+    }
+
+    /// The model of stage `step`; 1000 is the launch ceremony and shows the finished ship.
+    pub fn model_at_step(&self, step: i32) -> Option<u32> {
+        let model = if step == 1000 {
+            self.main_model_id
+        } else {
+            self.steps.iter().find(|s| s.step == step).map_or(0, |s| s.model_id)
+        };
+        (model != 0).then_some(model)
     }
 }
 
@@ -250,6 +290,8 @@ impl Lookups {
         Lookups {
             conn,
             actor_files: HashMap::new(),
+            prefab_references: HashMap::new(),
+            shipyard_templates: HashMap::new(),
             doodad_models: HashMap::new(),
             doodad_phase_models: HashMap::new(),
             doodad_shapes: HashMap::new(),
@@ -394,6 +436,67 @@ impl Db {
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// The `prefab://` element of a prefab model's first (alive) state: the complete authored layout
+    /// (`models.sub_type = PrefabModel`), for the models 1.2 draws as prefabs (houses, shipyards, doodads).
+    pub fn prefab_reference(&self, model_id: u32) -> Option<String> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(p) = l.prefab_references.get(&model_id) {
+            return p.clone();
+        }
+        let prefab = l
+            .conn
+            .query_row(
+                "SELECT e.file_path FROM models m JOIN prefab_elements e ON e.prefab_model_id = m.sub_id AND m.sub_type = 'PrefabModel' WHERE m.id = ?1 ORDER BY e.state_id LIMIT 1",
+                params![model_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        l.prefab_references.insert(model_id, prefab.clone());
+        prefab
+    }
+
+    /// A shipyard template and its stages (`shipyards` / `shipyard_steps`, the server's
+    /// `ShipyardTemplate.ShipyardSteps`). `None` while the rows or the database are missing.
+    pub fn shipyard_template(&self, template_id: u32) -> Option<ShipyardTemplate> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(t) = l.shipyard_templates.get(&template_id) {
+            return t.clone();
+        }
+        let template_row = l
+            .conn
+            .query_row(
+                "SELECT main_model_id, build_radius FROM shipyards WHERE id = ?1",
+                params![template_id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                    ))
+                },
+            )
+            .ok();
+        let main_model_id = template_row.as_ref().and_then(|(m, _)| *m).map_or(0, |m| m.max(0) as u32);
+        let build_radius = template_row.as_ref().and_then(|(_, b)| *b).map_or(0, |b| b.max(0) as i32);
+        let template = (main_model_id != 0).then(|| {
+            let mut steps = Vec::new();
+            if let Ok(mut q) = l.conn.prepare(
+                "SELECT step, model_id, num_actions FROM shipyard_steps WHERE shipyard_id = ?1 ORDER BY step",
+            ) && let Ok(mut rows) = q.query(params![template_id]) {
+                while let Ok(Some(row)) = rows.next() {
+                    steps.push(ShipyardStep {
+                        step: row.get::<_, i64>(0).unwrap_or(0) as i32,
+                        model_id: row.get::<_, i64>(1).unwrap_or(0).max(0) as u32,
+                        num_actions: row.get::<_, i64>(2).unwrap_or(0) as i32,
+                    });
+                }
+            }
+            ShipyardTemplate { main_model_id, build_radius, steps }
+        });
+        l.shipyard_templates.insert(template_id, template.clone());
+        template
     }
 
     /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
