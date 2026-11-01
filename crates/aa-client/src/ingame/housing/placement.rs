@@ -20,17 +20,24 @@
 //!
 //! ## Where the ghost may stand
 //!
-//! The builder's checks (`39333E20`, `39334060`) set the error the ghost shows: the refused ghost is drawn with
-//! `materials/special/housing_build_invalid` (dark red, `housing_build_normal` otherwise). Here, as the server checks
-//! (`systems/housing/placement.rs`):
+//! The builder's checks (`39333E20`, `39334060`, `39335860`) set the error the ghost shows: the refused ghost is
+//! drawn with `materials/special/housing_build_invalid` (dark red, `housing_build_normal` otherwise). The spot is
+//! snapped to the 4 m grid first (`39325e30`: the lower left footprint corner to a whole cell, `x` and `y`).
 //!
-//! * the spot lies on housing land (`HOUSE_CANNOT_LOCATE_INVALID_AREA`) whose group allows the design's category
-//!   (`HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA`), and the account's other houses do not break the group's rules
-//!   (`houseless`: `HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION`, `existing_category_id`:
-//!   `HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION`);
-//! * the house's square of land (`garden_radius`) does not overlap another house's (`HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE`).
+//! * the centre's area group allows the design's category (restricted categories 1 and 7..=13, 15..=18;
+//!   `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA`, also when the centre is outside every polygon);
+//! * every 4 m cell of the `n x n` footprint (`n = int((2r + 3) / 4)`, `r` the garden radius) lies inside one housing
+//!   polygon (`HOUSE_CANNOT_LOCATE_INVALID_AREA`);
+//! * no 4 m footprint cell's centre lies in another house's snapped axis-aligned footprint: the placement-mode cell
+//!   query answers `HOUSE_CANNOT_LOCATE_INVALID_AREA` first (recapture2), before the 0x71 house-overlap test;
+//! * the footprint contains no unit or doodad (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`);
+//! * the terrain under the footprint changes by at most 6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`).
 //!
-//! The dominion rules (siege zones, castle land) are left to the server.
+//! The account's other houses do not break the group's rules (`houseless`:
+//! `HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION`, `existing_category_id`:
+//! `HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION`) as the server checks them. The dominion rules (siege zones,
+//! castle land) and the exact collision shapes of units and doodads (mask `0x1f`) are left to the server / marked
+//! capture-pending.
 
 use aa_cry::scene::{CryAssets, ModelOptions};
 use aa_cry::shade::illum::IllumMaterial;
@@ -38,7 +45,7 @@ use aa_cry::workers::Workers;
 use aa_net::Houses;
 use aa_net::housing::HouseCommand;
 use aa_net::model::UnitKind;
-use aa_net::state::Units;
+use aa_net::state::{Doodads, Units};
 use aa_net::{Command, NetCommand};
 use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
 use bevy::prelude::*;
@@ -56,7 +63,7 @@ const REACH: f32 = 200.0;
 const CLICK_SLOP: f32 = 6.0;
 /// The wheel's turns: `builder_rotate_*_small`, `_normal`, `_large` (radians).
 const TURN: [f32; 3] = [std::f32::consts::PI / 180.0, std::f32::consts::PI / 36.0, std::f32::consts::PI / 4.0];
-/// `CSCreateHouse` at most this often (the original's 5 s, `CANNOT_LOCATE_DOODAD_NOW`).
+/// `CSCreateHouse` at most this often (`FUN_3932FE60`: `DAT_3a167ea0 + 5000` ms).
 const CREATE_INTERVAL: f32 = 5.0;
 /// `materials/special/housing_build_invalid.mtl`: `Diffuse`, glowing.
 const INVALID: Color = Color::srgb(0.737, 0.013, 0.013);
@@ -98,10 +105,37 @@ pub struct Build {
     pub error: Option<&'static str>,
     /// The quote's total tax (copper), sent back with `CSCreateHouse`.
     pub total_tax: i32,
+    /// The z sent with `CSConstructHouseTax`; `CSCreateHouse` reuses it so both carry one z
+    /// (the capture's 0x56 and 0x57 both show 173.05162, `37 0d 2d 43`).
+    quote_z: Option<f32>,
+    /// The finished model's local AABB (cry space), once the ghost's parts are prepared
+    /// (`FUN_3908d400`; the terrain check and the spot's z use it).
+    pub(crate) model_box: Option<(Vec3, Vec3)>,
     ghost: Option<Entity>,
     /// The ghost's meshes and their own materials (swapped for [`INVALID`] while refused).
     meshes: Vec<(Entity, GhostMaterial)>,
     shown_error: Option<Option<&'static str>>,
+}
+
+impl Build {
+    /// A builder already at its confirm step (dev hooks, tests and examples).
+    pub(crate) fn confirmed(design: u32, item_id: u64, item_template: u32, pos: Vec3, yaw: f32, total_tax: i32) -> Build {
+        Build {
+            design,
+            item_id,
+            item_template,
+            stage: Stage::Confirm,
+            pos,
+            yaw,
+            error: None,
+            total_tax,
+            quote_z: None,
+            model_box: None,
+            ghost: None,
+            meshes: Vec::new(),
+            shown_error: None,
+        }
+    }
 }
 
 /// The original material must survive a refused (red) placement, including Illum meshes.
@@ -134,6 +168,31 @@ pub enum BuilderSignal {
     End,
     /// A click on a refused spot: the `ERROR_MSG` to show.
     Refused(&'static str),
+    /// `CANNOT_LOCATE_DOODAD_NOW` with its remaining seconds (`$1`).
+    Locked(u32),
+}
+
+/// The 30 s placement lock is the farm's [`PlantLock`] (`FUN_393a6de0`); both read one timer, so
+/// a house and a seed can never disagree. It is armed at the end of a world load (`WorldLoadFinished`,
+/// also on `OnEnter(InGame)`); a short `SCTeleportUnit` does not reach `FUN_39426520` and does not lock.
+pub(crate) use crate::ingame::ground_target::plant::PlantLock;
+
+/// Arms the placement lock when the game screen starts (`FUN_39426520`'s end-of-load point). The
+/// `Teleport` guard keeps test/example harnesses that start in-game from locking, as the plant's does.
+pub fn arm_on_entry(mut lock: ResMut<PlantLock>, time: Res<Time>) {
+    lock.hold(f64::from(time.elapsed_secs()));
+}
+
+/// Arms the placement lock when a world load or instance load finishes
+/// (`FUN_39426520` calls `FUN_393a6de0`); a short teleport that needs no load does not.
+pub fn arm_on_world_load(
+    mut lock: ResMut<PlantLock>,
+    time: Res<Time>,
+    mut loads: MessageReader<crate::ingame::teleport::WorldLoadFinished>,
+) {
+    if loads.read().next().is_some() {
+        lock.hold(f64::from(time.elapsed_secs()));
+    }
 }
 
 #[derive(Resource, Default)]
@@ -151,19 +210,24 @@ impl Builder {
     pub fn commit(&mut self, now: f32, net: &mut MessageWriter<NetCommand>, signals: &mut MessageWriter<BuilderSignal>) {
         let Some(b) = self.build.as_ref().filter(|b| b.stage == Stage::Confirm) else { return };
         if self.last_create.is_some_and(|t| now - t < CREATE_INTERVAL) {
-            signals.write(BuilderSignal::Refused("CANNOT_LOCATE_DOODAD_NOW"));
+            let seconds = self.last_create.map_or(0, |t| (CREATE_INTERVAL - (now - t)).max(0.0) as u32);
+            signals.write(BuilderSignal::Locked(seconds));
             return;
         }
         self.last_create = Some(now);
+        let z = b.quote_z.unwrap_or(b.pos.z);
+        let pos = data::get()
+            .and_then(|d| d.designs.get(&b.design))
+            .map_or(b.pos.truncate(), |d| snap_spot(b.pos.truncate(), footprint_half(d.garden_radius)));
         info!(
             "housing: build design {} at ({:.1}, {:.1}, {:.1}) yaw {:.2} with item {} (tax {})",
-            b.design, b.pos.x, b.pos.y, b.pos.z, b.yaw, b.item_id, b.total_tax
+            b.design, pos.x, pos.y, b.pos.z, b.yaw, b.item_id, b.total_tax
         );
         net.write(NetCommand(Command::House(HouseCommand::CreateHouse {
             design_id: b.design,
-            x: b.pos.x,
-            y: b.pos.y,
-            z: b.pos.z,
+            x: pos.x,
+            y: pos.y,
+            z,
             z_rot: b.yaw,
             item_id: b.item_id,
             money_amount: b.total_tax,
@@ -202,39 +266,205 @@ impl Builder {
     }
 }
 
-/// Why `design` cannot stand at `pos` (`ERROR_MSG` name), or `None`.
-pub fn check(data: &HousingData, design: u32, pos: Vec2, own_categories: &[u32], others: impl Iterator<Item = (Vec2, f32)>) -> Option<&'static str> {
-    let Some(d) = data.designs.get(&design) else { return Some("INVALID_HOUSE_INFO") };
-    let mut error = "HOUSE_CANNOT_LOCATE_INVALID_AREA";
-    let mut allowed = false;
-    for (_, group) in data.groups_at(pos) {
-        if !group.categories.contains(&d.category_id) {
-            if error == "HOUSE_CANNOT_LOCATE_INVALID_AREA" {
-                error = "HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA";
+/// The original's footprint cell size (m).
+const CELL: f32 = 4.0;
+/// `FUN_3999ecf4`: a house needs terrain that changes by at most this over its footprint (m).
+const MAX_SLOPE: f32 = 6.0;
+
+/// The side of the footprint in 4 m cells (`FUN_39897170`: `int((garden_radius * 2 + 3) * 0.25)`).
+pub fn footprint_cells(garden_radius: f32) -> i32 {
+    ((garden_radius * 2.0 + 3.0) * 0.25) as i32
+}
+
+/// Half the footprint's side (m).
+pub fn footprint_half(garden_radius: f32) -> f32 {
+    (footprint_cells(garden_radius) * 4) as f32 / 2.0
+}
+
+/// `FUN_39325e30`: the footprint's lower left corner to a whole 4 m cell (`C` truncation).
+pub fn snap_spot(pos: Vec2, half: f32) -> Vec2 {
+    let snap = |v: f32| ((v - half + CELL * 0.5) * 0.25) as i32 as f32 * CELL + half;
+    Vec2::new(snap(pos.x), snap(pos.y))
+}
+
+/// `FUN_39897070`: the designs whose centre area must belong to their housing group.
+pub fn restricted_category(category_id: u32) -> bool {
+    matches!(category_id, 1 | 7..=13 | 15..=18)
+}
+
+/// The ghost's spot: the snapped position, its yaw and the finished model's local box.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Site {
+    pub pos: Vec2,
+    pub yaw: f32,
+    /// The finished model's local AABB (cry space), `None` before the ghost's parts arrive.
+    pub model_box: Option<(Vec3, Vec3)>,
+}
+
+/// The other things the builder tests the spot against.
+#[derive(Clone, Copy, Default)]
+pub struct Around<'a> {
+    /// Categories of the account's houses (`houseless` / `existing_category_id` rules).
+    pub own_categories: &'a [u32],
+    /// The other houses: position and garden radius.
+    pub houses: &'a [(Vec2, f32)],
+    /// Units that are not the player's (mounts, mates and slaves of the player are left out).
+    pub units: &'a [Vec2],
+    /// Doodads that are not attached to a house.
+    pub doodads: &'a [Vec2],
+    pub terrain: Option<&'a TerrainQuery>,
+}
+
+/// Why `design` cannot stand at `site.pos` (`ERROR_MSG` name), or `None`.
+#[allow(clippy::too_many_arguments)]
+pub fn check(
+    data: &HousingData,
+    design: u32,
+    site: Site,
+    around: Around<'_>,
+) -> Option<&'static str> {
+    let Some(d) = data.designs.get(&design) else {
+        return Some("INVALID_HOUSE_INFO");
+    };
+    let n = footprint_cells(d.garden_radius);
+    if n >= 12 {
+        // `FUN_39897170` logs "house too big" and returns no footprint; the builder refuses it
+        // before any area check (capture-pending: no client text or case was captured).
+        return Some("INVALID_HOUSE_INFO");
+    }
+    let half = footprint_half(d.garden_radius);
+    let site = Site {
+        pos: snap_spot(site.pos, half),
+        ..site
+    };
+    let groups: Vec<_> = data.groups_at(site.pos).collect();
+    let allowed = groups
+        .iter()
+        .find(|(_, group)| group.categories.contains(&d.category_id));
+    if restricted_category(d.category_id) && allowed.is_none() {
+        // a centre outside every polygon, or one whose group has no row for the design's
+        // category, is 0x244 ("Building doesn't fit in this area."). Unrestricted designs skip
+        // this check (the client and the server both do).
+        return Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA");
+    }
+    if let Some((_, group)) = allowed {
+        if group.houseless && !around.own_categories.is_empty() {
+            return Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION");
+        }
+        if group.existing_category_id != 0
+            && around.own_categories.contains(&group.existing_category_id)
+        {
+            return Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION");
+        }
+    }
+    let lower = site.pos - Vec2::splat(half);
+    let upper = site.pos + Vec2::splat(half);
+    let house_boxes: Vec<(Vec2, f32)> = around
+        .houses
+        .iter()
+        .filter_map(|(p, radius)| {
+            let n = footprint_cells(*radius);
+            let half = footprint_half(*radius);
+            (n > 0).then(|| (snap_spot(*p, half), half))
+        })
+        .collect();
+    if n > 0 {
+        let candidates: Vec<_> = data
+            .land
+            .iter()
+            .filter(|land| land.overlaps_box(lower, upper))
+            .collect();
+        for cy in 0..n {
+            for cx in 0..n {
+                let corner = lower + Vec2::new(cx as f32 * CELL, cy as f32 * CELL);
+                let cell = [
+                    corner,
+                    corner + Vec2::X * CELL,
+                    corner + Vec2::Y * CELL,
+                    corner + Vec2::splat(CELL),
+                ];
+                let Some(area) = candidates.iter().find(|land| land.contains(cell[0])) else {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                };
+                if cell[1..].iter().any(|p| !area.contains(*p)) {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                }
+                // `FUN_39333e20`'s cell callback asks the housing manager whether the cell can be
+                // built on; a house already standing there is not buildable, and the client
+                // answers 0x70 (recapture2), before the 0x71 house-overlap test.
+                let centre = corner + Vec2::splat(CELL * 0.5);
+                if house_boxes.iter().any(|(c, h)| {
+                    centre.x > c.x - h
+                        && centre.x < c.x + h
+                        && centre.y > c.y - h
+                        && centre.y < c.y + h
+                }) {
+                    return Some("HOUSE_CANNOT_LOCATE_INVALID_AREA");
+                }
             }
-            continue;
         }
-        if group.houseless && !own_categories.is_empty() {
-            error = "HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION";
-            continue;
-        }
-        if group.existing_category_id != 0 && own_categories.contains(&group.existing_category_id) {
-            error = "HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION";
-            continue;
-        }
-        allowed = true;
-        break;
     }
-    if !allowed {
-        return Some(error);
+    if around
+        .units
+        .iter()
+        .chain(around.doodads)
+        .any(|p| lower.x < p.x && p.x < upper.x && lower.y < p.y && p.y < upper.y)
+    {
+        return Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT");
     }
-    for (other, radius) in others {
-        let extent = d.garden_radius + radius;
-        if (pos.x - other.x).abs() < extent && (pos.y - other.y).abs() < extent {
-            return Some("HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE");
-        }
+    if around
+        .terrain
+        .is_some_and(|terrain| terrain_too_steep(site, half, |x, y| terrain.height_at(x, y)))
+    {
+        return Some("HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW");
     }
     None
+}
+
+/// The terrain over the ghost's rotated model box: its four corners and centre
+/// (`FUN_39326c10`), or the footprint square before the model is loaded.
+fn terrain_samples(
+    site: Site,
+    half: f32,
+    height: impl Fn(f32, f32) -> Option<f32>,
+) -> Option<(f32, f32)> {
+    let (lo, hi) = site
+        .model_box
+        .map(|(lo, hi)| (lo.truncate(), hi.truncate()))
+        .unwrap_or((-Vec2::splat(half), Vec2::splat(half)));
+    let (sin, cos) = site.yaw.sin_cos();
+    let rotate = |p: Vec2| Vec2::new(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
+    let centre = (lo + hi) * 0.5;
+    let heights: Option<Vec<f32>> = [
+        Vec2::new(lo.x, lo.y),
+        Vec2::new(hi.x, lo.y),
+        Vec2::new(lo.x, hi.y),
+        Vec2::new(hi.x, hi.y),
+        centre,
+    ]
+        .into_iter()
+    .map(|p| {
+        let p = rotate(p) + site.pos;
+        height(p.x, p.y)
+    })
+        .collect();
+    heights.map(|h| {
+        (
+            h.iter().copied().fold(f32::INFINITY, f32::min),
+            h.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        )
+    })
+}
+
+/// The spot's z: the lowest terrain sample of the rotated model box (`FUN_39332180` stores the
+/// minimum before `39325160` moves the ghost).
+fn lowest_sample(site: Site, half: f32, height: impl Fn(f32, f32) -> Option<f32>) -> Option<f32> {
+    terrain_samples(site, half, height).map(|(min, _)| min)
+}
+
+/// `FUN_39332180`: terrain over the rotated model box changes by more than [`MAX_SLOPE`] (6 m).
+fn terrain_too_steep(site: Site, half: f32, height: impl Fn(f32, f32) -> Option<f32>) -> bool {
+    terrain_samples(site, half, height).is_some_and(|(min, max)| max - min > MAX_SLOPE)
 }
 
 /// The terrain under the view ray through `cursor` (game coordinates).
@@ -273,11 +503,23 @@ fn yaw_towards(from: Vec3, to: Vec3) -> Option<f32> {
 }
 
 /// A design item used from the bag or a slot starts the builder (`ground_target::route` leaves these items alone).
-pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Builder>, player: Query<&Transform, With<LocalPlayer>>, mut signals: MessageWriter<BuilderSignal>,bridge: Option<NonSend<crate::hud::api::HudBridge>>,
+pub fn start(
+    mut pressed: MessageReader<SkillPressed>,
+    mut builder: ResMut<Builder>,
+    player: Query<&Transform, With<LocalPlayer>>,
+    time: Res<Time>,
+    lock: Res<PlantLock>,
+    mut signals: MessageWriter<BuilderSignal>,
+    bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     for press in pressed.read() {
         let Some((item_id, template)) = press.item else { continue };
         let Some(design) = data::get().and_then(|d| d.design_by_item.get(&template).copied()) else { continue };
+        let now = f64::from(time.elapsed_secs());
+        if lock.refused(now) {
+            signals.write(BuilderSignal::Locked(lock.remaining(now) as u32));
+            continue;
+        }
         // the same item again lets go
         if builder.build.as_ref().is_some_and(|b| b.item_id == item_id) {
             builder.end(&mut signals);
@@ -297,6 +539,8 @@ pub fn start(mut pressed: MessageReader<SkillPressed>, mut builder: ResMut<Build
             yaw: 0.0,
             error: None,
             total_tax: 0,
+            quote_z: None,
+            model_box: None,
             ghost: None,
             meshes: Vec::new(),
             shown_error: None,
@@ -386,6 +630,7 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
                 return;
             }
             info!("housing: tax of design {} at ({:.1}, {:.1}, {:.1})", b.design, b.pos.x, b.pos.y, b.pos.z);
+            b.quote_z = Some(b.pos.z);
             net.write(NetCommand(Command::House(HouseCommand::ConstructHouseTax { design_id: b.design, x: b.pos.x, y: b.pos.y, z: b.pos.z })));
             b.stage = Stage::Quote;
             rotation_mode(bridge.as_deref(), false);
@@ -400,15 +645,21 @@ bridge: Option<NonSend<crate::hud::api::HudBridge>>,
 pub fn follow(
     actions: Res<crate::settings::Actions>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
+    cameras: Query<
+        (&Camera, &GlobalTransform),
+        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
+    >,
     terrain: Option<Res<TerrainQuery>>,
     units: Res<Units>,
+    doodads: Res<Doodads>,
     houses: Res<Houses>,
     player: Res<aa_net::state::Player>,
     mut builder: ResMut<Builder>,
 ) {
     let pinned = builder.pinned;
-    let Some(b) = builder.build.as_mut() else { return };
+    let Some(b) = builder.build.as_mut() else {
+        return;
+    };
     for (sign, side) in [(1.0, "left"), (-1.0, "right")] {
         for (turn, size) in TURN.iter().zip(["small", "normal", "large"]) {
             if actions.just_pressed(&format!("builder_rotate_{side}_{size}"), 0) {
@@ -421,21 +672,43 @@ pub fn follow(
             if b.stage == Stage::Position {
                 b.yaw = yaw;
             }
-            terrain.as_deref().and_then(|t| t.height_at(p.x, p.y)).map(|z| Vec3::new(p.x, p.y, z))
+            terrain
+                .as_deref()
+                .and_then(|t| t.height_at(p.x, p.y))
+                .map(|z| Vec3::new(p.x, p.y, z))
         }
         None => {
             let cursor = windows.single().ok().and_then(Window::cursor_position);
             let camera = cameras.iter().find(|(c, _)| c.is_active);
             match (cursor, camera, terrain.as_deref()) {
-                (Some(cursor), Some((camera, transform)), Some(terrain)) => terrain_under(camera, transform, cursor, terrain),
+                (Some(cursor), Some((camera, transform)), Some(terrain)) => {
+                    terrain_under(camera, transform, cursor, terrain)
+                }
                 _ => None,
             }
         }
     };
+    let Some(data) = data::get() else { return };
+    let half = data
+        .designs
+        .get(&b.design)
+        .map_or(0.0, |d| footprint_half(d.garden_radius));
     match b.stage {
         Stage::Position => {
             if let Some(spot) = spot {
-                b.pos = spot;
+                let snapped = snap_spot(spot.truncate(), half);
+                let site = Site {
+                    pos: snapped,
+                    yaw: b.yaw,
+                    model_box: b.model_box,
+                };
+                // `FUN_39332180`: the spot's z is the lowest terrain sample of the rotated model
+                // box (four corners and centre).
+                let z = terrain
+                    .as_deref()
+                    .and_then(|t| lowest_sample(site, half, |x, y| t.height_at(x, y)))
+                    .unwrap_or(spot.z);
+                b.pos = snapped.extend(z);
             }
         }
         Stage::Rotate if pinned.is_none() => {
@@ -445,19 +718,103 @@ pub fn follow(
         }
         _ => {}
     }
-    let Some(data) = data::get() else { return };
+    // `FUN_39332180` runs on every builder update: the spot's z follows the lowest sample of
+    // the current rotated model box (also after a wheel turn or when the model box arrives).
+    if let Some(terrain) = terrain.as_deref() {
+        let site = Site {
+            pos: b.pos.truncate(),
+            yaw: b.yaw,
+            model_box: b.model_box,
+        };
+        if let Some(z) = lowest_sample(site, half, |x, y| terrain.height_at(x, y)) {
+            b.pos.z = z;
+        }
+    }
     let me = player.spawn.as_ref().map(|s| s.character().id);
     let own: Vec<u32> = houses
         .by_tl_id
         .values()
         .filter(|h| !h.demolished && Some(h.snapshot.owner_id) == me)
-        .filter_map(|h| data.designs.get(&h.snapshot.template_id).map(|d| d.category_id))
+        .filter_map(|h| {
+            data.designs
+                .get(&h.snapshot.template_id)
+                .map(|d| d.category_id)
+        })
         .collect();
-    let others = units.iter().filter_map(|u| match u.kind {
-        UnitKind::Housing { template_id, .. } => Some((Vec2::new(u.pos.x, u.pos.y), data.designs.get(&template_id).map_or(0.0, |d| d.garden_radius))),
+    let others: Vec<(Vec2, f32)> = units
+        .iter()
+        .filter_map(|u| match u.kind {
+            UnitKind::Housing { template_id, .. } => Some((
+                Vec2::new(u.pos.x, u.pos.y),
+                data.designs
+                    .get(&template_id)
+                    .map_or(0.0, |d| d.garden_radius),
+            )),
         _ => None,
-    });
-    b.error = check(data, b.design, b.pos.truncate(), &own, others);
+        })
+        .collect();
+    let own_obj = player.spawn.as_ref().map(|s| s.obj_id);
+    let (obstacles, props) = obstacles(&units, &doodads, own_obj, me);
+    b.error = check(
+        data,
+        b.design,
+        Site {
+            pos: b.pos.truncate(),
+            yaw: b.yaw,
+            model_box: b.model_box,
+        },
+        Around {
+            own_categories: &own,
+            houses: &others,
+            units: &obstacles,
+            doodads: &props,
+            terrain: terrain.as_deref(),
+        },
+    );
+}
+
+/// The unit and doodad points the footprint tests: the player's own object, mount, mate and
+/// slave are left out (the server's `player_owned`), and so is every doodad attached to a house
+/// (`FUN_39335860`'s skip list).
+fn obstacles(
+    units: &Units,
+    doodads: &Doodads,
+    own_obj: Option<u32>,
+    character: Option<u32>,
+) -> (Vec<Vec2>, Vec<Vec2>) {
+    let points = units
+        .iter()
+        .filter(|u| {
+            !matches!(u.kind, UnitKind::Housing { .. }) && !player_owned(u, own_obj, character)
+        })
+        .map(|u| Vec2::new(u.pos.x, u.pos.y))
+        .collect();
+    let props = doodads
+        .by_id
+        .values()
+        .filter(|d| {
+            !units
+                .get(d.parent_obj_id)
+                .is_some_and(|u| matches!(u.kind, UnitKind::Housing { .. }))
+        })
+        .map(|d| Vec2::new(d.pos.x, d.pos.y))
+        .collect();
+    (points, props)
+}
+
+/// The player's own object, mount, mate or slave (the server's `player_owned`).
+fn player_owned(unit: &aa_net::model::Unit, own_obj: Option<u32>, character: Option<u32>) -> bool {
+    if Some(unit.obj_id) == own_obj {
+        return true;
+    }
+    let Some(character) = character else {
+        return false;
+    };
+    match unit.kind {
+        UnitKind::Slave { summoner_id, .. } => summoner_id == character,
+        UnitKind::Mate { owner_id, .. } => owner_id == character,
+        _ => false,
+    }
 }
 
 /// Prepared ghost parts arriving from the workers.
@@ -519,6 +876,7 @@ pub fn ghost(
         if Some(m) != model || b.ghost.is_some() {
             continue;
         }
+        b.model_box = render::bounds(&parts);
         let root = commands.spawn((Name::new("house ghost"), Ghost, Transform::default(), Visibility::default())).id();
         render::spawn_parts(&mut commands, &mut cry, root, parts, &ModelOptions::default());
         b.ghost = Some(root);
@@ -563,6 +921,7 @@ pub fn clear(mut builder: ResMut<Builder>, mut signals: MessageWriter<BuilderSig
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aa_net::{Event, NetEvent};
     #[test]
     fn refused_rotate_click_reasserts_builder_after_mode_bar_promotion() {
         use crate::hud::api::{HudBridge, HudData};
@@ -588,6 +947,8 @@ mod tests {
                     yaw: 0.,
                     error: Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"),
                     total_tax: 0,
+                    quote_z: None,
+                    model_box: None,
                     ghost: None,
                     meshes: Vec::new(),
                     shown_error: None,
@@ -655,30 +1016,575 @@ mod tests {
         d
     }
 
+    fn site(pos: Vec2) -> Site {
+        Site { pos, ..default() }
+    }
+
+    fn at(d: &HousingData, design: u32, pos: Vec2) -> Option<&'static str> {
+        check(d, design, site(pos), Around::default())
+    }
+
+    fn with_others(
+        d: &HousingData,
+        design: u32,
+        pos: Vec2,
+        houses: &[(Vec2, f32)],
+    ) -> Option<&'static str> {
+        check(
+            d,
+            design,
+            site(pos),
+            Around {
+                houses,
+                ..default()
+            },
+        )
+    }
+
     #[test]
     fn the_land_its_categories_and_other_houses_decide_where_a_house_may_stand() {
         let d = data();
-        let none = std::iter::empty;
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[], none()), None);
-        assert_eq!(check(&d, 171, Vec2::new(150.0, 50.0), &[], none()), Some("HOUSE_CANNOT_LOCATE_INVALID_AREA"));
-        assert_eq!(check(&d, 172, Vec2::new(50.0, 50.0), &[], none()), Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA"));
-        // garden squares: 11 + 7.5 m apart on both axes is needed
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[], [(Vec2::new(68.0, 50.0), 7.5)].into_iter()), Some("HOUSE_CANNOT_LOCATE_OVERLAP_HOUSE"));
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[], [(Vec2::new(69.0, 50.0), 7.5)].into_iter()), None);
+        assert_eq!(at(&d, 171, Vec2::new(50.0, 50.0)), None);
+        // a centre outside every polygon is 0x244 for a restricted category, not 0x70
+        assert_eq!(
+            at(&d, 171, Vec2::new(150.0, 50.0)),
+            Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA")
+        );
+        assert_eq!(
+            at(&d, 172, Vec2::new(50.0, 50.0)),
+            Some("HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA")
+        );
+        // an existing house on the spot is 0x70 (recapture2), not 0x71: the placement-mode cell
+        // query answers it before the 0x71 house-overlap test; touching edges do not overlap
+        assert_eq!(
+            with_others(
+                &d,
+                171,
+                Vec2::new(50.0, 50.0),
+                &[(Vec2::new(50.0, 50.0), 11.0)]
+            ),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
+        assert_eq!(
+            with_others(
+                &d,
+                171,
+                Vec2::new(50.0, 50.0),
+                &[(Vec2::new(70.0, 50.0), 7.5)]
+            ),
+            None
+        );
         let mut d = d;
         d.groups.get_mut(&15).unwrap().houseless = true;
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[1], none()), Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION"));
+        assert_eq!(
+            check(
+                &d,
+                171,
+                site(Vec2::new(50.0, 50.0)),
+                Around {
+                    own_categories: &[1],
+                    ..default()
+                }
+            ),
+            Some("HOUSE_CANNOT_OWN_MORE_HOUSELESS_CONDITION")
+        );
         d.groups.get_mut(&15).unwrap().houseless = false;
         d.groups.get_mut(&15).unwrap().existing_category_id = 18;
-        assert_eq!(check(&d, 171, Vec2::new(50.0, 50.0), &[18], none()), Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION"));
-        assert_eq!(check(&d, 999, Vec2::new(50.0, 50.0), &[], none()), Some("INVALID_HOUSE_INFO"));
+        assert_eq!(
+            check(
+                &d,
+                171,
+                site(Vec2::new(50.0, 50.0)),
+                Around {
+                    own_categories: &[18],
+                    ..default()
+                }
+            ),
+            Some("HOUSE_CANNOT_OWN_MORE_EXISTING_CATEGORY_CONDITION")
+        );
+        assert_eq!(
+            at(&d, 999, Vec2::new(50.0, 50.0)),
+            Some("INVALID_HOUSE_INFO")
+        );
+    }
+
+    #[test]
+    fn unrestricted_categories_skip_the_area_category_error_and_no_footprint_designs_pass() {
+        let mut d = data();
+        // category 2 is outside FUN_39897070's restricted set; the group has no row for it
+        d.designs.insert(
+            173,
+            Design {
+                id: 173,
+                category_id: 2,
+                garden_radius: 11.0,
+                main_model: 1082,
+                steps: vec![],
+            },
+        );
+        assert_eq!(at(&d, 173, Vec2::new(50.0, 50.0)), None);
+        // n = int((2 * 0 + 3) * 0.25) = 0: FUN_39897170 returns no footprint and the original
+        // lets the design through
+        d.designs.insert(
+            174,
+            Design {
+                id: 174,
+                category_id: 18,
+                garden_radius: 0.0,
+                main_model: 1082,
+                steps: vec![],
+            },
+        );
+        assert_eq!(at(&d, 174, Vec2::new(50.0, 50.0)), None);
+    }
+
+    #[test]
+    fn every_footprint_cell_must_lie_in_one_polygon() {
+        let mut d = data();
+        d.land.clear();
+        d.land.push(Land::new(
+            338,
+            vec![
+                Vec2::new(-1.0, -1.0),
+                Vec2::new(25.0, -1.0),
+                Vec2::new(25.0, 25.0),
+                Vec2::new(-1.0, 25.0),
+            ],
+        ));
+        // design 171: n = 6, 24 m footprint 0..24, all cells inside
+        assert_eq!(at(&d, 171, Vec2::new(12.0, 12.0)), None);
+        // footprint 4..28: the cells past x = 25 leave the polygon
+        assert_eq!(
+            at(&d, 171, Vec2::new(16.0, 12.0)),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
+        // the snap puts the lower left corner on a 4 m cell: 16.4 -> 16.0
+        assert_eq!(
+            snap_spot(Vec2::new(16.4, 12.4), 12.0),
+            Vec2::new(16.0, 12.0)
+        );
+        assert_eq!(
+            snap_spot(Vec2::new(15328.4, 14632.33), 12.0),
+            Vec2::new(15328.0, 14632.0)
+        );
+    }
+
+    #[test]
+    fn a_unit_or_doodad_in_the_footprint_refuses_it() {
+        let d = data();
+        let spot = Vec2::new(50.0, 50.0);
+        let refused = |units: &[Vec2], doodads: &[Vec2]| {
+            check(
+                &d,
+                171,
+                site(spot),
+                Around {
+                    units,
+                    doodads,
+                    ..default()
+                },
+            )
+        };
+        assert_eq!(refused(&[], &[]), None);
+        assert_eq!(
+            refused(&[Vec2::new(49.0, 49.0)], &[]),
+            Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT")
+        );
+        assert_eq!(
+            refused(&[], &[Vec2::new(49.0, 49.0)]),
+            Some("HOUSE_CANNOT_LOCATE_OVERLAP_UNIT")
+        );
+        // the footprint is 38..62 on both axes; its edge does not overlap
+        assert_eq!(refused(&[Vec2::new(64.0, 50.0)], &[]), None);
+    }
+
+    #[test]
+    fn the_terrain_check_uses_the_rotated_model_box_and_returns_the_lowest_sample() {
+        // asymmetric box: a sign error in the yaw would swap the two quarter turns
+        let base = Site {
+            pos: Vec2::splat(50.0),
+            yaw: 0.0,
+            model_box: Some((Vec3::new(-5.0, -1.0, -5.0), Vec3::new(3.0, 4.0, 10.0))),
+        };
+        let height = |x: f32, _y: f32| Some((x * x + x) * 0.01224);
+        assert!(terrain_too_steep(base, 14.0, height), "unrotated");
+        let turned = Site { yaw: std::f32::consts::FRAC_PI_2, ..base };
+        assert!(!terrain_too_steep(turned, 14.0, height), "+90 degrees stays under 6 m");
+        let mirrored = Site { yaw: -std::f32::consts::FRAC_PI_2, ..base };
+        assert!(terrain_too_steep(mirrored, 14.0, height), "-90 degrees goes over 6 m");
+        let (min, max) = terrain_samples(turned, 14.0, height).unwrap();
+        assert!((min - 26.462_88).abs() < 0.001 && (max - 32.460_48).abs() < 0.001);
+        assert!((lowest_sample(turned, 14.0, height).unwrap() - 26.462_88).abs() < 0.001);
+        // without a model box the footprint (28 m here) is sampled as before
+        assert!(terrain_too_steep(Site { model_box: None, ..turned }, 14.0, height));
+        // a corner without terrain leaves the check to the server
+        assert!(!terrain_too_steep(base, 14.0, |_, _| None));
+    }
+
+    fn unit(obj_id: u32, kind: UnitKind) -> aa_net::model::Unit {
+        aa_net::model::Unit {
+            obj_id,
+            name: String::new(),
+            kind,
+            owner_name: String::new(),
+            pos: aa_net::wire::Pos::new(0.0, 0.0, 0.0),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 1,
+            model_id: 0,
+            equipment: Default::default(),
+            model_params: Default::default(),
+            hp: 1,
+            mp: 0,
+            max_hp: 1,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            anim_action: 0,
+            house_posture: None,
+            turret: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    fn doodad(obj_id: u32, parent_obj_id: u32, x: f32) -> aa_net::model::Doodad {
+        aa_net::model::Doodad {
+            obj_id,
+            template_id: 1,
+            owner_obj_id: 0,
+            parent_obj_id,
+            attach_point: 0,
+            pos: aa_net::wire::Pos::new(x, 0.0, 0.0),
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: 1.0,
+            has_loot_item: false,
+            func_group_id: 0,
+            owner_id: 0,
+            ucc_id: 0,
+            item_template_id: 0,
+            type2: 0,
+            time_left: 0,
+            plant_time: 0,
+            quest_glow: 0,
+            family: 0,
+            puzzle_group: 0,
+            owner_type: 0,
+            owner_db_id: 0,
+            data: 0,
+        }
+    }
+
+    #[test]
+    fn the_players_own_units_and_house_doodads_are_not_obstacles() {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(8615, unit(8615, UnitKind::Character { char_id: 42 }));
+        units.by_id.insert(
+            9001,
+            unit(
+                9001,
+                UnitKind::Slave {
+                    id: 1,
+                    tl_id: 1,
+                    template_id: 60,
+                    summoner_id: 42,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9002,
+            unit(
+                9002,
+                UnitKind::Mate {
+                    tl_id: 2,
+                    template_id: 1,
+                    owner_id: 42,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9003,
+            unit(
+                9003,
+                UnitKind::Slave {
+                    id: 3,
+                    tl_id: 3,
+                    template_id: 60,
+                    summoner_id: 99,
+                },
+            ),
+        );
+        units.by_id.insert(
+            9004,
+            unit(
+                9004,
+                UnitKind::Housing {
+                    tl_id: 4,
+                    template_id: 171,
+                    build_step: -1,
+                },
+            ),
+        );
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(9100, doodad(9100, 0, 1.0));
+        doodads.by_id.insert(9101, doodad(9101, 9004, 2.0));
+        let (points, props) = obstacles(&units, &doodads, Some(8615), Some(42));
+        assert_eq!(
+            points,
+            vec![Vec2::new(0.0, 0.0)],
+            "only the foreign slave remains"
+        );
+        assert_eq!(
+            props,
+            vec![Vec2::new(1.0, 0.0)],
+            "only the free doodad remains"
+        );
+    }
+
+    #[test]
+    fn the_tax_and_create_use_one_z() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<HudPointerOverUi>()
+            .add_message::<NetCommand>()
+            .add_message::<BuilderSignal>()
+            .insert_resource(Builder {
+                build: Some(Build {
+                    design: 171,
+                    item_id: 1,
+                    item_template: 21_165,
+                    stage: Stage::Rotate,
+                    pos: Vec3::new(15328.0, 14632.0, 173.05162),
+                    yaw: 0.0,
+                    error: None,
+                    total_tax: 0,
+                    quote_z: None,
+                    model_box: None,
+                    ghost: None,
+                    meshes: Vec::new(),
+                    shown_error: None,
+                }),
+                clicks: 1,
+                ..default()
+            })
+            .add_systems(Update, input);
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        let NetCommand(Command::House(HouseCommand::ConstructHouseTax { z, .. })) = &commands[0] else {
+            panic!("not a tax: {commands:?}");
+        };
+        assert_eq!(*z, 173.05162);
+        assert_eq!(app.world().resource::<Builder>().build.as_ref().unwrap().quote_z, Some(173.05162));
+        // a later z rewrite (the model box arriving) must not change the create's z
+        app.add_systems(
+            Update,
+            |mut builder: ResMut<Builder>, mut net: MessageWriter<NetCommand>, mut signals: MessageWriter<BuilderSignal>| {
+                let Some(build) = builder.build.as_mut() else { return };
+                build.stage = Stage::Confirm;
+                build.pos.z = 100.0;
+                builder.commit(10.0, &mut net, &mut signals);
+            },
+        );
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+        let NetCommand(Command::House(HouseCommand::CreateHouse { z, .. })) = &commands[0] else {
+            panic!("not a create: {commands:?}");
+        };
+        assert_eq!(*z, 173.05162, "CSCreateHouse reuses the tax z");
+    }
+
+    #[test]
+    fn the_placement_and_create_locks_report_their_remaining_seconds() {
+        let mut lock = PlantLock::default();
+        assert!(!lock.refused(0.0));
+        lock.hold(10.0);
+        assert_eq!(lock.remaining(10.0), 30.0);
+        assert_eq!(lock.remaining(39.0), 1.0);
+        assert!(!lock.refused(40.0));
+        assert_eq!(lock.remaining(40.0), 0.0);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NetCommand>()
+            .add_message::<BuilderSignal>()
+            .insert_resource(Builder {
+                build: Some(Build::confirmed(171, 1, 21_165, Vec3::ZERO, 0.0, 0)),
+                ..default()
+            })
+            .add_systems(
+                Update,
+                |mut builder: ResMut<Builder>,
+                 mut net: MessageWriter<NetCommand>,
+                 mut signals: MessageWriter<BuilderSignal>| {
+                    builder.commit(1.0, &mut net, &mut signals);
+                    builder.build = Some(Build::confirmed(171, 1, 21_165, Vec3::ZERO, 0.0, 0));
+                    builder.commit(1.0, &mut net, &mut signals);
+                },
+            );
+        app.update();
+        let signals: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<BuilderSignal>>()
+            .drain()
+            .collect();
+        assert_eq!(signals, vec![BuilderSignal::End, BuilderSignal::Locked(5)]);
+    }
+
+    #[test]
+    fn a_short_teleport_does_not_lock_but_a_world_load_does() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<NetEvent>()
+            .add_message::<crate::ingame::teleport::WorldLoadFinished>()
+            .init_resource::<PlantLock>()
+            .add_systems(Update, arm_on_world_load);
+        app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::Teleported {
+            pos: aa_net::wire::Pos::default(),
+            yaw: 0.0,
+            reason: 0,
+        }));
+        app.update();
+        let now = f64::from(app.world().resource::<Time>().elapsed_secs());
+        assert_eq!(app.world().resource::<PlantLock>().remaining(now), 0.0, "a short teleport must not lock");
+        app.world_mut()
+            .resource_mut::<Messages<crate::ingame::teleport::WorldLoadFinished>>()
+            .write(crate::ingame::teleport::WorldLoadFinished);
+        app.update();
+        let remaining = app.world().resource::<PlantLock>().remaining(now);
+        assert!(remaining > 29.9 && remaining < 30.1, "a world load must lock ({remaining})");
+    }
+
+    #[test]
+    fn the_world_load_lock_blocks_starting_the_builder() {
+        let Ok(_) = std::env::var("AA_DB") else {
+            return;
+        };
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let data = data::get().unwrap_or_else(|| {
+            let d = data::load_now("main_world");
+            let _ = data::set(d);
+            data::get().expect("housing data")
+        });
+        if !data.design_by_item.contains_key(&21_165) {
+            return;
+        }
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SkillPressed>()
+            .add_message::<BuilderSignal>()
+            .init_resource::<Builder>()
+            .init_resource::<PlantLock>()
+            .add_systems(Update, start);
+        app.world_mut().resource_mut::<PlantLock>().hold(0.0);
+        app.world_mut()
+            .resource_mut::<Messages<SkillPressed>>()
+            .write(SkillPressed {
+                skill: 0,
+                item: Some((1, 21_165)),
+                target_obj_id: 0,
+                gcd: false,
+            });
+        app.update();
+        assert!(app.world().resource::<Builder>().build.is_none());
+        let signals: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<BuilderSignal>>()
+            .drain()
+            .collect();
+        assert_eq!(signals, vec![BuilderSignal::Locked(30)]);
+    }
+
+    #[test]
+    fn the_area_338_polygon_refuses_the_old_spot_and_accepts_the_captured_one() {
+        let Ok(_) = std::env::var("AA_DB") else {
+            return;
+        };
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let d = data::load_now("main_world");
+        if !d.land.iter().any(|l| l.area_id == 338) || !d.designs.contains_key(&171) {
+            return;
+        }
+        // 2026-10-31-house-spot.md: 24 m footprint across the area's south east notch
+        assert_eq!(
+            at(&d, 171, Vec2::new(15338.53, 14632.33)),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
+        // 2026-10-31-recapture.md: the ghost snapped to (15328, 14632) and the client accepted it
+        let terrain = TerrainQuery::new("main_world");
+        assert_eq!(
+            check(
+                &d,
+                171,
+                Site {
+                    pos: Vec2::new(15328.4, 14631.8),
+                    yaw: 0.0,
+                    model_box: None
+                },
+                Around {
+                    terrain: Some(&terrain),
+                    ..default()
+                },
+            ),
+            None
+        );
+        // recapture2: an existing house on that spot is 0x70, before the 0x71 overlap test
+        assert_eq!(
+            check(
+                &d,
+                171,
+                Site {
+                    pos: Vec2::new(15328.4, 14631.8),
+                    yaw: 0.0,
+                    model_box: None
+                },
+                Around {
+                    houses: &[(Vec2::new(15328.0, 14632.0), 11.0)],
+                    terrain: Some(&terrain),
+                    ..default()
+                },
+            ),
+            Some("HOUSE_CANNOT_LOCATE_INVALID_AREA")
+        );
     }
 
     #[test]
     fn the_house_faces_the_cursor_in_the_units_yaw() {
         // north is +Y and yaw 0; west (-X) is a quarter turn counter-clockwise
-        assert!(yaw_towards(Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0)).unwrap().abs() < 1e-6);
-        assert!((yaw_towards(Vec3::ZERO, Vec3::new(-5.0, 0.0, 0.0)).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert!(
+            yaw_towards(Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0))
+                .unwrap()
+                .abs()
+                < 1e-6
+        );
+        assert!(
+            (yaw_towards(Vec3::ZERO, Vec3::new(-5.0, 0.0, 0.0)).unwrap()
+                - std::f32::consts::FRAC_PI_2)
+                .abs()
+                < 1e-6
+        );
         assert!(yaw_towards(Vec3::ZERO, Vec3::new(0.1, 0.1, 0.0)).is_none());
     }
 }

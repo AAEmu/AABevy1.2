@@ -117,6 +117,9 @@ pub fn sync_loot(
     bridge: NonSend<HudBridge>,
     loot: Res<Loot>,
     units: Res<Units>,
+    views: Res<crate::ingame::units::Views>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     player: Res<Player>,
     mut seen: Local<(u32, u32)>,
 ) {
@@ -138,7 +141,15 @@ pub fn sync_loot(
             .filter_map(|&(kind, id)| {
                 let u = units.get(id)?;
                 let radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
-                let dist = super::api::distance_to(pos, own_radius, Vec3::new(u.pos.x, u.pos.y, u.pos.z), radius);
+                let target = crate::ingame::units::unit_world_pose(
+                    u,
+                    &units,
+                    &views,
+                    &transforms,
+                    &parents,
+                )?
+                .0;
+                let dist = super::api::distance_to(pos, own_radius, target, radius);
                 in_reach(dist).then_some((dist, (kind, id)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -182,6 +193,7 @@ pub fn loot_input(
     focus: Res<HudKeyboardFocus>,
     rt: Option<NonSend<aa_ui::UiRuntime>>,
     bridge: NonSend<HudBridge>,
+    ladder_claim: Option<Res<crate::ingame::ladder::LadderClaim>>,
     mut script: ResMut<ScriptedKeys>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -204,7 +216,10 @@ pub fn loot_input(
     // the keys (a scripted one, `--hud-key f 20`, counts too)
     let scripted = script.take_loot();
     let typing = focus.0 || rt.is_some_and(|rt| rt.keyboard_captured());
-    let all = scripted == Some(true) || (!typing && actions.just_pressed("do_interaction_1", 0));
+    // a ladder in reach (or being climbed) has F
+    let claimed = ladder_claim.as_deref().is_some_and(|claim| claim.0.is_some());
+    let all = !claimed
+        && (scripted == Some(true) || (!typing && actions.just_pressed("do_interaction_1", 0)));
     let open = scripted == Some(false) || (!typing && actions.just_pressed("do_interaction_2", 0));
     if (all || open)
         && let Some((_, id)) = d.loot.nearest
@@ -348,6 +363,63 @@ mod tests {
         assert!(in_reach(2.9));
         assert!(in_reach(3.0));
         assert!(!in_reach(3.1));
+    }
+
+    /// A ladder in reach (or being climbed) has F: loot-all must not also fire.
+    #[test]
+    fn a_ladder_claim_keeps_f_from_looting() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::settings::Actions::default())
+            .insert_resource(HudKeyboardFocus::default())
+            .insert_resource(ScriptedKeys::default())
+            .insert_resource(crate::ingame::ladder::LadderClaim(Some(77)))
+            .add_message::<NetCommand>()
+            .add_systems(Update, loot_input);
+        let shared = Rc::new(RefCell::new(crate::hud::api::HudData::default()));
+        app.insert_non_send(HudBridge(shared.clone()));
+        shared.borrow_mut().loot.nearest = Some((aa_net::state::owner_type::NPC, 5));
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .script_tap("do_interaction_1");
+        app.update();
+        let commands: Vec<Command> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect();
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, Command::LootOpen { .. })),
+            "the ladder has F"
+        );
+        // without the claim the same F press loots
+        app.world_mut()
+            .resource_mut::<crate::ingame::ladder::LadderClaim>()
+            .0 = None;
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .script_clear_taps();
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .script_tap("do_interaction_1");
+        app.update();
+        let commands: Vec<Command> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect();
+        assert!(
+            commands
+                .iter()
+                .any(|c| matches!(c, Command::LootOpen { loot_all: true, .. })),
+            "F loots without a ladder: {commands:?}"
+        );
     }
 
     #[test]

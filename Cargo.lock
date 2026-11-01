@@ -103,6 +103,7 @@ dependencies = [
  "bevy",
  "image",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]

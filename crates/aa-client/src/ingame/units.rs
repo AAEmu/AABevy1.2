@@ -47,6 +47,8 @@ const SPAWN_SLOW_FRAME: f32 = 0.025;
 const SPAWN_MAX_WAIT: f32 = 0.2;
 /// Unit and doodad preparations on the workers at once; the nearest are started first.
 const MAX_JOBS: usize = 16;
+/// The server's own cap for a transform parent chain (`aaemu-game` `world/mod.rs:50`).
+const MAX_PARENT_DEPTH: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;
@@ -71,6 +73,9 @@ fn tuning() -> (bool, f32) {
 #[derive(Component, Clone)]
 pub struct RemoteUnit {
     pub obj_id: u32,
+    /// The model (`Unit::model_id`) the drawn tree was built from; a change invalidates a cached
+    /// pick box.
+    pub model_id: u32,
     /// The buffered reports and the playback clock.
     track: Track,
     /// The 1.2 vehicle / ship controller, once a type-2 or type-3 movement arrived.
@@ -86,6 +91,16 @@ pub struct RemoteUnit {
     /// A remote unit walking on a ship deck: its ship-local track, composed with the smoothed
     /// hull each frame instead of its own world track.
     pub(super) deck: Option<DeckWalk>,
+    /// The unit this slave is attached to (`SCUnitState` first attach point), while its packet
+    /// position and rotation are parent-local. `None` for a unit standing in the world.
+    parent: Option<u32>,
+    /// A remote unit hanging on a ladder parented to a moving hull: the hull and the ship-local
+    /// point/facing of its climb movement.
+    pub(super) hang: Option<HangRide>,
+    /// The climb kind of a hanging unit from its `SCHung` target (`0` when the target is not known).
+    pub(super) hanging: Option<u8>,
+    /// Vertical speed of the last hanging movement (m/s, positive up).
+    pub(super) climb_up: f32,
     scale: f32,
     /// A player character (8 way run clips, jump and fall) rather than an NPC or a creature (always faces where it goes).
     character: bool,
@@ -112,20 +127,70 @@ pub struct DeckWalk {
 #[derive(Component)]
 pub struct DeckRider;
 
+/// A remote unit hanging on a ladder of a moving hull: the primary position and facing are in
+/// the hull frame (`0x20` + `0x40` movement). The drawn pose is composed with the smoothed hull.
+#[derive(Clone, Debug)]
+pub struct HangRide {
+    pub parent: u32,
+    /// Hull-local point (right, forward, up) and relative facing.
+    pub local: Vec3,
+    pub local_yaw: f32,
+    /// The packet's world point, while the hull itself is not drawn.
+    pub world: Vec3,
+}
+
 /// The last drawn pose of every hull with a vehicle track (game position, full rotation, yaw).
 /// `receive_moves` seeds a ship switch from the drawn pose (the next frame's smoothing has not
 /// run yet), not from the wire packet.
 #[derive(Resource, Default)]
 pub struct DeckHullPoses(pub HashMap<u32, (Vec3, Quat, f32)>);
 
+/// The `SCHung` target's climb kind (`doodad_func_climbs.climb_type_id`) per hanging unit.
+#[derive(Resource, Default)]
+pub struct Hangers(pub HashMap<u32, u8>);
+
+/// Folds `SCHung`/`SCUnhung` into [`Hangers`] so a movement with actor flag `0x40` knows which
+/// clip family to play. A target that is not a climb doodad (or was not announced) gives kind 0.
+pub fn track_hangers(
+    mut events: MessageReader<NetEvent>,
+    mut hangers: ResMut<Hangers>,
+    doodads: Res<Doodads>,
+    db: Option<Res<Db>>,
+) {
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::Transport(aa_net::TransportReceipt::Hung { unit_obj_id, target_obj_id }) => {
+                let kind = doodads
+                    .by_id
+                    .get(target_obj_id)
+                    .and_then(|d| db.as_ref().and_then(|db| db.ladder_kind(d.func_group_id)))
+                    .unwrap_or(0);
+                hangers.0.insert(*unit_obj_id, kind);
+            }
+            Event::Transport(aa_net::TransportReceipt::Unhung { unit_obj_id, .. }) => {
+                hangers.0.remove(unit_obj_id);
+            }
+            Event::UnitsRemoved(ids) => {
+                for id in ids {
+                    hangers.0.remove(id);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 impl RemoteUnit {
     /// The playback state of a unit announced by the server. The live path creates it in [`sync_views`]; a scripted
     /// example that spawns an actor for `unit` uses it directly.
     pub fn announced(unit: &Unit) -> Self {
         let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-        Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
-            rotation: Quat::from_rotation_y(unit.yaw()), game_rotation: Quat::from_rotation_z(unit.yaw()), deck: None,
-            scale: if unit.scale > 0.0 { unit.scale } else { 1.0 }, character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
+        let parent = unit_parent(unit);
+        let game_rotation = if parent.is_some() { unit_game_rotation(unit) } else { Quat::from_rotation_z(unit.yaw()) };
+        let rotation = if parent.is_some() { cry_rot_to_bevy(game_rotation) } else { Quat::from_rotation_y(unit.yaw()) };
+        Self { obj_id: unit.obj_id, model_id: unit.model_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
+            rotation, game_rotation, deck: None, parent, hang: None, hanging: None, climb_up: 0.0,
+            scale: unit_scale(unit), character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
     }
 
     /// The same committed movement clock is used with and without a render tree.
@@ -149,7 +214,8 @@ impl RemoteUnit {
         let mut pos = pose.pos;
         let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
         let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
-        if !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
+        // a hanger's packet point is its real point; the terrain must not snap it down
+        if self.hanging.is_none() && !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
         self.pos = pos;
         self.combat = pose.combat;
         self.speed = pose.speed;
@@ -173,9 +239,10 @@ impl RemoteUnit {
         true
     }
 
-    /// The transform of the drawn pose: vehicles keep their full rotation.
+    /// The transform of the drawn pose: an attached slave is parent-local (its root is a `ChildOf`
+    /// the parent), and vehicles keep their full rotation.
     fn drawn(&self) -> Transform {
-        if self.vehicle.is_some() {
+        if self.parent.is_some() || self.vehicle.is_some() {
             Transform { translation: cry_to_bevy(self.pos), rotation: self.rotation, scale: Vec3::splat(self.scale) }
         } else {
             placement(self.pos, self.facing, self.scale)
@@ -187,8 +254,9 @@ impl RemoteUnit {
     pub(super) fn speed(&self) -> f32 { self.speed }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
-        Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
-            rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None,
+        Self { obj_id, model_id: 0, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
+            rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None, parent: None,
+            hang: None, hanging: None, climb_up: 0.0,
             scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
     }
 
@@ -284,6 +352,9 @@ struct View {
     entity: Option<Entity>,
     /// The model failed to build or the object has none: do not try again.
     no_model: bool,
+    /// The unit stopped waiting because its parent had no model: a later parent root (or a new
+    /// parent state) may give it one, so this give-up is cleared again.
+    gave_up_on_parent: bool,
     /// Why there is no model (for the report).
     why: String,
     /// A worker is preparing it.
@@ -296,6 +367,9 @@ struct View {
     /// Owns playback only while no RemoteUnit component owns it. Render policy
     /// (distance, missing model or failed preparation) does not retire an actor.
     pending: Option<RemoteUnit>,
+    /// The source unit's attachment, so a later state that attaches or detaches it rebuilds the
+    /// playback at the new frame.
+    parent: Option<u32>,
     /// Receipt which created this incarnation, not a same-identity refresh.
     announced_after: Option<usize>,
 }
@@ -329,7 +403,25 @@ impl View {
                 * aa_world::coords::CRY_TO_BEVY;
             self.pending = Some(pending);
         }
-        if let Some(entity) = self.entity.take() { commands.entity(entity).despawn(); }
+        if let Some(entity) = self.entity.take() { commands.entity(entity).try_despawn(); }
+    }
+
+    /// A later state attached or detached the unit: the packet position changed frame (parent-local
+    /// or world), so the old root cannot be moved as if it were the same placement. Rebuild the
+    /// playback from the snapshot and let the normal spawn path wait for the new parent.
+    fn reparent(&mut self, commands: &mut Commands, unit: &Unit, parent: Option<u32>) {
+        if self.parent == parent {
+            return;
+        }
+        self.parent = parent;
+        // the packet frame changed: a model we gave up on as a child may be buildable in the new frame
+        self.no_model = false;
+        self.gave_up_on_parent = false;
+        self.why.clear();
+        if let Some(entity) = self.entity.take() {
+            commands.entity(entity).try_despawn();
+        }
+        self.pending = Some(RemoteUnit::announced(unit));
     }
 }
 
@@ -347,7 +439,13 @@ impl Views {
             commands.entity(entity).try_despawn();
         }
         self.source_generation += 1;
-        self.units.insert(unit.obj_id, View { source_generation: self.source_generation, unit_identity: Some(identity), pending: Some(RemoteUnit::announced(unit)), ..default() });
+        self.units.insert(unit.obj_id, View {
+            source_generation: self.source_generation,
+            unit_identity: Some(identity),
+            pending: Some(RemoteUnit::announced(unit)),
+            parent: unit_parent(unit),
+            ..default()
+        });
     }
 
     fn finish_unit(&mut self, id: u32, generation: u64) -> Option<&mut View> {
@@ -388,11 +486,14 @@ impl Views {
     }
 
     /// Current logical point when the model is absent. The caller still checks
-    /// received membership/identity, and a live render root takes precedence.
-    pub(crate) fn unit_point(&self, unit: &Unit) -> Option<Vec3> {
+    /// received membership/identity, and a live render root takes precedence. An attached slave's
+    /// packet position is parent-local, so its point is resolved through the parent.
+    pub(crate) fn unit_point(&self, unit: &Unit, units: &Units) -> Option<Vec3> {
         let view = self.units.get(&unit.obj_id)?;
         if view.unit_identity.as_ref()? != &source_identity(unit) { return None; }
-        view.pending.as_ref().map(|actor| cry_to_bevy(actor.pos))
+        let pending = view.pending.as_ref()?;
+        if unit_parent(unit).is_some() { return unit_world(unit, units); }
+        Some(cry_to_bevy(pending.pos))
     }
 
     /// The drawn pose of an actor without a render tree (examples and tests): Bevy-space position
@@ -420,6 +521,7 @@ impl Views {
             entity: Some(entity),
             source_generation: self.source_generation,
             unit_identity: Some(source_identity(unit)),
+            parent: unit_parent(unit),
             ..default()
         });
     }
@@ -452,7 +554,7 @@ impl Views {
     pub(crate) fn fixture_actor(&mut self, unit: &Unit, entity: Option<Entity>) {
         self.source_generation += 1;
         self.units.insert(unit.obj_id, View { entity, source_generation: self.source_generation,
-            unit_identity: Some(source_identity(unit)),
+            unit_identity: Some(source_identity(unit)), parent: unit_parent(unit),
             pending: entity.is_none().then(|| RemoteUnit::announced(unit)), ..default() });
     }
 
@@ -489,9 +591,14 @@ impl Views {
             if view.is_some_and(|v| v.no_model) {
                 failed += 1;
                 reasons.push((*id, view.map_or("", |v| v.why.as_str())));
-            } else if flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS {
-                far += 1;
+            } else if let Some(world) = unit_world(unit, units) {
+                if flat_distance(world, me) > UNIT_RADIUS {
+                    far += 1;
+                } else {
+                    pending += 1;
+                }
             } else {
+                // an attached child whose parent is not announced yet: waiting, not far away
                 pending += 1;
             }
         }
@@ -522,6 +629,162 @@ fn same_doodad_source(a: &aa_net::model::Doodad, b: &aa_net::model::Doodad) -> b
 
 fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     Vec2::new(a.x - b.x, a.y - b.y).length()
+}
+
+fn unit_scale(unit: &Unit) -> f32 {
+    if unit.scale > 0.0 { unit.scale } else { 1.0 }
+}
+
+/// The unit a slave is attached to, from its unit-state snapshot. `SCUnitState` carries the first
+/// attach point and, for a slave, the owner object id; the packet position is then parent-local
+/// (`aaemu-game` `slaves.rs:4256-4261`, `unit_state.rs:473-495`). Only a slave's first attachment is
+/// a unit: a transfer's first object is a bonding object and a character's is a doodad bond.
+/// The 1.2 `Unit::AttachTo` (`FUN_390b3f10`) ignores attach point 0 and the system point (-1).
+pub(crate) fn unit_parent(unit: &Unit) -> Option<u32> {
+    if !matches!(unit.kind, aa_net::model::UnitKind::Slave { .. }) {
+        return None;
+    }
+    let attachments = unit.state_attachments?;
+    if attachments.first_point == 0 || attachments.first_point == u8::MAX {
+        return None;
+    }
+    attachments.first_obj_id.filter(|id| *id != 0)
+}
+
+/// A unit's full local rotation (roll, pitch, yaw about CryEngine X, Y, Z), the order
+/// `aaemu-game`'s `PositionAndRotation::to_quaternion` composes. Only an attached slave's rotation
+/// is local; an ordinary unit is drawn upright about its yaw.
+fn unit_game_rotation(unit: &Unit) -> Quat {
+    let [roll, pitch, yaw] = unit.rotation;
+    Quat::from_euler(EulerRot::ZYX, yaw, pitch, roll)
+}
+
+/// The transform of a unit in its parent's frame: the packet position and rotation are the server's
+/// attach-point local values (`aaemu-game` `apply_attach_point_location`, `slaves.rs:3383-3415`).
+pub(crate) fn unit_local_transform(unit: &Unit, scale: f32) -> Transform {
+    Transform {
+        translation: cry_to_bevy(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)),
+        rotation: cry_rot_to_bevy(unit_game_rotation(unit)),
+        scale: Vec3::splat(scale),
+    }
+}
+
+/// The root transform of a unit: the local transform for an attached slave, otherwise the world
+/// placement (upright about its yaw, as before).
+fn unit_transform(unit: &Unit) -> Transform {
+    let scale = unit_scale(unit);
+    if unit_parent(unit).is_some() {
+        unit_local_transform(unit, scale)
+    } else {
+        placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), scale)
+    }
+}
+
+/// Where a unit stands in the world (game coordinates): the packet position for an ordinary unit, or
+/// the parent's placement applied to the parent-local packet position. `None` while an attached
+/// unit's parent is not announced.
+pub(crate) fn unit_world(unit: &Unit, units: &Units) -> Option<Vec3> {
+    unit_world_pose_in(unit, units).map(|(pos, _)| pos)
+}
+
+/// The current-frame world transform of an entity: its local `Transform` composed with the `Transform`
+/// of every `ChildOf` ancestor. Transform propagation writes `GlobalTransform` in `PostUpdate`, so a
+/// reader in `Update` (or in `PostUpdate` before propagation) would see the previous frame's pose and a
+/// freshly spawned root as the identity; composing the locals gives this frame's pose at any point.
+pub fn current_transform<F: bevy::ecs::query::QueryFilter>(
+    entity: Entity,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<Transform> {
+    let mut pose = *transforms.get(entity).ok()?;
+    let mut current = entity;
+    for _ in 0..MAX_PARENT_DEPTH {
+        let Ok(parent) = parents.get(current) else {
+            return Some(pose);
+        };
+        let parent = parent.parent();
+        pose = transforms.get(parent).ok()?.mul_transform(pose);
+        current = parent;
+    }
+    None
+}
+
+/// [`current_transform`] as a game-coordinate position and game yaw (radians about CryEngine Z).
+pub fn current_pose<F: bevy::ecs::query::QueryFilter>(
+    entity: Entity,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<(Vec3, f32)> {
+    let pose = current_transform(entity, transforms, parents)?;
+    Some((
+        bevy_to_cry(pose.translation),
+        pose.rotation.to_euler(EulerRot::YXZ).0,
+    ))
+}
+
+/// [`current_pose`] from a [`World`], for readers that are not ECS systems.
+pub(crate) fn current_pose_world(world: &World, entity: Entity) -> Option<(Vec3, f32)> {
+    let mut pose = *world.get::<Transform>(entity)?;
+    let mut current = entity;
+    for _ in 0..MAX_PARENT_DEPTH {
+        let Some(parent) = world.get::<ChildOf>(current).map(ChildOf::parent) else {
+            return Some((
+                bevy_to_cry(pose.translation),
+                pose.rotation.to_euler(EulerRot::YXZ).0,
+            ));
+        };
+        pose = world.get::<Transform>(parent)?.mul_transform(pose);
+        current = parent;
+    }
+    None
+}
+
+/// A unit's world pose: the drawn root's current `Transform` chain when it has an entity, otherwise
+/// the parent-composed packet pose. Composing the locals, not their `GlobalTransform`, gives this
+/// frame's pose for a parent moved in `Update` and a freshly spawned root before propagation. The
+/// facing includes the parent's rotation, so a child gun points where the ship points. `None` while
+/// an attached unit's parent is not announced.
+pub fn unit_world_pose<F: bevy::ecs::query::QueryFilter>(
+    unit: &Unit,
+    units: &Units,
+    views: &Views,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Option<(Vec3, f32)> {
+    if let Some(entity) = views.unit_entity(unit.obj_id)
+        && let Some(pose) = current_pose(entity, transforms, parents)
+    {
+        return Some(pose);
+    }
+    unit_world_pose_in(unit, units)
+}
+
+/// The parent-composed source pose, for a unit that has no drawn root.
+pub(crate) fn unit_world_pose_in(unit: &Unit, units: &Units) -> Option<(Vec3, f32)> {
+    let transform = unit_world_transform(unit, units, 0)?;
+    Some((
+        bevy_to_cry(transform.translation),
+        transform.rotation.to_euler(EulerRot::YXZ).0,
+    ))
+}
+
+fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
+    let Some(parent_id) = unit_parent(unit) else {
+        return Some(placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), unit_scale(unit)));
+    };
+    if depth > MAX_PARENT_DEPTH {
+        return None;
+    }
+    let parent = units.by_id.get(&parent_id)?;
+    let root = unit_world_transform(parent, units, depth + 1)?;
+    Some(root.mul_transform(unit_local_transform(unit, unit_scale(unit))))
+}
+
+/// Parents a spawned unit root to the entity drawing its parent, keeping the local transform that
+/// [`unit_local_transform`] put on it. `ChildOf` makes the child follow the parent's moves and
+/// despawn with it.
+pub(crate) fn attach_unit_root(commands: &mut Commands, entity: Entity, parent: Entity) {
+    commands.entity(entity).insert(ChildOf(parent));
 }
 
 /// The root transform of a doodad. The server writes the packet's position in the parent unit's frame when it has a
@@ -652,6 +915,22 @@ pub fn sync_views(
             view.entity = None;
         }
     }
+    // The same for a unit root under an attached parent: when the parent leaves view Bevy despawns the child, so forget
+    // the dead root here and build the child again when its parent comes back. Its playback restarts from the snapshot
+    // (the child's packet position is parent-local).
+    let orphans: Vec<u32> = views
+        .units
+        .iter()
+        .filter_map(|(id, view)| Some((*id, view.entity?)))
+        .filter(|(_, entity)| remote.get(*entity).is_err())
+        .map(|(id, _)| id)
+        .collect();
+    for id in orphans {
+        if let Some(view) = views.units.get_mut(&id) {
+            view.entity = None;
+            view.pending = units.by_id.get(&id).map(RemoteUnit::announced);
+        }
+    }
     // units and doodads that are gone; `try_despawn` because a parented doodad may already be gone with its unit
     let gone: Vec<u32> = views.units.keys().filter(|id| !units.by_id.contains_key(id)).copied().collect();
     for id in gone {
@@ -673,26 +952,64 @@ pub fn sync_views(
     // units: follow the server, drop the far ones, collect the ones to prepare
     let mut wanted: Vec<(f32, u32)> = Vec::new();
     for (id, unit) in &units.by_id {
-        // houses are drawn by `housing::render` (a prefab per construction stage)
-        if matches!(unit.kind, aa_net::model::UnitKind::Housing { .. }) {
+        // houses and shipyards are drawn by their own prefab modules (a model per construction stage)
+        if matches!(unit.kind, aa_net::model::UnitKind::Housing { .. } | aa_net::model::UnitKind::Shipyard { .. }) {
             continue;
         }
-        let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-        let d = flat_distance(pos, me);
+        let parent = unit_parent(unit);
+        let world = unit_world(unit, &units);
+        let d = world.map_or(f32::MAX, |p| flat_distance(p, me));
         if !views.units.contains_key(id) { views.announce_unit(&mut commands, unit); }
+        let parent_entity = parent.and_then(|p| views.unit_entity(p));
+        // a Housing parent is drawn by `housing::render`; a parent whose preparation failed is known unbuildable
+        let parent_unbuildable = parent.is_some_and(|p| {
+            units.by_id.get(&p).is_some_and(|u| matches!(u.kind, aa_net::model::UnitKind::Housing { .. }))
+                || views.units.get(&p).is_some_and(|v| v.no_model)
+        });
         let view = views.units.get_mut(id).expect("announced unit source");
+        // a later state attached or detached it: the packet position is in a different frame now
+        view.reparent(&mut commands, unit, parent);
+        // a parent that was unbuildable when the child gave up has been re-announced or drawn: try again
+        if view.gave_up_on_parent && !parent_unbuildable {
+            view.no_model = false;
+            view.gave_up_on_parent = false;
+            view.why.clear();
+        }
+        let mut parent_failed = false;
+        if view.entity.is_none()
+            && !view.no_model
+            && parent.is_some()
+            && parent_entity.is_none()
+            && parent_unbuildable
+        {
+            let parent = parent.expect("parent checked");
+            view.no_model = true;
+            view.gave_up_on_parent = true;
+            view.preparing = false;
+            view.why = format!("parent {parent} has no model");
+            parent_failed = true;
+            warn!("unit {} {:?} (model {}) is not drawn: its parent {parent} has no model", unit.obj_id, unit.name, unit.model_id);
+        }
         match view.entity {
             Some(e) => {
-                if d > UNIT_RADIUS * 1.25 {
+                // an attached child waits for (and goes away with) its parent root
+                if d > UNIT_RADIUS * 1.25 || (parent.is_some() && parent_entity.is_none()) {
                     view.evict(&mut commands, remote.get(e).ok());
                 }
             }
-            None if !view.no_model && !view.preparing && d <= UNIT_RADIUS => {
-                let ahead = Vec2::new(pos.x - me.x, pos.y - me.y).normalize_or_zero().dot(facing_game(facing));
+            None if !view.no_model
+                && !view.preparing
+                && world.is_some()
+                && (parent.is_none() || parent_entity.is_some())
+                && d <= UNIT_RADIUS =>
+            {
+                let world = world.expect("world checked");
+                let ahead = Vec2::new(world.x - me.x, world.y - me.y).normalize_or_zero().dot(facing_game(facing));
                 wanted.push((d + if ahead < -0.2 { 50.0 } else { 0.0 }, *id));
             }
             None => {}
         }
+        if parent_failed { views.failed += 1; }
     }
     wanted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let loader = cry.loader();
@@ -787,7 +1104,7 @@ pub fn sync_views(
     // spawn what is ready, nearest first, while the frame can take it
     let mut ready = std::mem::take(&mut views.ready);
     let distance = |b: &Built| match b {
-        Built::Unit(id, _, _) => units.by_id.get(id).map_or(f32::MAX, |u| flat_distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z), me)),
+        Built::Unit(id, _, _) => units.by_id.get(id).and_then(|u| unit_world(u, &units)).map_or(f32::MAX, |p| flat_distance(p, me)),
         Built::Doodad(id, _, _) => doodads
             .by_id
             .get(id)
@@ -803,9 +1120,19 @@ pub fn sync_views(
         }
         match built {
             Built::Unit(id, generation, build) => {
-                let Some(view) = views.finish_unit(id, generation) else { continue };
                 let Some(unit) = units.by_id.get(&id) else { continue };
-                if view.entity.is_some() || flat_distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), me) > UNIT_RADIUS * 1.25 {
+                let parent = unit_parent(unit);
+                let parent_entity = parent.and_then(|p| views.unit_entity(p));
+                let Some(view) = views.finish_unit(id, generation) else { continue };
+                if view.no_model { continue; }
+                let Some(world) = unit_world(unit, &units) else { continue };
+                if view.entity.is_some() || flat_distance(world, me) > UNIT_RADIUS * 1.25 {
+                    continue;
+                }
+                // the parent unit is not drawn yet: keep the prepared model and wait (its packet position is local)
+                if parent.is_some() && parent_entity.is_none() {
+                    view.preparing = true;
+                    later.push(Built::Unit(id, generation, build));
                     continue;
                 }
                 *last_spawn = 0.0;
@@ -824,6 +1151,9 @@ pub fn sync_views(
                 match entity {
                     Ok(e) => {
                         view.admit(&mut commands, e, unit);
+                        if let Some(parent_entity) = parent_entity {
+                            attach_unit_root(&mut commands, e, parent_entity);
+                        }
                         views.spawned_units += 1;
                     }
                     Err(why) => {
@@ -866,7 +1196,7 @@ pub fn sync_views(
                     let total_ms = growth.map_or(0.0, |_| announced_ms);
                     let scale = base_scale * growth.map_or(1.0, |g| g.scale_at(remaining_ms, total_ms));
                     let transform = doodad_root_transform(doodad, scale);
-                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, growth, remaining_ms, total_ms, base_scale };
+                    let visual = DoodadVisual { path: path.clone(), model: Some(model), func_group_id, rendered_func_group_id: func_group_id, bond_helpers: spawned.helpers, ladder: spawned.ladder, growth, remaining_ms, total_ms, base_scale };
                     let mut root = commands.spawn((Name::new(format!("doodad {}", doodad.template_id)), RemoteDoodad { obj_id: id }, visual, transform, Visibility::default()));
                     if let Some(parent) = parent {
                         root.insert(ChildOf(parent));
@@ -892,10 +1222,10 @@ pub fn sync_views(
 
 /// Builds the entity of one unit from what the worker prepared. `None` when there is nothing we can draw.
 pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, unit: &Unit, build: UnitBuild) -> Result<Entity, String> {
-    let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
+    let scale = unit_scale(unit);
     let pos = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
-    let transform = placement(pos, unit.yaw(), scale);
-    debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale);
+    let transform = unit_transform(unit);
+    debug!("unit {} {:?} {:?} model {} at ({:.1}, {:.1}, {:.1}) scale {:.2} parent {:?}", unit.obj_id, unit.name, unit.kind, unit.model_id, pos.x, pos.y, pos.z, scale, unit_parent(unit));
     let entity = match build {
         UnitBuild::Character { assets, models, carried, applied, wield, clips: set, pose, tools } => {
             for m in models {
@@ -927,9 +1257,27 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
             let _t = aa_cry::prof::scope("unit.spawn_creature");
             creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
         }
-        UnitBuild::Vehicle(pieces) => {
+        UnitBuild::Vehicle {
+            pieces,
+            state,
+            variant,
+            max_hp,
+            dying_time,
+        } => {
             let _t = aa_cry::prof::scope("unit.spawn_vehicle");
-            super::vehicle::spawn(commands, cry, clips, pieces, transform)
+            let root = super::vehicle::spawn(commands, cry, clips, pieces, transform);
+            commands.entity(root).insert(super::vehicle::VehicleDamage {
+                state,
+                variant: variant.clone(),
+                max_hp,
+                requested: None,
+                dying_start: None,
+                dying_time,
+                death_seen: state == 5,
+                dead_effect_played: false,
+            });
+            super::vehicle::spawn_state_effects(commands, root, &variant, false);
+            root
         }
         UnitBuild::Effects(effects) => {
             let root = commands.spawn((transform, Visibility::default())).id();
@@ -944,21 +1292,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
     };
     commands.entity(entity).insert((
         Name::new(format!("unit {} {}", unit.obj_id, unit.name)),
-        RemoteUnit {
-            obj_id: unit.obj_id,
-            track: Track::new(pos, unit.yaw()),
-            vehicle: None,
-            pos,
-            facing: unit.yaw(),
-            rotation: Quat::from_rotation_y(unit.yaw()),
-            game_rotation: Quat::from_rotation_z(unit.yaw()),
-            deck: None,
-            scale,
-            character: unit.is_character(),
-            combat: false,
-            casting: true,
-            speed: 0.0,
-        },
+        RemoteUnit::announced(unit),
     ));
     // different idle phases, so a crowd does not breathe in step
     let obj_id = unit.obj_id;
@@ -980,12 +1314,15 @@ fn unit_hash(v: u32) -> u32 {
 /// `move_units` and `cull_units` (registered by [`super::InGamePlugin`]) and [`super::anim::drive_locomotion`].
 pub fn plugin(app: &mut App) {
     app.init_resource::<DeckHullPoses>();
+    app.init_resource::<Hangers>();
     app.add_systems(
         Update,
         (
+            track_hangers.before(receive_moves),
             receive_moves.after(super::seating::track).after(super::world_switch::clear_old_units).before(sync_views).before(move_units),
             (super::mount::fake_mount, super::mount::start_stop_riding, super::mount::pose_riders, super::mount::step_dismounts).chain().after(move_units),
             place_deck_riders.after(move_units).before(super::anim::drive_locomotion).before(super::glide::track_remote_gliders),
+            place_hangers.after(place_deck_riders).before(super::anim::drive_locomotion),
             super::idle::posture_changes,
             super::idle::remote_idles.after(super::anim::drive_locomotion),
             face::select.after(cull_units),
@@ -1029,7 +1366,7 @@ fn deck_offset(movement: &Movement) -> Option<(u32, Vec3, f32)> {
 /// Fold source lifetime and movement in receipt order. An old report cannot
 /// enter a replacement with the same object ID; unrendered actors keep playback.
 #[allow(clippy::too_many_arguments)]
-pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, units_state: Option<Res<Units>>, hull_poses: Option<Res<DeckHullPoses>>, mut seats: Option<ResMut<super::seating::Seats>>) {
+pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>, mut views: ResMut<Views>, mut units: Query<(&mut RemoteUnit, Has<Driven>)>, time: Res<Time>, units_state: Option<Res<Units>>, hull_poses: Option<Res<DeckHullPoses>>, hangers: Option<Res<Hangers>>, mut seats: Option<ResMut<super::seating::Seats>>) {
     let now = time.elapsed_secs();
     let vehicle_now = time.elapsed_secs_f64();
     for (NetEvent(event), message_id) in events.read_with_id() {
@@ -1047,6 +1384,21 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 if let Some(entity)=views.doodads.remove(id).and_then(|view|view.entity) { commands.entity(entity).try_despawn(); }
             },
             Event::DoodadsSpawned(doodads) => for doodad in doodads { views.announce_doodad(&mut commands,doodad,time.elapsed_secs()); },
+            Event::Transport(aa_net::TransportReceipt::Unhung { unit_obj_id, .. }) => {
+                if let Some(view) = views.units.get_mut(unit_obj_id) {
+                    if let Some(entity) = view.entity
+                        && let Ok((mut unit, _)) = units.get_mut(entity)
+                    {
+                        unit.hanging = None;
+                        unit.hang = None;
+                        unit.climb_up = 0.0;
+                    } else if let Some(unit) = view.pending.as_mut() {
+                        unit.hanging = None;
+                        unit.hang = None;
+                        unit.climb_up = 0.0;
+                    }
+                }
+            }
             Event::DoodadPhaseChanged { obj_id, .. }
             | Event::DoodadChanged { obj_id, .. }
             | Event::DoodadOriginator { obj_id, .. } => {
@@ -1078,13 +1430,65 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 None => continue,
             },
         };
+        // An attached slave's state position is parent-local: its placement is the `ChildOf` hierarchy, and a later
+        // state that detaches it replaces the actor in `sync_views`. Its own movement reports must not re-place it.
+        if unit.parent.is_some() {
+            continue;
+        }
         match event {
             Event::UnitMoved { movement, .. } if movement.move_type != 4 => {
-                // A relative-only attachment report does not establish a world point.
-                if movement.support.as_ref().is_some_and(|support| support.world.is_none()) { continue; }
+                // A relative-only supporting-object report does not establish a world point; a
+                // plain hang (0x40 only) carries its world point in the primary position.
+                if movement.actor_flags & actor_flags::HANGING_FROM_OBJECT == 0
+                    && movement.support.as_ref().is_some_and(|support| support.world.is_none())
+                {
+                    continue;
+                }
                 let report = report_of(movement);
                 if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id, view.announced_after)) {
                     unit.reset_track(report.pos, report.yaw);
+                }
+                // Hanging: actor flag 0x40 and the climb data block. A ladder on a moving hull also
+                // carries the supporting-object block (0x60), so its primary position is hull-local
+                // and the pose is composed with the drawn hull like a deck walker.
+                let hanging = movement.actor_flags & actor_flags::HANGING_FROM_OBJECT != 0;
+                let was_hanging = unit.hanging.is_some();
+                unit.hanging = hanging.then(|| hangers.as_ref().and_then(|h| h.0.get(obj_id).copied()).unwrap_or(0));
+                // the stop packet (moving: false) ends the climb clip even if it repeats the last
+                // velocity; a hull hang's 0x20 block replaces the moving bit with
+                // STANDING_ON_OBJECT, so its climb speed comes from the velocity
+                let climbing = hanging
+                    && (movement.flags & move_flags::MOVING != 0
+                        || (movement.flags & move_flags::STANDING_ON_OBJECT != 0
+                            && movement.velocity[2] != 0));
+                unit.climb_up = if climbing {
+                    f32::from(movement.velocity[2]) / 1024.0
+                } else {
+                    0.0
+                };
+                if hanging {
+                    let support = movement.support.as_ref();
+                    let parent = support.and_then(|s| (s.kind == 1 && s.obj_id != 0 && s.obj_id != 1).then_some(s.obj_id));
+                    unit.hang = parent.zip(support.and_then(|s| s.world)).map(|(parent, (world, _))| HangRide {
+                        parent,
+                        local: Vec3::new(movement.pos.x, movement.pos.y, movement.pos.z),
+                        local_yaw: movement.yaw(),
+                        world: Vec3::new(world.x, world.y, world.z),
+                    });
+                    if was_hanging && let Some(entity) = view.entity { commands.entity(entity).remove::<DeckRider>(); }
+                    if unit.deck.take().is_some() {
+                        unit.track = Track::new(report.pos, report.yaw);
+                    }
+                    if unit.hang.is_some() {
+                        continue;
+                    }
+                    // a plain hang: the packet position is the world point; keep the walking track
+                    unit.track.push(now, report);
+                    continue;
+                }
+                if was_hanging && unit.hang.take().is_some() {
+                    // a hull hanger re-enters the world track at its first world report
+                    unit.track = Track::new(report.pos, report.yaw);
                 }
                 // A ship-local deck report walks in the hull frame: interpolate the local
                 // position and relative facing with the walking track (same delay and rules)
@@ -1171,6 +1575,9 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
             }
             Event::UnitDeath { .. } => {
                 unit.reset_track(unit.pos, unit.facing);
+                unit.hanging = None;
+                unit.hang = None;
+                unit.climb_up = 0.0;
                 if let Some(entity) = view.entity { commands.entity(entity).remove::<DeckRider>(); }
             }
             Event::Resurrected { pos, yaw, .. } => {
@@ -1179,6 +1586,9 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 unit.track = Track::new(unit.pos, unit.facing);
                 unit.vehicle = None;
                 unit.deck = None;
+                unit.hang = None;
+                unit.hanging = None;
+                unit.climb_up = 0.0;
                 unit.rotation = Quat::from_rotation_y(unit.facing);
                 unit.game_rotation = Quat::from_rotation_z(unit.facing);
                 if let Some(entity) = view.entity { commands.entity(entity).remove::<DeckRider>(); }
@@ -1322,6 +1732,75 @@ pub fn place_deck_riders(
                 speed: if moving { local.speed } else { 0.0 },
                 local_dir: if moving { remote::local_dir(local.heading, local.yaw) } else { Vec2::ZERO },
                 airborne: false,
+                climb: None,
+            };
+        }
+    }
+}
+
+/// Places a remote unit hanging on a ladder that is parented to a moving hull (`0x60` movement:
+/// the primary position and facing are hull-local). The pose is composed with the smoothed hull
+/// each frame, like a deck walker, so an idle climber rides the hull between movement packets.
+pub fn place_hangers(
+    time: Res<Time>,
+    mut views: ResMut<Views>,
+    units: Option<Res<Units>>,
+    hull_poses: Res<DeckHullPoses>,
+    mut riders: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+) {
+    if time.delta_secs() <= 0.0 {
+        return;
+    }
+    let pose_of = |parent: u32| {
+        hull_poses.0.get(&parent).copied().or_else(|| {
+            units.as_deref().and_then(|units| units.by_id.get(&parent)).map(|hull| {
+                (Vec3::new(hull.pos.x, hull.pos.y, hull.pos.z), Quat::from_rotation_z(hull.yaw()), hull.yaw())
+            })
+        })
+    };
+    for view in views.units.values_mut() {
+        if view.entity.is_some() {
+            continue;
+        }
+        let Some(unit) = view.pending.as_mut() else { continue };
+        let Some(hang) = unit.hang.as_ref() else { continue };
+        let (parent, local, local_yaw, world) = (hang.parent, hang.local, hang.local_yaw, hang.world);
+        if let Some((root, rotation, hull_yaw)) = pose_of(parent) {
+            unit.pos = super::ship::deck::ship_to_world(root, rotation, local);
+            unit.facing = super::cart::wrap_angle(hull_yaw + local_yaw);
+            unit.game_rotation = rotation * Quat::from_rotation_z(local_yaw);
+            unit.rotation = cry_rot_to_bevy(unit.game_rotation);
+        } else {
+            unit.pos = world;
+        }
+    }
+    for (mut unit, mut transform, motion) in &mut riders {
+        let Some(hang) = unit.hang.as_ref() else { continue };
+        let (parent, local, local_yaw, world) = (hang.parent, hang.local, hang.local_yaw, hang.world);
+        if let Some((root, rotation, hull_yaw)) = pose_of(parent) {
+            unit.pos = super::ship::deck::ship_to_world(root, rotation, local);
+            unit.facing = super::cart::wrap_angle(hull_yaw + local_yaw);
+            unit.game_rotation = rotation * Quat::from_rotation_z(local_yaw);
+            unit.rotation = cry_rot_to_bevy(unit.game_rotation);
+        } else {
+            unit.pos = world;
+            unit.facing = super::cart::wrap_angle(unit.facing);
+            unit.rotation = Quat::from_rotation_y(unit.facing);
+            unit.game_rotation = Quat::from_rotation_z(unit.facing);
+        }
+        let placed = unit.drawn();
+        if !(transform.translation.abs_diff_eq(placed.translation, 1e-4)
+            && transform.rotation.abs_diff_eq(placed.rotation, 1e-6)
+            && transform.scale == placed.scale)
+        {
+            *transform = placed;
+        }
+        if let Some(mut motion) = motion {
+            *motion = Motion {
+                speed: 0.0,
+                local_dir: Vec2::ZERO,
+                airborne: false,
+                climb: Some(super::anim::ClimbPose { kind: unit.hanging.unwrap_or(0), up: unit.climb_up, exiting: false, angle_deg: 0.0 }),
             };
         }
     }
@@ -1398,6 +1877,7 @@ pub fn move_units(
     for view in views.units.values_mut().filter(|view| view.entity.is_none()) {
         if let Some(actor) = view.pending.as_mut()
             && actor.deck.is_none()
+            && actor.parent.is_none()
         {
             actor.advance(now, dt, &terrain);
         }
@@ -1405,8 +1885,10 @@ pub fn move_units(
     let measure = smoothness_wanted();
     for (mut unit, mut transform, motion) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
-        // walker whose deck a `reset_track` cleared moves here again
-        if unit.deck.is_some() {
+        // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
+        // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position. A
+        // hanging unit on a moving hull is placed by its ladder ride.
+        if unit.deck.is_some() || unit.parent.is_some() || unit.hang.is_some() {
             continue;
         }
         let before = unit.pos;
@@ -1433,7 +1915,12 @@ pub fn move_units(
             } else {
                 Vec2::Y
             };
-            *m = Motion { speed: if moving { pose.speed } else { 0.0 }, local_dir, airborne: airborne && unit.character };
+            *m = Motion {
+                speed: if moving { pose.speed } else { 0.0 },
+                local_dir,
+                airborne: airborne && unit.character,
+                climb: unit.hanging.map(|kind| super::anim::ClimbPose { kind, up: unit.climb_up, exiting: false, angle_deg: 0.0 }),
+            };
         }
     }
     if measure {
@@ -1545,8 +2032,9 @@ mod lifecycle_tests {
         let pos = Vec3::new(3.0, 4.0, 5.0);
         let mut track = Track::new(pos, 1.0);
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
-        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, vehicle: None, pos, facing: 1.0,
-            rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None,
+        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, model_id: 0, track, vehicle: None, pos, facing: 1.0,
+            rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None, parent: None,
+            hang: None, hanging: None, climb_up: 0.0,
             scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
@@ -1802,6 +2290,9 @@ pub fn cull_units(
 }
 
 #[cfg(test)]
+mod child_unit_tests;
+
+#[cfg(test)]
 mod point_tests;
 
 #[cfg(test)]
@@ -1829,6 +2320,170 @@ mod display_tests {
         let mut plain = Movement::unit(Pos::new(0.0, 0.0, 0.0), 0.0, 0);
         plain.direction = 32;
         assert!((report_of(&plain).yaw - 32.0 * std::f32::consts::TAU / 128.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod hang_tests {
+    use super::*;
+    use aa_net::model::{MoveSupport, actor_flags};
+    use aa_net::{Event, NetEvent, Pos};
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .init_resource::<DeckHullPoses>()
+            .init_resource::<Hangers>()
+            .add_message::<NetEvent>()
+            .insert_resource(TerrainQuery::new("__hang_test_world__"))
+            .add_systems(Update, (receive_moves, move_units, place_hangers).chain());
+        app
+    }
+
+    fn step(app: &mut App, dt: f32) {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    fn actor(app: &mut App, obj_id: u32) -> Entity {
+        let entity = app.world_mut().spawn((
+            RemoteUnit::fixture(obj_id, Vec3::ZERO),
+            Transform::default(),
+            Motion::default(),
+        )).id();
+        app.world_mut().resource_mut::<Views>().units.insert(obj_id, View { entity: Some(entity), ..View::default() });
+        entity
+    }
+
+    fn movement(pos: Pos, flags: u8, support: MoveSupport) -> Movement {
+        let mut m = Movement::unit(pos, 0.0, 1);
+        m.actor_flags = flags;
+        m.support = Some(support);
+        m
+    }
+
+    #[test]
+    fn a_plain_hang_moves_at_its_world_point_and_plays_the_climb_clip() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped (move_units probes the terrain)");
+            return;
+        }
+        let mut app = app();
+        let entity = actor(&mut app, 7);
+        app.world_mut().resource_mut::<Hangers>().0.insert(7, 1);
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: movement(
+                Pos::new(1.0, 2.0, 3.0),
+                actor_flags::HANGING_FROM_OBJECT,
+                MoveSupport { obj_id: 1, climb: Some(aa_net::climb::pack_ladder(1.0, 0.0)), ..MoveSupport::default() },
+            ),
+        }));
+        step(&mut app, 0.2);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert_eq!(unit.hanging, Some(1));
+        assert!(unit.hang.is_none());
+        assert!(unit.pos.x > 0.0 && unit.pos.z > 0.0, "the world point moved: {:?}", unit.pos);
+        let motion = app.world().get::<Motion>(entity).unwrap();
+        assert_eq!(motion.climb.map(|c| c.kind), Some(1), "the climb clip family follows SCHung");
+    }
+
+    #[test]
+    fn a_stop_packet_stops_the_remote_climb_clip() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped (move_units probes the terrain)");
+            return;
+        }
+        let mut app = app();
+        let entity = actor(&mut app, 7);
+        app.world_mut().resource_mut::<Hangers>().0.insert(7, 1);
+        let support = MoveSupport {
+            obj_id: 1,
+            climb: Some(aa_net::climb::pack_ladder(1.0, 0.0)),
+            ..MoveSupport::default()
+        };
+        let mut up = movement(
+            Pos::new(1.0, 2.0, 3.0),
+            actor_flags::HANGING_FROM_OBJECT,
+            support.clone(),
+        );
+        up.velocity[2] = 1024;
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: up,
+        }));
+        step(&mut app, 0.2);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert!(
+            (unit.climb_up - 1.0).abs() < 1e-6,
+            "the climb plays: {}",
+            unit.climb_up
+        );
+        assert_eq!(
+            app.world()
+                .get::<Motion>(entity)
+                .unwrap()
+                .climb
+                .map(|c| c.up),
+            Some(1.0)
+        );
+        // the sender's stop packet repeats the last velocity but says moving: false
+        let mut stop = movement(
+            Pos::new(1.0, 2.0, 3.0),
+            actor_flags::HANGING_FROM_OBJECT,
+            support,
+        );
+        stop.flags = move_flags::STOPPING;
+        stop.velocity[2] = 1024;
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: stop,
+        }));
+        step(&mut app, 0.2);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert_eq!(unit.climb_up, 0.0, "the stop packet stops the climb");
+        assert_eq!(
+            app.world()
+                .get::<Motion>(entity)
+                .unwrap()
+                .climb
+                .map(|c| c.up),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn a_hull_hang_composes_with_the_drawn_hull() {
+        let mut app = app();
+        let entity = actor(&mut app, 7);
+        app.world_mut().resource_mut::<Hangers>().0.insert(7, 4);
+        app.world_mut().resource_mut::<DeckHullPoses>().0.insert(9, (Vec3::new(10.0, 0.0, 0.0), Quat::IDENTITY, 0.0));
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: movement(
+                Pos::new(0.5, 1.0, 2.0),
+                0x60,
+                MoveSupport {
+                    obj_id: 9,
+                    kind: 1,
+                    part: 24,
+                    world: Some((Pos::new(10.5, 1.0, 2.0), [0, 0, 0])),
+                    climb: Some(aa_net::climb::pack_ladder(1.0, 0.0)),
+                },
+            ),
+        }));
+        step(&mut app, 0.016);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert_eq!(unit.hang.as_ref().map(|h| (h.parent, h.local)), Some((9, Vec3::new(0.5, 1.0, 2.0))));
+        assert!((unit.pos.x - 10.5).abs() < 0.01, "{:?}", unit.pos);
+        let motion = app.world().get::<Motion>(entity).unwrap();
+        assert_eq!(motion.climb.map(|c| c.kind), Some(4));
+        // The hull moves: the hanger follows it without a new movement packet.
+        app.world_mut().resource_mut::<DeckHullPoses>().0.insert(9, (Vec3::new(20.0, 0.0, 0.0), Quat::IDENTITY, 0.0));
+        step(&mut app, 0.016);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert!((unit.pos.x - 20.5).abs() < 0.01, "{:?}", unit.pos);
     }
 }
 

@@ -7,6 +7,25 @@ bones, flying arrows, hit reactions, death. Code: `crates/aa-client/src/ingame/c
 The server only reports results (`aa_net::Event`, see `docs/aa-net.md`, "Combat events for visuals"); everything visible is derived
 from the 1.2 game database and the model's own animation data.
 
+> **Time base (2026-11-01, T0).** The only Bevy/1.2 combat side-by-side (2026-10-26, `tools/combat-side`) ran the Bevy
+> side with `--headless-fps 120` and `--feel-fps 60`, which pins `TimeUpdateStrategy::ManualDuration(1/60)`; 561ebd1b
+> records that as game time advancing 1.562x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by
+> 1.562, so that cast mismatch was a time-base artefact (**suspect (time base)**, and the only one); the phase-2
+> side-by-side report (`docs/research/port-combat/side-by-side.md` in 1b0066d4) reran the Bevy side in real time
+> (`--feel-fps 0`) and measured 1.502 s against the original's 1.496 s. No raw run data is retained.
+> The "stance exit 10.017 s vs 0.861 s" is **not** a time-base artefact: the client holds `Drawn` for 10 s of game
+> time (6.41 s wall in that run), and `combat.rs` / `weapons.rs` never read `CombatChanged` (only the HUD does). The
+> 0.861 s is **not a native stance timer**: the original's flip follows its `SCCombatCleared` packet, and the
+> side-by-side source records it as packet/processing order, not a timer
+> (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4). The decompile rule is that `FUN_391d6a60`
+> (`OnCombatCleared`) clears the `+0x3bba` latch through vtable `+0x48` = `FUN_39355ec0`, and `FUN_39355ee0`
+> refreshes a 10 s deadline while the latch is set. The **open bug** is that Bevy ignores
+> `CombatChanged`/combat-cleared, so nothing ends the stance when the server reports the fight cleared; whether its
+> 10 s hold matches the 10 s engaged deadline needs a check, not a claim. The current client
+> reads wall clocks for server-facing timing (`hud/cast.rs` `Instant`, `aa-net` `Instant`, `hud/cooldown.rs`
+> `Time<Real>`); a comparison run must pass `--require-wall-clock` (judged every frame, see `docs/aa-dev.md`, Clock)
+> or divide by the logged `game_per_wall` ratio.
+
 ## How 1.2 data links a skill to its visuals
 
 ```
@@ -139,7 +158,11 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
   weapon comes out for the clip's prefix (`weapon_for_clip`: `bow_` the bow, `onehand_` / `twohand_` the main hand weapon (a two
   handed one hangs on `item_back_c` and goes to the right hand), `twoswords_` both swords, `music_` the instrument, which is hidden
-  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw).
+  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw). **Open bug:**
+  this 10 s hold keeps the stance and the weapon out because `CombatChanged` is not read here; the original's stance flip
+  follows its `SCCombatCleared` (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4), so the 0.861 s between
+  packet and flip is packet/processing order, not a native timer. Whether the 10 s hold matches the decompiled 10 s
+  engaged deadline (`FUN_39355ee0`, refreshed while `+0x3bba` is set) needs a check.
 * **Controller and instrument clips**: a skill that has no clip of its own plays its `skill_controllers.start_anim_id` when its first
   step or fire comes (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...); a song plays `*_instrument_start_anim_id` (the cast loop) and
   `*_instrument_fire_anim_id` of the instrument held, else the skill's own clips.
@@ -172,7 +195,12 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
-  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). The shield is on the arm only while
+  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). **Open bug:**
+  that 10 s is game time (6.41 s wall in the skewed run); `weapons.rs` and `combat.rs` never read `CombatChanged` (only
+  the HUD does), so nothing ends the stance when the server reports the fight cleared. The native 0.861 s is not a stance
+  timer: it is the packet/processing order after `SCCombatCleared` (`docs/research/port-combat/side-by-side.md:52-68` in
+  1b0066d4); the decompile rule is a clear on `OnCombatCleared` (`FUN_391d6a60` -> `FUN_39355ec0`) with a 10 s deadline
+  refreshed while engaged (`FUN_39355ee0`). Whether this hold matches that deadline needs a check. The shield is on the arm only while
   the sword is out (the real client shows none on a character at peace: it comes onto the arm with the sword, `Grip::Shield` in
   `weapons.rs`; with the bow or an instrument out it is away too). The `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
@@ -208,8 +236,12 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
     (also dual wield), `twohand`, `music`, else `fist`. The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
     shared by the characters of a skeleton).
   * The weapon stays out 10 s after the last action with it (`Drawn::after_action`; 4 s for an instrument): a lower bound from
-    `combat_death_2`, where the shield is up at the last frame 7 s after the kill; `CombatChanged` is not read, the server only
-    reports "cleared" and the kill is also when the real client says "Battle End". Then `sheathe` plays the holster clip
+    `combat_death_2`, where the shield is up at the last frame 7 s after the kill; **open bug:** the 2026-10-26
+    side-by-side measured a 10.017 s stance exit, and this branch still does not read `CombatChanged` (the server only
+    reports "cleared"; the kill is also when the real client says "Battle End"). The original's 0.861 s stance flip follows
+    its `SCCombatCleared` packet (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4), not a native timer, and
+    the decompile rule is a clear on `OnCombatCleared` (`FUN_391d6a60` -> `FUN_39355ec0`) with a 10 s deadline refreshed
+    while engaged (`FUN_39355ee0`); whether the 10 s hold matches that deadline needs a check, not a claim. Then `sheathe` plays the holster clip
     (`onehand_ac_holster_side_l`, `twohand_ac_holster_back_r`) on a standing unit, ends the stance and moves the weapon into its
     sheath at the clip's `aw_none` event (0.43 s into the one handed clip); a unit that is running has no holster clip (the real
     `_ub` variant is 1 s long) and puts the weapon away at once; a unit that starts to run during the clip leaves it; the bow and

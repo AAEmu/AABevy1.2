@@ -939,6 +939,67 @@ pub(crate) mod tests {
         }
     }
 
+    /// 2026-10-31 original-client capture, design 171 at (15328, 14632): `CSCreateHouse` and the
+    /// `SCMyHouse`/`SCHouseState` body are byte-exact.
+    #[test]
+    fn captured_house_create_and_stage_zero_state_are_byte_exact() {
+        let create = HouseCommand::CreateHouse {
+            design_id: 171,
+            x: 15328.0,
+            y: 14632.0,
+            z: 173.051_62,
+            z_rot: 0.0,
+            item_id: 16_777_230,
+            money_amount: 450_000,
+            ht: 0,
+            auto_use_aa_point: false,
+        };
+        assert_eq!(
+            command_body(&create),
+            hex("ab000000 000000000000be03 0000000000809203 370d2d43 00000000 0e00000100000000 d0dd0600 00000000 00")
+        );
+        assert_eq!(create.opcode(), 0x057);
+        // the same layout read back with the server's reader order
+        let body = command_body(&create);
+        let mut r = Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 171);
+        assert_eq!(long_to_coord(r.i64().unwrap()), 15328.0);
+        assert_eq!(long_to_coord(r.i64().unwrap()), 14632.0);
+        assert_eq!(r.f32().unwrap(), 173.051_62);
+        assert_eq!(r.f32().unwrap(), 0.0);
+        assert_eq!(r.u64().unwrap(), 16_777_230);
+        assert_eq!(r.i32().unwrap(), 450_000);
+        assert_eq!(r.i32().unwrap(), 0);
+        assert!(!r.bool().unwrap());
+        assert!(r.is_empty());
+
+        let state = hex(
+            "0d00 0d000000 c59800 ab000000 3b040000 01000000 01000000 0500 5265636170 01000000 00 14000000 00000000 f0490200 000000000000be03 0000000000809203 370d2d43 1200 5468617463686564204661726d686f757365 01 00000000 00000000 0000",
+        );
+        assert_eq!(state.len(), 100);
+        let house = HouseSnapshot::read(&mut Reader::new(&state)).unwrap();
+        assert_eq!(
+            (house.tl_id, house.db_id, house.obj_id, house.template_id, house.model_id),
+            (13, 13, 39_109, 171, 1083)
+        );
+        assert_eq!((house.owner_id, house.owner_name.as_str(), house.all_actions, house.current_actions), (1, "Recap", 20, 0));
+        assert_eq!(house.position(), Pos::new(15328.0, 14632.0, 173.051_62));
+        // stage 0 -> the store and the rendered model
+        let event = Event::Housing(HousingEvent::State(house.clone()));
+        let mut world = crate::state::WorldState::default();
+        assert!(world.houses.apply(&event));
+        assert_eq!(world.houses.by_tl_id[&13].snapshot.model_id, 1083);
+        for (current, model) in [(1, 1083), (2, 1083), (10, 1084), (15, 1085), (20, 1082)] {
+            assert!(world.houses.apply(&Event::Housing(HousingEvent::BuildProgress {
+                tl_id: 13,
+                model_id: model,
+                all_actions: 20,
+                current_actions: current,
+            })));
+            assert_eq!(world.houses.by_tl_id[&13].snapshot.model_id, model);
+        }
+    }
+
     #[test]
     fn housing_received_state_deltas_removal_replacement_and_lifecycle() {
         let mut world = crate::state::WorldState::default();
