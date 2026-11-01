@@ -3,7 +3,7 @@
 //! the aim changes, and a received posture type 8 turns a remote cannon's `bone_yaw` /
 //! `bone_pitch`.
 //!
-//! `cargo run -p aa-client --example cannon_aim -- --mute --shot shots/aa-client/cannon_aim.png --shot-after 3`
+//! `cargo run -p aa-client --example cannon_aim -- --mute --shot shots/aa-client/cannon_aim.png --shot-after 8`
 //! Fails (exit 1, no screenshot) when any rule is broken; skips cleanly without `AA_PAK` / `AA_DB`.
 
 #![allow(dead_code)]
@@ -116,6 +116,9 @@ fn main() {
 
     let terrain = TerrainQuery::new("main_world");
     let collision = WorldCollision::new("main_world", terrain.clone());
+    // The camera ray needs an obstacle: a flat 5 m sea stands in for the world (the pak's own
+    // terrain cells are not built in this example). The cannon stands on the water line.
+    let world = aa_world::World::parse_g("oceanLevel 5");
     App::new()
         .add_plugins((
             aa_dev::default_plugins("Cannon aim"),
@@ -140,6 +143,7 @@ fn main() {
         .insert_resource(fire)
         .insert_resource(terrain)
         .insert_resource(collision)
+        .insert_resource(aa_world::stream::WorldInfo(std::sync::Arc::new(world)))
         .insert_resource(aa_net::state::Player {
             spawn: Some(player_spawn(LOCAL)),
         })
@@ -179,8 +183,9 @@ fn player_spawn(attached_to: u32) -> aa_net::PlayerSpawn {
 }
 
 /// Runs the real `track_local_mount` gate for a cannon, a trebuchet and an all-zero turret row:
-/// the cannon becomes the turret seat, the trebuchet stays drivable, and the all-zero model is
-/// neither. Exits non-zero on a mismatch.
+/// the cannon becomes the turret seat, the trebuchet is a turret seat that keeps driving (the
+/// `VehicleModel` controller type 3), and the all-zero model is neither. Exits non-zero on a
+/// mismatch.
 fn seat_gate_check(db: &ingame::data::Db) {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -213,13 +218,16 @@ fn seat_gate_check(db: &ingame::data::Db) {
         Transform::default(),
     ));
     let cases = [
-        ("galleon cannon", 8u32, 10u32, CANNON_MODEL, true),
-        // slave 2/model 2 (vehicle_models 2): velocity 2.5, a drivable trebuchet
-        ("trebuchet", 7, 2, 2, false),
+        ("galleon cannon", 8u32, 10u32, CANNON_MODEL, true, false),
+        // slave 2/model 2 (vehicle_models 2): installed, velocity 2.5, a drivable trebuchet
+        // that is also a turret seat (`VehicleModel` controller type 3, S12-C6)
+        ("trebuchet", 7, 2, 2, true, true),
         // slave 59/model 1005 (vehicle_models 37): velocity 0 but all-zero turret ranges
-        ("all-zero turret", 7, 59, 1005, false),
+        ("all-zero turret", 7, 59, 1005, false, true),
     ];
-    for (index, (name, kind, template, model, want_turret)) in cases.into_iter().enumerate() {
+    for (index, (name, kind, template, model, want_turret, want_cart)) in
+        cases.into_iter().enumerate()
+    {
         let obj_id = LOCAL + index as u32;
         let mut unit = cannon_unit(obj_id, Pos::new(0.0, 0.0, 0.0));
         unit.kind = UnitKind::Slave {
@@ -239,16 +247,12 @@ fn seat_gate_check(db: &ingame::data::Db) {
         *app.world_mut().resource_mut::<ingame::LocalMount>() = ingame::LocalMount::default();
         app.update();
         let seat = *app.world().resource::<ingame::LocalMount>();
-        if want_turret {
-            if seat.turret_seat() != Some(obj_id)
-                || seat.cart_driver().is_some()
-                || seat.driving().is_some()
-            {
-                eprintln!("cannon_aim: FAIL: {name} did not become the turret seat: {seat:?}");
-                std::process::exit(1);
-            }
-        } else if seat.turret_seat().is_some() || seat.cart_driver() != Some(obj_id) {
-            eprintln!("cannon_aim: FAIL: {name} did not stay drivable: {seat:?}");
+        let turret = seat.turret_seat() == Some(obj_id);
+        let cart = seat.cart_driver() == Some(obj_id);
+        if turret != want_turret || cart != want_cart {
+            eprintln!(
+                "cannon_aim: FAIL: {name} seat gate is turret {turret} cart {cart}, want {want_turret}/{want_cart}: {seat:?}"
+            );
             std::process::exit(1);
         }
     }
@@ -388,9 +392,9 @@ fn scene(
     for (obj_id, x) in [(LOCAL, 0.0), (REMOTE, 8.0)] {
         let pieces = ingame::vehicle::prepare(&loader, &look);
         assert!(!pieces.is_empty(), "the galleon cannon has parts");
-        let transform = ingame::player::placement(Vec3::new(x, 0.0, 0.0), 0.0, 1.0);
+        let transform = ingame::player::placement(Vec3::new(x, 0.0, 5.0), 0.0, 1.0);
         let root = ingame::vehicle::spawn(&mut commands, &mut cry, &clips, pieces, transform);
-        let unit = cannon_unit(obj_id, Pos::new(x, 0.0, 0.0));
+        let unit = cannon_unit(obj_id, Pos::new(x, 0.0, 5.0));
         commands
             .entity(root)
             .insert(ingame::units::RemoteUnit::announced(&unit));
@@ -399,20 +403,32 @@ fn scene(
 }
 
 /// A moving camera until 1 s, then a fixed aim well past both limits: the target must clamp and
-/// stop changing, so no packet goes out after the last pending one.
-fn drive_camera(time: Res<Time>, mut cameras: Query<&mut ingame::camera::OrbitCamera>) {
+/// stop changing, so no packet goes out after the last pending one. The camera's drawn transform
+/// is the `FUN_3917dd80` ray origin; its direction looks down at the sea obstacle.
+fn drive_camera(
+    time: Res<Time>,
+    mut cameras: Query<(
+        &mut ingame::camera::OrbitCamera,
+        &mut Transform,
+        &mut GlobalTransform,
+    )>,
+) {
     let t = time.elapsed_secs_f64();
     let (yaw, pitch) = if t < 1.0 {
         // a monotonic aim inside the cannon's -22..22 / -20..35 degree limits: every 200 ms
         // sample is a new aim, so the rate and the change-only rule are both visible
-        (-0.35 + 0.7 * t as f32, -0.3 + 0.8 * t as f32)
+        (-0.35 + 0.7 * t as f32, -0.4 - 0.2 * t as f32)
     } else {
         // past both limits: the clamped target stops changing
-        (1.0, 1.2)
+        (1.0, -1.0)
     };
-    for mut camera in &mut cameras {
+    let origin = Vec3::new(4.0, 30.0, 30.0);
+    let direction = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch) * Vec3::NEG_Z;
+    for (mut camera, mut transform, mut global) in &mut cameras {
         camera.yaw = yaw;
         camera.pitch = pitch;
+        *transform = Transform::from_translation(origin).looking_at(origin + direction, Vec3::Y);
+        *global = (*transform).into();
     }
 }
 
@@ -478,7 +494,7 @@ fn verify(
     animators: Query<&aa_anim::Animator>,
     bones: Query<&Transform>,
 ) {
-    if *done || time.elapsed_secs() < 2.5 {
+    if *done || time.elapsed_secs() < 6.0 {
         return;
     }
     *done = true;
@@ -487,8 +503,10 @@ fn verify(
         std::process::exit(1);
     };
 
-    // The real data row reached the systems: the local target is the camera aim clamped to the
-    // galleon cannon's -22..22 yaw and -20..35 pitch.
+    // The real data row reached the systems: the local target is the ballistic solve of the
+    // camera aim (`FUN_394322f0`), inside the galleon cannon's -22..22 yaw / -20..35 pitch
+    // window. The solve pitch is the lob (`atan2(vz, len)`), not the 1.2 rad camera pitch: a
+    // code that sent the clamped camera aim would fail the `pitch < 0.5` check.
     let local = roots
         .iter()
         .find(|(_, u)| u.obj_id == LOCAL)
@@ -498,12 +516,19 @@ fn verify(
         .get(local)
         .map(|t| t.0)
         .unwrap_or_else(|_| fail("no local turret target".into()));
-    if (local_target.yaw - YAW_LIMIT).abs() > 1e-4
-        || (local_target.pitch - PITCH_LIMIT).abs() > 1e-4
+    if local_target.yaw.abs() > YAW_LIMIT + 1e-4
+        || local_target.pitch > PITCH_LIMIT + 1e-4
+        || local_target.pitch < -20f32.to_radians() - 1e-4
     {
         fail(format!(
-            "local aim {} / {} is not the clamped 22 / 35 degrees",
+            "local aim {} / {} is outside the model window",
             local_target.yaw.to_degrees(),
+            local_target.pitch.to_degrees()
+        ));
+    }
+    if local_target.pitch >= 0.5 {
+        fail(format!(
+            "local aim pitch {} is the camera pitch, not the ballistic solve",
             local_target.pitch.to_degrees()
         ));
     }
@@ -538,10 +563,13 @@ fn verify(
             ));
         }
     }
-    // The camera stopped at 1 s: the newest aim was sent by the end of its window (~1.2 s), then
-    // an unchanged aim must not be sent again.
-    if sent.0.iter().any(|(at, _, _)| *at > 1.3) {
-        fail("CSTurretState kept going after the aim stopped changing".into());
+    // The camera stopped at 1 s. The muzzle bone moves with the drawn turret, so the solve
+    // settles after a few seconds; once it has, an unchanged aim must not be sent again.
+    if sent.0.iter().any(|(at, _, _)| *at > 5.0) {
+        fail(format!(
+            "CSTurretState kept going after the aim stopped changing: {:?}",
+            sent.0
+        ));
     }
 
     // The seat came through the real `track_local_mount` gate: a galleon cannon is the turret
@@ -570,6 +598,12 @@ fn verify(
     if entry.skill != 14372 || entry.cast_skill() != 10473 {
         fail(format!("gunner bar {entry:?} is not 14372 -> 10473"));
     }
+    if sight.skill != 10473 {
+        fail(format!(
+            "the sight solved skill {}, not the bar's 10473",
+            sight.skill
+        ));
+    }
     match hud::mode_actions::slave_cast(entry, Some(&fire.game), Some(*sight), LOCAL, 0) {
         aa_net::Command::UseMateSkillAt {
             skill_id,
@@ -580,11 +614,11 @@ fn verify(
         } => {
             if (skill_id, mate_obj_id, mount_skill_id) != (10473, LOCAL, 16)
                 || pos != sight.pos
-                || rot != sight.rot
+                || rot != 0.0
             {
                 fail(format!(
-                    "aimed fire command {skill_id}/{mate_obj_id}/{mount_skill_id} at {pos:?} {rot}, sight {:?} {}",
-                    sight.pos, sight.rot
+                    "aimed fire command {skill_id}/{mate_obj_id}/{mount_skill_id} at {pos:?} {rot}, sight {:?}",
+                    sight.pos
                 ));
             }
         }

@@ -101,6 +101,9 @@ fn cannon_game() -> crate::hud::data::GameData {
         .insert(10, vec![SlaveSkill::new(10473, 16)]);
     game.mode_actions.attached.insert((10, 16, 1), 14372);
     game.mode_actions.first_attached.insert((10, 16), 1);
+    // `cannon_game` bypasses `Tables::load`; slave 10 is the stationary cannon row whose
+    // bar shows its point-1 attached skill (the `velocity == 0` rule).
+    game.mode_actions.turret_slaves.insert(10);
     game
 }
 
@@ -118,6 +121,14 @@ fn cannon_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
 
 /// Press one driver-bar slot with a fresh world and return the commands it wrote.
 fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
+    press_driver_slot_details(state, slot).0
+}
+
+/// The same press, with the client-side refusals it published.
+fn press_driver_slot_details(
+    state: &Shared,
+    slot: usize,
+) -> (Vec<aa_net::Command>, Vec<crate::hud::alerts::UseFailed>) {
     use crate::hud::{
         alerts::UseFailed,
         usable::{Env, InFlight},
@@ -149,11 +160,16 @@ fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
         &mut failed,
     );
     drop(data);
-    world
+    let commands = world
         .resource_mut::<Messages<aa_net::NetCommand>>()
         .drain()
         .map(|command| command.0)
-        .collect()
+        .collect();
+    let failures = world
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    (commands, failures)
 }
 
 fn runtime(loaded: bool) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
@@ -799,13 +815,12 @@ fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// `seat_bar` on the same rows the real data has: the cart 73 keeps its mount skills, the
-/// cannon 10 shows the attached skill when the engine's seat flag names it or, before that flag
-/// arrives, when the template gate says it is a turret. A stale flag for another slave also
-/// falls back to the template gate.
+/// `seat_bar` on the same rows the real data has: the drivable `VehicleModel` cart 73 keeps
+/// its mount skills (a cart is not a gunner seat), and the cannon 10 shows its attached skill
+/// from the template gate, with the engine's seat flag and a stale flag for another slave not
+/// changing it.
 #[test]
-fn seat_bar_uses_the_engine_seat_or_the_template_fallback() -> Result<(), Box<dyn std::error::Error>>
-{
+fn seat_bar_keeps_a_drivable_cart_on_its_mount_skills() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("AA_PAK").is_err() {
         eprintln!("skip: no client pak");
         return Ok(());
@@ -881,7 +896,8 @@ fn seat_bar_uses_the_engine_seat_or_the_template_fallback() -> Result<(), Box<dy
 
 /// A cannon gunner's bar shows the point-1 attached skill (14372) but casts the linked mount
 /// skill (10473). With a published sight that BallisticPos cast goes to the aimed spot; without
-/// one it keeps the ordinary unit target. This is the real 1.2 split: the bar skill has
+/// one it is refused locally with `NO_TARGET` and sends nothing (a Unit fallback would be read
+/// as the caster's own position). This is the real 1.2 split: the bar skill has
 /// `target_type_id` 0, the mount skill it casts has 11.
 #[test]
 fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::error::Error>> {
@@ -922,7 +938,8 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
             yaw: -0.2,
         },
         pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-        rot: 0.7,
+        skill: 10473,
+        refusal: None,
     });
     let sent = press_driver_slot(&state, 0);
     let [
@@ -939,26 +956,65 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
     };
     assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (10473, 20, 16));
     assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
-    assert_eq!(*rot, 0.7);
+    assert_eq!(*rot, 0.0, "FUN_390f3b20 writes rot 0");
 
-    // Not manning the cannon (no sight): the same cast keeps the selected unit.
+    // No sight (the camera or the cannon root is not ready): a BallisticPos cast must not fall
+    // back to a Unit target, which the server reads as the caster's own position and refuses as
+    // too close. It is the same local NO_TARGET as a ray that hit nothing.
     state.borrow_mut().turret = None;
-    let sent = press_driver_slot(&state, 0);
-    let [
-        aa_net::Command::UseMateSkill {
-            skill_id,
-            mate_obj_id,
-            mount_skill_id,
-            target_obj_id,
-        },
-    ] = &sent[..]
-    else {
-        panic!("{sent:?}")
-    };
-    assert_eq!(
-        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
-        (10473, 20, 16, 777)
+    let (sent, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        sent.is_empty(),
+        "a cast without a sight sends nothing: {sent:?}"
     );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
+    Ok(())
+}
+
+/// `FUN_390f3b20`: a preview refusal (`DAT_3a5a4ea4`, result 9 for a screen ray that hit
+/// nothing) shows the result and sends no packet.
+#[test]
+fn a_refused_cannon_preview_sends_nothing() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    state.borrow().game.0.set(cannon_game()).ok().unwrap();
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(cannon_unit(20, 10))),
+        None,
+    );
+    state.borrow_mut().turret_seat = Some(20);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
+        slave: 20,
+        aim: aa_net::TurretAim::default(),
+        pos: aa_net::Pos::default(),
+        skill: 10473,
+        refusal: Some(aa_net::skill::result::NO_TARGET),
+    });
+    let (commands, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        commands.is_empty(),
+        "a refused preview sends nothing: {commands:?}"
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
     Ok(())
 }
 
@@ -1829,7 +1885,8 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
                 yaw: -0.2,
             },
             pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-            rot: 0.7,
+            skill: fire,
+            refusal: None,
         };
         let command = slave_cast(entry, Some(&game), Some(sight), 20, 0);
         if aimed {
@@ -1850,7 +1907,7 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
             };
             assert_eq!(
                 (skill_id, mate_obj_id, mount_skill_id, pos, rot),
-                (fire, 20, mount, sight.pos, sight.rot)
+                (fire, 20, mount, sight.pos, 0.0)
             );
         } else {
             let aa_net::Command::UseMateSkill {
@@ -1900,9 +1957,10 @@ fn the_first_attached_entry_chooses_the_seat() {
 /// Every kind-7/8 driver bar applies the native seat filter (`FUN_39347260`): a row without an
 /// attached list counts at point 1, a row whose FIRST attached entry is another point does not
 /// (tank 53's row 39 at point 2, slave 54's row 44, ladder 5's row 236 at point 81). The kept
-/// rows are unchanged otherwise: a turret shows its point-1 attached skill and casts the mount
-/// skill (the cotton cart 73's mount 65 has attached 15548 at point 1 but is not a turret, so it
-/// keeps 15622), and the harpoon rows without an attached list stay.
+/// rows are unchanged otherwise: a stationary turret (`vehicle_models.velocity == 0`) shows its
+/// point-1 attached skill and casts the mount skill (the cotton cart 73's mount 65 has attached
+/// 15548 at point 1 but is not a turret, so it keeps 15622), and the harpoon rows without an
+/// attached list stay.
 #[test]
 #[ignore = "requires AA_DB"]
 fn every_real_kind_7_8_bar_filters_by_the_seat_and_only_turrets_show_attached_skills() {
@@ -1913,31 +1971,19 @@ fn every_real_kind_7_8_bar_filters_by_the_seat_and_only_turrets_show_attached_sk
     let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("read the game database");
     let tables = Tables::load(&conn).expect("mode action tables");
-    let Some(db) = crate::ingame::data::Db::open() else {
-        return;
-    };
     let mut query = conn
-        .prepare(
-            "SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)",
-        )
+        .prepare("SELECT id, name FROM slaves WHERE slave_kind_id IN (7, 8)")
         .expect("slave query");
     let rows = query
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, u32>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, u32>(2)?,
-                r.get::<_, u32>(3)?,
-            ))
-        })
+        .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))
         .expect("query slaves")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("read slaves");
     let mut checked = 0;
     let mut dropped = 0;
-    for (id, name, kind, model) in rows {
+    for (id, name) in rows {
         let mounts = tables.slave_skills.get(&id).cloned().unwrap_or_default();
-        let turret = crate::ingame::turret::turret_seat_model(kind, model, &db);
+        let turret = tables.turret_slave(id);
         let bar = tables.bar(id, 1, turret).unwrap_or_default();
         let level = tables.slave_levels.get(&id).copied().unwrap_or(u8::MAX);
         let expected = mounts
@@ -1983,6 +2029,15 @@ fn every_real_kind_7_8_bar_filters_by_the_seat_and_only_turrets_show_attached_sk
 
     let cart = tables.bar(73, 1, false).expect("cotton cart bar");
     assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
+    assert!(
+        !tables.turret_slave(73),
+        "the drivable cotton cart is not a bar turret seat"
+    );
+    assert!(tables.turret_slave(10), "the stationary galleon cannon is");
+    assert!(
+        !tables.turret_slave(53),
+        "the drivable tank 53 keeps its mount skills"
+    );
     let tank = tables.bar(53, 1, false).expect("tank 53 bar");
     assert!(
         tank.iter().all(|row| row.mount_skill != 39),

@@ -46,6 +46,11 @@ struct Lookups {
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
+    /// `slaves.id` -> the `BallisticPos` gunner skill its point-1 seat fires.
+    cannon_skills: HashMap<u32, Option<super::turret::CannonSkill>>,
+    /// `slaves.id` -> whether any of its mount skills is `BallisticPos` (11) or `ArtilleryPos`
+    /// (15), the skills whose use enters the native camera-aim mode (8).
+    cannon_seats: HashMap<u32, bool>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -53,6 +58,9 @@ struct Lookups {
     skill_links: HashMap<u32, Option<SkillLink>>,
     /// `item_backpacks` of an item template: its backpack type and the skill using it casts.
     backpack_items: HashMap<u32, Option<ItemBackpack>>,
+
+    /// The hull's vertical extent from `ship_models.mass_center_z` and `mass_box_size_z`.
+    ship_hull: HashMap<u32, Option<(f32, f32)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -290,10 +298,13 @@ impl Lookups {
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
+            cannon_skills: HashMap::new(),
+            cannon_seats: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
             skill_links: HashMap::new(),
             backpack_items: HashMap::new(),
+            ship_hull: HashMap::new(),
         }
     }
 }
@@ -418,6 +429,17 @@ impl Db {
         Some(db)
     }
 
+    /// The hull's vertical range for the aim box, on a fixture whose `ship_models` row has no
+    /// mass box columns.
+    #[cfg(test)]
+    pub(crate) fn seed_ship_hull_height(&self, model_id: u32, low: f32, high: f32) {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_hull
+            .insert(model_id, Some((low, high)));
+    }
+
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
     /// or ship model the one model that stands for it.
     pub fn actor_model_file(&self, model_id: u32) -> Option<String> {
@@ -533,6 +555,55 @@ impl Db {
             .flatten()
     }
 
+    /// The ship hull's vertical extent relative to the hull root: `ship_models.mass_center_z`
+    /// +/- `mass_box_size_z / 2`, the physics box's keel to deck/rail range. `None` for a
+    /// non-ship, a missing row or a non-positive box.
+    pub fn ship_hull_height(&self, model_id: u32) -> Option<(f32, f32)> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(height) = l.ship_hull.get(&model_id) {
+            return *height;
+        }
+        let height = l
+            .conn
+            .query_row(
+                "SELECT s.mass_center_z, s.mass_box_size_z FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?)),
+            )
+            .ok()
+            .and_then(|(centre, size)| {
+                let (centre, size) = (centre as f32, size as f32);
+                (centre.is_finite() && size.is_finite() && size > 0.0)
+                    .then(|| (centre - size * 0.5, centre + size * 0.5))
+            });
+        l.ship_hull.insert(model_id, height);
+        height
+    }
+
+    /// Whether the slave has a mount skill whose `skills.target_type_id` is `BallisticPos` (11)
+    /// or `ArtilleryPos` (15). Using such a skill is what enters the native camera-aim mode 8;
+    /// a drivable VehicleModel with a turret block but no such skill is not a gunner seat.
+    pub fn has_cannon_skill(&self, template: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(seat) = l.cannon_seats.get(&template) {
+            return *seat;
+        }
+        let seat = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id IN (11, 15)
+                 LIMIT 1",
+                params![template],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.cannon_seats.insert(template, seat);
+        seat
+    }
+
     /// The turret block of a vehicle model: its `vehicle_models` pitch/yaw range and rates, or
     /// `None` when the model is no vehicle or the row is incomplete (a text value in an angle
     /// column; skip the row rather than treat it as zero).
@@ -588,6 +659,64 @@ impl Db {
         );
         l.turrets.insert(model_id, limits);
         limits
+    }
+
+    /// The shot a gunner's seat fires for slave template `template`: the mount skill's own
+    /// `skills` row (`slave_mount_skills` -> `mount_skills.skill_id`) with `target_type_id` 11
+    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc), its range and the
+    /// `target_angle` cone (`FUN_393594c0` +0x17c). The bar casts the same row (a point-1
+    /// `mount_attached_skills` skill is only the displayed one); rows of other types (the tower
+    /// deployment, the drums) are not shots. A slave with several BallisticPos rows (the siege
+    /// thrower, slave 1, has three ammo throws) takes its first BallisticPos row; those rows
+    /// share the ballistic data here, and a caller that knows the slot can use
+    /// [`Db::cannon_skill_for`].
+    pub fn cannon_skill(&self, template: u32) -> Option<super::turret::CannonSkill> {
+        self.cannon_skill_for(template, None)
+    }
+
+    /// [`Db::cannon_skill`] for a specific `slave_mount_skills` row when the caller knows the
+    /// slot it will cast, else the first BallisticPos row.
+    pub fn cannon_skill_for(
+        &self,
+        template: u32,
+        mount_skill: Option<u32>,
+    ) -> Option<super::turret::CannonSkill> {
+        let mut l = self.lookups.lock().unwrap();
+        if mount_skill.is_none()
+            && let Some(skill) = l.cannon_skills.get(&template)
+        {
+            return *skill;
+        }
+        let skill = {
+            let mut query = match l.conn.prepare(
+                "SELECT ms.skill_id, s.effect_speed, s.min_range, s.max_range, s.target_angle
+                 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id = 11
+                     AND s.effect_speed > 0 AND s.max_range > 0
+                     AND (?2 IS NULL OR sm.mount_skill_id = ?2)
+                 ORDER BY sm.id LIMIT 1",
+            ) {
+                Ok(query) => query,
+                Err(_) => return None,
+            };
+            query
+                .query_row(params![template, mount_skill], |r| {
+                    Ok(super::turret::CannonSkill {
+                        id: r.get(0)?,
+                        speed: r.get(1)?,
+                        min_range: r.get(2)?,
+                        max_range: r.get(3)?,
+                        target_angle: r.get(4)?,
+                    })
+                })
+                .ok()
+        };
+        if mount_skill.is_none() {
+            l.cannon_skills.insert(template, skill);
+        }
+        skill
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,

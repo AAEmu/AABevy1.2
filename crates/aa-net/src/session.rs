@@ -5886,4 +5886,43 @@ mod tests {
         assert!(r.is_empty());
     }
 
+    /// Path A of `FUN_390f3b20`: skill 17742 (`mount_skills` 116), the cannon slave as the
+    /// `Mount` caster, a `Position` target at the solved impact point, `posRot` 0 and the flag
+    /// byte 0 (no skill object).
+    #[test]
+    fn a_cannon_shot_is_the_mount_skill_at_a_position_with_rot_zero() {
+        use crate::buff::caster_kind;
+        use crate::skill::target_kind;
+        let pos = Pos::new(24163.5, 15512.25, 82.5);
+        let message = mate_skill_at_message(17742, 0x11_2233, 0x00_0077, 116, pos, 0.0);
+        let body = message.encode_body();
+        assert_eq!(
+            body,
+            [
+                0x4e, 0x45, 0, 0, // skill 17742
+                3, 0x77, 0, 0, // Mount caster, slave 77
+                116, 0, 0, 0, // mount_skills.id
+                1, // Position target
+                0, 0, 0, 0, 0, 0x38, 0xe6, 0x05, // x
+                0, 0, 0, 0, 0, 0x84, 0xc9, 0x03, // y
+                0, 0, 0xa5, 0x42, // z 82.5
+                0, 0, 0, 0, // posRot 0
+                0, 0, 0, // objId1 invalid
+                0, 0, 0, // objId2 invalid
+                0, // no skill object
+            ]
+        );
+        let mut r = crate::wire::Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 17742);
+        assert_eq!(r.u8().unwrap(), caster_kind::MOUNT);
+        assert_eq!(r.bc().unwrap(), 0x77);
+        assert_eq!(r.u32().unwrap(), 116);
+        assert_eq!(r.u8().unwrap(), target_kind::POSITION);
+        assert_eq!(r.long_position().unwrap(), pos);
+        assert_eq!(r.f32().unwrap(), 0.0);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
 }

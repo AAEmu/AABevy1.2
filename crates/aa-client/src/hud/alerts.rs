@@ -216,6 +216,22 @@ pub fn track_death(
     }
 }
 
+/// `FUN_39390900` after a cast: a mount cast (`SCStartSkill` with the cannon slave as the
+/// `Mount` caster) answers the player too, and a cooldown result with detail 2 is silent
+/// (`param_1 == 8 && param_2 == 2`).
+fn reported(
+    caster: &aa_net::buff::BuffCaster,
+    own: u32,
+    mount: Option<u32>,
+    result: u8,
+    value: u32,
+) -> bool {
+    own != 0
+        && (caster.obj_id == own
+            || (caster.kind == aa_net::buff::caster_kind::MOUNT && mount == Some(caster.obj_id)))
+        && !(result == code::COOLDOWN_TIME && value == 2)
+}
+
 /// Shows the refusals and the server messages of this frame.
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -240,6 +256,11 @@ pub fn show(
         return;
     };
     let own = skills.obj_id;
+    let mount = player
+        .as_ref()
+        .and_then(|player| player.spawn.as_ref())
+        .and_then(|spawn| spawn.unit.attached_to)
+        .map(|attachment| attachment.obj_id);
     let mut alerts: Vec<UseFailed> = failed.read().copied().collect();
     // scripted refusals, relative to the first frame they were looked at
     let now = time.elapsed_secs();
@@ -259,8 +280,15 @@ pub fn show(
     }
     for NetEvent(event) in events.read() {
         match event {
-            Event::SkillStarted(s) if s.failed() && own != 0 && s.caster.obj_id == own => {
-                alerts.push(UseFailed { skill: s.skill_id, result: s.result, value: s.result_value, server: true });
+            Event::SkillStarted(s)
+                if s.failed() && reported(&s.caster, own, mount, s.result, s.result_value) =>
+            {
+                alerts.push(UseFailed {
+                    skill: s.skill_id,
+                    result: s.result,
+                    value: s.result_value,
+                    server: true,
+                });
             }
             Event::AbilitySwapped { obj_id, old_ability, ability } if own != 0 && *obj_id == own => ability_changed(&rt, *ability, *old_ability),
             // FUN_391d39f0: the offer raises PLAYER_RESURRECTION (event 92) with the caster's live-object id;
@@ -368,6 +396,96 @@ mod tests {
         assert_eq!(bridge.borrow().death_started.get(), Some(started), "the offer must not restart the death timer");
         assert_eq!(bridge.borrow().death_ends.get(), Some(ends), "the offer must not restart the server wait");
         assert_eq!(bridge.borrow().revive_caster.get(), Some(42));
+    }
+
+    #[test]
+    fn a_mount_casters_refusal_is_the_players_and_cooldown_detail_2_is_silent() {
+        use aa_net::buff::{BuffCaster, caster_kind};
+        let cannon = BuffCaster { kind: caster_kind::MOUNT, obj_id: 0x77 };
+        assert!(reported(&cannon, 0x10, Some(0x77), 0x10, 0));
+        assert!(
+            !reported(&cannon, 0x10, Some(0x78), 0x10, 0),
+            "another slave's cannon"
+        );
+        assert!(
+            !reported(&cannon, 0, Some(0x77), 0x10, 0),
+            "no own unit yet"
+        );
+        assert!(
+            !reported(&cannon, 0x10, Some(0x77), code::COOLDOWN_TIME, 2),
+            "FUN_39390900: code 8 detail 2 is silent"
+        );
+        assert!(reported(&cannon, 0x10, Some(0x77), code::COOLDOWN_TIME, 0));
+        let own = BuffCaster { kind: caster_kind::UNIT, obj_id: 0x10 };
+        assert!(reported(&own, 0x10, None, 0x10, 0));
+    }
+
+    /// A refused cannon shot (`SCSkillStarted` with a `Mount` caster) reaches `SKILL_MSG`.
+    #[test]
+    fn a_refused_cannon_shot_shows_the_skill_result() -> Result<(), Box<dyn std::error::Error>> {
+        use aa_net::buff::{BuffCaster, caster_kind};
+        use aa_net::skill::{SkillCasterData, SkillResult, SkillStarted, SkillTarget, SkillTargetData, SkillPosition};
+        let (rt, bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;
+        rt.lua.load(
+            "refusal=nil; UIParent:SetEventHandler('SKILL_MSG',function(name,arg1,arg2) refusal={name,arg1,arg2} end)",
+        ).exec()?;
+        let mut spawn = super::super::expansion::fixture::spawn();
+        spawn.unit.attached_to = Some(aa_net::model::Attachment {
+            obj_id: 0x77,
+            point: 1,
+            reason: 1,
+        });
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<ScriptedFails>()
+            .insert_resource(Skills { obj_id: 100, ..default() })
+            .insert_resource(Player { spawn: Some(spawn) })
+            .insert_resource(HudBuilt { up: true, ..default() })
+            .add_message::<UseFailed>().add_message::<ShowError>().add_message::<NetEvent>()
+            .insert_non_send(rt).insert_non_send(HudBridge(bridge))
+            .add_systems(Update, show);
+        let started = |result, value| Event::SkillStarted(SkillStarted {
+            skill_id: 17742,
+            tl: 0,
+            caster: BuffCaster { kind: caster_kind::MOUNT, obj_id: 0x77 },
+            target: SkillTarget::position_rot(aa_net::Pos::new(1.0, 2.0, 3.0), 0.0),
+            raw_caster: SkillCasterData::Mount { obj_id: 0x77, mount_skill_id: 116 },
+            raw_target: SkillTargetData::Position {
+                position: SkillPosition { x: 0, y: 0, z: 0.0 },
+                rotation: 0.0,
+                obj_id1: 0,
+                obj_id2: 0,
+            },
+            cast_ms: 0,
+            base_cast_ms: 0,
+            synergy: 0,
+            result,
+            result_value: value,
+            raw_result: SkillResult::default(),
+        });
+        app.world_mut().write_message(NetEvent(started(0x10, 0)));
+        app.update();
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("assert(refusal and refusal[1]=='OUTOF_ANGLE', tostring(refusal and refusal[1]))")
+            .exec()?;
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("refusal=nil")
+            .exec()?;
+        app.world_mut()
+            .write_message(NetEvent(started(code::COOLDOWN_TIME, 2)));
+        app.update();
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("assert(refusal==nil, 'cooldown detail 2 must be silent')")
+            .exec()?;
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
     }
 
     #[test]
