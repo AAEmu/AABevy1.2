@@ -569,7 +569,8 @@ pub(super) fn push_slots(rt: &UiRuntime, state: &Shared) {
 /// The packet a driven-slave bar slot writes. A gunner's bar shows `mount_attached_skills`
 /// (14372 etc.) but casts the linked mount skill (10473 etc.); when that cast skill is
 /// `BallisticPos` (target type 11) and the turret system published a sight for the same slave,
-/// the target is the aimed ground point. Every other slave skill keeps the unit/no-target cast.
+/// the target is the arc impact point of the 1.2 ballistic solve, with `rot` 0 (the decompile
+/// `FUN_390f3b20` writes `local_44 = 0`). Every other slave skill keeps the unit/no-target cast.
 pub(crate) fn slave_cast(
     entry: &SlaveSkill,
     game: Option<&super::data::GameData>,
@@ -587,7 +588,7 @@ pub(crate) fn slave_cast(
             mate_obj_id: slave,
             mount_skill_id: entry.mount_skill,
             pos: sight.pos,
-            rot: sight.rot,
+            rot: 0.0,
         }
     } else {
         aa_net::Command::UseMateSkill {
@@ -630,6 +631,29 @@ pub(super) fn use_slot(
         // dropped silently, like the player's. A gunner's cooldown is on the cast skill, which
         // the server answers (`SCSkillStarted` names 10473, not the 14372 the bar shows).
         let cast_skill = entry.cast_skill();
+        let ballistic = data
+            .game
+            .get()
+            .and_then(|game| game.skills.get(&cast_skill))
+            .is_some_and(|info| info.target_type == 11);
+        // `FUN_394322f0` sets `DAT_3a5a4ea4` when its aim ray fails (`FUN_394281b0`); the click
+        // (`FUN_390f3b20`) then shows that result and sends nothing. The solved aim is not
+        // refused here: the decompile's `CanUse` reads the current unit target
+        // (`local_170` / `DAT_3a5a4d70`), not the Position.
+        if ballistic
+            && let Some(result) = data
+                .turret
+                .filter(|sight| sight.slave == slave)
+                .and_then(|sight| sight.refusal)
+        {
+            failed.write(super::alerts::UseFailed {
+                skill,
+                result,
+                value: 0,
+                server: false,
+            });
+            return;
+        }
         if let Some(fail) = env.mount_cooldown(slave, cast_skill) {
             failed.write(super::alerts::UseFailed {
                 skill,

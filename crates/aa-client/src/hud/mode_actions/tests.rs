@@ -671,7 +671,8 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
             yaw: -0.2,
         },
         pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-        rot: 0.7,
+        skill: 10473,
+        refusal: None,
     });
     let sent = press_driver_slot(&state, 0);
     let [
@@ -688,7 +689,7 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
     };
     assert_eq!((*skill_id, *mate_obj_id, *mount_skill_id), (10473, 20, 16));
     assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
-    assert_eq!(*rot, 0.7);
+    assert_eq!(*rot, 0.0, "FUN_390f3b20 writes rot 0");
 
     // Not manning the cannon (no sight): the same cast keeps the selected unit.
     state.borrow_mut().turret = None;
@@ -1570,7 +1571,8 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
                 yaw: -0.2,
             },
             pos: aa_net::Pos::new(130.25, 131.5, 100.0),
-            rot: 0.7,
+            skill: fire,
+            refusal: None,
         };
         let command = slave_cast(entry, Some(&game), Some(sight), 20, 0);
         if aimed {
@@ -1591,7 +1593,7 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
             };
             assert_eq!(
                 (skill_id, mate_obj_id, mount_skill_id, pos, rot),
-                (fire, 20, mount, sight.pos, sight.rot)
+                (fire, 20, mount, sight.pos, 0.0)
             );
         } else {
             let aa_net::Command::UseMateSkill {

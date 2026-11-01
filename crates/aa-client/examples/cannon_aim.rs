@@ -486,8 +486,10 @@ fn verify(
         std::process::exit(1);
     };
 
-    // The real data row reached the systems: the local target is the camera aim clamped to the
-    // galleon cannon's -22..22 yaw and -20..35 pitch.
+    // The real data row reached the systems: the local target is the ballistic solve of the
+    // camera aim (`FUN_394322f0`), inside the galleon cannon's -22..22 yaw / -20..35 pitch
+    // window. The solve pitch is the lob (`atan2(vz, len)`), not the 1.2 rad camera pitch: a
+    // code that sent the clamped camera aim would fail the `pitch < 0.5` check.
     let local = roots
         .iter()
         .find(|(_, u)| u.obj_id == LOCAL)
@@ -497,12 +499,19 @@ fn verify(
         .get(local)
         .map(|t| t.0)
         .unwrap_or_else(|_| fail("no local turret target".into()));
-    if (local_target.yaw - YAW_LIMIT).abs() > 1e-4
-        || (local_target.pitch - PITCH_LIMIT).abs() > 1e-4
+    if local_target.yaw.abs() > YAW_LIMIT + 1e-4
+        || local_target.pitch > PITCH_LIMIT + 1e-4
+        || local_target.pitch < -20f32.to_radians() - 1e-4
     {
         fail(format!(
-            "local aim {} / {} is not the clamped 22 / 35 degrees",
+            "local aim {} / {} is outside the model window",
             local_target.yaw.to_degrees(),
+            local_target.pitch.to_degrees()
+        ));
+    }
+    if local_target.pitch >= 0.5 {
+        fail(format!(
+            "local aim pitch {} is the camera pitch, not the ballistic solve",
             local_target.pitch.to_degrees()
         ));
     }
@@ -569,6 +578,12 @@ fn verify(
     if entry.skill != 14372 || entry.cast_skill() != 10473 {
         fail(format!("gunner bar {entry:?} is not 14372 -> 10473"));
     }
+    if sight.skill != 10473 {
+        fail(format!(
+            "the sight solved skill {}, not the bar's 10473",
+            sight.skill
+        ));
+    }
     match hud::mode_actions::slave_cast(entry, Some(&fire.game), Some(*sight), LOCAL, 0) {
         aa_net::Command::UseMateSkillAt {
             skill_id,
@@ -579,11 +594,11 @@ fn verify(
         } => {
             if (skill_id, mate_obj_id, mount_skill_id) != (10473, LOCAL, 16)
                 || pos != sight.pos
-                || rot != sight.rot
+                || rot != 0.0
             {
                 fail(format!(
-                    "aimed fire command {skill_id}/{mate_obj_id}/{mount_skill_id} at {pos:?} {rot}, sight {:?} {}",
-                    sight.pos, sight.rot
+                    "aimed fire command {skill_id}/{mate_obj_id}/{mount_skill_id} at {pos:?} {rot}, sight {:?}",
+                    sight.pos
                 ));
             }
         }

@@ -46,6 +46,8 @@ struct Lookups {
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
+    /// `slaves.id` -> the `BallisticPos` gunner skill its point-1 seat fires.
+    cannon_skills: HashMap<u32, Option<super::turret::CannonSkill>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -269,6 +271,7 @@ impl Lookups {
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
+            cannon_skills: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
         }
@@ -531,6 +534,40 @@ impl Db {
         );
         l.turrets.insert(model_id, limits);
         limits
+    }
+
+    /// The shot a gunner's seat fires for slave template `template`: the mount skill's own
+    /// `skills` row (`slave_mount_skills` -> `mount_skills.skill_id`) with `target_type_id` 11
+    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc) and `max_range`. The bar casts
+    /// the same row (a point-1 `mount_attached_skills` skill is only the displayed one); rows of
+    /// other types (the tower deployment, the drums) are not shots.
+    pub fn cannon_skill(&self, template: u32) -> Option<super::turret::CannonSkill> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(skill) = l.cannon_skills.get(&template) {
+            return *skill;
+        }
+        let skill = l
+            .conn
+            .query_row(
+                "SELECT ms.skill_id, s.effect_speed, s.max_range
+                 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id = 11
+                     AND s.effect_speed > 0 AND s.max_range > 0
+                 ORDER BY sm.id LIMIT 1",
+                params![template],
+                |r| {
+                    Ok(super::turret::CannonSkill {
+                        id: r.get(0)?,
+                        speed: r.get(1)?,
+                        max_range: r.get(2)?,
+                    })
+                },
+            )
+            .ok();
+        l.cannon_skills.insert(template, skill);
+        skill
     }
 
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,

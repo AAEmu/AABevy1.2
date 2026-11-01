@@ -132,9 +132,11 @@ Ships (merged after the checkpoint was written):
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
 
 - **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim
-  clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState`, the drawn
-  `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
-  (`docs/aa-client-units.md`, S12).
+  solved as the 1.2 ballistic arc (`FUN_394322f0`: `effect_speed`, `min(300, max_range)`, `item_hand_r`, 0.1 s
+  trace) and clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState` sent before the
+  click's fire, installed-turret key aim (`39425580`), the drawn `bone_yaw`/`bone_pitch` aim, remote type-8 posture
+  and the fire skill as `CSStartSkill` 0x052 with the `Mount` caster, the mount skill id and a `Position` target at
+  the arc impact (`rot` 0), with server refusals shown through `SKILL_MSG` (`docs/aa-client-units.md`, S12).
 
 Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
 the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
