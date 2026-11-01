@@ -78,7 +78,8 @@ def main() -> int:
     for script in scripts:
         expected = expected_reasons(script)
         offset = server_log.stat().st_size
-        command = [str(client), "--headless", "--mute", "--account", args.account, "--login", args.login,
+        command = [str(client), "--headless", "--mute", "--require-wall-clock",
+                   "--account", args.account, "--login", args.login,
                    "--password-file", str(password_file), "--character", args.character, "--script", str(script)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=300)
         data = server_log.read_bytes()[offset:].decode("utf-8", "replace")
@@ -88,7 +89,7 @@ def main() -> int:
                                                        encoding="utf-8")
         match = result.returncode == 0 and reasons == expected
         ok = ok and match
-        shown = (f"<client> --headless --mute --account <account> --login <login> "
+        shown = (f"<client> --headless --mute --require-wall-clock --account <account> --login <login> "
                  f"--password-file <password-file> --character <character> --script <evidence>/{script.name}")
         lines += [
             f"{script.name}:",
