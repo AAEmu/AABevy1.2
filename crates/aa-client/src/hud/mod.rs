@@ -65,7 +65,7 @@ mod expansion;
 pub(crate) use expansion::fixture::spawn as fixture_spawn;
 mod sorting;
 mod specialty;
-mod formula;
+pub(crate) mod formula;
 mod family;
 mod expedition;
 mod territory;
@@ -111,9 +111,10 @@ mod map_quests;
 mod map_services;
 mod map_slaves;
 mod notices;
-mod panels;
+pub(crate) mod panels;
 mod party;
 mod period;
+pub(crate) mod pick;
 mod portal;
 pub(crate) mod doodad;
 mod dynamic_actions;
@@ -146,7 +147,7 @@ mod tipitem;
 mod tips;
 mod trade;
 mod trial;
-mod usable;
+pub(crate) mod usable;
 mod user_music;
 pub(crate) use user_music::MusicItemUsed;
 
@@ -183,6 +184,33 @@ pub(crate) fn trade_fixture() {
 
 pub(crate) fn keybindings_runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
     loot_roll::fixture::runtime(width, height)
+}
+
+/// The real World-stage HUD without a server, for the Options-open regression example.
+#[allow(dead_code)]
+pub(crate) fn options_hang_runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    let mut rt = UiRuntime::new("en_us", width, height)?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
+    let bridge = Rc::new(RefCell::new(api::HudData::default()));
+    {
+        let mut d = bridge.borrow_mut();
+        d.snapshot.unit_id = "100".into();
+        d.snapshot.name = "Options fixture".into();
+        d.snapshot.level = 30;
+        d.snapshot.hp = 100;
+        d.snapshot.max_hp = 100;
+        d.panels.actions_known = true;
+        d.panels.bag_slots = 50;
+        assert!(d.game.0.set(data::GameData::load(&db)?).is_ok());
+    }
+    api::install(&mut rt, &bridge)?;
+    rt.run_stage(aa_ui::Stage::World);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    api::enter_world(&rt, &bridge, &aa_net::state::Chat::default());
+    Ok(rt)
 }
 
 #[allow(dead_code)]
@@ -254,6 +282,11 @@ pub(crate) fn stored_music_fixture() { user_music::cache::fixture::run();
 #[allow(dead_code)]
 pub(crate) fn mode_actions_fixture() {
     mode_actions::fixture::run(); }
+
+#[allow(dead_code)]
+pub(crate) fn vehicle_bar_fixture() {
+    mode_actions::fixture::run_vehicle_bar();
+}
 
 #[allow(dead_code)]
 pub(crate) fn stablehand_fixture() {
@@ -626,7 +659,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud, combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse), alerts::show).run_if(hud_up),
+                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )

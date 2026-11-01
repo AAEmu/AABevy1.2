@@ -49,6 +49,7 @@ pub(crate) fn run() {
         .insert_non_send(HudBridge(bridge))
         .insert_resource(units)
         .insert_resource(houses)
+        .init_resource::<aa_net::Shipyards>()
         .insert_resource(doodads)
         .insert_resource(inventory)
         .insert_resource(Step::default())
@@ -527,7 +528,6 @@ fn verify(
     }
 }
 
-
 /// Self-check for slice 6b: two sessions (seller 42, buyer 7) over synthetic sale receipts, no socket.
 /// The seller's and the buyer's `sync` run the real `X2House` sale methods; every click must send exactly one
 /// `CSSellHouse` / `CSBuyHouse` / `CSSellHouseCancel` with its wire bytes, a refused gate none and its
@@ -550,7 +550,8 @@ pub(crate) fn run_sale() {
     buyer.commands();
     // The original sell form over our `GetHouseSaleInfo`/`GetHouseSaleItemInfo`: the register button is off with
     // 0/0/0, on for 1 gold with the seller's two certificates, and off for 201 gold (3 certificates needed).
-    seller.lua(r#"
+    seller.lua(
+        r#"
         local w = CreateSellRegisterWindow('sellTest', UIParent)
         housing.sellRegisterWindow = w
         w:Show(true)
@@ -564,7 +565,8 @@ pub(crate) fn run_sale() {
         assert(not w.registerButton:IsEnabled(), '201 gold needs 3 certificates, the seller has 2')
         w:Show(false)
         print('SELLFORM checks ok')
-    "#);
+    "#,
+    );
 
     // Gates: not the owner, no sale to cancel, nothing for sale to buy. Each shows its ERROR_MSG text and
     // sends no packet.
@@ -887,6 +889,7 @@ impl Session {
             .insert_resource(houses)
             .insert_resource(doodads)
             .insert_resource(inventory)
+            .init_resource::<aa_net::Shipyards>()
             .init_resource::<crate::ingame::housing::placement::Builder>()
             .insert_non_send(HudBridge(bridge.clone()))
             .insert_non_send(rt)

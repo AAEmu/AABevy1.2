@@ -1,4 +1,5 @@
 use super::*;
+use aa_net::{Event, ShipyardEvent, ShipyardState};
 
 fn snapshot(owner_id: u32, all: i32, current: i32) -> HouseSnapshot {
     HouseSnapshot {
@@ -162,6 +163,7 @@ fn app_with_hud(
         .insert_resource(houses)
         .insert_resource(Doodads::default())
         .insert_resource(inventory)
+        .init_resource::<aa_net::Shipyards>()
         .init_resource::<Builder>()
         .insert_non_send(HudBridge(bridge))
         .insert_non_send(rt)
@@ -419,6 +421,7 @@ fn the_start_button_sends_the_captured_create_house() -> mlua::Result<()> {
         .init_resource::<HudPointerOverUi>()
         .insert_resource(Units::default())
         .insert_resource(Houses::default())
+        .init_resource::<aa_net::Shipyards>()
         .insert_resource(Doodads::default())
         .insert_resource(Inventory::default())
         .insert_resource(builder)
@@ -725,6 +728,7 @@ fn a_change_of_the_received_actability_points_raises_the_spy_event() -> mlua::Re
         .init_resource::<ActabilitySpied>()
         .insert_resource(Units::default())
         .insert_resource(Houses::default())
+        .init_resource::<aa_net::Shipyards>()
         .insert_resource(Doodads::default())
         .insert_resource(Inventory::default())
         .init_resource::<Builder>()
@@ -1682,4 +1686,240 @@ fn the_sale_success_events_do_not_need_the_open_house_window() -> mlua::Result<(
         vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_CANCEL_SELL_SUCCESS"]
     );
     Ok(())
+}
+
+/// A shipyard unit at (1, 2, 3) with yaw 0 (the same origin as the real template 5 stage 0).
+fn shipyard_unit() -> Unit {
+    Unit {
+        obj_id: 77,
+        name: "Drydock".into(),
+        kind: UnitKind::Shipyard { id: 9, template_id: 5 },
+        owner_name: "Owner".into(),
+        pos: aa_net::Pos::new(1.0, 2.0, 3.0),
+        rotation: [0.0; 3],
+        scale: 1.0,
+        level: 30,
+        model_id: 673,
+        equipment: aa_net::model::Equipment::default(),
+        model_params: aa_net::model::ModelParams::default(),
+        hp: 300,
+        mp: 0,
+        max_hp: 300,
+        max_mp: 0,
+        dead: false,
+        race_gender: 0,
+        movement: None,
+        faction_id: 0,
+        expedition_id: 0,
+        appellation: 0,
+        flags: 0,
+        gm_modes: [0; 4],
+        bounty_money: None,
+        pvp_honor: 0,
+        pvp_kills: 0,
+        skills: Vec::new(),
+        passive_buffs: Vec::new(),
+        ability_exp: Vec::new(),
+        active_abilities: Vec::new(),
+        buffs: Vec::new(),
+        anim_action: 0,
+        house_posture: None,
+        turret: None,
+        state_attachments: None,
+        attached_to: None,
+        doodad_bond: None,
+    }
+}
+
+fn shipyard_state() -> Shipyards {
+    let mut shipyards = Shipyards::default();
+    shipyards.apply(&Event::Shipyard(ShipyardEvent::State(ShipyardState {
+        id: 9,
+        template_id: 5,
+        obj_id: 77,
+        step: 1,
+        actions: 2,
+        owner_name: "Owner".into(),
+        ..Default::default()
+    })));
+    shipyards
+}
+
+fn tax_info() -> HouseTaxInfo {
+    HouseTaxInfo {
+        tl_id: 7,
+        dominion_tax_rate: 0,
+        money_amount: 1,
+        money_amount2: 2,
+        due: 0,
+        is_already_paid: false,
+        weeks_without_pay: 0,
+        is_heavy_tax_house: false,
+    }
+}
+
+#[test]
+fn picking_a_shipyard_ends_the_house_interaction() {
+    let mut units = Units::default();
+    units.apply(&Event::UnitSpawned(Box::new(shipyard_unit())));
+    let shipyards = shipyard_state();
+    let (houses, doodads, inventory) =
+        (Houses::default(), Doodads::default(), Inventory::default());
+    let mut view = View::default();
+    view.current = Some(Current {
+        obj_id: 900,
+        tl_id: 7,
+        design: 171,
+        snapshot: Some(snapshot(42, 20, 12)),
+        name: "Farm".into(),
+        mine: true,
+        tax: None,
+        decorations: 2,
+        ..Default::default()
+    });
+    let mut last_tax = Some(tax_info());
+    interact_and_refresh(
+        &mut view,
+        Some(77),
+        (&units, &houses, &doodads, &inventory),
+        (Vec3::new(1.0, 2.0, 0.0), 42),
+        &mut last_tax,
+        &super::super::data::SharedGameData::default(),
+        &shipyards,
+        None,
+        None,
+    );
+    assert!(view.current.is_none(), "the house window loses its house");
+    assert!(last_tax.is_none(), "the house tax is stale");
+    assert_eq!(view.signals, vec![Signal::End], "HOUSE_INTERACTION_END");
+    let yard = view
+        .shipyard
+        .expect("the shipyard is the current interaction");
+    assert_eq!(
+        (yard.obj_id, yard.id, yard.owner_name.as_str()),
+        (77, 9, "Owner")
+    );
+}
+
+#[test]
+fn a_shipyard_pick_without_a_house_raises_no_end() {
+    let mut units = Units::default();
+    units.apply(&Event::UnitSpawned(Box::new(shipyard_unit())));
+    let shipyards = shipyard_state();
+    let (houses, doodads, inventory) =
+        (Houses::default(), Doodads::default(), Inventory::default());
+    let mut view = View::default();
+    let mut last_tax = Some(tax_info());
+    interact_and_refresh(
+        &mut view,
+        Some(77),
+        (&units, &houses, &doodads, &inventory),
+        (Vec3::new(1.0, 2.0, 0.0), 42),
+        &mut last_tax,
+        &super::super::data::SharedGameData::default(),
+        &shipyards,
+        None,
+        None,
+    );
+    assert!(view.signals.is_empty());
+    assert!(last_tax.is_some());
+}
+
+#[test]
+fn a_shipyard_pick_is_the_model_bounds_box_not_a_sphere() {
+    let unit = shipyard_unit();
+    let bounds = (Vec3::new(-6.0, -20.0, -10.0), Vec3::new(6.0, 20.0, -1.0));
+    let centre = aa_world::cry_to_bevy(Vec3::new(1.0, 2.0, 3.0 - 5.0));
+    let origin = centre + Vec3::new(0.0, 10.0, 30.0);
+    let direction = Dir3::new(centre - origin).unwrap();
+    let ray = Ray3d::new(origin, direction);
+    assert!(
+        shipyard_hit(&ray, &unit, bounds).is_some(),
+        "the hull middle"
+    );
+    // 15 m along the keel (cry +y) still hits the 20 m half length
+    let along = Ray3d::new(
+        origin + aa_world::cry_to_bevy(Vec3::new(0.0, 15.0, 0.0)),
+        direction,
+    );
+    assert!(shipyard_hit(&along, &unit, bounds).is_some(), "the bow");
+    // 10 m to the side is inside a 20 m sphere around the middle, outside the 6 m half beam
+    let beside = Ray3d::new(origin + Vec3::X * 10.0, direction);
+    assert!(
+        shipyard_hit(&beside, &unit, bounds).is_none(),
+        "beside the hull"
+    );
+    // the least half-size keeps a small model pickable
+    assert_eq!(
+        half_extents((Vec3::splat(-1.0), Vec3::splat(1.0))),
+        Vec2::splat(SHIPYARD_PICK_MIN)
+    );
+}
+
+#[test]
+fn the_pointer_system_ends_the_house_interaction_on_a_shipyard() {
+    let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+    let bridge = Rc::new(RefCell::new(super::super::api::HudData::default()));
+    assert!(
+        bridge
+            .borrow()
+            .game
+            .0
+            .set(super::super::data::GameData::default())
+            .is_ok()
+    );
+    super::super::api::install(&mut rt, &bridge).unwrap();
+    rt.lua
+        .load(
+            r#"
+            shipyardEnded = 0
+            local probe = UIParent:CreateWidget('emptywidget', 'shipyardProbe', 'UIParent')
+            probe:RegisterEvent('HOUSE_INTERACTION_END')
+            probe:SetHandler('OnEvent', function(self, event) shipyardEnded = shipyardEnded + 1 end)
+        "#,
+        )
+        .exec()
+        .unwrap();
+    let state = rt.lua.app_data_ref::<State>().unwrap().clone();
+    {
+        let mut view = state.0.borrow_mut();
+        view.current = Some(Current {
+            obj_id: 900,
+            tl_id: 7,
+            design: 171,
+            snapshot: Some(snapshot(42, 20, 12)),
+            name: "Farm".into(),
+            mine: true,
+            tax: None,
+            decorations: 2,
+            ..Default::default()
+        });
+        view.last_tax = Some(tax_info());
+        view.pointer_picked = Some(77);
+    }
+    let mut units = Units::default();
+    units.apply(&Event::UnitSpawned(Box::new(shipyard_unit())));
+    let mut app = App::new();
+    app.insert_non_send(rt)
+        .insert_non_send(HudBridge(bridge))
+        .insert_resource(units)
+        .init_resource::<Houses>()
+        .init_resource::<Doodads>()
+        .init_resource::<Inventory>()
+        .insert_resource(shipyard_state())
+        .add_message::<NetCommand>()
+        .add_systems(Update, pointer_interaction);
+    app.update();
+    let ended: i64 = app
+        .world()
+        .get_non_send::<UiRuntime>()
+        .unwrap()
+        .lua
+        .load("return shipyardEnded")
+        .eval()
+        .unwrap();
+    assert_eq!(ended, 1, "HOUSE_INTERACTION_END");
+    let view = state.0.borrow();
+    assert!(view.current.is_none());
+    assert!(view.last_tax.is_none());
 }

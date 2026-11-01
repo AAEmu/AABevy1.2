@@ -130,7 +130,7 @@ def main() -> int:
     if manual_ref is not None:
         refs["manual"] = manual_ref
     offset = server_log.stat().st_size
-    command = [str(client), "--headless", "--mute", "--account", args.account,
+    command = [str(client), "--headless", "--mute", "--require-wall-clock", "--account", args.account,
                "--login", args.login, "--password-file", str(password_file),
                "--character", args.character, "--script", str(script)]
     result = subprocess.run(command, capture_output=True, text=True, timeout=420)

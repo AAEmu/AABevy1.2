@@ -49,6 +49,19 @@ The server announces every house as a unit (`SCUnitState`, kind housing, any own
 the workers and spawned under a root at the unit's position and yaw. `SCHouseBuildProgress` carries the next stage's
 model: the house is redrawn. A finished house sends 0 of 0 actions (`SCHouseState`).
 
+## Shipyards
+
+A shipyard unit (`SCUnitState` kind shipyard) is drawn by `ingame/shipyard.rs` at the model of its construction
+stage (`SCShipyardState` 0x1aa, `shipyard_steps` by position); `step == steps.len()` is the finished hull
+(`shipyards.main_model_id`, the entry `FUN_394d8600` appends) and step 1000 the launch ceremony
+(`shipyards.ceremony_model_id`). Like houses, shipyards are left out of the unit views (`units.rs`), so
+`Views::unit_entity` answers `None` for one: the portal effects, speech bubbles, posture clips and mount/deck
+lookups that use it never apply to a shipyard, and no pick box or selection ring is drawn for one. A right click
+picks a shipyard by the drawn stage model's bounds
+(the hull and its drydock parts), not by `build_radius`; the interaction ends at the same half-size plus the
+10 m `LEAVE` margin. `X2House`'s `GetShipyard*` getters answer for the last shipyard interacted
+with; the material window is not raised yet (`GetShipyardConstructionStepInfo` is still open).
+
 ## The builder (`x2game.dll` `HousingManager`, `3932A3B0` .. `39334460`)
 
 Using a design item does not cast: `placement::start` reads the `SkillPressed` of an item in `design_by_item`

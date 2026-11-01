@@ -34,7 +34,7 @@ pub(super) mod fixture;
 pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
 
 use aa_net::interaction::Interact;
-use aa_net::model::UnitKind;
+use aa_net::model::{Unit, UnitKind};
 use aa_net::quest::{Quest, status};
 use aa_net::state::{Buffs, Doodads, Inventory, Player, PlayerStats, Quests, Skills, Target, Units};
 use aa_net::interaction::InteractEvent;
@@ -54,8 +54,6 @@ use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// How far the player reaches to talk to an NPC (F, a right click), metres.
 const TALK_RANGE: f32 = 6.0;
-/// How near the view ray has to pass a unit's middle for a right click to pick it, metres.
-const PICK_RADIUS: f32 = 1.1;
 /// A press that moves more than this many pixels before it is released was a camera drag.
 const CLICK_SLOP: f32 = 6.0;
 /// The widgets the dialog leaves shown when it hides the HUD.
@@ -560,8 +558,16 @@ pub struct Pointer<'w, 's> {
     cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 }
 
-/// The NPC a right click released over the 3D view picked (not a drag, not on the HUD).
-fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Option<Vec2>, blocked: bool) -> Option<u32> {
+/// The NPC or vehicle a right click released over the 3D view picked (not a drag, not on the HUD).
+fn right_click_pick(
+    p: &Pointer,
+    units: &Units,
+    own: u32,
+    ridden: Option<u32>,
+    pressed_at: &mut Option<Vec2>,
+    blocked: bool,
+    pick: &mut super::pick::PickWorld,
+) -> Option<u32> {
     if blocked { *pressed_at = None; return None; }
     let window = p.windows.single().ok()?;
     let cursor = window.cursor_position();
@@ -577,21 +583,14 @@ fn right_click_pick(p: &Pointer, units: &Units, own: u32, pressed_at: &mut Optio
     }
     let (camera, transform) = p.cameras.iter().find(|(c, _)| c.is_active)?;
     let ray = camera.viewport_to_world(transform, end).ok()?;
-    let mut best: Option<(f32, u32)> = None;
-    for u in units.iter().filter(|u| {
-        u.obj_id != own && matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. })
-    }) {
-        let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 0.9 * u.scale.max(0.5)));
-        let along = (centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
-            continue;
-        }
-        let miss = (ray.origin + *ray.direction * along).distance(centre);
-        if miss <= PICK_RADIUS * u.scale.max(0.7) && best.is_none_or(|(a, _)| along < a) {
-            best = Some((along, u.obj_id));
-        }
-    }
-    best.map(|(_, id)| id)
+    super::pick::pick_unit(
+        &ray,
+        units,
+        own,
+        ridden,
+        |u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. }),
+        |unit, ray| pick.data(unit, units, ray),
+    )
 }
 
 /// `--hud-talk-nearest T` (talk to the nearest NPC that has something for the player, T seconds
@@ -637,14 +636,26 @@ impl ScriptedTalk {
 
 /// The NPC nearest to the player in reach that can be talked to (alive, not hostile); with `wanted`,
 /// only one that has something for the player.
-fn nearest_npc(d: &HudData, units: &Units, own: u32, own_faction: u32, facts: &PlayerFacts, range: f32, wanted: bool) -> Option<(u32, u32)> {
+#[allow(clippy::too_many_arguments)]
+fn nearest_npc(
+    d: &HudData,
+    me: Vec3,
+    units: &Units,
+    own: u32,
+    own_faction: u32,
+    facts: &PlayerFacts,
+    range: f32,
+    wanted: bool,
+    world: &impl Fn(&Unit) -> Option<Vec3>,
+) -> Option<(u32, u32)> {
     let game = d.game.get();
     units
         .iter()
         .filter(|u| u.obj_id != own && !u.dead)
         .filter_map(|u| {
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
-            let dist = d.pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let at = world(u).unwrap_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let dist = me.distance(at);
             if dist > range || super::plates::relation_of(game, own_faction, u) == "hostile" {
                 return None;
             }
@@ -670,16 +681,26 @@ pub fn talk_input(
     doodads: Res<Doodads>,
     target: Res<Target>,
     facts: Facts,
+    mut pick: super::pick::PickWorld,
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut pressed_at: Local<Option<Vec2>>,
-    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
+    (teleport, ladder_claim): (
+        Option<Res<crate::ingame::teleport::Teleport>>,
+        Option<Res<crate::ingame::ladder::LadderClaim>>,
+    ),
     suspended: Res<super::HudSuspended>,
 ) {
     let Some(rt) = rt else { return };
     if suspended.0 || teleport.is_some_and(|t| t.loading()) || bridge.0.borrow().dialog.npc_flow.barrier { return; }
     let Some(spawn) = facts.player.spawn.as_ref() else { return };
     let (own, own_faction) = (spawn.obj_id, spawn.character().faction_id);
+    // seated, the server moves only the slave: the HUD position can stay at the boarding point
+    let ridden = spawn.unit.attached_to.map(|a| a.obj_id);
+    let me = {
+        let world = |id: u32| units.get(id).and_then(|u| pick.pose(u, &units));
+        super::slave::player_centre(&bridge.0.borrow(), &world)
+    };
     let Some(player_facts) = facts.get() else { return };
     // the scripted keys and talk
     let now = time.elapsed_secs();
@@ -701,7 +722,6 @@ pub fn talk_input(
         let offer = {
             let mut d = bridge.0.borrow_mut();
             let starter = d.game.get().and_then(|g| g.quests.parts_of(quest, kind::START).flat_map(|c| &c.acts).find(|a| a.ty == "ConAcceptDoodad").map(|a| a.target));
-            let me = d.pos;
             let near = starter.and_then(|t| {
                 doodads.by_id.values().filter(|o| o.template_id == t)
                     .filter_map(|o| Some((me.distance(doodad_world(o, &units)?), o)))
@@ -732,7 +752,7 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked);
+    let picked = right_click_pick(&pointer, &units, own, ridden, &mut pressed_at, blocked, &mut pick);
     let scripted_pick = script_pick.take_right();
     let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
 
@@ -750,10 +770,13 @@ pub fn talk_input(
     }
     // a right click on a slave (cart, ship ...) sends the 1.2 interaction request (0x02c + 0x068,
     // never 0x031); the interact key (F) sends nothing for a slave and keeps the NPC talk path
+    let ladder_owns_key = ladder_claim
+        .as_deref()
+        .is_some_and(|claim| claim.0.is_some());
     let interact_key = !scripted_talk
         && pressed("do_interaction_1", 0, 'f')
         && d.loot.nearest.is_none()
-        && (scripted_key == Some('f') || !d.doodad.claims_key());
+        && (scripted_key == Some('f') || (!d.doodad.claims_key() && !ladder_owns_key));
     if let Some(obj_id) = super::slave::action_target(&units, picked) {
         super::slave::interact(&mut d, &units, target.obj_id, obj_id);
         if scripted_pick == Some(obj_id) {
@@ -768,7 +791,10 @@ pub fn talk_input(
         let game = d.game.get();
         units.get(obj_id).filter(|u| !u.dead && super::plates::relation_of(game, own_faction, u) != "hostile").and_then(|u| {
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
-            let dist = d.pos.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+            let at = pick
+                .pose(u, &units)
+                .map_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z), |(pos, _)| pos);
+            let dist = me.distance(at);
             if dist > TALK_RANGE {
                 info!("hud: {} is too far away to talk to ({dist:.1} m)", u.name);
                 return None;
@@ -777,16 +803,20 @@ pub fn talk_input(
         })
     } else { None };
     let keyboard_npc = if scripted_talk {
-        nearest_npc(&d, &units, own, own_faction, &player_facts, 60.0, true)
+        nearest_npc(&d, me, &units, own, own_faction, &player_facts, 60.0, true, &|unit| {
+            pick.pose(unit, &units).map(|(pos, _)| pos)
+        })
     } else if interact_key {
         nearest_npc(
             &d,
+            me,
             &units,
             own,
             own_faction,
             &player_facts,
             TALK_RANGE,
             false,
+            &|unit| pick.pose(unit, &units).map(|(pos, _)| pos),
         )
     } else {
         None
@@ -1102,6 +1132,89 @@ pub fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[test]
+    fn talk_distance_measures_from_the_drawn_seat_not_the_stale_hud_point() {
+        let state: Shared = Rc::new(RefCell::new(HudData::default()));
+        let own = crate::hud::fixture_spawn();
+        crate::hud::mounted::receive(
+            &state,
+            &Event::CharacterSelected(Box::new(own.state.clone())),
+        );
+        crate::hud::mounted::receive(&state, &Event::PlayerSpawn(Box::new(own.clone())));
+        let mut slave = crate::hud::fixture_spawn().unit;
+        slave.obj_id = 20;
+        slave.kind = UnitKind::Slave {
+            id: 700,
+            tl_id: 700,
+            template_id: 60,
+            summoner_id: 0,
+        };
+        slave.pos = aa_net::Pos::new(100.0, 100.0, 0.0);
+        crate::hud::mounted::receive(&state, &Event::UnitSpawned(Box::new(slave.clone())));
+        crate::hud::mounted::receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: own.obj_id,
+                mount: slave.obj_id,
+                point: 1,
+                reason: 0,
+            },
+        );
+        let mut npc = crate::hud::fixture_spawn().unit;
+        npc.obj_id = 21;
+        npc.kind = UnitKind::Npc {
+            template_id: 7,
+            owner_id: 0,
+        };
+        npc.pos = aa_net::Pos::new(105.0, 100.0, 0.0);
+        let mut units = Units::default();
+        units.by_id.insert(slave.obj_id, slave);
+        units.by_id.insert(npc.obj_id, npc);
+        // the HUD point stayed at the boarding point 100 m away
+        state.borrow_mut().pos = Vec3::ZERO;
+        let world = |id: u32| {
+            units
+                .get(id)
+                .and_then(|u| crate::ingame::units::unit_world_pose_in(u, &units))
+        };
+        let me = super::super::slave::player_centre(&state.borrow(), &world);
+        assert_eq!(me, Vec3::new(100.0, 100.0, 0.0));
+        let facts = PlayerFacts::default();
+        let by_unit = |u: &Unit| world(u.obj_id).map(|(pos, _)| pos);
+        assert_eq!(
+            nearest_npc(
+                &state.borrow(),
+                me,
+                &units,
+                own.obj_id,
+                0,
+                &facts,
+                10.0,
+                false,
+                &by_unit
+            ),
+            Some((21, 7)),
+            "the seat's position is within talk range"
+        );
+        assert_eq!(
+            nearest_npc(
+                &state.borrow(),
+                state.borrow().pos,
+                &units,
+                own.obj_id,
+                0,
+                &facts,
+                10.0,
+                false,
+                &by_unit
+            ),
+            None,
+            "the stale HUD point would be 105 m away"
+        );
+    }
 
     #[test]
     fn a_before_bubble_start_cinema_starts_when_the_dialog_opens() {
