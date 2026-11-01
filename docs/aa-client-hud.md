@@ -3218,8 +3218,15 @@ order.
 * **Any slave seat** (`FUN_39345f10`) gets the mount skills attached to its point (`FUN_39347260`
   with the seat point: point 1 for the Farm Wagon, the `mount_attached_skills` point-2 rows for the
   tank seats), then `unbind` (slot 6: `ui/icon/icon_skill_vehicle03.dds`, `ui_texts` 33 `unbind`).
-  A passenger's attached skill is shown like a gunner's: the point-2 skill (20238 on the tank 46)
-  is displayed and the row's `mount_skills.skill_id` (15235) is cast. The `unbind` is appended after
+  `FUN_39347260` / `FUN_39347130` filter EVERY seat, the driver's included: a row with no attached
+  list counts only at point 1, and a row with one only when its FIRST `mount_attached_skills` entry
+  (lowest row id) is at the seat point. A row's skill level (`skills.ability_level`, the skill's
+  `+8`) must also not exceed the slave unit's level byte (`+0x4b4`, `slaves.level`); one 1.2 row is
+  above it (slave 44's skill 13572, ability level 99 against a level-50 slave) and is dropped. So
+  the tank 46 driver bar is rows 201 (no list) and 45 (first entry point 1), never 51 (first entry
+  point 2), whose skill 20238 belongs to the passenger seat. A passenger's attached skill is shown
+  like a gunner's: the point-2 skill (20238 on the tank 46) is displayed and the row's
+  `mount_skills.skill_id` (15235) is cast. The `unbind` is appended after
   the skill loop even when the slave has no `slave_mount_skills` rows at all (39 of the 140 slaves,
   including the carriage 7, the rowboats 55/91 and the ship 23), so those seats still get it.
 * **The driver seat** (point 1) appends `showSlaveInfo` (slot 7: `ui/icon/icon_skill_info_view.dds`,
@@ -3231,13 +3238,15 @@ order.
   command 9 via `FUN_39361e80`), then the buff skills. The native adds it only when
   `FUN_3933b1b0(parent) == 0`: that predicate is 1 for the player's own mate (kind 5 and its
   `+0x420` owner is the local player), so riding the player's own pet shows no function slot (its
-  pet bar owns the dismount) and only a foreign mate gets this one.
+  pet bar owns the dismount) and only a foreign mate gets this one. Which native mate field the
+  spawn's `owner_id` maps to is unproven; the port uses the received `UnitKind::Mate.owner_id`.
 * **Clicks**: `unbind` is `FUN_39345aa0` -> `CSDiscardSlave` 0x032 (`{u16 tl_id}`). Its driver branch
-  is keyed on `this+0x14`, the slave SCSlaveBound named as the local player's master, not on the
-  seat point: with it the unbind is refused above 5 m/s (`_DAT_3999f85c` 25.0) with
-  `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170` sends only from an attachment above
-  point 1 (no speed check, one request per `_DAT_3a169948` 1500 ms) and is silent for a point-1 seat
-  that is not the player's. `showSlaveInfo` fires UI event `SHOW_SLAVE_INFO` (0x60) and the stock
+  is keyed on `this+0x14`, the timeline of the slave SCSlaveBound named as the local player's
+  master, not on the seat point; the speed check resolves `this+0x18`, that bound slave's object
+  id, so both the 5 m/s refusal (`_DAT_3999f85c` 25.0, `SLAVE_SHUT_OFF_TO_UNBIND` 0x67) and the
+  packet name the BOUND slave even when the player sits on another one. Without it `FUN_39362170`
+  sends only from an attachment above point 1 (no speed check, one request per `_DAT_3a169948`
+  1500 ms) and is silent for a point-1 seat that is not the player's. `showSlaveInfo` fires UI event `SHOW_SLAVE_INFO` (0x60) and the stock
   `slave_info.alb` opens; `command_unmount` uses the existing mate unmount (`CSUnMountMate` 0x0a8
   reason 9).
 * **Grab Machine**: the dynamic action bar has a slave producer (`hud/slave.rs::candidate`) with
@@ -3249,7 +3258,9 @@ order.
   (`FUN_393601a0`, `_DAT_3999c488` = 1.0, sorted by `FUN_3902ed20`) only orders the one set. The
   keyboard prompt and the doodad bar are arbitrated on that same key, not on centre distance: a
   Farm Wagon's storage boxes (doodads 3446 at attach points 9-12) are often nearer but behind or
-  beside the player while the wagon is in front, so the native key keeps the Grab Machine. The bar
+  beside the player while the wagon is in front, so the native key keeps the Grab Machine. A
+  right-clicked doodad is preferred only among doodads; it keeps its native key against a slave.
+  A tie keeps the doodad: that tie-break is in `FUN_393bd9e0`, which is not decoded. The bar
   is `DYNAMIC_ACTION_BAR_SHOW("npc", id)` with 12076 "Grab Machine"; 13863 "passenger seat" is
   added when the model has `model_bindings` point 2 (`FUN_390c9f70(2)`) and no unit is attached
   there. F / `ExecuteDynamicAction` sends `CSBindSlave` 0x031 for 12076 (`FUN_393b1de0` ->
@@ -3266,8 +3277,9 @@ order.
 * **Evidence/tests**: `vehicle_bar` example (driver bar with both function slots and the F prompt for
   a second wagon in one frame, measured from the driven wagon while the HUD position/yaw are stale),
   `hud/mode_actions/tests.rs` (driver 7 slots, a slave with no mount skills keeps `unbind` +
-  `showSlaveInfo`, the point-2 attached skill before `unbind`, a foreign mate's `command_unmount`
-  and none on the player's own mate, the stale slot cache, `0x67`, function event, icons/texts),
+  `showSlaveInfo`, the tank 46's driver and passenger bars, the first-attached-entry seat rule,
+  the point-2 attached skill before `unbind`, a foreign mate's `command_unmount` and none on the
+  player's own mate, the stale slot cache, `0x67`, function event, icons/texts),
   `hud/slave/tests.rs` (the candidate reach and key in front/beside/behind, measurement from the
   seat, mate/bond/seated suppression, 13863 only with a free point 2, the SCSlaveBound driver gate,
   `CSDiscardSlave`, passenger 1500 ms throttle), and the inline doodad tests in `hud/doodad.rs` (the
@@ -3276,7 +3288,8 @@ order.
 
 Still pending: the two `showSlaveInfo` gates; a live passenger bar and the point-2 skills
 (decompile only); the exact `player+0x3b94` non-empty state (ported from the received bond); the
-buff skills 1.2 appends to the seat bar; a live 0x67 at >5 m/s; a ship helm/siege bar (same table,
+buff skills 1.2 appends to the seat bar; the `buff_mount_skills` list `FUN_39347260` uses instead
+of `slave_mount_skills` when the ridden unit has a buff id at `+0x5fe4`; a live 0x67 at >5 m/s; a ship helm/siege bar (same table,
 other rows); player death while driving; a slave skill cooldown after re-boarding; and the pressed
 slot target field (this client sends the current target, 0 when none, with the slave's object id
 and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins it). The Eznan Cutter

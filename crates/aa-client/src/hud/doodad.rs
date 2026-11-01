@@ -436,13 +436,15 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
     Vec3::new(p.x, p.y, p.z)
 }
 
-/// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked, else the
-/// lowest native interaction key (`slave::native_key`: surface gap minus `1 + facing`, the same key the slave
-/// producer uses and the one `FUN_3902ed20` orders the combined unit/doodad candidate set by). The capture's bar
-/// beside tome 851 (a chair 0.7 m away, the tome 4.9 m ahead) was the chair's skill 15857; beside tome 850 (the
-/// Mailbox 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see
-/// the module doc). The tomes' own 14602 was not observed. The doodad's collider radius is not loaded, so its gap
-/// uses the centre distance minus the player's radius (a zero doodad radius).
+/// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked among
+/// doodads, else the lowest native interaction key (`slave::native_key`: surface gap minus `1 + facing`, the same
+/// key the slave producer uses and the one `FUN_3902ed20` orders the combined unit/doodad candidate set by).
+/// The right-click preference is a port behaviour that only ranks doodads: it must not force the doodad past a
+/// slave in [`arbitrate`], because 1.2 has one candidate set ordered by the native key. The capture's bar beside
+/// tome 851 (a chair 0.7 m away, the tome 4.9 m ahead) was the chair's skill 15857; beside tome 850 (the Mailbox
+/// 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see the
+/// module doc). The tomes' own 14602 was not observed. A doodad has no recovered collision shape, so its gap is
+/// the centre distance minus the player's radius; the doodad's own radius is 0 here.
 fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
     if data.doodad.seated {
         return None;
@@ -450,35 +452,42 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
     let game = data.game.get()?;
     let from = super::slave::player_centre(data, units);
     let forward = super::slave::player_forward(data, units);
-    let candidates = doodads.by_id.values().filter_map(|o| {
-        let uses = game.doodad.uses(o.func_group_id)?;
+    let mut best: Option<(bool, f32, Focus)> = None;
+    for o in doodads.by_id.values() {
+        let Some(uses) = game.doodad.uses(o.func_group_id) else {
+            continue;
+        };
         if uses.skills.is_empty() {
-            return None;
+            continue;
         }
-        let pos = doodad_world(o, units)?;
+        let Some(pos) = doodad_world(o, units) else {
+            continue;
+        };
         let dist = from.distance(pos);
         if dist > reach(data, uses) {
-            return None;
+            continue;
         }
-        let key = if data.doodad.preferred == Some(o.obj_id) {
-            f32::MIN
-        } else {
-            let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
-            super::slave::native_key(from, forward, pos, gap)
-        };
-        Some((
+        let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
+        let key = super::slave::native_key(from, forward, pos, gap);
+        let preferred = data.doodad.preferred == Some(o.obj_id);
+        let focus = Focus {
+            obj_id: o.obj_id,
+            skills: uses.skills.clone(),
             key,
-            Focus {
-                obj_id: o.obj_id,
-                skills: uses.skills.clone(),
-                key,
-                dist,
-            },
-        ))
-    });
-    candidates
-        .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, f)| f)
+            dist,
+        };
+        let better = best
+            .as_ref()
+            .is_none_or(|(best_preferred, best_key, _)| match preferred.cmp(best_preferred) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Equal => key < *best_key,
+            });
+        if better {
+            best = Some((preferred, key, focus));
+        }
+    }
+    best.map(|(_, _, focus)| focus)
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
@@ -654,8 +663,9 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
 }
 
 /// The bar the two interaction producers ask for: the one with the lower [`super::slave::native_key`]
-/// (`FUN_3902ed20` orders the native unit/doodad set by it). A tie keeps the doodad, and the returned
-/// number is the chosen candidate's centre distance, which F's NPC-talk priority compares against.
+/// (`FUN_3902ed20` orders the native unit/doodad set by it). A tie keeps the doodad: the native
+/// tie-break is in `FUN_393bd9e0`, which is not decoded. The returned number is the chosen
+/// candidate's centre distance, which F's NPC-talk priority compares against.
 fn arbitrate(
     doodad: Option<(super::dynamic_actions::Shown, f32, f32)>,
     slave: Option<(super::dynamic_actions::Shown, f32, f32)>,
@@ -2173,6 +2183,9 @@ mod tests {
         wagon.model_id = 1008;
         wagon.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
         units.by_id.insert(20, wagon);
+        // A right click makes the box the preferred doodad; that must not force it past the
+        // wagon in the shared candidate set (1.2 orders units and doodads on the native key).
+        data.doodad.preferred = Some(3446);
 
         let focus = find_focus(&data, &doodads, &units).expect("the storage box in reach");
         assert_eq!(focus.obj_id, 3446);
@@ -2226,6 +2239,55 @@ mod tests {
             "the wagon wins over the nearer but behind storage box"
         );
         assert_eq!(dist, Some(1.0));
+    }
+
+    /// The right-click preference ranks doodads only. The preferred one keeps a native key, so a
+    /// slave in front can still win `arbitrate`; without the click the native key chooses among
+    /// the doodads.
+    #[test]
+    fn a_right_click_prefers_a_doodad_only_among_doodads() {
+        let mut tables = Tables::default();
+        tables.add(1, 13990, "DoodadFuncUse");
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        let _ = data.game.0.set(game);
+        data.pos = Vec3::ZERO;
+        data.yaw = 0.0;
+        let mut doodads = Doodads::default();
+        // id 1 is 2 m behind (key 2), id 2 is 2 m in front (key 0).
+        doodads
+            .by_id
+            .insert(1, world_doodad(1, 850, 1, Vec3::new(0.0, -2.0, 0.0)));
+        doodads
+            .by_id
+            .insert(2, world_doodad(2, 850, 1, Vec3::new(0.0, 2.0, 0.0)));
+        data.doodad.preferred = Some(1);
+        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        assert_eq!(
+            focus.obj_id, 1,
+            "the right-clicked doodad stays the bar's among doodads"
+        );
+        assert!(
+            focus.key > 0.0,
+            "its key is the native one, not f32::MIN: {}",
+            focus.key
+        );
+        data.doodad.preferred = None;
+        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        assert_eq!(
+            focus.obj_id, 2,
+            "without a click the native key picks the front one"
+        );
     }
 
     /// `player+0x3b94`: sitting on a bonded seat doodad shows no doodad bar either.

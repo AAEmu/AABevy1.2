@@ -124,6 +124,15 @@ pub(crate) struct Tables {
     /// Point 1 is the driver/gunner seat; the same table has point-2 rows for the tank seats
     /// (`FUN_39347260` filters the list by the seat's point).
     attached: HashMap<(u32, u32, u8), u32>,
+    /// `(slave template, mount skill)` -> the attach point of the row's FIRST
+    /// `mount_attached_skills` entry (lowest id). A row with an attached list is counted only at
+    /// that point; a row without one only at point 1 (`FUN_39347260` / `FUN_39347130`).
+    first_attached: HashMap<(u32, u32), u8>,
+    /// `slaves.id` -> `slaves.level`, the slave unit's level byte `+0x4b4` in the bar's gate.
+    /// Empty when the schema has no `level` column (test fixtures): the gate then passes.
+    slave_levels: HashMap<u32, u8>,
+    /// `skills.id` -> `skills.ability_level`, the skill's `+8` in the same gate.
+    skill_levels: HashMap<u32, u8>,
     /// Slave templates whose point-1 seat is a turret (kind 7/8, `vehicle_models.velocity == 0`
     /// and a non-zero turret range): only their rows show the point-1 attached skill. This is
     /// the same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a
@@ -178,13 +187,13 @@ impl Tables {
         // The per-row attached skill, for every seat point: point 1 is the operator/gunner, and
         // the point-2 rows are the passenger skills (`FUN_39347260` filters by the seat point).
         // A row without one keeps its mount skill (the server's `GetMountAttachedSkills` is per
-        // attach point).
+        // attach point). The row id order makes `first_attached` the native row's FIRST entry.
         let mut query = db.prepare(
             "SELECT sm.slave_id, sm.mount_skill_id, mas.attach_point_id, mas.skill_id
              FROM slave_mount_skills sm
              JOIN mount_attached_skills mas ON mas.mount_skill_id = sm.mount_skill_id
              WHERE sm.slave_id IS NOT NULL AND mas.skill_id > 0
-             ORDER BY sm.id",
+             ORDER BY sm.id, mas.id",
         )?;
         for row in query.query_map([], |row| {
             Ok((
@@ -196,6 +205,26 @@ impl Tables {
         })? {
             let (slave, mount_skill, point, skill) = row?;
             out.attached.insert((slave, mount_skill, point), skill);
+            out.first_attached
+                .entry((slave, mount_skill))
+                .or_insert(point);
+        }
+        // The native level gate in `FUN_39347260`: the skill's level (`+8`,
+        // `skills.ability_level`) must not exceed the slave unit's level byte (`+0x4b4`,
+        // `slaves.level`). The unit there is the slave itself (`FUN_39345f10`); one 1.2 row is
+        // above it (slave 44's skill 13572, ability level 99 against a level-50 slave).
+        // A schema without these columns left the gate open (test fixtures).
+        if let Ok(mut query) = db.prepare("SELECT id, ability_level FROM skills") {
+            for row in query.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, i64>(1)?)))? {
+                let (skill, level) = row?;
+                out.skill_levels.insert(skill, level.clamp(0, 255) as u8);
+            }
+        }
+        if let Ok(mut query) = db.prepare("SELECT id, level FROM slaves") {
+            for row in query.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, i64>(1)?)))? {
+                let (slave, level) = row?;
+                out.slave_levels.insert(slave, level.clamp(0, 255) as u8);
+            }
         }
         // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a numeric
         // `vehicle_models.velocity` of 0, and a non-zero parsed pitch/yaw range. The text
@@ -288,20 +317,41 @@ impl Tables {
         self.turret_slaves.contains(&template)
     }
 
-    /// The slave's bar, one entry per `slave_mount_skills` row. On a turret seat a row with a
-    /// point-1 attached skill shows that skill and casts the mount skill; every other row shows
-    /// and casts the mount skill. No row is dropped. `None` when the slave has no rows at all
-    /// (the native still appends its function slots; the caller uses `unwrap_or_default`).
-    pub(crate) fn bar(&self, template: u32, turret: bool) -> Option<Vec<SlaveSkill>> {
+    /// The slave's bar, one entry per matching `slave_mount_skills` row. `FUN_39347260` /
+    /// `FUN_39347130` filter every seat, the driver's included: a row without an attached list
+    /// counts only at point 1, and a row with one only when its FIRST `mount_attached_skills`
+    /// entry is at `point`; the row's skill level must also not exceed the slave's level. On a
+    /// turret point-1 seat a kept row with a point-1 attached skill shows that skill and casts
+    /// the mount skill; a passenger seat shows the row's attached skill the same way. `None` when
+    /// the slave has no rows at all (the native still appends its function slots; the caller uses
+    /// `unwrap_or_default`).
+    pub(crate) fn bar(&self, template: u32, point: u8, turret: bool) -> Option<Vec<SlaveSkill>> {
         let rows = self.slave_skills.get(&template)?;
         if rows.is_empty() {
             return None;
         }
+        let level = self.slave_levels.get(&template).copied().unwrap_or(u8::MAX);
         Some(
             rows.iter()
+                .filter(|row| {
+                    let skill_level = self.skill_levels.get(&row.skill).copied().unwrap_or(1);
+                    if skill_level > level {
+                        return false;
+                    }
+                    match self.first_attached.get(&(template, row.mount_skill)) {
+                        Some(&first) => first == point,
+                        None => point == 1,
+                    }
+                })
                 .map(|row| {
                     if turret
+                        && point == 1
                         && let Some(skill) = self.attached.get(&(template, row.mount_skill, 1))
+                    {
+                        return SlaveSkill::gunner(*skill, row.mount_skill, row.skill);
+                    }
+                    if point > 1
+                        && let Some(skill) = self.attached.get(&(template, row.mount_skill, point))
                     {
                         return SlaveSkill::gunner(*skill, row.mount_skill, row.skill);
                     }
@@ -311,26 +361,10 @@ impl Tables {
         )
     }
 
-    /// A passenger seat's skills: the rows whose mount skill has a `mount_attached_skills` entry
-    /// at `point` (`FUN_39347260` with the seat point). Like a gunner's rows, the bar shows the
-    /// attached skill and casts the mount skill's own skill. An empty list is a seat with nothing
-    /// but the function slots.
-    pub(crate) fn passenger_bar(&self, template: u32, point: u8) -> Vec<SlaveSkill> {
-        self.slave_skills
-            .get(&template)
-            .into_iter()
-            .flatten()
-            .filter_map(|row| {
-                let skill = self.attached.get(&(template, row.mount_skill, point))?;
-                Some(SlaveSkill::gunner(*skill, row.mount_skill, row.skill))
-            })
-            .collect()
-    }
-
     /// The turret-seat view of [`Tables::bar`], used by the fire-path tests and the example.
     #[allow(dead_code)]
     pub(crate) fn gunner_bar(&self, template: u32) -> Option<Vec<SlaveSkill>> {
-        self.bar(template, true)
+        self.bar(template, 1, true)
     }
 
     fn has(&self, buff: u32) -> bool {
@@ -437,27 +471,20 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
 fn seat_bar(data: &HudData) -> Option<Vec<Entry>> {
     let tables = &data.game.get()?.mode_actions;
     let (slave, template, kind, point) = data.mounted.slave_seat()?;
-    let mut out: Vec<Entry> = if point == 1 {
-        // A turret seat is this slave when the engine's seat flag names it, or, before that flag
-        // reaches the HUD (the attach event can arrive first), when the template passes the same
-        // kind/velocity/range gate as `turret_seat_model`.
-        let turret = match data.turret_seat {
+    // A turret seat is this slave when the engine's seat flag names it, or, before that flag
+    // reaches the HUD (the attach event can arrive first), when the template passes the same
+    // kind/velocity/range gate as `turret_seat_model`.
+    let turret = point == 1
+        && match data.turret_seat {
             Some(seated) if seated == slave => true,
             _ => tables.turret_slave(template),
         };
-        tables
-            .bar(template, matches!(kind, 7 | 8) && turret)
-            .unwrap_or_default()
-            .into_iter()
-            .map(Entry::Skill)
-            .collect()
-    } else {
-        tables
-            .passenger_bar(template, point)
-            .into_iter()
-            .map(Entry::Skill)
-            .collect()
-    };
+    let mut out: Vec<Entry> = tables
+        .bar(template, point, matches!(kind, 7 | 8) && turret)
+        .unwrap_or_default()
+        .into_iter()
+        .map(Entry::Skill)
+        .collect();
     out.push(Entry::Function(Function::Unbind));
     if point == 1 {
         // The native gates this on `local_8 == 1` (the driver) and two undecoded conditions

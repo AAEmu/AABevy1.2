@@ -15,8 +15,9 @@
 //! dead (`CANT_DO_WHILE_YOU_DEAD` 0x14c), we are bound to another slave (0x66), we are bound to
 //! this one (silent), a bind is already pending (0x13), and the same gap strictly below
 //! `DAT_39ac7408` 16.0 -> 4.0 m (0x9a). 1.2 minimises over per-collider shapes that are not
-//! recovered; this client uses one scaled actor-model radius per unit, an approximation
-//! (unverified). The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
+//! recovered; this client uses one sphere per unit (unverified), and a slave has no
+//! `ActorModel`, so its radius is 0 and only the player's radius reduces the centre distance.
+//! The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
 //!
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
 //! (live capture 2026-10-28, case e), never 0x068.
@@ -33,9 +34,10 @@
 //! at +0x3a70..+0x3a73/+0x3a7b (native 0x13) and the parent unit type 0xe (native silent refusal)
 //! are not ported: their meaning is unverified.
 //!
-//! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`): `CSDiscardSlave`
-//! 0x032 with the bound timeline, refused with 0x67 while the slave's speed squared is above 25.0
-//! (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
+//! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`):
+//! `CSDiscardSlave` 0x032 for the slave `SCSlaveBound` named as the local player's master (its
+//! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
+//! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
 //! `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`); that native path has no
 //! speed check. The speed source is unverified (see the docs).
 
@@ -102,8 +104,9 @@ pub(super) fn action_target(units: &Units, picked: Option<u32>) -> Option<u32> {
 
 /// The reach predicate of `FUN_3989bf90` -> `FUN_398b1ab0` -> `FUN_398b1af0`: the 3D surface
 /// gap of two sphere colliders, `|centre_a - centre_b| - (r_a + r_b)`, not clamped at 0. 1.2
-/// takes the minimum over the target's several colliders; one scaled actor-model sphere per unit
-/// approximates that (unverified).
+/// takes the minimum over the target's several colliders; this port uses one sphere per unit
+/// (unverified). A slave has no `ActorModel`, so [`radius`] returns 0 for it and its gap is the
+/// centre distance minus the player's actor radius.
 pub(super) fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32) -> f32 {
     from.distance(to) - (from_radius + to_radius)
 }
@@ -117,7 +120,10 @@ pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
     gap.abs() - (1.0 + forward.dot(toward))
 }
 
-/// The target's scaled actor-model radius, the same source as `api::distance_to`.
+/// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
+/// model is a `VehicleModel`, not an `ActorModel`, so the catalog has no radius for it and this
+/// returns 0: the slave's collider is not approximated at all (unverified, but the 1.2
+/// `FUN_3989bf90` uses the slave's real collision shape, which is also not recovered).
 fn radius(data: &HudData, unit: &Unit) -> f32 {
     data.game
         .get()
@@ -414,33 +420,40 @@ pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
 }
 
 /// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon` and the mode bar's `unbind` slot:
-/// `CSDiscardSlave` for the seated/bound slave. A driver (attach point 1, or the SCSlaveBound
-/// fallback) is refused above 5 m/s with 0x67. A passenger takes the native `FUN_39362170`
-/// branch: no speed check, one request per 1500 ms (`_DAT_3a169948`).
+/// `CSDiscardSlave` for the slave `SCSlaveBound` named as the local player's master. That same
+/// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
+/// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
+/// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
+/// one request per 1500 ms (`_DAT_3a169948`).
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
 
 pub(super) fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
-    let Some((obj_id, tl_id)) = data.mounted.discard_slave() else {
-        return Outcome::Silent;
-    };
-    // `FUN_39345aa0` takes its driver branch on `this+0x14`, the slave SCSlaveBound named as the
-    // local player's master, not on the seat point. Without it (a passenger, or a point-1 seat
-    // that is not ours) `FUN_39362170` sends only from a slave attachment above point 1 and
-    // otherwise nothing at all.
-    if data.mounted.bound_slave().is_some() {
+    // `FUN_39345aa0` takes its bound branch on `this+0x14`, the timeline SCSlaveBound stored for
+    // the local player's master (`this+0x18` is that slave's object id, used for the speed
+    // lookup); the seat point plays no part. Both the check and the packet use the bound slave,
+    // never the seat's `discard_slave` preference.
+    if let Some((obj_id, tl_id)) = data.mounted.bound_slave() {
         // No replicated movement, or one older than the staleness bound, means a standing slave.
         if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
             return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
         }
-    } else if !data
+        data.requests
+            .push(Request::Slave(SlaveCommand::Unbind { tl_id }));
+        return Outcome::Sent;
+    }
+    let Some((_, tl_id)) = data.mounted.discard_slave() else {
+        return Outcome::Silent;
+    };
+    if !data
         .mounted
         .player_attachment()
         .is_some_and(|attachment| attachment.point > 1)
     {
         return Outcome::Silent;
-    } else if !data.mounted.walk_off_throttle(now) {
+    }
+    if !data.mounted.walk_off_throttle(now) {
         // Native FUN_39362170 returns silently inside the 1500 ms window.
         return Outcome::Silent;
     }

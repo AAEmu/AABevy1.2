@@ -435,7 +435,9 @@ and explicit controls").
   units and the doodads share that one sorted set (`FUN_3902f010` adds the doodads), and
   `hud/doodad.rs` arbitrates its two producers on the same key: the Farm Wagon's storage boxes
   (doodads 3446 at attach points 9-12) are often nearer in centre terms but behind or beside the
-  player, and the wagon in front then keeps the prompt. While the player sits on a bonded seat
+  player, and the wagon in front then keeps the prompt. A right-clicked doodad keeps its native
+  key against a slave (the preference ranks doodads only), and a key tie keeps the doodad: that
+  tie-break is `FUN_393bd9e0`, not decoded. While the player sits on a bonded seat
   doodad (`player+0x3b94`, `FUN_393635e0` `BondLazyDoodad`) neither prompt is built. The
   2026-10-28 capture with a cart targeted and an NPC at 1.24 m produced no packet; the 2026-11-01
   owner capture shows the prompt and F taking the driver seat. NPC talk keeps the path it had when
@@ -457,9 +459,11 @@ and explicit controls").
   seat: `Player::apply` clears `attached_to` (`aa-net/src/state.rs`), and `hud/mounted.rs` clears
   the cached seat link and the bound fallback with it (no separate `SCUnitDetached` is needed).
 * **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
-  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. The
-  driver branch is keyed on `this+0x14`, the slave SCSlaveBound named as the local player's master,
-  not on the seat point. With it the unbind is refused while the slave's speed squared is above
+  `SlaveCommand::Unbind` 0x032 for the timeline SCSlaveBound stored at `this+0x14`, with the speed
+  check on that bound slave's object id (`this+0x18`): both use the BOUND slave, not the seat, so
+  a player seated on another slave still discards the bound one. The driver branch is keyed on
+  `this+0x14`, the slave SCSlaveBound named as the local player's master, not on the seat point.
+  With it the unbind is refused while the bound slave's speed squared is above
   `_DAT_3999f85c` 25.0 (5 m/s) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170`
   sends only from an attachment above point 1 (no speed check, 1500 ms throttle) and is silent for
   a point-1 seat that is not the player's. The speed is the latest replicated

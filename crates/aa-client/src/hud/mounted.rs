@@ -310,9 +310,11 @@ impl View {
     }
 
     /// `FUN_392045f0`'s mate function slot: the parent is a mate (kind 5) and
-    /// `FUN_3933b1b0(parent) == 0`. That predicate is 1 when the mate's `+0x420` owner is the
-    /// local character (the client's other paths use it to act through the player's own mount),
-    /// so riding the player's own pet gets no `command_unmount` here.
+    /// `FUN_3933b1b0(parent) == 0`. That predicate is 1 when the mate's owner is the local
+    /// character (the client's other paths use it to act through the player's own mount), so
+    /// riding the player's own pet gets no `command_unmount` here. Which native mate field the
+    /// spawn's `owner_id` maps to (`+0x420` or another id) is unproven: the port uses the
+    /// received `UnitKind::Mate.owner_id`.
     pub(super) fn mate_unmount(&self) -> bool {
         let Some(link) = self.player_attachment() else {
             return false;
@@ -329,8 +331,9 @@ impl View {
         Some((id, self.slave(id)?.slave_tl?))
     }
 
-    /// The slave the player leaves with `DiscardSiegeWeapon`: the seated one (the attachment wins,
-    /// as for the boarding checks), else the SCSlaveBound fallback, with its timeline id.
+    /// The seated slave with its timeline id, for the passenger `FUN_39362170` branch of
+    /// `DiscardSiegeWeapon` (no bound master). The native bound branch never uses it: both its
+    /// speed check and its packet name the SCSlaveBound slave.
     pub(super) fn discard_slave(&self) -> Option<(u32, u16)> {
         if let Some(link) = self.player_attachment()
             && let Some(actor) = self.slave(link.obj_id)

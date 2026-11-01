@@ -861,12 +861,63 @@ fn a_point_1_seat_without_a_master_bound_reply_is_silent() {
     // `FUN_39345aa0` needs `this+0x14`: an SCSlaveBound naming the local player as master.
     // Without it `FUN_39362170` sends nothing for an attachment at point 1.
     assert_eq!(discard(&state), Outcome::Silent);
-    // the seat wins over a SCSlaveBound naming another slave
+    // The bound slave wins over the seat: `FUN_39345aa0` sends `this+0x14` (slave 20's
+    // timeline 8), not the seat's slave 21 (timeline 9).
     bound(&state, 20);
     assert_eq!(discard(&state), Outcome::Sent);
     assert_eq!(
         state.borrow().requests,
-        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 9 })]
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+}
+
+/// `FUN_39345aa0` speed-checks the bound slave (`this+0x18`), not the seat's: a fast seat does
+/// not refuse a standing bound slave, and a fast bound slave refuses while the seat stands.
+#[test]
+fn the_unbind_speed_check_uses_the_bound_slave() {
+    let (state, _units) = setup(&[
+        slave(20, 8, Vec3::new(1.0, 0.0, 0.0)),
+        slave(21, 9, Vec3::new(2.0, 0.0, 0.0)),
+    ]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 21,
+            point: 1,
+            reason: 0,
+        },
+    );
+    bound(&state, 20);
+    let mut fast_seat = Movement::unit(Pos::default(), 0.0, 1);
+    fast_seat.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 21,
+            movement: fast_seat,
+        },
+    );
+    assert_eq!(
+        discard(&state),
+        Outcome::Sent,
+        "the seated slave 21 is fast, the bound slave 20 stands"
+    );
+    state.borrow_mut().requests.clear();
+
+    let mut fast_bound = Movement::unit(Pos::default(), 0.0, 2);
+    fast_bound.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement: fast_bound,
+        },
+    );
+    assert_eq!(
+        discard(&state),
+        Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND),
+        "the bound slave 20 is fast even though the seat 21 stands"
     );
 }
 

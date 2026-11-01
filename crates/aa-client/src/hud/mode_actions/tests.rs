@@ -100,6 +100,7 @@ fn cannon_game() -> crate::hud::data::GameData {
         .slave_skills
         .insert(10, vec![SlaveSkill::new(10473, 16)]);
     game.mode_actions.attached.insert((10, 16, 1), 14372);
+    game.mode_actions.first_attached.insert((10, 16), 1);
     game
 }
 
@@ -277,19 +278,16 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
         tables.has_passenger_point(146),
         "the Red Farm Hauler has point 2"
     );
-    // the point-2 attached rows `FUN_39347260` lists for a tank passenger: show the attached
-    // skill and cast the row's mount_skills.skill_id
+    // No Farm Wagon row has an attached list, so all five count at point 1 and none at point 2.
     assert_eq!(
         tables
-            .passenger_bar(46, 2)
-            .iter()
-            .map(|s| (s.skill, s.mount_skill, s.cast_skill()))
-            .collect::<Vec<_>>(),
-        [(20238, 51, 15235)],
-        "the tank 46's point-2 seat"
+            .bar(60, 1, false)
+            .expect("Farm Wagon driver bar")
+            .len(),
+        5
     );
     assert!(
-        tables.passenger_bar(60, 2).is_empty(),
+        tables.bar(60, 2, false).unwrap_or_default().is_empty(),
         "the Farm Wagon has no point-2 seat skill"
     );
     assert_eq!(
@@ -302,6 +300,41 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
     );
     assert_eq!(tables.text(Function::CommandUnmount), "Dismount");
     Ok(())
+}
+
+/// `FUN_39347260` filters every seat, the driver's included: the tank 46's rows are 201 (no
+/// attached list), 45 (first `mount_attached_skills` entry point 1) and 51 (first entry point 2).
+/// The native driver bar is therefore 201 and 45; only the point-2 seat lists 51. The old port
+/// kept every row for point 1, so the passenger skill 20238 appeared on the driver bar too.
+#[test]
+fn the_real_tank_46_bars_follow_the_seat_point() {
+    let Some(conn) = Connection::open_with_flags(
+        aa_anim::db::DEFAULT_DB,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok() else {
+        eprintln!("skip: no client database");
+        return;
+    };
+    let tables = Tables::load(&conn).expect("mode action tables");
+    let driver = tables.bar(46, 1, false).expect("tank 46 driver bar");
+    assert_eq!(
+        driver
+            .iter()
+            .map(|s| (s.skill, s.mount_skill, s.fire))
+            .collect::<Vec<_>>(),
+        [(14373, 45, None), (20704, 201, None)],
+        "the driver keeps only the rows whose first attached point is 1 or absent"
+    );
+    let passenger = tables.bar(46, 2, false).expect("tank 46 passenger bar");
+    assert_eq!(
+        passenger
+            .iter()
+            .map(|s| (s.skill, s.mount_skill, s.cast_skill()))
+            .collect::<Vec<_>>(),
+        [(20238, 51, 15235)],
+        "the point-2 seat shows 20238 and casts 15235"
+    );
 }
 
 fn slave_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
@@ -552,6 +585,7 @@ fn a_passenger_bar_lists_the_point_2_attached_skills_before_unbind()
             .slave_skills
             .insert(46, vec![SlaveSkill::new(15235, 51)]);
         game.mode_actions.attached.insert((46, 51, 2), 20238);
+        game.mode_actions.first_attached.insert((46, 51), 2);
         data.game.0.set(game).ok().unwrap();
     }
     let mut own = crate::hud::expansion::fixture::spawn();
@@ -1836,14 +1870,42 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
     }
 }
 
-/// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a turret seat a row with
-/// a point-1 attached skill shows that skill and casts the mount skill; every other row shows
-/// and casts its mount skill. This is the regression that dropped rows (tank 53's 14332, slave
-/// 54's 14344, ladder 5's 21723, harpoons 37/48/90's 13750) and gave the cotton cart 73 the
-/// attached 15548 instead of its mount skill 15622.
+/// A row with an attached list counts only at the FIRST entry's point, on every seat: mount
+/// skill 188 has `mount_attached_skills` 35 then 1 (row ids 299, 300), so it counts at 35 and
+/// never at point 1, which a point-only lookup would accept.
+#[test]
+fn the_first_attached_entry_chooses_the_seat() {
+    let mut tables = Tables::default();
+    tables
+        .slave_skills
+        .insert(5, vec![SlaveSkill::new(20161, 188)]);
+    tables.attached.insert((5, 188, 35), 20161);
+    tables.attached.insert((5, 188, 1), 20161);
+    tables.first_attached.insert((5, 188), 35);
+    assert!(
+        tables.bar(5, 1, false).expect("rows").is_empty(),
+        "point 1 is not the first attached entry"
+    );
+    assert_eq!(
+        tables
+            .bar(5, 35, false)
+            .expect("rows")
+            .iter()
+            .map(|row| row.mount_skill)
+            .collect::<Vec<_>>(),
+        [188]
+    );
+}
+
+/// Every kind-7/8 driver bar applies the native seat filter (`FUN_39347260`): a row without an
+/// attached list counts at point 1, a row whose FIRST attached entry is another point does not
+/// (tank 53's row 39 at point 2, slave 54's row 44, ladder 5's row 236 at point 81). The kept
+/// rows are unchanged otherwise: a turret shows its point-1 attached skill and casts the mount
+/// skill (the cotton cart 73's mount 65 has attached 15548 at point 1 but is not a turret, so it
+/// keeps 15622), and the harpoon rows without an attached list stay.
 #[test]
 #[ignore = "requires AA_DB"]
-fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills() {
+fn every_real_kind_7_8_bar_filters_by_the_seat_and_only_turrets_show_attached_skills() {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     if !std::path::Path::new(&path).exists() {
         return;
@@ -1872,12 +1934,28 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("read slaves");
     let mut checked = 0;
+    let mut dropped = 0;
     for (id, name, kind, model) in rows {
         let mounts = tables.slave_skills.get(&id).cloned().unwrap_or_default();
         let turret = crate::ingame::turret::turret_seat_model(kind, model, &db);
-        let bar = tables.bar(id, turret).unwrap_or_default();
-        assert_eq!(bar.len(), mounts.len(), "slave {id} {name} keeps every row");
-        for (entry, mount) in bar.iter().zip(&mounts) {
+        let bar = tables.bar(id, 1, turret).unwrap_or_default();
+        let level = tables.slave_levels.get(&id).copied().unwrap_or(u8::MAX);
+        let expected = mounts
+            .iter()
+            .filter(|row| tables.skill_levels.get(&row.skill).copied().unwrap_or(1) <= level)
+            .filter(|row| {
+                tables
+                    .first_attached
+                    .get(&(id, row.mount_skill))
+                    .is_none_or(|first| *first == 1)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            bar.len(),
+            expected.len(),
+            "slave {id} {name} keeps the rows of its seat"
+        );
+        for (entry, mount) in bar.iter().zip(&expected) {
             assert_eq!(entry.mount_skill, mount.mount_skill);
             match tables.attached.get(&(id, mount.mount_skill, 1)) {
                 Some(attached) if turret => {
@@ -1894,31 +1972,45 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
                 }
             }
         }
+        dropped += mounts.len() - expected.len();
         checked += 1;
     }
     assert!(checked >= 40, "checked {checked} kind-7/8 rows");
+    assert!(
+        dropped >= 3,
+        "the point-2 and point-81 rows are filtered out ({dropped} dropped)"
+    );
 
-    let cart = tables.bar(73, false).expect("cotton cart bar");
+    let cart = tables.bar(73, 1, false).expect("cotton cart bar");
     assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
-    let tank = tables.bar(53, false).expect("tank 53 bar");
+    let tank = tables.bar(53, 1, false).expect("tank 53 bar");
     assert!(
-        tank.iter().any(|row| row.skill == 14332),
-        "tank 53 keeps 14332"
+        tank.iter().all(|row| row.mount_skill != 39),
+        "tank 53 drops the point-2 row 39"
     );
-    let ladder = tables.bar(5, false).expect("siege ladder bar");
+    let ladder = tables.bar(5, 1, false).expect("siege ladder bar");
     assert!(
-        ladder.iter().any(|row| row.skill == 21723),
-        "ladder 5 keeps 21723"
+        ladder.iter().all(|row| row.mount_skill != 236),
+        "ladder 5 drops the point-81 row 236"
     );
-    let tank54 = tables.bar(54, true).expect("tank 54 bar");
+    let tank54 = tables.bar(54, 1, true).expect("tank 54 bar");
     assert!(
-        tank54.iter().any(|row| row.skill == 14344),
-        "tank 54 keeps the point-2 row"
+        tank54.iter().all(|row| row.mount_skill != 44),
+        "tank 54 drops the point-2 row on the driver seat"
+    );
+    let tank54_passenger = tables.bar(54, 2, false).expect("tank 54 passenger bar");
+    assert_eq!(
+        tank54_passenger
+            .iter()
+            .map(|row| (row.skill, row.mount_skill, row.cast_skill()))
+            .collect::<Vec<_>>(),
+        [(14299, 44, 14344)],
+        "the point-2 seat shows the attached 14299 and casts 14344"
     );
     for id in [37u32, 48] {
         assert!(
             tables
-                .bar(id, true)
+                .bar(id, 1, true)
                 .expect("harpoon bar")
                 .iter()
                 .any(|row| row.skill == 13750),
@@ -1926,7 +2018,7 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
         );
     }
     assert_eq!(
-        tables.bar(90, true).expect("harpoon bar").len(),
+        tables.bar(90, 1, true).expect("harpoon bar").len(),
         2,
         "slave 90 keeps both rows"
     );
@@ -1935,7 +2027,7 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
         (133, 24501, 24500, 341),
         (100, 20161, 20160, 184),
     ] {
-        let bar = tables.bar(id, true).expect("gunner bar");
+        let bar = tables.bar(id, 1, true).expect("gunner bar");
         let entry = bar
             .iter()
             .find(|row| row.mount_skill == mount)
