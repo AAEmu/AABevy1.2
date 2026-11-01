@@ -8,8 +8,8 @@ it on both sides (`FUN_39391670`: a caster, a hit, both units alive), and `OnCom
 vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`); a clear on a unit that is not flagged changes nothing. The capture's
 1 -> 0 at t=59,322 is our server's `SCCombatCleared` 0.772 s after the recorder lost the target (0.613 s after the no-target
 press), not a client timer. Separate from the flag is the derived combat idle (`combat.rs` `CombatIdle`, `X2Unit + 0x5fc4`):
-`FUN_39355ee0` refreshes `+0x5fc0` every update while the flag is set and for 1000 ms after a skill request on the local
-player's path (skill 2 always; another skill only with `start_autoattack`, `+0x158`), and the idle falls `DAT_39ac7424` =
+`FUN_39355ee0` refreshes `+0x5fc0` every update while the flag is set and for 1000 ms after the local player's auto attack
+request (skill 2; the `+0x158` branch for another skill is unreachable in 1.2), and the idle falls `DAT_39ac7424` =
 10000 ms after the last refresh (the model's `+0x428`); the deadline does not clear the flag and does not put the weapon away.
 Putting the weapon away zeroes `+0x5fc0` (`FUN_39360920`), as does the resurrect reset (`FUN_39362690`), so the idle ends with
 the weapon. The weapon byte `+0x3ba8` stayed 1 after the K2 clear, so the **drawn weapon** (`Drawn`) remains a separate state

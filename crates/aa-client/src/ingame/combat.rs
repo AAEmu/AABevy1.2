@@ -1819,9 +1819,10 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
 
 /// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now
 /// (the 1.2 client changes the weapon at the request, `FUN_39390f80` -> `FUN_39360920`) and the character turns to the target.
-/// The combat idle pulse (`+0x5fc5` / `+0x5fc6`) is on this request path too, and only for the local player: the auto attack
-/// always pulses, another skill only when its `start_autoattack` byte (`+0x158`) is set. The clip is not timed here: it plays
-/// when the server's `SCSkillFired` arrives.
+/// The combat idle pulse (`+0x5fc5`) is on this request path too, and only for the local player's auto attack: both callers of
+/// `FUN_39390f80` pass skill 2 (`FUN_393989e0`'s `param_2 == DAT_39ac769c` branch, 748866-748885, and `FUN_393923c0`, 743728,
+/// called with `DAT_39ac3874` = 2 at 140928), so the `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2. The
+/// clip is not timed here: it plays when the server's `SCSkillFired` arrives.
 fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, mut shot: Option<ResMut<DevShot>>) {
     let now = time.elapsed_secs_f64();
     for NetCommand(cmd) in requests.read() {
@@ -1843,11 +1844,11 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
         if st.actors.get(me).is_ok_and(|a| a.4 || !a.0.starts_enabled()) {
             continue;
         }
-        // `FUN_39390f80` is the local player's request path: the skill 2 branch (`DAT_39ac769c` = 2) draws the weapon and sets
-        // `+0x5fc5` (`FUN_39354610`); another skill does it only when its `+0x158` byte (`skills.start_autoattack`) is set
-        // (`+0x5fc6`, `FUN_39354640`). If the derived idle is already set (`FUN_39354600`), the deadline is only refreshed
-        // (`FUN_393545e0`) and no pulse starts.
-        if *skill_id == MELEE_ATTACK || st.book.start_autoattack(*skill_id) {
+        // `FUN_39390f80` is the local player's request path, and both callers pass skill 2 (`DAT_39ac769c`): it draws the
+        // weapon and sets `+0x5fc5` (`FUN_39354610`). Its `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2
+        // (the click attack `FUN_393923c0` passes `DAT_39ac3874` = 2 too). If the derived idle is already set
+        // (`FUN_39354600`), the deadline is only refreshed (`FUN_393545e0`) and no pulse starts.
+        if *skill_id == MELEE_ATTACK {
             st.commands.queue(move |w: &mut World| {
                 if let Some(mut idle) = w.get_mut::<CombatIdle>(me) {
                     idle.last = now;
@@ -2908,6 +2909,38 @@ mod tests {
         schedule.run(&mut world);
         let idle = *world.get::<CombatIdle>(local).expect("the idle stays");
         assert!((idle.last - 5.0).abs() < 1e-6, "the clear does not refresh the deadline ({idle:?})");
+    }
+
+    /// The request path pulses the combat idle for the local player's auto attack only: `FUN_39390f80`'s only callers pass
+    /// skill 2 (`DAT_39ac769c`; the click attack passes `DAT_39ac3874` = 2), so its `+0x158` / `+0x5fc6` branch never runs in
+    /// 1.2. A `start_autoattack` self-buff (Frenzy 10455) starts no combat idle.
+    #[test]
+    fn only_the_auto_attack_request_pulses_the_combat_idle() {
+        let Some(book) = SkillBook::open() else { return };
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetCommand>>();
+        let me = world.spawn((LocalPlayer { obj_id: 7 }, GlobalTransform::default())).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((request_skill, bevy::ecs::schedule::ApplyDeferred).chain());
+        // the basic attack: a request creates the 1 s pulse (`FUN_39354610`)
+        world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 2, target_obj_id: 0 }));
+        schedule.run(&mut world);
+        let idle = *world.get::<CombatIdle>(me).expect("the auto attack request pulses the idle");
+        assert!(idle.pulse_until > idle.last, "it is the +0x5fc5 pulse ({idle:?})");
+        // Frenzy 10455 has start_autoattack 't', but no 1.2 caller passes it to FUN_39390f80: no pulse
+        world.entity_mut(me).remove::<CombatIdle>();
+        world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 10455, target_obj_id: 0 }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(me).is_none(), "a start_autoattack self-buff does not enter the combat idle");
     }
 
     /// `FUN_39391670` needs a real blow: a miss or a zero sets no battle flag, and a dead unit is left out.

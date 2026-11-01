@@ -484,8 +484,14 @@ impl Skills {
                 }
             }
             Event::UnitDeath { obj_id } => {
+                // `OnUnitDeath` resets the dead unit (`FUN_39369c10`, 706564): it clears `+0x3ad5`, so the player's own death
+                // drops the auto attack latch.
+                let latched = self.is_own(*obj_id) && self.auto_attack;
+                if latched {
+                    self.auto_attack = false;
+                }
                 if self.casting.remove(obj_id).is_none() {
-                    return false;
+                    return latched;
                 }
             }
             Event::UnitsRemoved(ids) => {
@@ -653,6 +659,12 @@ mod tests {
         s.apply(&Event::SkillStopped { obj_id: 9, skill_id: 2 });
         assert!(s.auto_attack);
         assert!(s.apply(&Event::SkillStopped { obj_id: 5, skill_id: 2 }));
+        assert!(!s.auto_attack);
+        // the player's own death resets it (`OnUnitDeath` -> `FUN_39369c10`); another unit's death does not
+        assert!(s.apply(&started(2, 0, 5, 0, 0)));
+        assert!(!s.apply(&Event::UnitDeath { obj_id: 9 }));
+        assert!(s.auto_attack);
+        assert!(s.apply(&Event::UnitDeath { obj_id: 5 }));
         assert!(!s.auto_attack);
     }
 

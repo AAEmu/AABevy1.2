@@ -313,6 +313,10 @@ pub struct Env<'a> {
 /// How long a press waits for the server's answer before the next one may go out.
 const FLIGHT_MS: u64 = 500;
 
+/// `skills.id` of the basic melee attack (`DAT_39ac769c` = 2): the only skill whose request `FUN_393989e0` swallows while the
+/// auto attack latch (`X2Unit + 0x3ad5`) is set.
+const MELEE_ATTACK: u32 = 2;
+
 /// The global cooldown left under which a press goes out anyway: the client counts it from the server's answer, which is a
 /// little behind the server's own clock.
 const GCD_SLACK_MS: u32 = 100;
@@ -614,12 +618,13 @@ impl Env<'_> {
 
     /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
     /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, the last press has no answer yet, or the auto attack
-    /// latch (`X2Unit + 0x3ad5`) is set (`FUN_393989e0` returns 1 for skill 2 while it is).
+    /// latch (`X2Unit + 0x3ad5`) is set for skill 2 (`FUN_393989e0` returns 1 only for `DAT_39ac769c` = 2; the off-hand and
+    /// ranged basics 3 and 4 are not swallowed).
     pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
         if self.casting(skill) {
             return true;
         }
-        if self.is_auto_attack(skill) && self.skills.is_some_and(|s| s.auto_attack) {
+        if skill == MELEE_ATTACK && self.skills.is_some_and(|s| s.auto_attack) {
             return true;
         }
         self.uses_gcd(skill) && (self.gcd_left(skill) > GCD_SLACK_MS || self.skills.is_some_and(|s| flight.pending(s, Instant::now())))
@@ -982,9 +987,10 @@ mod tests {
     }
 
     /// The K2 client's outbound packets: a press at 11.2 m still sent `CSStartSkill 2`, and a second press sent another one.
-    /// The client's only swallow is the auto attack latch (`X2Unit + 0x3ad5`, `FUN_393989e0`): `SCSkillStarted` for skill 2
-    /// with timeline 0 sets it (`OnSkillStarted`, `FUN_3939a810` 750346) and `SCSkillStopped` clears it (`FUN_39398410`
-    /// 748541). Our server sends no `SCSkillStarted` for skill 2, which is why the K2 presses all went out. The range check is
+    /// The client's only swallow is the auto attack latch (`X2Unit + 0x3ad5`, `FUN_393989e0`), and only for skill 2
+    /// (`DAT_39ac769c`): `SCSkillStarted` for skill 2 with timeline 0 sets it (`OnSkillStarted`, `FUN_3939a810` 750346) and
+    /// `SCSkillStopped` clears it (`FUN_39398410` 748541); the off-hand and ranged basics 3 and 4 are not swallowed. Our
+    /// server sends no `SCSkillStarted` for skill 2, which is why the K2 presses all went out. The range check is
     /// `FUN_39397f90`: an out-of-range press is sent unless the `DAT_39d1fba4` setting returns 1. A press without a target
     /// sends nothing and shows the client's own refusal.
     #[test]
@@ -1018,9 +1024,13 @@ mod tests {
             use_slot(press.0, &env, &InFlight::default(), &bar, &inventory, &target, &mut net, &mut failed);
         }
         let mut g = game(Rules::default().with_skill(2, melee()));
-        g.skills.insert(2, crate::hud::data::SkillInfo { auto_attack: true, ..Default::default() });
+        for id in [2, 3, 4] {
+            g.skills.insert(id, crate::hud::data::SkillInfo { auto_attack: true, ..Default::default() });
+        }
         let mut bar = ActionBar { slots: vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS], ..Default::default() };
-        bar.slots[1] = aa_net::items::ActionSlot { kind: aa_net::items::ActionKind::Spell, id: 2 };
+        for (slot, id) in [(1, 2), (2, 3), (3, 4)] {
+            bar.slots[slot] = aa_net::items::ActionSlot { kind: aa_net::items::ActionKind::Spell, id };
+        }
         let mut target = Target::default();
         target.obj_id = Some(77);
         let mut app = App::new();
@@ -1079,6 +1089,17 @@ mod tests {
         app.update();
         assert!(sent(&mut app).is_empty(), "the auto attack latch swallows the press");
         assert_eq!(failed(&mut app), 0, "and shows no refusal");
+        // the latch swallows only skill 2: the off-hand and ranged basics 3 and 4 still go out
+        app.world_mut().insert_resource(Press(2, 2.0));
+        app.update();
+        let offhand = sent(&mut app);
+        assert_eq!(offhand.len(), 1, "skill 3 is not swallowed ({offhand:?})");
+        assert_eq!(offhand[0].skill, 3);
+        app.world_mut().insert_resource(Press(3, 2.0));
+        app.update();
+        let ranged = sent(&mut app);
+        assert_eq!(ranged.len(), 1, "skill 4 is not swallowed ({ranged:?})");
+        assert_eq!(ranged[0].skill, 4);
         // `SCSkillStopped` clears it and the next press is sent again
         app.world_mut().resource_mut::<Skills>().apply(&aa_net::Event::SkillStopped { obj_id: 5, skill_id: 2 });
         app.world_mut().insert_resource(Press(1, 2.0));

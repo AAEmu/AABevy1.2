@@ -197,8 +197,9 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
     out in that stance already, inserts `Drawn` **at once**. The client changes the weapon on the request path, for the local
     player only: `FUN_39390f80` (742553; called from `FUN_393989e0`'s skill 2 branch, 748885, and the click attack
     `FUN_393923c0`, 743692) calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610`
-    (skill 2, `+0x5fc5`) or `FUN_39354640` (another skill, `+0x5fc6`) only when that skill's `start_autoattack` byte (`+0x158`)
-    is set. `SCSkillStarted` starts no pulse and no stance. The server's events are **not** held: the clip starts on
+    (skill 2, `+0x5fc5`). Both callers pass skill 2 (the click attack passes `DAT_39ac3874` = 2 at 140928), so the `+0x158` /
+    `+0x5fc6` branch for another skill is unreachable in 1.2: a `start_autoattack` self-buff such as Frenzy 10455 does not enter
+    the combat idle. `SCSkillStarted` starts no pulse and no stance. The server's events are **not** held: the clip starts on
     `SCSkillFired` and the damage on `SCUnitDamaged` when they arrive. The older 0.6 s `DRAW_LEAD` and the K2 report's +280 ms
     are not client timers: the K2 first fire was our server's `start_auto_skill` (CONT), and a localhost reply lands in the same
     client frame (the audit's F2). A refused skill (`cancel_draw`) puts the weapon back.
@@ -215,8 +216,8 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
     `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`); a
     clear on a unit that is not flagged changes nothing. It is **not** set by a skill start, and it has no timer.
   * The **10 s deadline** (`CombatIdle`, `X2Unit + 0x5fc0` / `+0x5fc4`, `FUN_39355ee0`). Every update, while the battle flag is
-    set, `+0x5fc0` = now; a skill request on the local player's path sets `+0x5fc5` / `+0x5fc6` for 1000 ms and those flags
-    refresh `+0x5fc0` too; a skill used while the derived flag is already set only refreshes it (`FUN_393545e0`). The derived
+    set, `+0x5fc0` = now; the local player's auto attack request sets `+0x5fc5` for 1000 ms and that flag refreshes `+0x5fc0`
+    too; a skill used while the derived flag is already set only refreshes it (`FUN_393545e0`). The derived
     flag is `now - +0x5fc0 <= DAT_39ac7424` = **10000 ms** (read from `x2game_unpacked.dll` at file offset `0xad5a24`); on its
     falling edge `FUN_39355ee0` writes `false` to the model's `+0x428` and zeroes `+0x5fc0`. Putting the weapon away zeroes
     `+0x5fc0` too (`FUN_39360920` with weapon 0; `FUN_39362690` on the resurrect reset, from `OnCharacterResurrected` 363182;
