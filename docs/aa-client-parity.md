@@ -2,52 +2,62 @@
 
 ## Vehicle interaction, engine and cinema checkpoint, 2026-11-01
 
-The 1.2 mode bar is filled natively (`FUN_39204500` / `FUN_392045f0`), not by Lua. For any slave seat
-it appends function slot "unbind" after the seat's mount skills: the click sends `CSDiscardSlave` 0x032
-with the slave's timeline id, refused above 5 m/s with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. The driver
-(attach point 1) also gets "showSlaveInfo", which raises UI event `SHOW_SLAVE_INFO` 0x60 and opens the
-Summon Info window with no packet; a mate's first slot is `command_unmount` (the stub pushes pet
-command 9; the command itself was not traced). The Bevy bar still holds skill ids only
-(`hud/mode_actions.rs`, `View.actions: Vec<u32>`) and builds a bar only for the point-1 driver, so a
-Farm Wagon driver has no UI way off, a seated passenger has no bar, and nothing fires
-`SHOW_SLAVE_INFO` (the unmerged `fix/wagon-retail` branch adds an Info key trigger). This corrects
-the earlier reading that 1.2 has no dismount button: it has one, and a passenger gets it too
+The 1.2 mode bar is filled natively (`FUN_39204500` / `FUN_392045f0`), not by Lua. The 2026-11-01
+original-client session (the driver's `client_mode_actions`) captured the Farm Wagon driver's bar:
+slots 1-5 are 20704/20291/15622/15450/15546, slot 6's tooltip is "Disembark from current device." and
+slot 7's is "Check details on a summon."; clicking slot 6 dismounted the driver and the Grab Machine F
+prompt took the seat. Decompile-only, not captured: the same "unbind" function slot appears for any
+slave seat (a passenger gets it too), its click sends `CSDiscardSlave` 0x032 and is refused above
+5 m/s with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67; the driver's slot 7 raises UI event `SHOW_SLAVE_INFO` 0x60
+with no packet; a mate's first slot is `command_unmount` (the stub pushes pet command 9; the command
+itself was not traced). The Bevy bar still holds skill ids only (`hud/mode_actions.rs`,
+`View.actions: Vec<u32>`) and builds a bar only for the point-1 driver, so a Farm Wagon driver has no
+UI way off, a seated passenger has no bar, and nothing fires `SHOW_SLAVE_INFO` (the unmerged
+`fix/wagon-retail` branch adds an Info key trigger). This corrects the earlier reading that 1.2 has
+no dismount button: it has one, and a passenger gets it too (decompile-only)
 (`handoff/2026-11-01-disembark-and-wagon-seat.md` §1-§2).
 
 The Farm Wagon (slave 60, model 1008) has no attach point 2: `model_bindings` for model 1008 lists
-points 1, 35 and 9-12 only (point 2 is `$passenger0`), so the 1.2 client never offers skill 13863 on
-it. Our server offers and accepts point 2 (`slave_interaction_skill` ignores the model; `bind_slave`
-accepts any point). That is a server bug, being fixed; the Bevy seat presentation needs no change
+points 1, 35 and 9-12 only (point 2 is `$passenger0`). [I] That record is the client's attach-point
+list (`model_bindings` is the only per-model attach list; model 450 shows points 1/2), so the 1.2
+client never offers skill 13863 on the wagon. Our server offers and accepts point 2
+(`slave_interaction_skill` ignores the model; `bind_slave` accepts any point). That is a server bug,
+being fixed; the Bevy seat presentation needs no change
 (`handoff/2026-11-01-disembark-and-wagon-seat.md` §3).
 
 The slave's F prompt is skill 12076 ("Grab the machine to control it.") on the native dynamic action
-bar (`x2ui/dynamic_action_bar.alb`, low-centre, `DYNAMIC_ACTION_BAR_SHOW("npc", id)`); F runs
-`do_interaction_1` and ends in `CSBindSlave`. Bevy publishes the bar from doodads only
-(`hud/dynamic_actions.rs`, `Source::Npc` is dead and has no slave producer), so right-click boards a
-cart but F shows nothing on foot at 2 m (`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §b).
+bar (`x2ui/dynamic_action_bar.alb`, `DYNAMIC_ACTION_BAR_SHOW("npc", id)`). [I] 12076 is the constant
+0x39ac789c in the interaction builder (the .data dword was not read); the tooltip text the owner saw
+supports it. [I] The bar sits low-centre (it is positioned from the screen's centre, not anchored to
+the unit). F runs `do_interaction_1` and ends in `CSBindSlave`. Bevy publishes the bar from doodads
+only (`hud/dynamic_actions.rs`, `Source::Npc` is dead and has no slave producer), so right-click
+boards a cart but F shows nothing on foot at 2 m
+(`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §b).
 
 The wagon body's `fist_ba_relaxed_idle` clip is the engine loop: `X2::PrefabUnitModel::UpdateIdleAnim`
-(`FUN_390d6690`) starts it on any unit model with an animation id, on model init/refresh, with no
-driver or speed condition. Bevy already spawns the `.chr` body through `creature::spawn` and starts
-that clip, but the owner sees no engine motion; the cause is not measured (a live `Bone_engine01`
-transform over time decides it). No engine sound is played: 1.2 uses `sound_packs` 176
-"run_tractor", item `run` -> sound 950 (`sounds/x2vehicles:trailer:run`), `yaw` -> 950, through
-`VehicleUnitModel::UpdateSound` (`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §a).
+(`FUN_390d6690`) starts it on any unit model with an animation id whose kind is not 5 or 6, on model
+init/refresh, with no driver or speed condition. Bevy already spawns the `.chr` body through
+`creature::spawn` and starts that clip, but the owner sees no engine motion; the cause is not
+measured (a live `Bone_engine01` transform over time decides it). No engine sound is played: 1.2
+uses `sound_packs` 176 "run_tractor", item `run` -> sound 950 (`sounds/x2vehicles:trailer:run`),
+`yaw` -> 950, through `VehicleUnitModel::UpdateSound`
+(`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §a).
 
 The 1.2 client has no quest-cinema skip. In the 2026-10-31 original-client run,
 `X2Quest:LeaveQuestDirectingMode()`, `X2Quest:DeclineDirectingQuest()` and Esc all did nothing and
 cinema 54 ran its natural 16.49 s; the compiled quest-directing script only closes the quest dialog.
 A key still held when input resumes moves the character 2.419 s after the movie ends, and a key
 released during the movie does not stick. The main-branch cinema gate replays held keys
-(`hud/cinema.rs`, `a_held_key_comes_back_after_the_movie`); the `cinema-held-keys` branch refines the
-replay to the 1.2 input window (in progress). Prologue `id_300_*` sequences live under
+(`hud/cinema.rs`, `a_held_key_comes_back_after_the_movie`); PR #61 (in review) refines the replay to
+the 1.2 input window. Prologue `id_300_*` sequences live under
 `instance_prologue`, so in `main_world` the client sends `CSStartedCinema` + `CSCompletedCinema` in
 the same second (`handoff/2026-10-31-cinemacap.md`).
 
 The 1.2 client sends `CSStartSkill` 15307 at a trade-pack storage with an empty back slot - no
 client-side check and no local text; the response is the server's. Bevy keeps the same send; the
-refusal is AAEmu #30 (in review). Furl Sails 11545 is likewise sent from the deck away from the helm
-with no local gate (`handoff/2026-10-31-cinemacap.md` cases 2 and 3).
+refusal is AAEmu #30 (in review; the same PR gates the unpaid rider skills). Furl Sails 11545 is
+likewise sent from the deck away from the helm with no local gate
+(`handoff/2026-10-31-cinemacap.md` cases 2 and 3).
 
 ## Mount-walk checkpoint, 2026-10-31
 
@@ -969,7 +979,7 @@ not turn it into a current completion claim.
 | World selection and login | Live Trion login, world list/queue, connect; original Lua, zero-error captures; later (code-only): the character list builds each character's `SCLoginCharInfoHouse` houses and per-character premium grade, and a dropped connection returns to idle with the original dialog while return to world select uses `SCReconnectAuth` (by design, as 1.2) | Other regional authentication (Korean / Mail.Ru / Tencent); the old "premium/house lobby info" item is wired, without an original-client check |
 | Character selection and creation | All four 1.2 races and both genders; appearance controls and server creation/re-entry; real captures; all eight preview heads use authored facial idle overlays | Remaining appearance/material differences, hat/beard variants, training-field animation/wind |
 | Loading and screen lifecycle | Full flow, prebuilt HUD, return-to-list/logout/disconnect, spawn focus tests | Broader interruption/race coverage and persistent driver pipeline cache |
-| Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit; later: the `slave-pick` branch (in progress) fixes vehicle targeting, where a 1.1 m sphere misses most of a ~4 m wagon |
+| Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit; later: PR #60 (stacked on #58, in review) fixes vehicle targeting, where a 1.1 m sphere misses most of a ~4 m wagon |
 | Water and mounted movement | Wading/swimming/diving; original breath bar on underwater reports/corrections and calculated capacity; remote mount/rider placement and movement packets | Natural live breath/drowning QA, local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
 | World geometry | Terrain with native heightmap-distance alpha order, exterior and visarea interior brushes, vegetation with native vertex AO/authored group brightness, roads, forward and deferred/wrapped diffuse decals including interior placements, authored static entity props/local lights/projectors, verified rigid CGA windmills, streaming, native baked-colour cave base geometry and seven compiled cave collision proxies with verified surfaces/transforms and unload; reference captures | Remaining voxel cover/detail/atlas variants; portal/area receiver lighting; decal normal/specular accumulation and receiver variants; other animated entities/controllers/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
 | Environment | Native Bezier curves and 147-slot defaults/ranges, spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Area/relic overrides and legacy XML color migration, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
@@ -984,7 +994,7 @@ not turn it into a current completion claim.
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall; original auction house search, bid, buy-out, listing, cancel and bid history, driven live between two accounts | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction settlement mails claimed through the window, bid/buy-out chat notices of other players |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F with the "Gather" cast bar and phase 4513->4514, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; legacy ore/rock/shear capture-pending); later: seed placement 30 m / yaw / 6 m spread / the two locks per #56; trade-pack storage sends 15307 with no client pre-check, as the 1.2 client does | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows; later: the trade-pack storage refusal is server-side (AAEmu #30 in review) |
-| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check; later: the housing builder (ghost, rotation, land/category/garden checks, tax quote, `CSConstructHouseTax` / `CSCreateHouse`) and the build/construction windows are on main (3de58d05, fd986eba, ca4e9a84), houses render at their stage model, and a Bevy live check received the 45-certificate Start Construction quote without sending the create | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open); later: furniture/decoration (`CSDecorateHouse` empty), live create/construction/tax/sale settlement, the original-client comparison, door/stair models and house HP/repair |
+| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check; later: the housing builder (ghost, rotation, land/category/garden checks, tax quote, `CSConstructHouseTax` / `CSCreateHouse`) and the build/construction windows are on main (3de58d05, fd986eba), houses render at their stage model, and a Bevy live check received the 45-certificate Start Construction quote without sending the create | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open); later: furniture/decoration (`CSDecorateHouse` empty), live create/construction/tax/sale settlement, the original-client comparison, door/stair models and house HP/repair |
 | Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded; later: remote vehicle movement (#52), glider casting (#49), passenger seats (#54), cannons and turrets (#55), shipping helm request type 4 and deck support movement | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls; later: the mode-bar function slots (unbind / Summon Info, G13), the slave F board prompt (G14), the vehicle engine idle and sound (G15/A3), hanging (S13) and vehicle damage/FX (S15); the Farm Wagon has no point 2 in 1.2, so its passenger seat is a server bug |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
 | Duels | Challenge from the target popup, challenge prompt (default dialog with the original `locale.duel` texts), accept/refuse, `STARTED_DUEL`/`ENDED_DUEL`, start text and result notice, temporary team factions on plates/target | Retail placement of the countdown text (system message here); the AAEmu server now sends `SCDuelStartCountdownPacket` at acceptance (NickMesser/AAEmu#15), so the countdown shows live; `SCAreaChatBubble` 0x153 (type 543, ignored) |
