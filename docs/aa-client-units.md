@@ -653,6 +653,13 @@ and explicit controls").
   body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
   `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
   value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+* **Passenger seat facing.** A vehicle seat is placed at the body's `$passenger0` (point 2) or
+  `$passengerN` helper. `transfers_trailer_c.chr` (the Red Farm Hauler's body, model 1553) authors
+  `$passenger0` as a 180-degree turn about model Z: the helper faces the vehicle's rear. The
+  rider therefore takes the helper's authored rotation on top of the vehicle's world rotation
+  (`ingame/mount.rs::rider_rotation`); the `$driver` helper is identity and keeps the mount's own
+  quaternion. Without the helper turn the seated character faced the cargo bed (2026-11-01 owner
+  retest), because the seat clip itself has an identity root (`fist_ac_trailer_sit_idle`).
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
   the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
