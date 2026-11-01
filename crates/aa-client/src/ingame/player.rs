@@ -3,7 +3,7 @@
 //!
 //! Keys (ArcheAge's `default_binding.g`), as 1.2's on-foot input reads them ([`resolve_keys`]): W / S forward / back, Q / E
 //! strafe left / right, A / D turn a quarter turn a second (strafe while a mouse button is held), Space jump (swim up in the
-//! water), X swim down, `.` toggles walking, NumLock auto-run ([`AutoRun`]: once W, S and both mouse buttons were let go, the
+//! water; W / S follow the camera pitch while swimming), X dive, `.` toggles walking, NumLock auto-run ([`AutoRun`]: once W, S and both mouse buttons were let go, the
 //! next press of any of them ends it). Both mouse buttons held run forward. Shift held also walks (a convenience, the real
 //! client has none). The mouse drives the camera ([`super::camera`]); with the right button held the character faces where the
 //! camera looks; the left button turns the camera alone, also on the run (free look: [`face_camera`]); without a button the
@@ -505,6 +505,7 @@ pub fn control_player(
         return;
     }
     let Ok(mut orbit) = cameras.single_mut() else { return };
+    let camera_pitch = orbit.pitch;
     let actor = actor.copied().unwrap_or_default();
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
@@ -592,11 +593,13 @@ pub fn control_player(
         dev.scripted(t, 'H')
             || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))),
     );
+    let swim_aim = swim::aimed_velocity(local_dir, camera_pitch);
     let local_vel = if let Some((_, speed)) = driving {
         // the mount's buffs (a gallop) speed it up
         local_dir * speed.of(local_dir, walking) * sprint.as_ref().map_or(1.0, |s| s.mount_speed_mul)
     } else if swimming {
-        swim::local_velocity(local_dir)
+        // 1.2's swim takes the 3-D request: forward/back follow the camera pitch
+        Vec2::new(swim_aim.x, swim_aim.y)
     } else {
         // the own buffs' speed (Dash: 1.384 at its first level)
         ground_velocity(
@@ -643,7 +646,13 @@ pub fn control_player(
 
     // what is under the feet and the water around
     let step_up = if mover.grounded || swimming { STEP_UP } else { 0.05 };
-    let ground = floor_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up);
+    // a swimmer over the map edge (a sea cell with no terrain) must not be clamped to the height they are at: only a body
+    // that stands keeps its saved height when nothing is under it
+    let ground = if swimming {
+        support_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up).unwrap_or(f32::NEG_INFINITY)
+    } else {
+        floor_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up)
+    };
     let wet = water.water_at(pos).map(|(surface, kind)| Wet { surface, kind, depth: (surface - ground).max(0.0) });
     mover.wading = if swimming { 0.0 } else { wet.map_or(0.0, |w| w.depth) };
     let rising = !mover.grounded && mover.vz > 0.0 && !swimming;
@@ -672,7 +681,9 @@ pub fn control_player(
             mover.vz = actor.jump_speed();
             jumped = true;
         } else {
-            let wanted = swim::wanted_vz(vertical, pos.z, rest);
+            // forward with the camera pitched is a dive or a rise; holding it with the camera level keeps the depth
+            let course = (local_dir != Vec2::ZERO).then_some(swim_aim.z);
+            let wanted = swim::wanted_vz(vertical, course, pos.z, rest);
             mover.vz = swim::approach(mover.vz, wanted, swim::WATER_DRAG, dt);
             pos.z = (pos.z + mover.vz * dt).max(ground + 0.05);
             if pos.z <= ground + 0.05 {
@@ -774,7 +785,13 @@ pub fn control_player(
     if (active && due) || (!active && state.was_active) || first || landed.is_some() || stance_changed {
         let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
         // pressed direction relative to the facing, [right, forward, up]; forward is [0, 127, 0]
-        let delta = [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, if swimming { (vertical * 127.0) as i8 } else { 0 }];
+        let delta = if swimming && vertical == 0.0 && local_dir != Vec2::ZERO {
+            // the 3-D swim request: forward/back follow the camera pitch, the direction itself is unit length
+            let d = swim_aim.normalize_or_zero();
+            [(d.x * 127.0).round() as i8, (d.y * 127.0).round() as i8, (d.z * 127.0).round() as i8]
+        } else {
+            [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, if swimming { (vertical * 127.0) as i8 } else { 0 }]
+        };
         // rising after a jump, falling otherwise in the air (and swimming: nothing under the feet), on the ground when standing
         let move_state = if mover.grounded {
             MoveState::Ground
@@ -1436,5 +1453,274 @@ mod movement_rules_tests {
         let released = DevOptions::default();
         assert!(!state.jump_tapped(&released, 0.2, false));
         assert!(state.jump_tapped(&released, 0.3, true), "the real binding still taps");
+    }
+}
+
+#[cfg(test)]
+mod dive_tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct SwimApp {
+        app: App,
+        player: Entity,
+        camera: Entity,
+        sent: Vec<MoveCommand>,
+    }
+
+    impl SwimApp {
+        fn new(pos: Vec3) -> Option<SwimApp> {
+            if !aa_cry::pak_available() {
+                return None;
+            }
+            let terrain = TerrainQuery::new("main_world");
+            let collision = WorldCollision::new("main_world", terrain.clone());
+            let water = WaterQuery::with_terrain("main_world", terrain.clone());
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .init_resource::<crate::settings::Actions>()
+                .init_resource::<ButtonInput<MouseButton>>()
+                .init_resource::<ButtonInput<KeyCode>>()
+                .init_resource::<PlayerInput>()
+                .init_resource::<SendState>()
+                .init_resource::<DevOptions>()
+                .init_resource::<LocalJump>()
+                .insert_resource(terrain)
+                .insert_resource(collision)
+                .insert_resource(water)
+                .add_message::<NetCommand>()
+                .add_systems(Update, control_player);
+            app.world_mut()
+                .resource_mut::<SendState>()
+                .settle_for_test();
+            let camera = app.world_mut().spawn(OrbitCamera::default()).id();
+            let player = app
+                .world_mut()
+                .spawn((
+                    LocalPlayer { obj_id: 1 },
+                    Mover {
+                        pos,
+                        facing: 0.0,
+                        vz: 0.0,
+                        grounded: false,
+                        velocity: Vec3::ZERO,
+                        swim: None,
+                        wading: 0.0,
+                    },
+                    Transform::default(),
+                    Motion::default(),
+                    ActorParams::default(),
+                ))
+                .id();
+            Some(SwimApp {
+                app,
+                player,
+                camera,
+                sent: Vec::new(),
+            })
+        }
+
+        fn tick(&mut self, dt: f32) {
+            self.app
+                .world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_secs_f32(dt));
+            self.app.update();
+            self.sent.extend(
+                self.app
+                    .world_mut()
+                    .resource_mut::<Messages<NetCommand>>()
+                    .drain()
+                    .filter_map(|NetCommand(c)| match c {
+                        Command::Move(m) => Some(m),
+                        _ => None,
+                    }),
+            );
+        }
+
+        fn pitch(&mut self, pitch: f32) {
+            self.app
+                .world_mut()
+                .get_mut::<OrbitCamera>(self.camera)
+                .unwrap()
+                .pitch = pitch;
+        }
+
+        fn hold(&mut self, action: &str) {
+            self.app
+                .world_mut()
+                .resource_mut::<crate::settings::Actions>()
+                .hold_for_test(action);
+        }
+
+        fn release(&mut self, action: &str) {
+            self.app
+                .world_mut()
+                .resource_mut::<crate::settings::Actions>()
+                .release_for_test(action);
+        }
+
+        fn mover(&self) -> &Mover {
+            self.app.world().get::<Mover>(self.player).unwrap()
+        }
+
+        fn moves(&self) -> &[MoveCommand] {
+            &self.sent
+        }
+    }
+
+    const SEA: Vec3 = Vec3::new(15_678.0, 15_382.0, 100.0);
+
+    #[test]
+    fn diving_moves_below_the_surface() {
+        let Some(mut f) = SwimApp::new(SEA) else {
+            return;
+        };
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(
+            f.mover().swim.is_some(),
+            "did not start swimming: {:?}",
+            f.mover().pos
+        );
+        // the 1.2 way: look down and swim forward (the request is a 3-D direction)
+        f.pitch(-45f32.to_radians());
+        f.hold("moveforward");
+        for _ in 0..120 {
+            f.tick(1.0 / 60.0);
+        }
+        let m = f.mover();
+        assert!(
+            m.pos.z < SEA.z - 1.0,
+            "looked down and swam forward for 2 s, stayed at {}",
+            m.pos.z
+        );
+        assert!(
+            m.swim.is_some_and(|s| s.deep),
+            "the deep set was not entered: {:?}",
+            m.swim
+        );
+        let moves = f.moves();
+        let last = moves.last().expect("a movement packet");
+        assert_eq!(last.stance, stance::SWIM);
+        assert_eq!(last.state, MoveState::Fall, "a swimmer is not standing on the ground");
+        assert!(
+            last.pos.z < SEA.z - 1.0,
+            "the packet still reports the surface: {:?}",
+            last.pos
+        );
+        assert!(
+            last.delta_movement[2] < 0,
+            "no dive in the movement packets: {:?}",
+            last.delta_movement
+        );
+    }
+
+    #[test]
+    fn the_dive_key_still_dives_without_a_camera_tilt() {
+        let Some(mut f) = SwimApp::new(SEA) else {
+            return;
+        };
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        f.hold("down");
+        for _ in 0..120 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(
+            f.mover().pos.z < SEA.z - 1.0,
+            "X did not dive: {:?}",
+            f.mover().pos
+        );
+    }
+
+    #[test]
+    fn ascending_returns_to_the_surface() {
+        let Some(mut f) = SwimApp::new(SEA) else {
+            return;
+        };
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        f.pitch(-45f32.to_radians());
+        f.hold("moveforward");
+        for _ in 0..120 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(f.mover().pos.z < SEA.z - 1.0);
+        f.release("moveforward");
+        f.pitch(0.0);
+        f.hold("jump");
+        for _ in 0..180 {
+            f.tick(1.0 / 60.0);
+        }
+        f.release("jump");
+        let m = f.mover();
+        assert!(
+            (m.pos.z - (SEA.z - 1.3)).abs() < 0.1,
+            "did not surface: {}",
+            m.pos.z
+        );
+        assert!(
+            m.swim.is_some_and(|s| !s.deep),
+            "still deep after surfacing: {:?}",
+            m.swim
+        );
+    }
+
+    #[test]
+    fn walking_into_shallow_water_is_unchanged() {
+        // the spawn pond: 0.75 m over the bed, under the 1.3 m that starts swimming
+        let Some(mut f) = SwimApp::new(Vec3::new(15_578.0, 15_382.0, 127.5)) else {
+            return;
+        };
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        let m = f.mover();
+        assert!(
+            m.swim.is_none(),
+            "0.75 m of water started a swim: {:?}",
+            m.swim
+        );
+        assert!(m.grounded, "not standing in the pond");
+        assert!((m.pos.z - 126.25).abs() < 0.1, "the pond bed: {}", m.pos.z);
+        assert!((m.wading - 0.75).abs() < 0.1, "wading depth: {}", m.wading);
+        f.pitch(-45f32.to_radians());
+        f.hold("moveforward");
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(
+            f.mover().swim.is_none(),
+            "walking in the pond started a swim"
+        );
+    }
+
+    #[test]
+    fn an_open_sea_without_a_seabed_does_not_clamp_the_swimmer() {
+        // the map edge: the sea plane over a cell with no terrain; the floor fallback must not hold the swimmer up
+        let Some(mut f) = SwimApp::new(Vec3::new(100.0, 100.0, 98.5)) else {
+            return;
+        };
+        for _ in 0..30 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(
+            f.mover().swim.is_some(),
+            "did not start swimming over the open sea: {:?}",
+            f.mover().pos
+        );
+        f.hold("down");
+        for _ in 0..120 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(
+            f.mover().pos.z < 96.0,
+            "stuck at the surface over a missing seabed: {}",
+            f.mover().pos.z
+        );
     }
 }

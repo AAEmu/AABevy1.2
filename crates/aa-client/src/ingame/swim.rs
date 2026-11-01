@@ -13,6 +13,11 @@
 //!   0.6: wading slows a player down from 0.3 m of water (none) to 1 m (to 0.6 times the speed).
 //! * The swim locomotion groups (`lmg_files/fist_mo_swim_run.lmg`) are authored for 3.0 m/s forward and to the side and
 //!   2.4 m/s (0.8 times) backwards, which the client's `swim_back_speed_mul` agrees with.
+//! * The swim movement mode (`x2game.dll`'s `FUN_3912c640` copies the movement request's 13 floats into the controller and
+//!   `FUN_3912ce00` builds the velocity from its x/y/z): the vertical is part of the **3-D direction** (x right, y forward,
+//!   z up), so its z steers the depth while forward / back are held and W / S follow the camera pitch. X
+//!   (`default_binding.g`: `x down`) and Space dive / rise on their own; only a swimmer pressing nothing floats up at
+//!   `swim_buoy_speed`.
 //!
 //! **The swim height.** The swim clips are authored with the body about 1.3 m above the entity's origin (`fist_mo_swim_f`: pelvis
 //! at 1.34 m, the body lying horizontally; `fist_ba_idle_swim`: upright, head at 1.83 m), so a swimmer's origin hangs about 1.3 m
@@ -166,20 +171,33 @@ pub fn should_swim(swimming: bool, feet: f32, wet: Option<Wet>, enter: f32) -> b
     }
 }
 
-/// Speed (m/s) in the local frame (x right, y forward) of a swimmer pressing `dir`.
-pub fn local_velocity(dir: Vec2) -> Vec2 {
+/// The 3-D direction (x right, y forward, z up, m/s) of a swimmer pressing `dir` with the camera pitched `pitch` (radians,
+/// positive looks up). `x2game.dll`'s swim controller (`FUN_3912ce00`, velocity built from the request's x/y/z, copied by
+/// `FUN_3912c640`) turns the movement request into the world direction, so forward/back follow the camera: looking down and
+/// pressing forward dives, looking up and pressing forward surfaces. The pressed direction is normalised and then scaled by
+/// the swim speed, so the total speed stays at the clips' 3.0 m/s (2.4 backwards, `swim_back_speed_mul`); strafing stays
+/// horizontal.
+pub fn aimed_velocity(dir: Vec2, pitch: f32) -> Vec3 {
     let d = dir.normalize_or_zero();
+    if d == Vec2::ZERO {
+        return Vec3::ZERO;
+    }
     let speed = if d.y < -0.1 { BASE_SPEED * BACK_MUL } else { BASE_SPEED };
-    d * speed
+    let (sin, cos) = pitch.sin_cos();
+    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * speed
 }
 
-/// The vertical speed (m/s) a swimmer wants: `vertical` is -1 (X), 0 or 1 (Space); `z` its height, `rest` the height the body
-/// floats at (surface minus swim height).
-pub fn wanted_vz(vertical: f32, z: f32, rest: f32) -> f32 {
+/// The vertical speed (m/s) a swimmer wants: `vertical` is -1 (X), 0 or 1 (Space); `course` is the aimed vertical speed of
+/// a pressed direction (the camera pitch, see [`aimed_velocity`]), `z` its height and `rest` the height the body floats at
+/// (surface minus swim height). A pressed course holds its depth when the camera is level (`Some(0.0)`) instead of floating
+/// to the surface; only a swimmer pressing nothing floats up (1.2's `swim_buoy_speed`).
+pub fn wanted_vz(vertical: f32, course: Option<f32>, z: f32, rest: f32) -> f32 {
     if vertical < 0.0 {
         -BASE_SPEED * DOWN_MUL
-    } else if vertical > 0.0 && z < rest - 0.05 {
-        BASE_SPEED * UP_MUL
+    } else if vertical > 0.0 {
+        if z < rest - 0.05 { BASE_SPEED * UP_MUL } else { 0.0 }
+    } else if let Some(vz) = course {
+        vz.clamp(-BASE_SPEED, BASE_SPEED)
     } else {
         // buoyancy: float to the resting height, slowing down near it
         ((rest - z) * 4.0).clamp(-BUOY_SPEED, BUOY_SPEED)
@@ -316,23 +334,45 @@ mod tests {
 
     #[test]
     fn swim_speed_depends_on_the_direction() {
-        assert_eq!(local_velocity(Vec2::ZERO), Vec2::ZERO);
-        assert!((local_velocity(Vec2::Y).length() - 3.0).abs() < 1e-5);
-        assert!((local_velocity(Vec2::X).length() - 3.0).abs() < 1e-5);
-        assert!((local_velocity(-Vec2::Y).length() - 2.4).abs() < 1e-5);
-        assert!((local_velocity(Vec2::new(1.0, -1.0)).length() - 2.4).abs() < 1e-5);
+        let flat = |dir| aimed_velocity(dir, 0.0).truncate();
+        assert_eq!(flat(Vec2::ZERO), Vec2::ZERO);
+        assert!((flat(Vec2::Y).length() - 3.0).abs() < 1e-5);
+        assert!((flat(Vec2::X).length() - 3.0).abs() < 1e-5);
+        assert!((flat(-Vec2::Y).length() - 2.4).abs() < 1e-5);
+        assert!((flat(Vec2::new(1.0, -1.0)).length() - 2.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn swimming_follows_the_camera_pitch() {
+        let aimed = aimed_velocity(Vec2::Y, 0.0);
+        assert!((aimed - Vec3::new(0.0, 3.0, 0.0)).length() < 1e-5);
+        let down = aimed_velocity(Vec2::Y, -45f32.to_radians());
+        assert!((down.length() - 3.0).abs() < 1e-5, "{down:?}");
+        assert!((down.y - 2.1213).abs() < 1e-3 && (down.z + 2.1213).abs() < 1e-3, "{down:?}");
+        let up = aimed_velocity(Vec2::Y, 45f32.to_radians());
+        assert!(up.z > 2.12 && (up.y - 2.1213).abs() < 1e-3, "{up:?}");
+        // backwards follows the camera the other way, at the back speed
+        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians());
+        assert!((back.length() - 2.4).abs() < 1e-5 && back.z > 1.69, "{back:?}");
+        // strafing stays horizontal at the full speed whatever the pitch
+        let side = aimed_velocity(Vec2::X, -60f32.to_radians());
+        assert!((side - Vec3::X * 3.0).length() < 1e-5, "{side:?}");
+        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0), Vec3::ZERO);
     }
 
     #[test]
     fn a_swimmer_floats_up_dives_and_surfaces() {
         // 1 m under the resting height floats up at the buoyancy speed, level with it stays
-        assert_eq!(wanted_vz(0.0, 98.8, 99.8), BUOY_SPEED);
-        assert!(wanted_vz(0.0, 99.8, 99.8).abs() < 1e-5);
-        assert!(wanted_vz(0.0, 100.3, 99.8) < 0.0);
-        assert_eq!(wanted_vz(-1.0, 99.8, 99.8), -1.5);
-        assert!((wanted_vz(1.0, 98.0, 99.8) - 2.1).abs() < 1e-5);
+        assert_eq!(wanted_vz(0.0, None, 98.8, 99.8), BUOY_SPEED);
+        assert!(wanted_vz(0.0, None, 99.8, 99.8).abs() < 1e-5);
+        assert!(wanted_vz(0.0, None, 100.3, 99.8) < 0.0);
+        assert_eq!(wanted_vz(-1.0, None, 99.8, 99.8), -1.5);
+        assert!((wanted_vz(1.0, None, 98.0, 99.8) - 2.1).abs() < 1e-5);
         // pressing up at the surface does not push the body out of it
-        assert!(wanted_vz(1.0, 99.8, 99.8).abs() < 1e-5);
+        assert!(wanted_vz(1.0, None, 99.8, 99.8).abs() < 1e-5);
+        // swimming forward with the camera pitched down dives and a level camera holds the depth
+        assert!((wanted_vz(0.0, Some(-2.12), 97.0, 99.8) + 2.12).abs() < 1e-5);
+        assert_eq!(wanted_vz(0.0, Some(0.0), 97.0, 99.8), 0.0);
         assert_eq!(approach(0.0, 10.0, 20.0, 0.1), 2.0);
         assert_eq!(approach(-8.0, 0.0, 35.0, 0.1), -4.5);
     }
