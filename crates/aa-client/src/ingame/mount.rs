@@ -718,19 +718,22 @@ fn helper_seat(now: &Transform, helpers: &super::vehicle::SeatHelpers, name: &st
         .map(|helper| now.transform_point(cry_to_bevy(helper.translation.into())))
 }
 
-/// Where the seat of a mount is now (Bevy coordinates): a bone's place on the mount's last drawn pose, or a vehicle
-/// body's `$` helper, carried to where the mount stands in this frame (`now`), so a rider does not trail it by a frame.
+/// Where the seat of a mount is now (Bevy coordinates): a bone's place in the mount's current `Transform` chain
+/// (its own local `Transform` and every `ChildOf` ancestor's), or a vehicle body's `$` helper in the mount root's
+/// frame. `GlobalTransform` is only propagated after `Update`; composing the locals lets a rider sit on this
+/// frame's mount pose instead of trailing it by a frame.
 #[allow(clippy::too_many_arguments)]
-fn seat_world(
+fn seat_world<F: bevy::ecs::query::QueryFilter>(
     mount: Entity,
     model_id: u32,
-    now: &Transform,
     animator: Option<&Animator>,
     helpers: Option<&super::vehicle::SeatHelpers>,
     seat: &Seat,
-    globals: &Query<&GlobalTransform>,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
     missing: &mut std::collections::HashSet<(u32, String)>,
 ) -> Vec3 {
+    let root = super::units::current_transform(mount, transforms, parents);
     match seat {
         Seat::Bone(name) => {
             let bone = animator.and_then(|a| {
@@ -741,21 +744,22 @@ fn seat_world(
                     .position(|b| b.name.eq_ignore_ascii_case(name))
                     .and_then(|i| a.bones.get(i))
             });
-            match (globals.get(mount), bone.and_then(|b| globals.get(*b).ok())) {
-                (Ok(root), Some(bone)) => now
-                    .transform_point(root.affine().inverse().transform_point3(bone.translation())),
-                _ => now.translation,
-            }
+            bone.and_then(|b| super::units::current_transform(*b, transforms, parents))
+                .map(|bone| bone.translation)
+                .or_else(|| root.map(|root| root.translation))
+                .unwrap_or_default()
         }
         Seat::Helper(name) => {
-            if let Some(point) = helpers.and_then(|h| helper_seat(now, h, name)) {
+            if let Some(root) = root
+                && let Some(point) = helpers.and_then(|h| helper_seat(&root, h, name))
+            {
                 return point;
             }
             // the fallback is the mount's origin: report it once per (model, helper), not every frame
             if missing.insert((model_id, name.clone())) {
                 debug!("mount model {model_id}: no ${name} seat helper, seating at its origin");
             }
-            now.translation
+            root.map_or(Vec3::ZERO, |root| root.translation)
         }
     }
 }
@@ -904,14 +908,14 @@ pub fn pose_riders(
     mounts: Query<
         (
             &RemoteUnit,
-            &Transform,
             Option<&Animator>,
             Option<&super::vehicle::SeatHelpers>,
             Option<&Motion>,
         ),
         Without<Rider>,
     >,
-    globals: Query<&GlobalTransform>,
+    transforms: Query<&Transform, Without<Rider>>,
+    parents: Query<&ChildOf>,
     mut missing: Local<std::collections::HashSet<(u32, String)>>,
 ) {
     let dt = time.delta_secs();
@@ -922,21 +926,23 @@ pub fn pose_riders(
         }
         let mounted = views.unit_entity(rider.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
         let (pos, facing, speed, tempo) = match mounted {
-            Some((e, (mount, now, mount_animator, helpers, motion))) => {
+            Some((e, (mount, mount_animator, helpers, motion))) => {
                 let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
                 let world = seat_world(
                     e,
                     model_id,
-                    now,
                     mount_animator,
                     helpers,
                     &rider.seat,
-                    &globals,
+                    &transforms,
+                    &parents,
                     &mut missing,
                 );
+                let facing = super::units::current_pose(e, &transforms, &parents)
+                    .map_or(mount.facing, |(_, facing)| facing);
                 (
                     bevy_to_cry(world),
-                    mount.facing,
+                    facing,
                     motion.map_or(0.0, |m| m.speed),
                     mount_animator.map_or(1.0, |a| a.speed),
                 )
@@ -948,7 +954,10 @@ pub fn pose_riders(
                     rider.step(&mut animator, dt, 0.0, 1.0);
                     continue;
                 };
-                (Vec3::new(m.pos.x, m.pos.y, m.pos.z), m.yaw(), 0.0, 1.0)
+                super::units::unit_world_pose_in(m, &net).map_or(
+                    (Vec3::new(m.pos.x, m.pos.y, m.pos.z), m.yaw(), 0.0, 1.0),
+                    |(pos, facing)| (pos, facing, 0.0, 1.0),
+                )
             }
         };
         unit.pos = pos;
@@ -1260,6 +1269,21 @@ const SEATED_DROP: f32 = 0.85;
 #[derive(Component)]
 pub struct Driven;
 
+/// The drawn units and their current-frame transforms: a bundle so `track_local_mount` stays inside the system
+/// parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Drawn<'w, 's> {
+    views: Res<'w, Views>,
+    transforms: Query<'w, 's, &'static Transform>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+impl Drawn<'_, '_> {
+    fn pose(&self, unit: &aa_net::model::Unit, units: &Units) -> Option<(Vec3, f32)> {
+        super::units::unit_world_pose(unit, units, &self.views, &self.transforms, &self.parents)
+    }
+}
+
 /// Follows the local player's attachment (`SCUnitAttached` / `SCUnitDetached`): seats it on the mount and puts its mover where
 /// the mount is; when it gets off it walks on from there (the server puts it where the mount stood too).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1269,7 +1293,7 @@ pub fn track_local_mount(
     net: Res<Units>,
     db: Option<Res<Db>>,
     clips: Res<ClipLibrary>,
-    views: Res<Views>,
+    drawn: Drawn,
     terrain: Res<TerrainQuery>,
     collision: Res<WorldCollision>,
     mut events: MessageReader<NetEvent>,
@@ -1310,7 +1334,7 @@ pub fn track_local_mount(
     let old = seat_state.0;
     if old.map(|s| (s.mount, s.point)) != attached.map(|a| (a.obj_id, a.point)) {
         // the mate the player drove goes back to its movement packets, from where it stands
-        if let Some(e) = old.filter(|s| s.drives).and_then(|s| views.unit_entity(s.mount)) {
+        if let Some(e) = old.filter(|s| s.drives).and_then(|s| drawn.views.unit_entity(s.mount)) {
             commands.entity(e).remove::<Driven>();
             if let Ok((mut unit, _)) = units.get_mut(e) {
                 let (pos, facing) = (unit.pos, unit.facing);
@@ -1337,9 +1361,8 @@ pub fn track_local_mount(
         match attached {
             Some(a) => {
                 // on the mount: where it is drawn (else where the server has it), facing its way
-                let shown = views.unit_entity(a.obj_id).and_then(|e| units.get(e).ok()).map(|(u, _)| (u.pos, u.facing));
-                let known = net.by_id.get(&a.obj_id).map(|u| (Vec3::new(u.pos.x, u.pos.y, u.pos.z), u.yaw()));
-                if let Some((pos, facing)) = shown.or(known) {
+                let shown = net.by_id.get(&a.obj_id).and_then(|u| drawn.pose(u, &net));
+                if let Some((pos, facing)) = shown {
                     mover.pos = pos;
                     mover.facing = facing;
                     if let Ok(mut orbit) = cameras.single_mut() {
@@ -1398,7 +1421,7 @@ pub fn track_local_mount(
                 };
                 let ship_landing = old.filter(|s| s.ship).and_then(|seat| {
                     db.as_deref().and_then(|db| {
-                        let drawn = views
+                        let drawn = drawn.views
                             .unit_entity(seat.mount)
                             .and_then(|entity| units.get(entity).ok())
                             .map(|(hull, _)| (hull.pos, hull.game_rotation()));
@@ -1444,7 +1467,7 @@ pub fn track_local_mount(
         send.send_now();
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
-    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && !s.turret).and_then(|s| views.unit_entity(s.mount))
+    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && !s.turret).and_then(|s| drawn.views.unit_entity(s.mount))
         && units.get(e).is_ok_and(|(_, driven)| !driven)
     {
         commands.entity(e).insert(Driven);
@@ -1497,9 +1520,10 @@ pub fn drive_mount(
     seat: Res<LocalMount>,
     views: Res<Views>,
     net: Res<Units>,
+    transforms: Query<&Transform, Without<Driven>>,
+    parents: Query<&ChildOf>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut driven: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (With<Driven>, Without<LocalPlayer>)>,
-    mounts: Query<&RemoteUnit, Without<Driven>>,
 ) {
     let (Some(s), Ok(mut mover)) = (seat.0, player.single_mut()) else { return };
     // a cart's driver is moved by `cart::drive_cart`; a ship's hull is placed by the server, and its driver's mover
@@ -1509,9 +1533,10 @@ pub fn drive_mount(
     }
     let entity = views.unit_entity(s.mount);
     if !s.drives || s.ship || s.turret {
-        let shown = entity.and_then(|e| mounts.get(e).ok()).map(|u| (u.pos, u.facing));
-        let known = net.by_id.get(&s.mount).map(|u| (Vec3::new(u.pos.x, u.pos.y, u.pos.z), u.yaw()));
-        if let Some((pos, facing)) = shown.or(known) {
+        let shown = net.by_id.get(&s.mount).and_then(|u| {
+            super::units::unit_world_pose(u, &net, &views, &transforms, &parents)
+        });
+        if let Some((pos, facing)) = shown {
             mover.pos = pos;
             mover.facing = facing;
         }
@@ -1545,14 +1570,14 @@ pub fn pose_local_rider(
     mounts: Query<
         (
             &RemoteUnit,
-            &Transform,
             Option<&Animator>,
             Option<&super::vehicle::SeatHelpers>,
             Option<&Motion>,
         ),
         (With<RemoteUnit>, Without<LocalPlayer>),
     >,
-    globals: Query<&GlobalTransform>,
+    transforms: Query<&Transform, Without<LocalPlayer>>,
+    parents: Query<&ChildOf>,
     mut missing: Local<std::collections::HashSet<(u32, String)>>,
 ) {
     let (Some(s), Ok((mover, mut transform, mut rider, mut animator))) = (seat.0, riders.single_mut()) else { return };
@@ -1561,24 +1586,25 @@ pub fn pose_local_rider(
     }
     let mounted = views.unit_entity(s.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
     let (pos, speed, tempo, rotation) = match mounted {
-        Some((e, (mount, now, mount_animator, helpers, motion))) => {
+        Some((e, (mount, mount_animator, helpers, motion))) => {
             let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
+            let shown = super::units::current_transform(e, &transforms, &parents);
             (
                 bevy_to_cry(seat_world(
                     e,
                     model_id,
-                    now,
                     mount_animator,
                     helpers,
                     &rider.seat,
-                    &globals,
+                    &transforms,
+                    &parents,
                     &mut missing,
                 )),
                 motion.map_or(0.0, |m| m.speed),
                 mount_animator.map_or(1.0, |a| a.speed),
-                // the native driver's quaternion is the cart's: tilt the rider
-                // with its mount (a creature mount is yaw-only)
-                now.rotation,
+                // the native driver's quaternion is the mount's world rotation: tilt the rider
+                // with its mount (a creature mount is yaw-only), including a ship parent's yaw
+                shown.map_or(Quat::from_rotation_y(mover.facing), |t| t.rotation),
             )
         }
         None => (mover.pos, 0.0, 1.0, Quat::from_rotation_y(mover.facing)),
@@ -1761,13 +1787,16 @@ mod tests {
         use crate::ingame::units::{RemoteUnit, Views};
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
             .insert_resource(Units::default())
             .add_systems(Update, pose_local_rider);
         let cart_pos = Vec3::new(100.0, 200.0, 5.0);
         let local = Vec3::new(-0.02, -0.50, 1.35);
         let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
-        helpers.0.insert("driver".into(), bevy::math::Affine3A::from_translation(local));
+        helpers.0.insert(
+            "driver".into(),
+            bevy::math::Affine3A::from_translation(local),
+        );
         let cart = app
             .world_mut()
             .spawn((RemoteUnit::fixture(7, cart_pos), placement(cart_pos, 0.0, 1.0), helpers))
@@ -1820,7 +1849,7 @@ mod tests {
         use crate::ingame::units::{RemoteUnit, Views};
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
             .insert_resource(Units::default())
             .add_systems(Update, pose_local_rider);
         let cart_pos = Vec3::new(100.0, 200.0, 5.0);
@@ -2846,7 +2875,7 @@ mod tests {
         use crate::ingame::units::{RemoteUnit, Views};
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
             .insert_resource(Units::default())
             .add_systems(Update, drive_mount);
         let hull_pos = Vec3::new(100.0, 200.0, 5.0);
@@ -2854,6 +2883,9 @@ mod tests {
             .world_mut()
             .spawn((RemoteUnit::fixture(7, hull_pos), placement(hull_pos, 0.0, 1.0)))
             .id();
+        let mut hull_unit = crate::ingame::seating::fixture_unit(7, 1, None);
+        hull_unit.pos = Pos::new(hull_pos.x, hull_pos.y, hull_pos.z);
+        app.world_mut().resource_mut::<Units>().by_id.insert(7, hull_unit);
         let mut views = Views::default();
         views.track_unit_entity(7, hull);
         app.insert_resource(views);
@@ -2891,6 +2923,9 @@ mod tests {
             unit.pos = moved;
             unit.facing = 0.75;
         }
+        // the drawn hull is the server-placed root (move_units does this in game); reading the
+        // current Transform chain sees it in this frame, before PostUpdate propagation
+        *app.world_mut().get_mut::<Transform>(hull).unwrap() = placement(moved, 0.75, 1.0);
         app.update();
         let mover = app.world().get::<Mover>(player).unwrap();
         assert_eq!((mover.pos, mover.facing), (moved, 0.75));
@@ -2898,10 +2933,10 @@ mod tests {
         assert_eq!(mover.vz, 0.0);
         assert!(mover.grounded);
         assert!(mover.swim.is_none());
-        // the hull stays where the server put it: its transform never comes from the driver's mover
+        // the hull stays where the server put it: drive_mount never moves it from the driver's mover
         assert_eq!(
             app.world().get::<Transform>(hull).unwrap().translation,
-            placement(hull_pos, 0.0, 1.0).translation
+            placement(moved, 0.75, 1.0).translation
         );
         // a hull out of view falls back to the net unit's pose, as the passenger branch does
         app.world_mut().despawn(hull);
@@ -2922,7 +2957,7 @@ mod tests {
         use crate::ingame::units::{RemoteUnit, Views};
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
             .insert_resource(Units::default())
             .add_systems(Update, pose_riders);
         let net_pos = Vec3::new(100.0, 200.0, 5.0);
@@ -3105,6 +3140,167 @@ mod tests {
         assert!(
             rider.step(&mut animator, 0.83, 0.0, 1.0),
             "only after its clips ran does the unit walk"
+        );
+    }
+}
+
+#[cfg(test)]
+mod child_seat_tests {
+    use super::*;
+    use aa_net::model::UnitStateAttachments;
+
+    fn slave(id: u32, pos: Vec3, parent: Option<u32>) -> aa_net::model::Unit {
+        let mut unit = crate::ingame::seating::fixture_unit(id, 42, None);
+        unit.kind = UnitKind::Slave {
+            id: 1,
+            tl_id: 1,
+            template_id: 1,
+            summoner_id: 0,
+        };
+        unit.pos = aa_net::Pos::new(pos.x, pos.y, pos.z);
+        if let Some(parent) = parent {
+            unit.state_attachments = Some(UnitStateAttachments {
+                first_point: 3,
+                first_obj_id: Some(parent),
+                bonding_obj_id: None,
+            });
+        }
+        unit
+    }
+
+    #[test]
+    fn a_turret_seat_follows_the_drawn_child_world_not_its_local_offset() {
+        let ship = Vec3::new(12000.0, 9000.0, 0.0);
+        let local = Vec3::new(2.0, 3.0, 1.0);
+        let ship_unit = slave(60, ship, None);
+        let child_unit = slave(7, local, Some(60));
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<Views>()
+            .init_resource::<Units>()
+            .insert_resource(LocalMount(Some(LocalSeat {
+                mount: 7,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: true,
+                speed: MountSpeed::default(),
+                lift: 0.0,
+            })))
+            .add_systems(Update, drive_mount);
+        let ship_entity = app
+            .world_mut()
+            .spawn(Transform::from_translation(cry_to_bevy(ship)))
+            .id();
+        let child_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(cry_to_bevy(local)),
+                ChildOf(ship_entity),
+            ))
+            .id();
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.fixture_actor(&ship_unit, Some(ship_entity));
+            views.fixture_actor(&child_unit, Some(child_entity));
+        }
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            units.by_id.insert(60, ship_unit);
+            units.by_id.insert(7, child_unit);
+        }
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 1 },
+            Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        app.update();
+        let mut movers = app.world_mut().query::<&Mover>();
+        let mover = movers.single(app.world()).unwrap();
+        let expected = ship + local;
+        assert!(
+            mover.pos.distance(expected) < 1e-3,
+            "the turret mover is at {:?}, not the child's world point {expected:?} (local {local:?})",
+            mover.pos
+        );
+        assert!(mover.pos.distance(local) > 1.0, "the local offset was used");
+    }
+}
+
+#[cfg(test)]
+mod seat_lag_tests {
+    use super::*;
+
+    #[derive(Component)]
+    struct MountTag;
+
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+
+    #[derive(Resource, Default)]
+    struct MoveMount(bool);
+
+    fn move_mount(mut moved: ResMut<MoveMount>, mut mounts: Query<&mut Transform, With<MountTag>>) {
+        if moved.0
+            && let Ok(mut transform) = mounts.single_mut()
+        {
+            transform.translation += Vec3::new(10.0, 0.0, 0.0);
+        }
+    }
+
+    fn read_seat(
+        mounts: Query<(Entity, &super::super::vehicle::SeatHelpers), With<MountTag>>,
+        transforms: Query<&Transform>,
+        parents: Query<&ChildOf>,
+        mut seen: ResMut<Seen>,
+    ) {
+        let Ok((entity, helpers)) = mounts.single() else {
+            return;
+        };
+        let mut missing = std::collections::HashSet::new();
+        seen.0 = Some(seat_world(
+            entity,
+            7,
+            None,
+            Some(helpers),
+            &Seat::Helper("driver".into()),
+            &transforms,
+            &parents,
+            &mut missing,
+        ));
+    }
+
+    #[test]
+    fn a_seat_reads_the_mounts_current_transform_in_the_same_update() {
+        let local = Vec3::new(-0.02, -0.50, 1.35);
+        let mut helpers = super::super::vehicle::SeatHelpers::default();
+        helpers.0.insert(
+            "driver".into(),
+            bevy::math::Affine3A::from_translation(local),
+        );
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+            .init_resource::<Seen>()
+            .init_resource::<MoveMount>()
+            .add_systems(Update, (move_mount, read_seat).chain());
+        app.world_mut()
+            .spawn((Transform::from_xyz(100.0, 5.0, 200.0), helpers, MountTag));
+        app.update();
+        app.world_mut().resource_mut::<MoveMount>().0 = true;
+        app.update();
+        let expected = Vec3::new(110.0, 5.0, 200.0) + cry_to_bevy(local);
+        let seen = app.world().resource::<Seen>().0.expect("the seat");
+        assert!(
+            seen.distance(expected) < 1e-4,
+            "the seat lags its mount: {seen:?} != {expected:?}"
         );
     }
 }
