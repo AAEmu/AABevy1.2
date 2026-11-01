@@ -821,6 +821,9 @@ pub fn local_aim(
     let Ok(ray) = camera.viewport_to_world(view, viewport * 0.5) else {
         return;
     };
+    // `FUN_3917dd80` reads the camera matrix translation, not the near-plane point
+    // `viewport_to_world` returns; the range is measured from here.
+    let ray_origin = view.translation();
     let direction = *ray.direction;
     let cannon = db.cannon_skill(template_id);
     let mut skip = vec![slave];
@@ -843,7 +846,7 @@ pub fn local_aim(
         bodies: &bodies,
     };
     let Some(solved) = solve_aim(
-        root, start, ray.origin, direction, limits, cannon, &aim_world,
+        root, start, ray_origin, direction, limits, cannon, &aim_world,
     ) else {
         return;
     };
@@ -1612,10 +1615,11 @@ mod tests {
         assert!(result.hit.is_none());
     }
 
-    /// The published `Position` is the traced arc impact, not the camera hit: a body on the arc
-    /// before the camera's target is the impact.
+    /// The solve's published `Position` is the traced arc impact, not the camera hit: a body on
+    /// the arc before the camera's target is the impact. (The `local_aim` system test below
+    /// drives the same rule through the ECS.)
     #[test]
-    fn local_aim_publishes_the_traced_impact_not_the_camera_hit() {
+    fn the_solve_publishes_the_traced_impact_not_the_camera_hit() {
         let root = GlobalTransform::default();
         let muzzle = Vec3::new(0.0, 10.0, 0.0);
         let camera = Vec3::new(0.0, 100.0, 0.0);
@@ -1667,6 +1671,159 @@ mod tests {
             (result.impact - camera_hit).length() > 20.0,
             "a code that published the camera hit would fail here"
         );
+    }
+
+    /// The real `local_aim` system publishes the trace's body, not the camera ray's target: a
+    /// camera ray to a far body and a second body on the arc before it. This drives the system
+    /// with a drawn camera and a fixture database, so the `Sight` it inserts is checked, not the
+    /// solve helper alone.
+    #[test]
+    fn local_aim_system_publishes_the_traced_impact() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-cannon-aim-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = rusqlite::Connection::open(&path).expect("fixture database");
+            conn.execute_batch(
+                "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+                 CREATE TABLE vehicle_models(id INTEGER PRIMARY KEY,
+                     turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
+                     turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
+                     turret_yaw_angvel REAL, turret_pitch_angvel REAL,
+                     velocity REAL, installed_turret TEXT);
+                 CREATE TABLE slave_mount_skills(id INTEGER PRIMARY KEY, slave_id INTEGER, mount_skill_id INTEGER);
+                 CREATE TABLE mount_skills(id INTEGER PRIMARY KEY, skill_id INTEGER);
+                 CREATE TABLE skills(id INTEGER PRIMARY KEY, effect_speed REAL, min_range REAL,
+                     max_range REAL, target_angle REAL, target_type_id INTEGER);
+                 INSERT INTO models VALUES (117, 'VehicleModel', 10);
+                 INSERT INTO vehicle_models VALUES (10, -20, 35, -22, 22, 35, 20, 0, 'f');
+                 INSERT INTO slave_mount_skills VALUES (72, 77, 116);
+                 INSERT INTO mount_skills VALUES (116, 17742);
+                 INSERT INTO skills VALUES (17742, 25, 10, 100, 50, 11);",
+            )
+            .expect("fixture rows");
+        }
+        let db = Db::open_path(path.to_str().expect("utf-8 temp path")).expect("cannon fixture db");
+
+        let gunner = crate::hud::fixture_spawn().unit;
+        let mut cannon = gunner.clone();
+        cannon.obj_id = 77;
+        cannon.kind = UnitKind::Slave {
+            id: 7,
+            tl_id: 1,
+            template_id: 77,
+            summoner_id: 0,
+        };
+        cannon.model_id = 117;
+        cannon.pos = Pos::new(0.0, 0.0, 0.0);
+        cannon.scale = 1.0;
+        let root = Transform::from_xyz(0.0, 0.0, 0.0);
+
+        let mut far = gunner.clone();
+        far.obj_id = 1;
+        far.kind = UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        };
+        far.pos = Pos::new(0.0, 30.0, 30.0);
+        let far_transform = Transform::from_xyz(0.0, 30.0, -30.0);
+
+        let mut arc_body = gunner;
+        arc_body.obj_id = 2;
+        arc_body.kind = UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        };
+        arc_body.pos = Pos::new(0.0, 21.5, 19.1);
+        arc_body.scale = 1.82;
+        let arc_transform = Transform::from_xyz(0.0, 17.46, -21.5);
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<aa_net::state::Units>()
+            .init_resource::<LocalMount>()
+            .init_resource::<TurretSend>()
+            .init_resource::<KeyAim>()
+            .insert_resource(db)
+            .add_message::<NetCommand>()
+            .add_systems(Update, local_aim);
+        {
+            let mut units = app.world_mut().resource_mut::<aa_net::state::Units>();
+            units.by_id.insert(77, cannon.clone());
+            units.by_id.insert(1, far.clone());
+            units.by_id.insert(2, arc_body.clone());
+        }
+        let camera_pose = Transform::from_translation(Vec3::new(0.0, 50.0, 20.0))
+            .looking_at(Vec3::new(0.0, 30.9, -30.0), Vec3::Y);
+        let mut camera = Camera {
+            viewport: Some(bevy::camera::Viewport {
+                physical_position: UVec2::ZERO,
+                physical_size: UVec2::new(1280, 720),
+                depth: 0.0..1.0,
+            }),
+            ..Default::default()
+        };
+        // The near-plane matrix only shapes the direction through the viewport centre; the ray
+        // origin is the camera translation (`local_aim`).
+        camera.computed.clip_from_view = Mat4::IDENTITY;
+        camera.computed.target_info = Some(bevy::camera::RenderTargetInfo {
+            physical_size: UVec2::new(1280, 720),
+            scale_factor: 1.0,
+        });
+        app.world_mut().spawn((
+            Camera3d::default(),
+            camera,
+            camera_pose,
+            GlobalTransform::from(camera_pose),
+        ));
+        app.world_mut().spawn((
+            RemoteUnit::announced(&cannon),
+            root,
+            GlobalTransform::from(root),
+        ));
+        app.world_mut().spawn((
+            RemoteUnit::announced(&far),
+            far_transform,
+            GlobalTransform::from(far_transform),
+        ));
+        app.world_mut().spawn((
+            RemoteUnit::announced(&arc_body),
+            arc_transform,
+            GlobalTransform::from(arc_transform),
+        ));
+        app.world_mut()
+            .insert_resource(LocalMount(Some(crate::ingame::mount::LocalSeat {
+                mount: 77,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: true,
+                speed: Default::default(),
+                lift: 0.0,
+            })));
+        app.update();
+
+        let sight = app.world().resource::<Sight>();
+        let impact = cry_to_bevy(Vec3::new(sight.pos.x, sight.pos.y, sight.pos.z));
+        let arc = arc_transform.translation + Vec3::Y * (0.9 * 1.82);
+        let far = far_transform.translation + Vec3::Y * 0.9;
+        assert!(
+            impact.distance(arc) <= 2.5,
+            "the published point is the traced body: {impact:?} vs {arc:?}"
+        );
+        assert!(
+            impact.distance(far) > 10.0,
+            "a code that published the camera hit would fail here: {impact:?} vs {far:?}"
+        );
+        assert_eq!(sight.refusal, None, "the preview passed");
+        let _ = std::fs::remove_file(path);
     }
 
     /// `FUN_39425580`: only `vehicle_models.installed_turret` models aim with keys (actions 0/1
