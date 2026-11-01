@@ -427,8 +427,12 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
-* **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
-  an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
+* **Interact key and Grab Machine.** F on foot next to a slave is the dynamic action bar's
+  "Grab Machine" entry (`FUN_393bdad0` -> `FUN_393bbb80`), not NPC talk: the slave in front within
+  `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate, and F sends `CSBindSlave` 0x031
+  (`FUN_393b1de0` -> `FUN_393be280`). The 2026-10-28 capture with a cart targeted and an NPC at
+  1.24 m produced no packet; the 2026-11-01 owner capture shows the prompt and F taking the driver
+  seat. NPC talk keeps the path it had when the bar has nothing to claim.
 * **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
   character as master stores the slave object; `hud/mounted.rs` keeps it with the slave's timeline
   from the loaded unit. `SCUnitAttached` 0x076 remains the authoritative seat state
@@ -464,9 +468,9 @@ and explicit controls").
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
   unverified.
-  The current UI has no mounted-HUD release action that calls `DiscardSiegeWeapon` (the original
-  scripts list it as unused), so the Lua entry point and the passenger walk-off are the two ways
-  a client action sends the unbind.
+  The mode bar's `unbind` function slot now calls the same `FUN_39345aa0` path (driver 0x67 above
+  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point and the passenger walk-off remain
+  the other two ways a client action sends the unbind.
 
 #### Pending live checks
 
@@ -485,8 +489,9 @@ and explicit controls").
 * `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
   `DAT_39ac796c`.
 * The auto-walk to a slave out of reach (`FUN_390a6af0`) and its re-entry into the interaction.
-* F / dynamic action bar 12076 path (`FUN_393b1de0`): the capture with a cart targeted and an NPC
-  at 1.24 m sent nothing; the port sends nothing for a cart on F.
+* The dynamic action bar's slave candidate (12076/13863) is decompile-backed: the exact facing
+  rule (this port requires the slave in the front half-plane, the native scores it), the
+  `player+0x3b94` non-empty state, and the two `showSlaveInfo` gates remain capture-pending.
 * 13863 (passenger) and 19165 (destroy) `CSStartSkill` targets and fields; the port ignores them.
 * Server side: the lane's `CSStartInteraction068` only answers NPCs/mates; a target server must
   answer a slave with `[12076]`.

@@ -3204,24 +3204,60 @@ zero errors; this is not a warning-clean claim. Deliberately not changed: the un
 indexed `action_bar_page` action, the visual page control animation, and the server's slot storage (the
 server already stores slots by the 1-based number).
 
-## Pending live checks (driven vehicle bar)
+## Vehicle mode bar and Grab Machine checkpoint (2026-11-01)
 
 The Group-A2 capture (2026-10-30) read the Farm Wagon driver's bar after `CSBindSlave`: 7 `modeSkillActionBar`
 slots, 5 `slave_skill` entries (Owner's Mark 20704 R, First Round in New Morning 20291 T with 10 s, Sound Horn
 15622 Y, Water Plant 15450 U, Create Water 15546 unbound) and two `function` buttons (6 "Disembark from current
-device", 7 "Check details on a summon"); slots 1-5 match `slave_mount_skills` rows 181-185 for slave 60. This client
-publishes the five skill slots (the two function buttons have no skill data and are not modelled) and restores the
-buff-skills bar on `SCUnitDetached`. A later capture must confirm: the function buttons' actions and icons; a ship
-helm or siege weapon bar (same table, other slave rows); whether the bar appears for a bound-but-not-seated slave
-(this client requires the driver seat, point 1); whether a passenger seat shows nothing (assumed); player death while
-driving (does 1.2 clear the slave bar? this client keeps it while the attach remains); whether the siege/mount bar
-really goes to 0 (this client only lowers input mode 1, `input_modes.set(1, ...)`, and does not touch a separate
-siege bar); a slave skill's cooldown after stepping off and back on (this client keeps it per slave object id, from
-the `SCSkillStarted`/`SCSkillFired` `Mount` receipts, since AAEmu's `start_skill_cooldown` sends `SCCooldowns` only
-to a player caster); and the pressed slot's exact target field (this client sends the current target, 0 when none, with
-the slave's object id and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins that packet). The
-Eznan Cutter helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 for model 393
-(normal 40 / wide 25); its bar was not read. Also pending: the slave's own cooldown start after a cast-time
-skill (this client follows the server's `cast`, which starts it at the cast end, so an interrupted cast
-leaves no local timer) and whether a native press during the slave's global cooldown is dropped silently
-like the player's.
+device", 7 "Check details on a summon"); slots 1-5 match `slave_mount_skills` rows 181-185 for slave 60.
+The 2026-11-01 decompile resolves the function slots: the bar is native (`FUN_39204500` /
+`FUN_392045f0`), entry kind 3 (`FUN_39204320`) is a function button with its callback, icon path, text
+category and key. `hud/mode_actions.rs` now models `Entry::{Player,Skill,Function}` and fills it in that
+order.
+
+* **Any slave seat** (`FUN_39345f10`) gets the mount skills of its point (point 1 for the Farm Wagon),
+  then `unbind` (slot 6: `ui/icon/icon_skill_vehicle03.dds`, `ui_texts` 33 `unbind`). A passenger gets
+  only `unbind` in this port; the native also lists mount skills attached to that point, and none of
+  the 1.2 point-2 models here has one.
+* **The driver seat** (point 1) appends `showSlaveInfo` (slot 7: `ui/icon/icon_skill_info_view.dds`,
+  `ui_texts` 33 `showSlaveInfo`). The native has two further gates
+  (`slave+0x3af0 == DAT_39d1fb98`, `FUN_3901be50() == 0`) that are not decoded; the port shows it on
+  the driver seat, which the owner's capture confirms for the Farm Wagon.
+* **A mate rider** (`player+0x3c26`, set only by the mate mount path `FUN_39369c10` and cleared by
+  `FUN_39362690`) gets `command_unmount` first (slot 1: `icon_skill_vehicle03.dds`, `ui_texts` 19,
+  command 9 via `FUN_39361e80`), then the buff skills.
+* **Clicks**: `unbind` is `FUN_39345aa0` -> `CSDiscardSlave` 0x032 (`{u16 tl_id}`). The driver is
+  refused above 5 m/s (`_DAT_3999f85c` 25.0) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67; a passenger takes
+  `FUN_39362170`'s branch: no speed check, one request per `_DAT_3a169948` 1500 ms. `showSlaveInfo`
+  fires UI event `SHOW_SLAVE_INFO` (0x60) and the stock `slave_info.alb` opens; `command_unmount`
+  uses the existing mate unmount (`CSUnMountMate` 0x0a8 reason 9).
+* **Grab Machine**: the dynamic action bar now has a slave producer
+  (`hud/slave.rs::candidate`) with the native gates: no prompt while riding a mate, and none for the
+  slave already bound to or sat on (`FUN_393bbb80`); another slave is still offered. The candidate
+  reach is `_DAT_399d3230` = 6.25 -> 2.5 m surface gap (`FUN_393601a0` -> `FUN_39093860`); the score
+  is `1 + facing·toward - gap`, so nearest-in-front wins. The port leaves out a slave behind the
+  player (capture-pending: the decompile scores rather than gates facing). The bar is
+  `DYNAMIC_ACTION_BAR_SHOW("npc", id)` with 12076 "Grab Machine"; 13863 "passenger seat" is added
+  when the model has `model_bindings` point 2 (`FUN_390c9f70(2)`) and no unit is attached there.
+  F / `ExecuteDynamicAction` sends `CSBindSlave` 0x031 for 12076 (`FUN_393b1de0` ->
+  `FUN_393be280`), or the plain 13863 `CSStartSkill`.
+* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window, which shows the received name, class,
+  slave kind, lowercase hex unit id and any received slave equipment (`GetMountedSiegeWeaponInfo`,
+  `GetSlaveEquipSlotInfo`). `X2SiegeWeapon:GetVehicleInfo`, `GetSiegeWeaponSpeed` and
+  `GetSiegeWeaponTurnSpeed` are still stubs, so the window has no gear/handbrake/traction-control
+  block and no speed/turn-speed rows. It guards the nil values and logs no script error (the ignored
+  `original_summon_info_window_opens_on_show_slave_info` test opens it against the real UI/pak/DB).
+* **Evidence/tests**: `vehicle_bar` example (driver bar with both function slots and the F prompt for
+  a second wagon in one frame), `hud/mode_actions/tests.rs` (driver 7 slots, passenger `unbind` only,
+  mate `command_unmount` first, `0x67`, function event, icons/texts), `hud/slave/tests.rs` (candidate
+  reach/facing, mate/bound suppression, 13863 only with a free point 2, `CSDiscardSlave`, passenger
+  1500 ms throttle) and `hud/doodad/tests.rs` (the `"npc"` source and F -> `CSBindSlave`).
+
+Still pending: the two `showSlaveInfo` gates; whether a passenger seat captured live shows only
+`unbind` (decompile only); the exact `player+0x3b94` non-empty state; whether the facing rule is a
+hard half-plane or only the score (this port gates it); a live 0x67 at >5 m/s; a ship helm/siege bar
+(same table, other rows); player death while driving; a slave skill cooldown after re-boarding; and
+the pressed slot target field (this client sends the current target, 0 when none, with the slave's
+object id and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins it). The Eznan
+Cutter helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 for model 393
+(normal 40 / wide 25); its bar was not read.
