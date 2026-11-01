@@ -75,6 +75,15 @@ pub struct Acting {
     pub layered: bool,
 }
 
+/// The client's combat stance (`X2Unit + 0x3bba`, `stance_perm` in the K2 capture): the unit is in battle, set by
+/// `SCCombatEngaged`, by an attack it starts and by a blow it deals or takes (the 1.2 handlers `OnCombatEngaged`,
+/// `FUN_39391670`), and cleared by `SCCombatCleared` (`OnCombatCleared` -> the unit's vtable `+0x48`, `FUN_39355ec0`, which sets
+/// the byte to 0 and calls `FUN_390b3710`). It is **not** the weapon in the hand: the K2 run's `weapon_active` (`+0x3ba8`) stays 1
+/// and the character keeps `onehand_combat_idle` for the whole 7.6 s between the stance exit and the next fight. A unit in the
+/// stance with no weapon out stands in its fist combat idle (`fist_ba_combat_idle`, the K2 state before the first press).
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct CombatStance;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
     /// The looping cast clip.
@@ -181,10 +190,12 @@ struct Combat {
     held_tls: Vec<u16>,
 }
 
-/// Seconds from the key to the first swing of a character that has its weapon sheathed: the weapon comes out and the shield onto the
-/// arm first (the real client's `combat_melee` and `combat_triple_slash` captures: the damage lands 0.85 s after the key, 0.25 s and
-/// 0.19 s into the clips: they start at about 0.6 s). The server answers after 0.12 s; its events wait for the rest.
-const DRAW_LEAD: f64 = 0.6;
+/// Seconds from the key to the first attack clip: the weapon comes out and the shield onto the arm first, then the swing. The K2
+/// capture (5 ms memory samples) has the weapon byte 0 -> 1 at +255 ms and the clip at +280 ms after the press; the second fight
+/// (weapon already out) starts its clip at +267 ms, so this is the client's attack start, not only the draw. The server's first
+/// auto attack fire is the skill's 300 ms `cooldown_time`, so its events arrive inside this lead in play; the lead only caps a
+/// faster answer (the older `combat_melee` frames at 0.3 s spacing read about 0.6 s and are not fine enough to separate these).
+const DRAW_LEAD: f64 = 0.28;
 
 /// The player asked for a weapon skill with the weapon away.
 #[derive(Clone, Copy)]
@@ -1421,6 +1432,15 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
         }
         Event::SkillStarted(s) => {
             let Some(caster) = st.caster_entity(s.caster.obj_id) else { return };
+            // attacking a unit starts the battle stance (the 1.2 `OnCombatEngaged`/`FUN_39391670`); the target takes it on the
+            // blow. A doodad caster has no stance (only units are in `Stage::entity`).
+            if s.target.kind == target_kind::UNIT
+                && s.target.obj_id != 0
+                && s.target.obj_id != s.caster.obj_id
+                && let Some(attacker) = st.entity(s.caster.obj_id)
+            {
+                st.commands.entity(attacker).insert(CombatStance);
+            }
             if let Some(shot) = shot.as_mut()
                 && st.is_local(caster)
             {
@@ -1676,6 +1696,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
             let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
             let caster = st.entity(d.caster_obj_id);
+            // a blow puts both sides in the battle stance (`FUN_39391670` from the damage handler)
+            st.commands.entity(target).insert(CombatStance);
+            if let Some(attacker) = caster {
+                st.commands.entity(attacker).insert(CombatStance);
+            }
             if let Some(attacker) = caster.filter(|c| *c != target) {
                 combat.last_attacker.insert(d.target_obj_id, attacker);
             }
@@ -1683,6 +1708,21 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             *last = last.max(at);
             combat.after(at, Later::Landed(now_landed));
             combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, sound });
+        }
+        // `SCCombatEngaged` / `SCCombatCleared` (`OnCombatEngaged` sets `+0x3bba`; `OnCombatCleared` clears it at once through
+        // `FUN_39355ec0`). The K2 capture's exit is the server's `SCCombatCleared`; the 0.772 s before it was the gap from the
+        // target being lost, not a client timer.
+        Event::CombatChanged { obj_id, engaged } => {
+            if let Some(unit) = st.entity(*obj_id) {
+                if *engaged {
+                    st.commands.entity(unit).insert(CombatStance);
+                } else {
+                    st.commands.entity(unit).remove::<CombatStance>();
+                }
+                if verbose() {
+                    info!("combat: [{now:.3}] the battle stance of {unit:?} is {engaged}");
+                }
+            }
         }
         Event::UnitDeath { obj_id } => {
             if let Some(shot) = shot.as_mut() {
@@ -2733,6 +2773,94 @@ mod tests {
             let fe = def.emitters.iter().find(|e| e.def.name == shell).expect(shell);
             assert!(effect.plays_once(shell) && fe.def.first_cycle().is_some_and(|d| d.emitter_life.base == 0.4), "{shell}");
         }
+    }
+
+    /// The first attack clip waits the captured lead: the K2 rows have the weapon byte 0 -> 1 at +255 ms and the clip at +280 ms
+    /// (the second fight, weapon already out, +267 ms). The server's own first fire (skill 2's 300 ms `cooldown_time`) already
+    /// arrives inside it; the lead caps a faster answer.
+    #[test]
+    fn the_first_attack_clip_waits_the_captured_lead() {
+        assert_eq!(DRAW_LEAD, 0.28);
+        let combat = Combat { lead: Some(Lead { ready: DRAW_LEAD, skill: 2, caster: 1 }), ..Default::default() };
+        let event = Fake::event("fire", &[1, 2, 0], 1, 2, None).expect("a fire event");
+        assert_eq!(hold_until(&combat, &event, 0.0), Some(DRAW_LEAD), "the server's fire waits for the draw");
+        assert_eq!(hold_until(&combat, &event, DRAW_LEAD), None, "and goes at the captured moment");
+    }
+
+    /// The K2 stance exit (2026-11-01): `stance_perm` (`CombatStance`) goes 1 -> 0 when the server's `SCCombatCleared` arrives
+    /// (`OnCombatCleared` -> vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`), while the weapon byte (`Drawn`, `+0x3ba8`) and the
+    /// `onehand_combat_idle` stay. The clear came 0.772 s after the target was lost in the capture; the loss alone ends nothing.
+    #[test]
+    fn the_battle_stance_ends_on_the_combat_clear_not_with_the_weapon_timer() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(book) = SkillBook::open() else { return };
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetEvent>>();
+        let local = world.spawn((LocalPlayer { obj_id: 1 }, GlobalTransform::default(), Drawn::after_action(10.0, Out::Blade { dual: false }))).id();
+        let rat = world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default())).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(handle_events);
+        // the blow puts both units in the battle stance (`FUN_39391670`)
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Fake::event("hit", &[1, 2, 100], 1, 2, None).expect("a hit event")));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(local).is_some(), "a blow starts the stance");
+        assert!(world.get::<CombatStance>(rat).is_some());
+        // the target is lost 0.7 s later: the stance stays (the capture kept it until the server's clear)
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(700));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(local).is_some(), "losing the target alone ends no stance");
+        // the server's clear 0.772 s after the loss: the stance ends at once, the weapon timer (10 s) does not touch it
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(72));
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::CombatChanged { obj_id: 1, engaged: false }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(local).is_none(), "OnCombatCleared clears the stance");
+        let drawn = world.get::<Drawn>(local).expect("the weapon stays");
+        assert_eq!(drawn.stance(0.772), Some(Out::Blade { dual: false }), "the K2 weapon byte stays 1");
+        assert!(world.get::<CombatStance>(rat).is_some(), "another unit's stance is its own packet");
+        // the next fight engages it again (OnCombatEngaged)
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::CombatChanged { obj_id: 1, engaged: true }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(local).is_some(), "re-engaging restores the stance");
+    }
+
+    /// A unit in the battle stance with no weapon in the hand stands in its fist combat idle (`fist_ba_combat_idle`, the K2 state
+    /// before the first press); without the stance it stands in the peaceful idle. A weapon in the hand keeps its own stance.
+    #[test]
+    fn a_fighting_unit_without_a_weapon_stands_in_the_fist_combat_idle() {
+        let Ok(rig) = shared_rig(SKELETON) else { return };
+        let Ok(cal) = Cal::shared(CAL) else { return };
+        let clips = ClipLibrary::default();
+        let Some(set) = ClipSet::load(&rig, cal, &clips) else { return };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).insert_resource(clips).add_systems(Update, crate::ingame::anim::drive_locomotion);
+        let bones: Vec<Entity> = rig.skeleton.bones.iter().map(|_| app.world_mut().spawn((Transform::default(), GlobalTransform::default())).id()).collect();
+        let local = app
+            .world_mut()
+            .spawn((Animator::new(rig.clone(), bones), Locomotion::new(set), Motion::default(), LocalPlayer { obj_id: 7 }, Visibility::default()))
+            .id();
+        let idle = |app: &App| app.world().get::<Animator>(local).and_then(|a| a.current.as_ref()).map_or_else(String::new, |c| format!("{} {}", c.clip.clip.name, c.clip.source.as_deref().unwrap_or("")));
+        // the spawn puts the animator in its first idle; `Locomotion` starts at `Idle`, so ask it to pick the clip
+        app.world_mut().get_mut::<Locomotion>(local).unwrap().invalidate();
+        app.update();
+        assert!(idle(&app).contains("fist_ba_relaxed_idle"), "at peace: {}", idle(&app));
+        assert_eq!(app.world().get::<Locomotion>(local).unwrap().stance(), None);
+        app.world_mut().entity_mut(local).insert(CombatStance);
+        app.world_mut().get_mut::<Locomotion>(local).unwrap().invalidate();
+        app.update();
+        // the model's `.cal` names the fist combat idle after the one handed clip on this rig; the stance is what the client picks
+        assert_eq!(app.world().get::<Locomotion>(local).unwrap().stance(), Some(crate::ingame::anim::Stance::Fist));
+        assert!(idle(&app).contains("_ba_combat_idle"), "in the battle stance: {}", idle(&app));
     }
 
     #[test]

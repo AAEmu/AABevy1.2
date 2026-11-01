@@ -599,9 +599,15 @@ impl Env<'_> {
         super::cooldown::gcd_at(game, skills, skill, Instant::now()).0
     }
 
-    /// The skill starts the global cooldown (it is known and does not ignore it).
+    /// The skill starts the global cooldown (it is known and does not ignore it). The 1.2 basic attacks are exempt: the K2
+    /// capture's cooldown-manager pair stays 0/1000 across all five auto attack presses (skill 2 never changes it).
     pub fn uses_gcd(&self, skill: u32) -> bool {
-        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd)
+        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd && !i.auto_attack)
+    }
+
+    /// A 1.2 basic attack (skill 2 melee, 3 off-hand, 4 ranged): what the client refuses is dropped without an alert.
+    pub fn is_auto_attack(&self, skill: u32) -> bool {
+        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| i.auto_attack)
     }
 
     /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
@@ -908,6 +914,120 @@ mod tests {
         g.skills.insert(2, crate::hud::data::SkillInfo { gcd_ms: 1000, ..Default::default() });
         g.skills.insert(3, crate::hud::data::SkillInfo { gcd_ms: 1000, ignore_gcd: true, ..Default::default() });
         g
+    }
+
+    /// The K2 capture's cooldown-manager pair (0/1000) is unchanged by every auto attack press: the basic attacks are exempt
+    /// from the global cooldown even though the data gives them `default_gcd` (skill 2: 1000 ms).
+    #[test]
+    fn the_basic_attacks_do_not_start_the_global_cooldown() {
+        let mut g = gcd_game();
+        g.skills.insert(4, crate::hud::data::SkillInfo { gcd_ms: 1000, auto_attack: true, ..Default::default() });
+        let me = me();
+        let skills = cast_ago(Duration::from_millis(100));
+        let e = Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) };
+        assert!(!e.uses_gcd(4), "the auto attack is exempt");
+        assert_eq!(e.gcd_left(4), 0);
+        assert!(!e.held_back(4, &InFlight::default()), "a press during another skill's GCD still goes out");
+        assert!(e.uses_gcd(1) && e.uses_gcd(2), "the other skills are not");
+        // the exemption is the basic attack, not `ignore_global_cooldown`: 3 ignores the GCD and 18132's weapon slot is no flag
+        assert!(!e.uses_gcd(3));
+    }
+
+    /// The flag comes from the 1.2 basic attack ids (2..=4), not `weapon_slot_for_autoattack_id` (Triple Slash 18132 carries 15
+    /// there but is no auto attack: its damage numbers are yellow in the real capture, the auto attack's are white).
+    #[test]
+    fn the_basic_attacks_are_the_three_basic_skills_of_the_database() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
+        let game = match crate::hud::data::GameData::load(&path) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no game data: {e}");
+                return;
+            }
+        };
+        for id in [2, 3, 4] {
+            assert!(game.skills.get(&id).is_some_and(|s| s.auto_attack), "skill {id}");
+        }
+        for id in [12026, 18132] {
+            assert!(game.skills.get(&id).is_some_and(|s| !s.auto_attack), "skill {id}");
+        }
+        let me = me();
+        assert!(!Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(2));
+        assert!(Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(18132));
+    }
+
+    /// K2 rows 3-4 and 6: a basic attack the client refuses (out of the weapon's reach) sends nothing and shows no text, and a
+    /// second press is sent again (the 1.2 `FUN_393989e0` swallows a press only when the auto attack flag is already set; it is
+    /// no toggle). The auto attack starts no global cooldown (`SkillPressed::gcd` false).
+    #[test]
+    fn a_refused_basic_attack_is_silent_and_a_second_press_goes_out_again() {
+        use aa_net::state::{ActionBar, Target};
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::{App, MessageWriter, MinimalPlugins, Res, Update};
+        use crate::hud::UseFailed;
+        use crate::hud::panels::use_slot;
+        use crate::ingame::ground_target::SkillPressed;
+        #[derive(Resource)]
+        struct Press(usize, f32);
+        #[derive(Resource)]
+        struct Fixture {
+            game: GameData,
+            me: Snapshot,
+        }
+        #[allow(clippy::too_many_arguments)]
+        fn press(
+            press: Res<Press>,
+            fixture: Res<Fixture>,
+            target: Res<Target>,
+            bar: Res<ActionBar>,
+            inventory: Res<Inventory>,
+            mut net: MessageWriter<SkillPressed>,
+            mut failed: MessageWriter<UseFailed>,
+        ) {
+            let snap = TargetSnap { obj_id: 77, hp: 100, max_hp: 100, relation: "hostile", ..Default::default() };
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: Some(&snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: None, buffs: &[], inventory: None };
+            use_slot(press.0, &env, &InFlight::default(), &bar, &inventory, &target, &mut net, &mut failed);
+        }
+        let mut g = game(Rules::default().with_skill(2, melee()));
+        g.skills.insert(2, crate::hud::data::SkillInfo { auto_attack: true, ..Default::default() });
+        let mut bar = ActionBar { slots: vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS], ..Default::default() };
+        bar.slots[1] = aa_net::items::ActionSlot { kind: aa_net::items::ActionKind::Spell, id: 2 };
+        let mut target = Target::default();
+        target.obj_id = Some(77);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Fixture { game: g, me: me() })
+            .insert_resource(target)
+            .insert_resource(bar)
+            .init_resource::<Inventory>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .insert_resource(Press(1, 12.0))
+            .add_systems(Update, press);
+        let sent = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<SkillPressed>>();
+            m.drain().collect::<Vec<_>>()
+        };
+        let failed = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<UseFailed>>();
+            m.drain().count()
+        };
+        app.update();
+        assert!(sent(&mut app).is_empty(), "out of reach: nothing is sent");
+        assert_eq!(failed(&mut app), 0, "and nothing is said");
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        let first = sent(&mut app);
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].skill, 2);
+        assert!(!first[0].gcd, "the auto attack starts no global cooldown");
+        assert_eq!(failed(&mut app), 0);
+        app.update();
+        let second = sent(&mut app);
+        assert_eq!(second.len(), 1, "the second press is sent again: no toggle ({second:?})");
     }
 
     /// The player cast skill 1 `ago` ago.

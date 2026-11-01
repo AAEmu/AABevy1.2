@@ -578,7 +578,11 @@ pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inve
                 return;
             }
             if let Some(f) = env.precheck(skill) {
-                failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
+                // the 1.2 client drops a refused basic attack without a word (K2: no target and out of range presses are silent);
+                // the other skills say why
+                if !env.is_auto_attack(skill) {
+                    failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
+                }
                 return;
             }
             // `ground_target::route` sends the command, or aims first when the skill takes a spot of the ground

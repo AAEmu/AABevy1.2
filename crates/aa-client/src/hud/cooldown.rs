@@ -36,9 +36,10 @@ fn combined_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Optio
 }
 
 /// The global cooldown (left, total) a skill waits for: the last successful cast's `gcd_ms` counted from its start, or the
-/// one a plot step's `GlobalCooldown` effect started, whichever lasts longer; none for the skills that ignore it.
+/// one a plot step's `GlobalCooldown` effect started, whichever lasts longer; none for the skills that ignore it and for the
+/// 1.2 basic attacks (K2: the auto attack never changes the cooldown-manager pair).
 pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> (u32, u32) {
-    if game.skills.get(&id).is_none_or(|info| info.ignore_gcd) {
+    if game.skills.get(&id).is_none_or(|info| info.ignore_gcd || info.auto_attack) {
         return (0, 0);
     }
     let mut best = (0, 0);
@@ -62,7 +63,7 @@ pub(super) fn mount_gcd_at(
     id: u32,
     now: Instant,
 ) -> (u32, u32) {
-    if game.skills.get(&id).is_none_or(|info| info.ignore_gcd) {
+    if game.skills.get(&id).is_none_or(|info| info.ignore_gcd || info.auto_attack) {
         return (0, 0);
     }
     let Some((at, last)) = skills.mount_last_cast(caster) else {

@@ -1,5 +1,22 @@
 # ArcheAge 1.2 feature parity
 
+## Combat stance and auto-attack checkpoint, 2026-11-01
+
+The K2 capture (2026-11-01-combat-k2k3) and the 1.2 decompile settle the auto attack and the stance exit. The client's battle
+stance is the `X2Unit + 0x3bba` byte (`stance_perm`): `OnCombatEngaged` sets it (`FUN_391d69a0` -> `FUN_390b36f0`) and
+`OnCombatCleared` clears it (`FUN_391d6a60` -> vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`). The capture's 1 -> 0 at
+t=59,322 is the server's `SCCombatCleared` 0.772 s after the recorder lost the target (0.613 s after the no-target press), not a
+client timer. The weapon byte `+0x3ba8` and the `onehand_combat_idle` stay for the 7.6 s until the next fight, so the client keeps
+the **battle stance** (`combat.rs` `CombatStance`, read from `CombatChanged`, a unit-targeted `SkillStarted` and `UnitDamaged`)
+separate from the **drawn weapon** (`Drawn`, still 10 s; the capture shows no sheathe). A fighting unit with no weapon out stands in
+its fist combat idle (K2 `fist_combat_idle`). The raw K2 rows contradict the report's "second press toggles off": the clips and the
+target's HP keep going every 2 s for 30 s after the re-press, and `FUN_393989e0` swallows the second skill 2 press without a
+toggle; the client's auto attack flag is cleared by the server's `SCSkillStopped`. The first attack clip starts at +280 ms after
+the key (`DRAW_LEAD` 0.28 s; the first damage at +1.28 s) and the basic attacks (2, 3, 4) are exempt from the global cooldown
+(K2: 0/1000 across every press); their refused presses are silent. Open: the client's own sheathe after a fight is not recovered
+(K2 shows none in 240 s; Bevy's 10 s is an approximation), and the auto-attack's white/yellow combat text split is now keyed on the
+basic ids, not `weapon_slot_for_autoattack_id`.
+
 ## Mount-walk checkpoint, 2026-10-31
 
 `X2Mate:MountMate()` now matches the 1.2 mount controller as read in the 1.2
