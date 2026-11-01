@@ -413,7 +413,11 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
                 let (builtins, absolute) = template(&b, c.design, |t| (t.binding_doodads, t.absolute_deco_limit));
                 (c.decorations, builtins, absolute)
             });
-            Ok((i64::from(attached) - i64::from(builtins), i64::from(absolute) - i64::from(builtins)))
+            // the built-ins may not have streamed in yet (or the house is still a frame): never negative
+            Ok((
+                (i64::from(attached) - i64::from(builtins)).max(0),
+                (i64::from(absolute) - i64::from(builtins)).max(0),
+            ))
         })?,
     )?;
     let (s, b) = (state.clone(), bridge.clone());
@@ -468,7 +472,8 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
             totals.set("totalDecoPoint", points)?;
             totals.set("totalPoint", crate::hud::crafting::proficiency(&data, group).map_or(0, |(point, _)| point))?;
             let items = lua.create_table()?;
-            for (i, f) in c.furniture.iter().filter(|f| f.actability_group == group).enumerate() {
+            // the same rows `actability_entries` sums, so the list adds up to `totalDecoPoint`
+            for (i, f) in c.furniture.iter().filter(|f| f.actability_group == group && f.deco_group != 0).enumerate() {
                 let row = lua.create_table()?;
                 let name = data.game.get().and_then(|g| g.items.get(&f.item)).map(|i| i.named.name.clone()).unwrap_or_default();
                 row.set("name", name)?;
