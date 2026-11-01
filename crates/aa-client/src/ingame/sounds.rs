@@ -950,11 +950,13 @@ impl VehicleSound {
 }
 
 /// `VehicleUnitModel::UpdateSound` (`FUN_390c6780`): resolves a unit's sound pack items once and marks it
-/// [`VehicleSound`]; an unchecked unit is only looked at while the packs are still loading. `engine` is the
-/// loop the original starts and keeps for the model's whole life; `run` starts only while the model moves
-/// (either of its two velocity vectors above 0.0003). The Farm Wagon's `sound_packs` 176 `run_tractor` has
-/// no `engine` item and `run` -> sound 950 (`sounds/x2vehicles:trailer:run`); the speedcar's `run_speedcar`
-/// has the reverse (`engine` -> `sounds/x2vehicles:speed_car:run`, `run` with no sound).
+/// [`VehicleSound`]; an unchecked unit is only looked at while the packs are still loading. While the model's
+/// prefab damage state is 1..4, `engine` is started and updated every frame (never speed-gated) and `run`
+/// starts only while the model moves (either of its two velocity vectors above 0.0003). State 5 (dying) or 6
+/// (dead) stops the `run`/`yaw`/`pitch` handles and returns before the engine block: the engine handle is
+/// neither started nor updated there, but it is not explicitly stopped. The Farm Wagon's `sound_packs` 176
+/// `run_tractor` has no `engine` item and `run` -> sound 950 (`sounds/x2vehicles:trailer:run`); the speedcar's
+/// `run_speedcar` has the reverse (`engine` -> `sounds/x2vehicles:speed_car:run`, `run` with no sound).
 fn vehicle_engine_sounds(
     mut commands: Commands,
     units: Option<Res<Units>>,
@@ -1001,8 +1003,11 @@ fn write_vehicle_params(sound: &mut Sound, ratio: f32) {
     sound.params.push(("pitch2".into(), pitch));
 }
 
-/// Toggles `run` with the model's movement and keeps the `engine` parameters on its speed. A destroyed
-/// unit (its root carries [`Dead`]) stops both; a resurrection plays the engine again.
+/// Toggles `run` with the model's movement and keeps the `engine` parameters on its speed. Native gates on
+/// prefab damage state 5 (dying) or 6 (dead): it stops the `run`/`yaw`/`pitch` handles and freezes the engine
+/// (no start, no updates; it is not explicitly stopped). This branch has no dying state yet (PR #69), so it
+/// gates on [`Dead`] (state 6) and stops both sounds there - a deviation from the native until #69. A
+/// resurrection plays the engine again.
 fn update_vehicle_engine_sounds(
     mut commands: Commands,
     dead: Query<(), With<Dead>>,
@@ -1212,7 +1217,8 @@ mod tests {
         assert_eq!(material_surface(&String::from_utf8_lossy(&mtl)).as_deref(), Some("mat_dirt"));
     }
 
-    /// The data `UpdateSound` keys from: `run` is the moving loop, `engine` the one that stays on.
+    /// The data `UpdateSound` keys from: `run` is the moving loop, `engine` the one that stays on while the
+    /// damage state is 1..4.
     #[test]
     fn the_vehicle_packs_name_engine_and_run_items() {
         let Ok(db) = std::env::var("AA_DB") else { return };
@@ -1308,6 +1314,8 @@ mod tests {
         assert!((speed - 0.99).abs() < 1e-4, "full speed at 15 m/s: {speed}");
     }
 
+    /// The current deviation: native stops only the non-engine handles in states 5/6 and leaves the engine
+    /// frozen; this branch has no dying state and stops both on `Dead` (state 6).
     #[test]
     fn a_destroyed_vehicle_stops_its_engine_and_restarts_it_on_resurrection() {
         let Some((mut app, root)) = vehicle_app(1323) else { return };

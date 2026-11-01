@@ -5,7 +5,10 @@
 The Farm Wagon (slave 60 -> model 1008 -> `vehicle_models` 38) draws the prefab body
 `objects/env/06_unit/05_carriage/transfers_trailer_a_body.chr`; its `.cal` loops `fist_ba_relaxed_idle`, whose tracks
 drive `Bone_engine01..03`. 1.2 starts that loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init
-and refresh, for every unit-model kind except 5 and 6 (Mate and Shipyard), with no driver or speed condition. Upstream
+and refresh, with no driver or speed condition. Its callers skip it while the model's prefab damage state
+(`model+0x1f0`, `param_1[0x7c]`) is 5 (dying) or 6 (dead): `FUN_390e69d0` (DEC 184925), `FUN_390eb7d0` (DEC 187546),
+`FUN_390ebaa0` (DEC 187601) and the interaction "opened" path `FUN_390d64a0` (DEC 173191). Those are damage states,
+not model kinds (the kind is the template's `+0x30`); a revive back to 1..4 resumes the idle. Upstream
 already looped the idle as a side effect of the generic creature spawn (`creature.rs:174`); this work moves that
 ownership to the vehicle path, where 1.2 puts it: a `VehicleIdle` on the body started by
 `vehicle::start_vehicle_idle` (`VehiclePlugin`), so every rigged prefab vehicle/ship body with the idle loops it, and
@@ -14,10 +17,14 @@ ownership to the vehicle path, where 1.2 puts it: a `VehicleIdle` on the body st
 the 22 vehicle models and 3 fishboats with this idle are listed in
 [units](aa-client-units.md#engine-idle-and-engine-sound-vehicleidle-start_vehicle_idle-vehiclesound).
 
-The same checkpoint adds the 1.2 engine sound (`VehicleUnitModel::UpdateSound`, `FUN_390c6780`): `engine` loops for the
-model's whole life with the `speed`/`volume1`/`pitch1`/`volume2`/`pitch2` parameters (normalized by
-`vehicle_models.velocity` / `ship_models.velocity`), `run` starts only while the model moves (either velocity vector
-above 0.0003), and both stop on `Dead`. A destroyed vehicle also stops its idle and plays the body's `dead_01`, which
+The same checkpoint adds the 1.2 engine sound (`VehicleUnitModel::UpdateSound`, `FUN_390c6780`; `FUN_390ebaa0` calls it
+outside its 5/6 gate at DEC 187611). While the prefab damage state is 1..4, `engine` starts and stays updated, with the
+`speed`/`volume1`/`pitch1`/`volume2`/`pitch2` parameters (normalized by
+`vehicle_models.velocity` / `ship_models.velocity`), and `run` starts only while the model moves (either velocity
+vector above 0.0003). In state 5/6 `UpdateSound` stops the `run`, `yaw` and `pitch` handles (+0x410/414/418) and jumps
+to the end: the `engine` handle (+0x41c) is neither started nor updated, but it is not explicitly stopped. The Bevy
+client has no dying state yet (PR #69 adds it), so it gates on `Dead` (state 6) and stops both sounds there - a
+deviation to revisit with #69. A destroyed vehicle also stops its idle and plays the body's `dead_01`, which
 `combat::ensure_corpses` missed because the prefab body's `Animator` is a child of the root with `Dead`.
 `steer_spindles` now runs after `AnimSet`, over the sampled idle pose, so the permanent idle no longer overwrites the
 front axle every frame. The self-checking `vehicle_idle` example and the wagon tests (`the_wagon_body_idles_its_engine`,
