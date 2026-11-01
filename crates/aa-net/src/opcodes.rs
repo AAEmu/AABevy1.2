@@ -479,6 +479,7 @@ opcodes! {
         SCGimmickJointsBrokenPacket = 0x13f,
         SCMateStatePacket = 0x1ac,
         SCSlaveStatePacket = 0x1ab,
+        SCShipyardStatePacket = 0x1aa,
         SCCraftFailedPacket = 0x1bf,
         SCCraftItemUnlockPacket = 0x0f5,
         SCMateSpawnedPacket = 0x125,

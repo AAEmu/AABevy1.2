@@ -20,6 +20,11 @@
 //!
 //! PNGs are encoded on their own threads (fast compression, RGB); at most [`MAX_WRITING`] encoders run, the app waits for the
 //! writers beyond that, and past [`MAX_IN_FLIGHT`] undelivered screenshots it renders frames with the clock frozen. The capture is the window: keep it 1280x720 for videos (`--size 1280x720`, about 1 MB per frame).
+//!
+//! This is a fixed-step mode: its game time is the frame step, not the wall clock. The final log line reports the measured
+//! `game/wall` ratio (also in the 2 s `aa-dev: … game_per_wall=…` line); divide any timestamp taken from a recorded run by
+//! it before claiming a wall duration, or do not use `--record` for a timing comparison (`--require-wall-clock` fails at
+//! once, because `ManualDuration` is not the wall clock).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -78,10 +83,12 @@ pub fn plugin(app: &mut App) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn capture(
     mut commands: Commands,
     args: Res<DevArgs>,
     time: Res<Time>,
+    audit: Res<super::ClockAudit>,
     gate: Res<RecordGate>,
     mut rec: ResMut<Recorder>,
     mut strategy: ResMut<TimeUpdateStrategy>,
@@ -113,7 +120,13 @@ fn capture(
     let total = args.record_secs.map(|s| (s * fps).round() as u32);
     if total.is_some_and(|n| rec.frames >= n) {
         if !rec.busy() {
-            info!("aa-dev: recorded {} frames in {dir}", rec.frames);
+            info!(
+                "aa-dev: recorded {} frames in {dir} (clock={} game/wall {:.3} real/wall {:.3})",
+                rec.frames,
+                audit.mode_name(),
+                audit.ratio(),
+                audit.real_ratio()
+            );
             exit.write(AppExit::Success);
         }
         return;

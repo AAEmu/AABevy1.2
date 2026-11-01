@@ -1,0 +1,692 @@
+[
+  {
+    "op": "mark",
+    "name": "k2_start",
+    "note": "auto-attack lifecycle: one press, wait for death, stance exit"
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 500
+  },
+  {
+    "op": "chat",
+    "message": "/clear_combat",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "set_slots",
+    "page": 1,
+    "slots": {
+      "3": 2
+    },
+    "note": "auto-attack skill 2 on key 3"
+  },
+  {
+    "op": "chat",
+    "message": "/move 15578.2 15450.0 126.245",
+    "settle_ms": 2500,
+    "note": "safe spawn spot"
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K2 target 1",
+    "approach": true
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "auto-attack key once"
+  },
+  {
+    "op": "wait_target_dead",
+    "timeout": 90,
+    "note": "wait for the rat to die"
+  },
+  {
+    "op": "mark",
+    "name": "k2_dead"
+  },
+  {
+    "op": "sleep",
+    "ms": 12000,
+    "note": "stance-exit window after combat end"
+  },
+  {
+    "op": "snapshot",
+    "code": "local a,b,c=_G.__combat_recorder and 1 or 0,0,0 local h=X2Unit:UnitHealth('target') local d=X2Unit:UnitIsDead('player') local s=X2Unit:UnitCombatState('player') return tostring(h)..'|'..tostring(d)..'|'..tostring(s)",
+    "note": "post-death state"
+  },
+  {
+    "op": "mark",
+    "name": "k2_no_target"
+  },
+  {
+    "op": "clear_target"
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "auto-attack with no target"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "mark",
+    "name": "k2_repress"
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K2 target 2",
+    "approach": true
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "start auto-attack"
+  },
+  {
+    "op": "sleep",
+    "ms": 1500
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "re-press mid-fight"
+  },
+  {
+    "op": "sleep",
+    "ms": 6000
+  },
+  {
+    "op": "wait_target_dead",
+    "timeout": 25,
+    "optional": true,
+    "note": "did the re-press stop the swings?"
+  },
+  {
+    "op": "mark",
+    "name": "k2_walk"
+  },
+  {
+    "op": "clear_target"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K2 target 3",
+    "approach": true
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "start auto-attack"
+  },
+  {
+    "op": "sleep",
+    "ms": 2000
+  },
+  {
+    "op": "key",
+    "key": "s",
+    "duration_ms": 2500,
+    "note": "walk away mid-fight"
+  },
+  {
+    "op": "sleep",
+    "ms": 4000
+  },
+  {
+    "op": "mark",
+    "name": "k2_leave_range"
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "auto-attack out of range"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "snapshot",
+    "code": "local n=X2Unit:UnitName('target') local h=X2Unit:UnitHealth('target') return tostring(n)..'|'..tostring(h)",
+    "note": "range state"
+  },
+  {
+    "op": "clear_target"
+  },
+  {
+    "op": "sleep",
+    "ms": 4000
+  },
+  {
+    "op": "chat",
+    "message": "/move 15578.2 15450.0 126.245",
+    "settle_ms": 2500
+  },
+  {
+    "op": "mark",
+    "name": "k2_end"
+  },
+  {
+    "op": "mark",
+    "name": "k3_start",
+    "note": "cast bar and cooldown/GCD matrix"
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 500
+  },
+  {
+    "op": "set_slots",
+    "page": 1,
+    "slots": {
+      "1": 12026,
+      "2": 18132,
+      "3": 11991,
+      "4": 10594,
+      "5": 10455,
+      "6": 10152,
+      "7": 10752,
+      "9": 14166
+    },
+    "note": "1 instant+GCD 2 custom GCD 3 1.5s cast 4 10s cast 5 no-GCD 6 30s cooldown 7 1s cast; slot 9 probes the learned-but-not-in-book 3.5s skill"
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_single_1"
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 Precision Strike alone"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 Triple Slash alone"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "11991 Health Lift 1.5s cast alone"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "key",
+    "key": "7",
+    "note": "10752 Flamebolt 1s cast alone"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_recall"
+  },
+  {
+    "op": "key",
+    "key": "4",
+    "note": "10594 Recall 10s cast"
+  },
+  {
+    "op": "sleep",
+    "ms": 8000
+  },
+  {
+    "op": "snapshot",
+    "code": "local a,b,c,d=X2Unit:UnitCastingInfo('player') return tostring(a)..'|'..tostring(b)..'|'..tostring(c)..'|'..tostring(d)",
+    "note": "cast bar at 8s"
+  },
+  {
+    "op": "key",
+    "key": "w",
+    "duration_ms": 500,
+    "note": "cancel Recall before it fires"
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "second cancel attempt after the movement"
+  },
+  {
+    "op": "sleep",
+    "ms": 2000
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000,
+    "note": "fresh rat before k3_gcd_during"
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target for k3_gcd_during",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_gcd_during"
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 starts the default GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 150
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 pressed during the 1000ms GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_gcd_after"
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 after the GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 2000
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000,
+    "note": "fresh rat before k3_cast_during"
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target for k3_cast_during",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_cast_during"
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "11991 begins a 1.5s cast"
+  },
+  {
+    "op": "sleep",
+    "ms": 300
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 during the cast"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_cast_after"
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 after the cast"
+  },
+  {
+    "op": "sleep",
+    "ms": 2000
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000,
+    "note": "fresh rat before k3_no_gcd"
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target for k3_no_gcd",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_no_gcd"
+  },
+  {
+    "op": "key",
+    "key": "5",
+    "note": "10455 Frenzy (ignore_global_cooldown)"
+  },
+  {
+    "op": "sleep",
+    "ms": 100
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 immediately after the no-GCD skill"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000,
+    "note": "fresh rat before k3_custom_gcd"
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target for k3_custom_gcd",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_custom_gcd"
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 custom 500ms GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 100
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 during the custom GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "spawn",
+    "template": 6409,
+    "settle_ms": 2000,
+    "note": "fresh rat before k3_buff_on"
+  },
+  {
+    "op": "findtarget",
+    "template": 6409,
+    "name": "rat_brown ",
+    "note": "K3 target for k3_buff_on",
+    "approach": true
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "chat",
+    "message": "/resetcd",
+    "settle_ms": 300
+  },
+  {
+    "op": "mark",
+    "name": "k3_buff_on",
+    "note": "same presses with buff 3024 (GlobalCooldownMul +1000 -> half)"
+  },
+  {
+    "op": "chat",
+    "message": "/heal",
+    "settle_ms": 300
+  },
+  {
+    "op": "buff",
+    "buff": 3024,
+    "level": 1,
+    "settle_ms": 1500
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 with the buff"
+  },
+  {
+    "op": "sleep",
+    "ms": 1500
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 with the buff"
+  },
+  {
+    "op": "sleep",
+    "ms": 1500
+  },
+  {
+    "op": "key",
+    "key": "3",
+    "note": "11991 cast with the buff"
+  },
+  {
+    "op": "sleep",
+    "ms": 3000
+  },
+  {
+    "op": "key",
+    "key": "1",
+    "note": "12026 with the buff again"
+  },
+  {
+    "op": "sleep",
+    "ms": 150
+  },
+  {
+    "op": "key",
+    "key": "2",
+    "note": "18132 during the buffed GCD"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "buff",
+    "buff": -3024,
+    "settle_ms": 1000
+  },
+  {
+    "op": "mark",
+    "name": "k3_cd_refusal"
+  },
+  {
+    "op": "key",
+    "key": "6",
+    "note": "10152 Teleportation (30s cooldown)"
+  },
+  {
+    "op": "sleep",
+    "ms": 1500
+  },
+  {
+    "op": "key",
+    "key": "6",
+    "note": "10152 again inside its cooldown"
+  },
+  {
+    "op": "sleep",
+    "ms": 2500
+  },
+  {
+    "op": "mark",
+    "name": "k3_end"
+  },
+  {
+    "op": "clear_target"
+  },
+  {
+    "op": "sleep",
+    "ms": 2000
+  }
+]

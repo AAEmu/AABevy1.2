@@ -38,6 +38,8 @@ pub struct Prepared {
     prefab: bool,
     pieces: Vec<Piece>,
     helpers: HashMap<String, Affine3A>,
+    /// The combined LOD 0 bounds of the parts in the prefab's local cry frame (metres).
+    pub bounds: Option<(Vec3, Vec3)>,
     ladder: Option<LadderHelper>,
 }
 
@@ -106,7 +108,35 @@ fn helpers_of(part: &Part, model: &aa_cry::mesh::Model, out: &mut HashMap<String
     }
 }
 
+/// The model's bounds placed by the prefab's part transform, still in the prefab's local cry frame.
+fn part_bounds(part: &Part, model: &aa_cry::mesh::Model) -> Option<(Vec3, Vec3)> {
+    let (lo, hi) = model.bounds()?;
+    let placement = Affine3A::from_scale_rotation_translation(part.scale, part.rot, part.pos);
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for x in [lo.x, hi.x] {
+        for y in [lo.y, hi.y] {
+            for z in [lo.z, hi.z] {
+                let p = placement.transform_point3(Vec3::new(x, y, z));
+                out = Some(match out {
+                    None => (p, p),
+                    Some((a, b)) => (a.min(p), b.max(p)),
+                });
+            }
+        }
+    }
+    out
+}
+
 pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
+    prepare_inner(loader, reference, false)
+}
+
+/// [`prepare`], and also the combined LOD 0 bounds the shipyard HUD picks by.
+pub fn prepare_with_bounds(loader: &CryLoader, reference: &str) -> Option<Prepared> {
+    prepare_inner(loader, reference, true)
+}
+
+fn prepare_inner(loader: &CryLoader, reference: &str, with_bounds: bool) -> Option<Prepared> {
     let prefab = reference.starts_with("prefab://");
     let parts = if prefab {
         prefab::load(reference)
@@ -121,6 +151,7 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
     };
     let mut pieces = Vec::new();
     let mut helpers = HashMap::new();
+    let mut bounds: Option<(Vec3, Vec3)> = None;
     let mut ladder = None;
     for part in parts {
         let options = ModelOptions {
@@ -133,6 +164,14 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
         match loader.prepare_model(&part.model, &options) {
             Ok(model) => {
                 helpers_of(&part, &model.loaded().model, &mut helpers);
+                if with_bounds
+                    && let Some((lo, hi)) = part_bounds(&part, model.loaded().model.as_ref())
+                {
+                    bounds = Some(match bounds {
+                        None => (lo, hi),
+                        Some((a, b)) => (a.min(lo), b.max(hi)),
+                    });
+                }
                 if ladder.is_none() {
                     ladder = ladder_of(&part, &model.loaded().model);
                 }
@@ -152,6 +191,7 @@ pub fn prepare(loader: &CryLoader, reference: &str) -> Option<Prepared> {
         prefab,
         pieces,
         helpers,
+        bounds,
         ladder,
     })
 }
@@ -161,6 +201,7 @@ pub fn spawn(commands: &mut Commands, cry: &mut CryAssets, prepared: Prepared) -
         prefab,
         pieces,
         helpers,
+        bounds: _,
         ladder,
     } = prepared;
     let root = prefab.then(|| {
@@ -397,6 +438,38 @@ mod tests {
                 "{reference}: {ladder:?}"
             );
         }
+    }
+
+    #[test]
+    fn part_bounds_follow_the_part_transform() {
+        let node = Node {
+            name: "hull".into(),
+            chunk_id: 0,
+            parent: None,
+            local: Affine3A::IDENTITY,
+            kind: NodeKind::Mesh,
+            mesh: Some(0),
+            material_name: None,
+            properties: String::new(),
+        };
+        let model = Model {
+            nodes: vec![node],
+            meshes: vec![aa_cry::mesh::MeshData {
+                positions: vec![Vec3::ZERO, Vec3::ONE],
+                ..default()
+            }],
+            ..default()
+        };
+        let part = Part {
+            model: "hull.cgf".into(),
+            material: None,
+            pos: Vec3::new(10.0, 0.0, 0.0),
+            rot: Quat::IDENTITY,
+            scale: Vec3::splat(2.0),
+        };
+        let (lo, hi) = part_bounds(&part, &model).expect("hull bounds");
+        assert!((lo - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-5, "{lo}");
+        assert!((hi - Vec3::new(12.0, 2.0, 2.0)).length() < 1e-5, "{hi}");
     }
 
     #[test]
