@@ -157,14 +157,22 @@ Ships (merged after the checkpoint was written):
   the step. The bottom stands on the terrain or a brush (a dock or a lower deck, the same support query
   movement uses) or starts swimming (never `grounded` in the air). Death is the only native 0xb site
   (`FUN_39137320`: the value reaches 0) and sends `CSUnhang` 0xb alone; mounting, a moving skill, a
-  stance change or a glider does not release a hang. F releases and Space jumps (mode 6). Remote hangers
-  use the `SCHung` target's kind and the climb data; a hull hanger rides the drawn hull. Covered by
-  `examples/ladder_climb`, byte-exact climb tests in `aa-net/src/climb.rs`, the
-  start/stop/top/bottom/moving-hull/rotated-hull/gate/water/death/F-claim tests in `ingame/ladder` and
-  `hud/doodad`, the clip mapping test against the player graph, and remote hanger tests in
-  `ingame/units`. Open (capture-pending): which key produces exit modes 3-9, the exact climb
-  `deltaMovement`/velocity, net/guardrail lateral `y`, top-step distance, camera pitch clamp, and the
-  remote client's own hanger animation consumer. Mount-start while already hanging is not gated by this
+  stance change or a glider does not release a hang. A plain Space jump sends `CSUnhang` 7, the
+  `FUN_39135570` mode-7 back-hop away from the ladder (-2.0 forward, 4.0 up, a -0.3 m nudge), not
+  the mode-6 forward leap; Space with a lateral key held (A/D in the capture) sends mode 4 (local
+  -X) or 5 (local +X) with the -/+2.0, 4.0 and -/+0.3 numbers. The 2026-11-01 original-client
+  capture saw 7 with no lateral input (also with W held) and 4 with a lateral key held; 5 and 6
+  were never captured, and which lateral key gives 4 vs 5 is capture-pending. F release and the
+  bottom exit send 1 here: inferred, since the only native 1 sender is `FUN_39134930` during a
+  running top exit. Remote hangers use the `SCHung` target's kind and the climb data; a hull
+  hanger rides the drawn hull.
+  Covered by `examples/ladder_climb`, byte-exact climb tests in `aa-net/src/climb.rs`, the
+  start/stop/top/bottom/jump/moving-hull/rotated-hull/gate/water/death/F-claim tests in
+  `ingame/ladder` and `hud/doodad`, the clip mapping test against the player graph, and remote
+  hanger tests in `ingame/units`. Open (capture-pending): which lateral key gives mode 4 vs 5 and
+  which input produces modes 3/6/8/9, the exact climb `deltaMovement`/velocity, net/guardrail
+  lateral `y`, top-step distance, camera pitch clamp, and the remote client's own hanger animation
+  consumer. Mount-start while already hanging is not gated by this
   client and not released (the native has no such release); capture-pending.
 
 Still open across these slices: vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and

@@ -4877,12 +4877,12 @@ mod tests {
         assert_eq!(&frame[4..6], &[0xcb, 0]);
         assert_eq!(&frame[6..], &[0x33, 0x22, 0x11, 0xcc, 0xbb, 0xaa]);
 
-        session.command(Command::Unhang { reason: 6 }).await;
+        session.command(Command::Unhang { reason: 7 }).await;
         let n = peer.read_u16_le().await.unwrap();
         let mut frame = vec![0; n as usize];
         peer.read_exact(&mut frame).await.unwrap();
         assert_eq!(&frame[4..6], &[0xcc, 0]);
-        assert_eq!(&frame[6..], &[0x33, 0x22, 0x11, 6, 0, 0, 0]);
+        assert_eq!(&frame[6..], &[0x33, 0x22, 0x11, 7, 0, 0, 0]);
     }
 
     #[tokio::test]

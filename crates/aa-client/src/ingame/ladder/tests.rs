@@ -353,6 +353,102 @@ fn f_grabs_the_climb_doodad_and_sends_the_native_hang_block() {
 }
 
 #[test]
+fn a_plain_jump_off_sends_7_and_carries_away_from_the_ladder() {
+    let mut app = app(0);
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    clear_taps(&mut app);
+    let before = {
+        let mut q = app.world_mut().query::<&Mover>();
+        q.single(app.world()).unwrap().pos
+    };
+    tap(&mut app, "jump");
+    app.update();
+    assert!(ladder_of(&mut app).is_none(), "the jump leaves the ladder");
+    let commands = sent(&mut app);
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 7 })),
+        "CSUnhang 7 (back-hop): {commands:?}"
+    );
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 6 })),
+        "not the mode-6 forward leap: {commands:?}"
+    );
+    let entity = player_entity(&mut app);
+    let carried = *app
+        .world()
+        .get::<super::player::CarriedVelocity>(entity)
+        .expect("the jump carry");
+    // The ladder is at x=0 and the body hangs on +X facing -X, so away is +X.
+    assert!(
+        carried.0.x > 1.9 && carried.0.y.abs() < 1e-6,
+        "the carry points away from the ladder: {:?}",
+        carried.0
+    );
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    assert!((mover.vz - 4.0).abs() < 1e-5, "4.0 m/s up: {}", mover.vz);
+    assert!(
+        mover.pos.x > before.x + 0.25,
+        "the -0.3 m nudge along forward moves away from the ladder: {:?} -> {:?}",
+        before,
+        mover.pos
+    );
+}
+
+#[test]
+fn a_jump_with_a_lateral_key_sends_the_side_hop_and_its_velocity() {
+    // 4 is local -X and 5 local +X (the mode switch); which physical key gives each is
+    // capture-pending, so this pins the left/right action mapping used by `control_ladder`.
+    // A/D (turn) are the capture's keys; Q/E (strafe) are the same lateral intent.
+    for (action, reason, sign) in [
+        ("turnleft", 4, -1.0f32),
+        ("turnright", 5, 1.0),
+        ("moveleft", 4, -1.0),
+        ("moveright", 5, 1.0),
+    ] {
+        let mut app = app(0);
+        tap(&mut app, "do_interaction_1");
+        app.update();
+        clear_taps(&mut app);
+        hold(&mut app, action);
+        tap(&mut app, "jump");
+        app.update();
+        assert!(ladder_of(&mut app).is_none(), "{action}: the jump left");
+        let commands = sent(&mut app);
+        assert!(
+            commands
+                .iter()
+                .any(|c| matches!(c, Command::Unhang { reason: r } if *r == reason)),
+            "{action}: CSUnhang {reason}: {commands:?}"
+        );
+        let entity = player_entity(&mut app);
+        let carried = *app
+            .world()
+            .get::<super::player::CarriedVelocity>(entity)
+            .expect("the jump carry");
+        // Facing -X, the local X axis is +Y: the side velocity is 2.0 m/s along it.
+        assert!(
+            (carried.0.y - sign * 2.0).abs() < 1e-5 && carried.0.x.abs() < 1e-6,
+            "{action}: side velocity {:?}",
+            carried.0
+        );
+        let mut q = app.world_mut().query::<&Mover>();
+        let mover = q.single(app.world()).unwrap();
+        assert!((mover.vz - 4.0).abs() < 1e-5, "{action}: 4.0 m/s up");
+        assert!(
+            (mover.pos.y - sign * 0.3).abs() < 1e-5,
+            "{action}: the 0.3 m side nudge: {:?}",
+            mover.pos
+        );
+    }
+}
+
+#[test]
 fn climbing_moves_up_and_the_top_exit_waits_half_a_second() {
     let mut app = app(0);
     tap(&mut app, "do_interaction_1");

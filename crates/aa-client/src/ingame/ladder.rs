@@ -23,16 +23,28 @@
 //!   (constant). On a ladder of a parented doodad (a ship's side ladder) it also carries the
 //!   `0x20` block with the hull id, the hull-local primary position and the world backup;
 //! * reaching the top starts the exit (local reason 2, no climb bit for its duration; after 0.5 s
-//!   the body steps onto the platform and `CSUnhang` 1 is sent), the bottom stands again
-//!   (`CSUnhang` 1), F lets go (1), Space jumps forward (6, the mode-6 velocities), a vanished
-//!   ladder releases with reason 0 (the 1.2 "my ladder is missing" path) and death releases with
-//!   reason 0xb (`FUN_39137320`, the only native 0xb site).
+//!   the body steps onto the platform and `CSUnhang` 1 is sent), a vanished ladder releases with
+//!   reason 0 (the 1.2 "my ladder is missing" path) and death releases with reason 0xb
+//!   (`FUN_39137320`, the only native 0xb site);
+//! * a plain Space jump sends `CSUnhang` 7, the mode-7 back-hop away from the ladder (`-2.0`
+//!   forward, `4.0` up, a `-0.3 m` nudge along forward), and Space with a lateral key held (A/D
+//!   in the capture) sends the mode-4/5 side hop (`-/+2.0` local X, `4.0` up, `-/+0.3 m` along
+//!   X). The 2026-11-01 original-client capture saw 7 with no lateral input (also with W held)
+//!   and 4 with a lateral key held; 5 and 6 were not captured. Mode 6 is the forward leap
+//!   (`4.5` forward, `7.0` up).
+//!   Which lateral key gives 4 vs 5 is capture-pending: the mode switch says 4 is local -X and 5
+//!   local +X, so the left action sends 4 here.
 //!
-//! Capture-pending (not settled by the decompile): which key produces each of the exit modes
-//! 3-9; the exact `deltaMovement` and velocity while climbing; the lateral `y` of the climb data
-//! on nets and guardrails (this client climbs centred, `y = 0`); the top step distance and the
-//! camera pitch clamp; and how a remote client animates a hanger (the client packet consumer was
-//! not traced). The remote side here uses the `SCHung` target's kind and the climb data.
+//! Inferred (neither captured nor found in the decompile): F releases with reason 1 and the
+//! bottom exit sends reason 1. The only native reason-1 sender is `FUN_39134930`, when the top
+//! exit's `OnLadder` state turns off.
+//!
+//! Capture-pending (not settled by the decompile): which lateral key gives mode 4 vs 5; which
+//! input produces modes 3, 6, 8 and 9; the exact `deltaMovement` and velocity while climbing; the
+//! lateral `y` of the climb data on nets and guardrails (this client climbs centred, `y = 0`); the
+//! top step distance and the camera pitch clamp; and how a remote client animates a hanger (the
+//! client packet consumer was not traced). The remote side here uses the `SCHung` target's kind
+//! and the climb data.
 
 use aa_anim::Animator;
 use aa_net::climb;
@@ -61,9 +73,15 @@ pub const FALLBACK_CLIMB_SPEED: f32 = 1.5;
 pub const TOP_EXIT_SECS: f32 = 0.5;
 /// How far the body steps over the top on the way out (m; capture-pending).
 pub const TOP_STEP: f32 = 0.6;
-/// The mode-6 forward jump (`FUN_39135570`: 4.5 m/s forward, 7.0 m/s up).
-const JUMP_FORWARD: f32 = 4.5;
-const JUMP_UP: f32 = 7.0;
+/// The mode-4/5/7 hop and the mode-6 leap (`FUN_39135570`; constants from the dump:
+/// `DAT_3999cffc` 2.0, `_DAT_3999eda8` 4.0, `DAT_3999ccd0` 0.3, `_DAT_399a26e8` 4.5,
+/// `_DAT_3999f0e4` 7.0).
+const HOP_SPEED: f32 = 2.0;
+const HOP_UP: f32 = 4.0;
+const HOP_NUDGE: f32 = 0.3;
+/// The mode-6 forward leap (no captured trigger).
+const LEAP_FORWARD: f32 = 4.5;
+const LEAP_UP: f32 = 7.0;
 /// How far the bottom exit snaps down (or up) to the ground before it counts as a fall (m).
 const BOTTOM_SNAP: f32 = 0.6;
 
@@ -128,16 +146,55 @@ pub struct Exit {
 
 /// Why the local player left (`CSUnhang` reason, `Player::LeaveLadder`).
 pub mod reason {
-    /// The ladder doodad disappeared.
+    /// The ladder doodad disappeared (`FUN_39137470` "my ladder is missing" -> `FUN_39132ba0(0)`).
     pub const LADDER_MISSING: i32 = 0;
-    /// A generic release / the end of the top exit.
+    /// The end of the top exit: `FUN_39134930` sends it when the exit's `OnLadder` state turns
+    /// off. Our F release and bottom exit also send 1: inferred, with no native site found for
+    /// either.
     pub const RELEASE: i32 = 1;
-    /// The forward jump off (`FUN_39135570` mode 6).
-    pub const FORWARD_JUMP: i32 = 6;
+    /// A jump with the left lateral key held: hop to the local -X side (`FUN_39135570` mode 4).
+    /// Which physical key gives 4 vs 5 is capture-pending (the mode switch fixes -X = 4).
+    pub const LEFT_HOP: i32 = 4;
+    /// A jump with the right lateral key held: hop to the local +X side (`FUN_39135570` mode 5).
+    pub const RIGHT_HOP: i32 = 5;
+    /// The mode-6 forward leap (4.5 forward, 7.0 up, anim `jumpMP01`). No capture and no known
+    /// trigger; kept for the mode table.
+    pub const FORWARD_LEAP: i32 = 6;
+    /// A plain jump off the ladder: the mode-7 back-hop away from it (-2.0 forward, 4.0 up, a
+    /// -0.3 m nudge along forward). Captured for Space with no lateral input, also with W held.
+    pub const JUMP_OFF: i32 = 7;
     /// The unit died while hanging: the value-change callback (`FUN_39137320`) leaves with 0xb
     /// when the value reaches 0. It is the only native 0xb site (no release on mount, skill,
     /// glide or stance).
     pub const LADDER_LOST: i32 = 0xb;
+}
+
+/// One jump off the ladder: the `CSUnhang` reason, the horizontal carry (m/s), the up speed and
+/// the position nudge (m) before the release movement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Jump {
+    reason: i32,
+    velocity: Vec2,
+    nudge: Vec2,
+    up: f32,
+}
+
+/// The jump physics of `Player::LeaveLadder` (`FUN_39135570`): mode 4 hops to the local -X side,
+/// 5 to +X, 6 is the forward leap and 7 the back-hop away from the ladder. `forward` and `right`
+/// are the horizontal game-unit vectors of the climber's facing.
+fn jump_physics(reason: i32, forward: Vec2, right: Vec2) -> Jump {
+    let (dir, speed, nudge, up) = match reason {
+        reason::LEFT_HOP => (-right, HOP_SPEED, HOP_NUDGE, HOP_UP),
+        reason::RIGHT_HOP => (right, HOP_SPEED, HOP_NUDGE, HOP_UP),
+        reason::FORWARD_LEAP => (forward, LEAP_FORWARD, 0.0, LEAP_UP),
+        _ => (-forward, HOP_SPEED, HOP_NUDGE, HOP_UP),
+    };
+    Jump {
+        reason,
+        velocity: dir * speed,
+        nudge: dir * nudge,
+        up,
+    }
 }
 
 /// The clip family of a climb kind.
@@ -718,6 +775,18 @@ pub fn control_ladder(
         actions.pressed("moveforward", 0) as i32 as f32
             - actions.pressed("moveback", 0) as i32 as f32
     };
+    // The lateral key held at the jump picks the side hop. The capture's keys are A/D
+    // (`turnleft`/`turnright`); the strafe pair (`moveleft`/`moveright`) is the same lateral
+    // intent. Capture-pending: which key gives 4 vs 5. The mode switch fixes 4 = local -X and
+    // 5 = local +X, so the left action sends 4 (flip this sign if a one-key capture says
+    // otherwise).
+    let lateral = if typing {
+        0.0
+    } else {
+        let left = actions.pressed("moveleft", 0) || actions.pressed("turnleft", 0);
+        let right = actions.pressed("moveright", 0) || actions.pressed("turnright", 0);
+        right as i32 as f32 - left as i32 as f32
+    };
 
     if dead {
         world.claim.0 = None;
@@ -939,12 +1008,18 @@ pub fn control_ladder(
     let facing = facing_of_normal(normal);
 
     if jump {
-        let forward = player::forward(facing);
-        mover.vz = JUMP_UP;
+        let jump_reason = match lateral {
+            side if side < 0.0 => reason::LEFT_HOP,
+            side if side > 0.0 => reason::RIGHT_HOP,
+            _ => reason::JUMP_OFF,
+        };
+        let jump = jump_physics(jump_reason, player::forward(facing), player::right(facing));
+        mover.pos += Vec3::new(jump.nudge.x, jump.nudge.y, 0.0);
+        mover.vz = jump.up;
         mover.grounded = false;
         commands
             .entity(entity)
-            .insert(player::CarriedVelocity(forward * JUMP_FORWARD));
+            .insert(player::CarriedVelocity(jump.velocity));
         release(
             &mut commands,
             entity,
@@ -952,7 +1027,7 @@ pub fn control_ladder(
             &mut motion,
             &mut state,
             &mut out,
-            reason::FORWARD_JUMP,
+            jump.reason,
         );
         return;
     }
