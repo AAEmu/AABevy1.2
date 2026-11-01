@@ -881,10 +881,24 @@ def attach_and_hide(mcp: Mcp, pid: int) -> None:
     log("attached and hidden", pid)
 
 
+def current_stage(mcp: Mcp, pid: int, timeout: float = 240.0) -> str:
+    end = time.monotonic() + timeout
+    value = ""
+    while time.monotonic() < end:
+        try:
+            value = mcp.text("client_lua", pid=pid, target="ui",
+                             code="return X2LoginCharacter and X2LoginCharacter:GetCurrentStage()").strip()
+        except Exception:
+            value = ""
+        if value in ("0", "3", "4"):
+            return value
+        time.sleep(0.5)
+    raise RuntimeError("login stage did not become readable: " + value)
+
+
 def ensure_world(mcp: Mcp, pid: int, character: str, ability: int,
                  create: bool, timeout: float = 240.0) -> str:
-    stage = mcp.text("client_lua", pid=pid, target="ui",
-                     code="return X2LoginCharacter and X2LoginCharacter:GetCurrentStage()").strip()
+    stage = current_stage(mcp, pid, timeout)
     if stage == "3":
         mcp.text("client_lua", pid=pid, target="ui", code="X2World:EnterWorld(1,0) return 1")
         wait_stage(mcp, pid, 4, timeout)
