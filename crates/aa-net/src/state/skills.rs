@@ -14,6 +14,13 @@ pub use native_timers::{NativeCooldown, NativeCooldownOrigin};
 use crate::session::Event;
 use crate::skill::{Cooldown, SkillTarget, COOLDOWN_LIMIT};
 
+/// `skills.id` of the basic melee attack, the only skill the client's auto attack latch (`X2Unit + 0x3ad5`) covers
+/// (`DAT_39ac769c` = 2).
+const MELEE_ATTACK: u32 = 2;
+/// The timeline id an auto attack `SCSkillStarted` carries (`DAT_3a177710` = 0): `OnSkillStarted` sets `+0x3ad5` and starts
+/// no skill (`FUN_3939a810`, 750346).
+const AUTO_ATTACK_TL: u16 = 0;
+
 /// A skill the player has learned.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KnownSkill {
@@ -107,6 +114,10 @@ resource! {
         /// (the length of the global cooldown is that skill's `custom_gcd`, or 1 s with `default_gcd`).
         pub last_cast: Option<Instant>,
         pub last_cast_skill: u32,
+        /// The auto attack latch (`X2Unit + 0x3ad5`): `SCSkillStarted` for skill 2 with timeline 0 sets it
+        /// (`OnSkillStarted`, `FUN_3939a810` 750346) and `SCSkillStopped` clears it (`FUN_39398410` 748541). While it is
+        /// set, a skill 2 request returns without sending (`FUN_393989e0` 748866).
+        pub auto_attack: bool,
         /// Cooldown tags reset by the server (`SkillCooldownReset::tag_id`) and when: a skill with
         /// that `cooldown_tag_id` used before that moment is ready again.
         pub reset_tags: Vec<(u32, Instant)>,
@@ -346,6 +357,13 @@ impl Skills {
                 }
                 self.last_failure = Some(SkillFailure { skill_id: s.skill_id, result: s.result, value: s.result_value, at: now });
             }
+            Event::SkillStarted(s) if s.skill_id == MELEE_ATTACK && s.tl == AUTO_ATTACK_TL => {
+                // The auto attack's special timeline: `OnSkillStarted` sets the latch and starts no skill (no cast, no GCD).
+                if !self.is_own(s.caster.obj_id) || self.auto_attack {
+                    return false;
+                }
+                self.auto_attack = true;
+            }
             Event::SkillStarted(s) => {
                 self.casting.insert(
                     s.caster.obj_id,
@@ -422,11 +440,15 @@ impl Skills {
                 return self.end_cast(*tl);
             }
             Event::SkillStopped { obj_id, skill_id } => {
+                let latched = *skill_id == MELEE_ATTACK && self.is_own(*obj_id) && self.auto_attack;
+                if latched {
+                    self.auto_attack = false;
+                }
                 if self.casting.get(obj_id).is_some_and(|c| c.skill_id == *skill_id) {
                     self.casting.remove(obj_id);
-                } else {
-                    return false;
+                    return true;
                 }
+                return latched;
             }
             Event::PlotEvent(p) => {
                 // A step with a `GlobalCooldown` effect restarts the player's global cooldown (the server's
@@ -471,6 +493,7 @@ impl Skills {
                 let lost_context = self.obj_id != 0 && ids.contains(&self.obj_id);
                 if lost_context {
                     self.native_gm_mode1 = None;
+                    self.auto_attack = false;
                     self.obj_id = 0;
                 }
                 for id in ids {
@@ -577,6 +600,7 @@ impl PartialEq for Skills {
             && self.mount_last_cast == o.mount_last_cast
             && self.last_cast == o.last_cast
             && self.last_cast_skill == o.last_cast_skill
+            && self.auto_attack == o.auto_attack
             && self.reset_tags == o.reset_tags
             && self.received_skill_cooldowns == o.received_skill_cooldowns
             && self.received_tag_cooldowns == o.received_tag_cooldowns
@@ -607,6 +631,29 @@ mod tests {
         assert!(s.casting_of(9).is_none());
         assert!(s.casting_of(5).is_some() && s.casting_of(10).is_some());
         assert!(!s.apply(&Event::UnitsRemoved(vec![9, 11])));
+    }
+
+    #[test]
+    fn the_auto_attack_latch_follows_the_special_skill_start_and_stop() {
+        let mut s = Skills { obj_id: 5, ..Skills::default() };
+        // an ordinary skill 2 cast (timeline 1) starts a cast and leaves the latch alone
+        s.apply(&started(2, 1, 5, 0, 0));
+        assert!(!s.auto_attack);
+        assert!(s.casting_of(5).is_some());
+        // timeline 0: `OnSkillStarted` sets `+0x3ad5` and starts no skill
+        assert!(s.apply(&started(2, 0, 5, 0, 0)));
+        assert!(s.auto_attack);
+        assert!(!s.apply(&started(2, 0, 5, 0, 0)), "already latched");
+        // another unit's or another skill's start does not latch the player
+        assert!(!s.apply(&started(2, 0, 9, 0, 0)));
+        s.apply(&started(3, 0, 5, 0, 0));
+        assert!(s.auto_attack);
+        // `SCSkillStopped` for skill 2 clears it; another skill or another unit does not
+        s.apply(&Event::SkillStopped { obj_id: 5, skill_id: 3 });
+        s.apply(&Event::SkillStopped { obj_id: 9, skill_id: 2 });
+        assert!(s.auto_attack);
+        assert!(s.apply(&Event::SkillStopped { obj_id: 5, skill_id: 2 }));
+        assert!(!s.auto_attack);
     }
 
     fn started(skill_id: u32, tl: u16, caster: u32, cast_ms: u32, res: u8) -> Event {

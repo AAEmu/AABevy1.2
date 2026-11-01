@@ -194,9 +194,11 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   combat idle. The rules below are the **decompile** (`x2game.dll.c`), not a timing read from our own server's replies:
   * `request_skill` reads the player's `UseSkill` (the key), finds the weapon the skill is played with (`skill_weapon`: the clips of
     its `SkillVisual`, the first plot step, the carried blade for the basic attack, which has no clip in the data) and, when it is not
-    out in that stance already, inserts `Drawn` and the combat idle **at once**. The client changes the weapon on the request path:
-    `FUN_39390f80` calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610` (skill 2,
-    `+0x5fc5`) or `FUN_39354640` (another skill, `+0x5fc6`). The server's events are **not** held: the clip starts on
+    out in that stance already, inserts `Drawn` **at once**. The client changes the weapon on the request path, for the local
+    player only: `FUN_39390f80` (742553; called from `FUN_393989e0`'s skill 2 branch, 748885, and the click attack
+    `FUN_393923c0`, 743692) calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610`
+    (skill 2, `+0x5fc5`) or `FUN_39354640` (another skill, `+0x5fc6`) only when that skill's `start_autoattack` byte (`+0x158`)
+    is set. `SCSkillStarted` starts no pulse and no stance. The server's events are **not** held: the clip starts on
     `SCSkillFired` and the damage on `SCUnitDamaged` when they arrive. The older 0.6 s `DRAW_LEAD` and the K2 report's +280 ms
     are not client timers: the K2 first fire was our server's `start_auto_skill` (CONT), and a localhost reply lands in the same
     client frame (the audit's F2). A refused skill (`cancel_draw`) puts the weapon back.
@@ -207,16 +209,20 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
     the fist combat idle (`Stance::Fist`). The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
     shared by the characters of a skeleton).
   * The **battle flag** (`combat.rs` `CombatStance`, `X2Unit + 0x3bba`). Set by `SCCombatEngaged` (`OnCombatEngaged`,
-    `FUN_391d69a0` -> `FUN_390b36f0`) and by a blow dealt or taken (`FUN_39391670` from the damage handler, both sides; the heal
-    handler also re-sets an engaged target, `FUN_393992d0`); cleared only by `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60`
-    -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`). It is **not** set by a skill start, and it has no timer.
+    `FUN_391d69a0` -> `FUN_390b36f0`) and by a real blow dealt or taken (`FUN_39391670`, 742913, from the damage handler, both
+    sides): the decompile requires a caster (`+0x50 != 0`), a hit (`+0x6e != 0`: not a miss or a zero), and both units alive
+    (neither `+0x3c26` nor `+0x3c27`). A heal handler also re-sets an engaged target (`FUN_393992d0`). It is cleared only by
+    `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`); a
+    clear on a unit that is not flagged changes nothing. It is **not** set by a skill start, and it has no timer.
   * The **10 s deadline** (`CombatIdle`, `X2Unit + 0x5fc0` / `+0x5fc4`, `FUN_39355ee0`). Every update, while the battle flag is
-    set, `+0x5fc0` = now; a skill request sets `+0x5fc5` / `+0x5fc6` for 1000 ms and those flags refresh `+0x5fc0` too; a skill
-    used while the derived flag is already set only refreshes it (`FUN_393545e0`). The derived flag is
-    `now - +0x5fc0 <= DAT_39ac7424` = **10000 ms** (read from `x2game_unpacked.dll` at file offset `0xad5a24`); on its falling edge
-    `FUN_39355ee0` writes `false` to the model's `+0x428` and zeroes `+0x5fc0`. It does **not** clear the battle flag and does not
-    put the weapon away. So the model keeps `onehand_combat_idle` for 10 s after the last engagement or skill use, which is the
-    K2 state after the clear (CAP: the weapon byte `+0x3ba8` was still 1, and the 240 s run shows no sheathe).
+    set, `+0x5fc0` = now; a skill request on the local player's path sets `+0x5fc5` / `+0x5fc6` for 1000 ms and those flags
+    refresh `+0x5fc0` too; a skill used while the derived flag is already set only refreshes it (`FUN_393545e0`). The derived
+    flag is `now - +0x5fc0 <= DAT_39ac7424` = **10000 ms** (read from `x2game_unpacked.dll` at file offset `0xad5a24`); on its
+    falling edge `FUN_39355ee0` writes `false` to the model's `+0x428` and zeroes `+0x5fc0`. Putting the weapon away zeroes
+    `+0x5fc0` too (`FUN_39360920` with weapon 0; `FUN_39362690` on the resurrect reset, from `OnCharacterResurrected` 363182;
+    `FUN_39362c70`), and so does a dead unit in Bevy. It does **not** clear the battle flag. So the model keeps
+    `onehand_combat_idle` for 10 s after the last engagement or skill use, which is the K2 state after the clear (CAP: the
+    weapon byte `+0x3ba8` was still 1, and the 240 s run shows no sheathe).
   * The K2 rows: the byte went 1 -> 0 at t=59,322, 0.772 s after the recorder cleared the target and 0.613 s after the
     no-target press. That gap is our server's `SCCombatCleared` (CONT), not a client timer. The no-target press sent no
     `CSStartSkill` (the client's own target check, `FUN_393be4e0`), and our server's clear is what ended the flag.
@@ -266,21 +272,27 @@ the upper body, the legs running).
 The decompile settles the client side; the K2 capture (2026-11-01, original 1.2 client against our server) supplies the outbound
 packets. The swing timing and cadence in that capture are our server's (CONT):
 
-* **Every press sends `CSStartSkill 2`.** CAP: the K2 server log has a `CSStartSkill 2` for every press, including the re-press at
-  68,588 (10:27:41) and the press at 11.2 m (10:28:30). The client has **no local toggle**: its only swallow is the internal
-  auto attack flag `+0x3ad5` (`FUN_393989e0` returns for skill 2 while it is set), which the server's `SCSkillStopped` clears
-  (`OnSkillStopped` -> `FUN_39398410`); a second press does not clear it. Bevy sends a `SkillPressed` on every press
-  (`hud::panels::use_slot`).
+* **Every press sends `CSStartSkill 2` unless the auto attack latch is set.** CAP: the K2 server log has a `CSStartSkill 2` for
+  every press, including the re-press at 68,588 (10:27:41) and the press at 11.2 m (10:28:30). The client has **no local
+  toggle**: its only swallow is the internal auto attack flag `+0x3ad5` (`FUN_393989e0`, 748866, returns 1 for skill 2 while it
+  is set). `SCSkillStarted` for skill 2 with the special timeline 0 sets it (`OnSkillStarted` -> `FUN_3939a810`, 750346), and
+  `SCSkillStopped` clears it (`OnSkillStopped` -> `FUN_39398410`, 748541); a second press does not clear it. Our server sends no
+  `SCSkillStarted` for skill 2, which is why every K2 press went out. Bevy models the latch (`aa-net` `Skills::auto_attack`):
+  `hud::panels::use_slot` drops a skill 2 press without an alert while it is set, and sends again once `SCSkillStopped` clears
+  it.
 * **The press starts the swing loop on the server.** CONT: `start_auto_skill` / `schedule_auto_attack` repeat skill 2 every weapon
   speed (the one-hand sword's `holdables.speed` 2000 ms), and every swing reaches the client as `SCSkillFired` with the clip id
   (`fire_anim_id`). The K2 clips at 10,086; 12,085; ... and the +280 ms first clip are that server timer, not a client rule. The
   client plays each `SCSkillFired` clip; Bevy does the same and has no repeat timer and no first-clip delay.
 * **Walking sends nothing.** CAP: no packet while the K2 character walked. The swings stop because our server's tick refuses the
   damage past the weapon's range (CONT), not because the client cancels anything; Bevy has no stop-on-walk.
-* **Out of range is not refused.** The decompile's skill 2 path checks only `FUN_393be4e0` (`CanAutoAttackTargetUnit`: a living,
-  attackable unit; **no distance test**) and then sends the request. The K2 press at 11.2 m sent `CSStartSkill 2` (CAP); our
-  server's reach tick did nothing with it (CONT). Bevy's `precheck_auto_attack` checks only the target and sends out-of-range
-  presses; a press with no valid target sends nothing and shows the client's refusal (`UseFailed`).
+* **Out of range is a setting-dependent send.** The skill 2 path checks a valid auto attack target (`FUN_393be4e0`,
+  `CanAutoAttackTargetUnit`: a living, attackable unit) and then range-checks it (`FUN_39397f90`, 748316, through
+  `FUN_39397eb0`). Out of range, when the setting behind `DAT_39d1fba4->+8()` returns 1, it calls `FUN_39393920` and returns
+  without sending (748886-748889); otherwise it falls through to `FUN_393925c0` and sends. The K2 press at 11.2 m sent
+  `CSStartSkill 2` (CAP), so that client's setting was not 1 there; the setting's default is not provable from the decompile.
+  Bevy's `precheck_auto_attack` checks the target and keeps sending out-of-range presses; a press with no valid target sends
+  nothing and shows the client's refusal (`UseFailed`).
 * **GCD-exempt: inferred.** The K2 cooldown-manager pair stays 0/1000 across every press (CAP, client memory), but the capture
   cannot tell whether the pair is written at the request or on our server's reply (F2), and the skill 2 path has no explicit GCD
   test, so `uses_gcd` returning false for the basic attacks is an inference, not a decompile rule. The data's `default_gcd` for

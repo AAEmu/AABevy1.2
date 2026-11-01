@@ -289,6 +289,9 @@ pub struct SkillVisual {
     /// `skills.casting_time` / `channeling_time` (ms): what the dev sweep (`AA_COMBAT_SWEEP`) plays the skill with.
     pub cast_ms: u32,
     pub channel_ms: u32,
+    /// `skills.start_autoattack`: the skill starts the auto attack (`X2SkillDesc + 0x158`, the byte `FUN_39390f80` tests
+    /// before it draws the weapon and sets the `+0x5fc6` combat idle pulse).
+    pub start_autoattack: bool,
 }
 
 impl SkillVisual {
@@ -475,6 +478,12 @@ impl SkillBook {
     /// The looks of a skill; `None` when the database does not know it.
     pub fn skill(&self, id: u32) -> Option<Arc<SkillVisual>> {
         self.inner().skill(id)
+    }
+
+    /// `skills.start_autoattack` (`X2SkillDesc + 0x158`): the skill's request draws the weapon and pulses the combat idle
+    /// (`FUN_39390f80` -> `FUN_39354640`).
+    pub(crate) fn start_autoattack(&self, id: u32) -> bool {
+        self.skill(id).is_some_and(|v| v.start_autoattack)
     }
 
     /// What a plot step plays; `None` when it has no clip, effect or projectile.
@@ -857,7 +866,7 @@ impl Inner {
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
                         channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
-                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't' \
+                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -874,11 +883,12 @@ impl Inner {
                         CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0, not_swim: int(r, 22).unwrap_or(0) != 0 },
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                         (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
+                        int(r, 23).unwrap_or(0) != 0,
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool))| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), start_autoattack)| {
             let [start, fire, twohand, dual] = anims;
             let tools = [self.tool(main_tool), self.tool(off_tool)];
             Arc::new(SkillVisual {
@@ -902,6 +912,7 @@ impl Inner {
                 plot,
                 cast_ms,
                 channel_ms,
+                start_autoattack,
             })
         });
         self.skills.insert(id, visual.clone());

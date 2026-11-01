@@ -613,9 +613,13 @@ impl Env<'_> {
     }
 
     /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
-    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, or the last press has no answer yet.
+    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, the last press has no answer yet, or the auto attack
+    /// latch (`X2Unit + 0x3ad5`) is set (`FUN_393989e0` returns 1 for skill 2 while it is).
     pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
         if self.casting(skill) {
+            return true;
+        }
+        if self.is_auto_attack(skill) && self.skills.is_some_and(|s| s.auto_attack) {
             return true;
         }
         self.uses_gcd(skill) && (self.gcd_left(skill) > GCD_SLACK_MS || self.skills.is_some_and(|s| flight.pending(s, Instant::now())))
@@ -628,10 +632,13 @@ impl Env<'_> {
         self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
     }
 
-    /// What refuses a basic attack before it is sent. The 1.2 skill 2 path (`FUN_393989e0`) checks only a valid auto attack
-    /// target (`FUN_393be4e0`, `CanAutoAttackTargetUnit`: a living unit that can be attacked) and shows its own error text; it
-    /// does not test the distance. The K2 press at 11.2 m still sent `CSStartSkill 2`, and the server's reach tick is what
-    /// stopped the damage. No mana, cooldown or GCD test is applied here either.
+    /// What refuses a basic attack before it is sent. The 1.2 skill 2 path (`FUN_393989e0`) checks a valid auto attack
+    /// target (`FUN_393be4e0`, `CanAutoAttackTargetUnit`: a living unit that can be attacked) and shows its own error text.
+    /// It also range-checks the target (`FUN_39397f90`, 748316, through `FUN_39397eb0`): out of range, when the setting behind
+    /// `DAT_39d1fba4->+8()` returns 1, it calls `FUN_39393920` and returns without sending (748886-748889); otherwise it falls
+    /// through to `FUN_393925c0` and sends. The K2 press at 11.2 m sent `CSStartSkill 2` (CAP), so that client's setting was not
+    /// 1 there; the setting's default is not provable from the decompile, so the send is kept. No mana, cooldown or GCD test is
+    /// applied here either.
     pub fn precheck_auto_attack(&self, skill: u32) -> Option<Fail> {
         let r = self.rules()?.skills.get(&skill)?;
         if self.dead() {
@@ -974,11 +981,14 @@ mod tests {
         assert!(Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(18132));
     }
 
-    /// The K2 client's outbound packets: a press at 11.2 m still sent `CSStartSkill 2` (the server's reach tick stopped the
-    /// damage), and a second press sent another one (no toggle). The decompile's skill 2 path checks only a valid auto attack
-    /// target (`FUN_393be4e0`), never the distance. A press without a target sends nothing and shows the client's own refusal.
+    /// The K2 client's outbound packets: a press at 11.2 m still sent `CSStartSkill 2`, and a second press sent another one.
+    /// The client's only swallow is the auto attack latch (`X2Unit + 0x3ad5`, `FUN_393989e0`): `SCSkillStarted` for skill 2
+    /// with timeline 0 sets it (`OnSkillStarted`, `FUN_3939a810` 750346) and `SCSkillStopped` clears it (`FUN_39398410`
+    /// 748541). Our server sends no `SCSkillStarted` for skill 2, which is why the K2 presses all went out. The range check is
+    /// `FUN_39397f90`: an out-of-range press is sent unless the `DAT_39d1fba4` setting returns 1. A press without a target
+    /// sends nothing and shows the client's own refusal.
     #[test]
-    fn an_out_of_range_basic_attack_is_sent_and_a_second_press_goes_out_again() {
+    fn a_basic_attack_press_is_sent_unless_the_auto_attack_latch_is_set() {
         use aa_net::state::{ActionBar, Target};
         use bevy::ecs::message::Messages;
         use bevy::prelude::{App, MessageWriter, MinimalPlugins, Res, Update};
@@ -999,11 +1009,12 @@ mod tests {
             target: Res<Target>,
             bar: Res<ActionBar>,
             inventory: Res<Inventory>,
+            skills: Res<Skills>,
             mut net: MessageWriter<SkillPressed>,
             mut failed: MessageWriter<UseFailed>,
         ) {
             let snap = TargetSnap { obj_id: 77, hp: 100, max_hp: 100, relation: "hostile", ..Default::default() };
-            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: target.obj_id.map(|_| &snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: None, buffs: &[], inventory: None };
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: target.obj_id.map(|_| &snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: Some(&skills), buffs: &[], inventory: None };
             use_slot(press.0, &env, &InFlight::default(), &bar, &inventory, &target, &mut net, &mut failed);
         }
         let mut g = game(Rules::default().with_skill(2, melee()));
@@ -1017,6 +1028,7 @@ mod tests {
             .insert_resource(Fixture { game: g, me: me() })
             .insert_resource(target)
             .insert_resource(bar)
+            .insert_resource(Skills { obj_id: 5, ..Skills::default() })
             .init_resource::<Inventory>()
             .add_message::<SkillPressed>()
             .add_message::<UseFailed>()
@@ -1030,13 +1042,29 @@ mod tests {
             let mut m = app.world_mut().resource_mut::<Messages<UseFailed>>();
             m.drain().count()
         };
+        let started = || {
+            aa_net::Event::SkillStarted(aa_net::skill::SkillStarted {
+                skill_id: 2,
+                tl: 0,
+                caster: aa_net::buff::BuffCaster { kind: 0, obj_id: 5 },
+                target: aa_net::skill::SkillTarget::unit(77),
+                raw_caster: aa_net::SkillCasterData::Unit(5),
+                raw_target: aa_net::skill::SkillTargetData::Unit(77),
+                cast_ms: 0,
+                base_cast_ms: 0,
+                synergy: 0,
+                result: 0,
+                result_value: 0,
+                raw_result: Default::default(),
+            })
+        };
         app.update();
         let far = sent(&mut app);
         assert_eq!(far.len(), 1, "out of reach is still sent: {far:?}");
         assert_eq!((far[0].skill, far[0].target_obj_id), (2, 77));
         assert!(!far[0].gcd, "the auto attack starts no global cooldown (inferred)");
         assert_eq!(failed(&mut app), 0);
-        // walking does not change the send, and a re-press is another start (the client has no toggle)
+        // walking does not change the send, and a re-press is another start (no toggle, and no latch yet)
         app.world_mut().insert_resource(Press(1, 2.0));
         app.update();
         let first = sent(&mut app);
@@ -1045,6 +1073,18 @@ mod tests {
         app.update();
         let second = sent(&mut app);
         assert_eq!(second.len(), 1, "the second press is sent again: no toggle ({second:?})");
+        // an `SCSkillStarted` for skill 2 with timeline 0 sets the latch: the next press is swallowed without an alert
+        app.world_mut().resource_mut::<Skills>().apply(&started());
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        assert!(sent(&mut app).is_empty(), "the auto attack latch swallows the press");
+        assert_eq!(failed(&mut app), 0, "and shows no refusal");
+        // `SCSkillStopped` clears it and the next press is sent again
+        app.world_mut().resource_mut::<Skills>().apply(&aa_net::Event::SkillStopped { obj_id: 5, skill_id: 2 });
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        let after = sent(&mut app);
+        assert_eq!(after.len(), 1, "after SCSkillStopped the press is sent again: {after:?}");
         // the target is gone: the client's own target check refuses and says why
         app.world_mut().resource_mut::<Target>().obj_id = None;
         app.world_mut().insert_resource(Press(1, 2.0));
