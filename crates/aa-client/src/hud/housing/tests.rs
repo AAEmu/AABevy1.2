@@ -59,6 +59,7 @@ fn design(id: u32, always_public: bool) -> super::super::data::housing::HousingT
         deco_limit: 40,
         housing_deco_limit_id: 10,
         binding_doodads: 2,
+        is_sellable: true,
         always_public,
         ..default()
     }
@@ -81,6 +82,140 @@ fn open(state: &State, owner: u32, all: i32, current: i32) {
         view_type: Some("house"),
         always_public: false,
     });
+}
+
+fn housing_unit(obj_id: u32, tl_id: u16, design: u32, x: f32, y: f32) -> aa_net::Unit {
+    aa_net::Unit {
+        bounty_money: None,
+        pvp_honor: 0,
+        pvp_kills: 0,
+        obj_id,
+        name: "Farm".into(),
+        kind: aa_net::model::UnitKind::Housing {
+            tl_id,
+            template_id: design,
+            build_step: -1,
+        },
+        owner_name: "Owner".into(),
+        pos: aa_net::Pos::new(x, y, 100.0),
+        rotation: [0.0; 3],
+        scale: 1.0,
+        level: 1,
+        model_id: 1083,
+        equipment: default(),
+        model_params: default(),
+        hp: 100,
+        mp: 0,
+        max_hp: 100,
+        max_mp: 0,
+        dead: false,
+        race_gender: 0,
+        movement: None,
+        faction_id: 0,
+        expedition_id: 0,
+        appellation: 0,
+        flags: 0,
+        gm_modes: [0; 4],
+        skills: vec![],
+        passive_buffs: vec![],
+        ability_exp: vec![],
+        active_abilities: vec![],
+        buffs: vec![],
+        anim_action: 0,
+        house_posture: None,
+        turret: None,
+        state_attachments: None,
+        attached_to: None,
+        doodad_bond: None,
+    }
+}
+
+fn house_resource(snapshot: HouseSnapshot) -> Houses {
+    let mut houses = Houses::default();
+    houses.by_tl_id.insert(
+        snapshot.tl_id,
+        aa_net::housing::House {
+            snapshot,
+            demolished: false,
+            build_pay: None,
+            tax: None,
+            sale: None,
+        },
+    );
+    houses
+}
+
+fn app_with_hud(
+    rt: UiRuntime,
+    bridge: Shared,
+    units: Units,
+    houses: Houses,
+    inventory: Inventory,
+) -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_message::<NetCommand>()
+        .add_message::<NetEvent>()
+        .add_message::<BuilderSignal>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<HudPointerOverUi>()
+        .insert_resource(units)
+        .insert_resource(houses)
+        .insert_resource(Doodads::default())
+        .insert_resource(inventory)
+        .init_resource::<aa_net::Shipyards>()
+        .init_resource::<Builder>()
+        .insert_non_send(HudBridge(bridge))
+        .insert_non_send(rt)
+        .add_systems(Update, sync);
+    app
+}
+
+fn lua(app: &App, code: &str) {
+    app.world()
+        .get_non_send::<UiRuntime>()
+        .expect("the UI runtime")
+        .lua
+        .load(code)
+        .exec()
+        .unwrap_or_else(|e| {
+            panic!(
+                "house_sale lua: {e}
+{code}"
+            )
+        });
+}
+
+fn events(app: &App) -> Vec<String> {
+    let names: String = app
+        .world()
+        .get_non_send::<UiRuntime>()
+        .expect("the UI runtime")
+        .lua
+        .load("local t = {} for i = 1, #EVENTS do t[i] = EVENTS[i][1] end return table.concat(t, ',')")
+        .eval()
+        .unwrap_or_default();
+    names
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn event_arg(app: &App, index: usize) -> String {
+    app.world()
+        .get_non_send::<UiRuntime>()
+        .expect("the UI runtime")
+        .lua
+        .load(format!("return tostring(EVENTS[{index}][2] or '')"))
+        .eval()
+        .unwrap_or_default()
+}
+
+fn feed(app: &mut App, event: Event) {
+    app.world_mut()
+        .resource_mut::<Messages<NetEvent>>()
+        .write(NetEvent(event));
 }
 
 fn spawn(owner: u32, family: u32, expedition: u32) -> Box<aa_net::PlayerSpawn> {
@@ -174,8 +309,12 @@ fn the_getters_answer_for_the_house_interacted_with() -> mlua::Result<()> {
 
 #[test]
 fn the_setters_send_what_changed_for_the_owner_only() -> mlua::Result<()> {
-    let (rt, state) = setup();
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state) = setup_with(game);
     open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    state.0.borrow_mut().me_name = "Self".into();
     rt.lua
         .load(
             r#"
@@ -192,17 +331,38 @@ fn the_setters_send_what_changed_for_the_owner_only() -> mlua::Result<()> {
     let commands = std::mem::take(&mut state.0.borrow_mut().commands);
     assert_eq!(
         format!("{commands:?}"),
-        format!("{:?}", vec![
-            Command::House(HouseCommand::ChangePermission { tl: 7, permission: 2 }),
-            Command::House(HouseCommand::AllowRecover { tl: 7 }),
-            Command::House(HouseCommand::ChangeName { tl: 7, name: "Home".into() }),
-            Command::House(HouseCommand::Sell { tl: 7, money_amount: 10_000, sell_to: String::new() }),
-            Command::UseSkill { skill_id: DEMOLISH_SKILL, target_obj_id: 900 },
-        ])
+        format!(
+            "{:?}",
+            vec![
+                Command::House(HouseCommand::ChangePermission {
+                    tl: 7,
+                    permission: 2
+                }),
+                Command::House(HouseCommand::AllowRecover { tl: 7 }),
+                Command::House(HouseCommand::ChangeName {
+                    tl: 7,
+                    name: "Home".into()
+                }),
+                Command::House(HouseCommand::Sell {
+                    tl: 7,
+                    money_amount: 10_000,
+                    sell_to: String::new()
+                }),
+                Command::UseSkill {
+                    skill_id: DEMOLISH_SKILL,
+                    target_obj_id: 900
+                },
+            ]
+        ),
+        "notices: {:?}",
+        state.0.borrow().notices
     );
+    assert_eq!(DEMOLISH_SKILL, 12_945, "DAT_39ac99e0: the 1.2 client's demolish skill");
     // someone else's house: nothing goes out
     open(&state, 5, 0, 0);
-    rt.lua.load("X2House:SetHousePermission(3) X2House:Demolish() X2House:SetHouseName('Mine')").exec()?;
+    rt.lua
+        .load("X2House:SetHousePermission(3) X2House:Demolish() X2House:SetHouseName('Mine')")
+        .exec()?;
     assert!(state.0.borrow().commands.is_empty());
     Ok(())
 }
@@ -707,6 +867,824 @@ fn the_tax_event_keeps_the_native_order_and_raw_weeks() -> mlua::Result<()> {
         .exec()?;
     fire_tax(-1, true);
     rt.lua.load("assert(TAX[4] == -1, tostring(TAX[4])) assert(TAX[5] == true)").exec()?;
+    Ok(())
+}
+
+/// `FUN_3932C640`'s gates, in their order. Each refusal shows its `ERROR_MSG` key and sends nothing; the
+/// passing click sends exactly one `CSSellHouse`.
+#[test]
+fn the_sell_gates_refuse_in_the_native_order() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let mut castle = design(172, false);
+    castle.category_id = 2;
+    game.housing.housings.insert(172, castle);
+    let mut unsellable = design(173, false);
+    unsellable.is_sellable = false;
+    game.housing.housings.insert(173, unsellable);
+    let (rt, state) = setup_with(game);
+    let sell = |name: &str| {
+        let code = format!("X2House:SetHouseForSale(\"1\", \"0\", \"0\", \"{name}\")");
+        rt.lua.load(code).exec().unwrap();
+    };
+    let take = || {
+        let notices = std::mem::take(&mut state.0.borrow_mut().notices);
+        let commands = std::mem::take(&mut state.0.borrow_mut().commands);
+        state.0.borrow_mut().pending = None;
+        (notices, commands)
+    };
+    state.0.borrow_mut().me_name = "Self".into();
+
+    // Not the owner: 0x282, before every other test.
+    open(&state, 5, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_NOT_OWNER",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // A castle category (2..=5, 14): 0x283.
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().current.as_mut().unwrap().design = 172;
+    state.0.borrow_mut().appraisals = 1;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_CASTLE",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // Flag 0 and fewer actions than the design: 0x29c.
+    open(&state, 42, 20, 12);
+    state.0.borrow_mut().appraisals = 1;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_UNDER_CONSTRUCTION",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // A price already set: 0x286.
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 1_000_000;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_ALREADY_FOR_SALE",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // The design is not sellable: 0x284.
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    state.0.borrow_mut().current.as_mut().unwrap().design = 173;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_TYPE",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // A design missing from `housings`: `FUN_3963B390` returns 0 and the native returns silently.
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    state.0.borrow_mut().current.as_mut().unwrap().design = 999;
+    sell("");
+    let (notices, commands) = take();
+    assert!(notices.is_empty(), "{notices:?}");
+    assert!(commands.is_empty());
+
+    // Not enough appraisal certificates: 0x287 (1 gold needs one).
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 0;
+    sell("");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_AS_NOT_ENOUGH_SEAL",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // Selling to oneself: 0x2a9.
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().appraisals = 1;
+    sell("Self");
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_SELL_TO_ONESELF",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // The passing click: one CSSellHouse, 1 gold in copper.
+    sell("");
+    let (notices, commands) = take();
+    assert!(notices.is_empty(), "{notices:?}");
+    assert_eq!(
+        format!("{commands:?}"),
+        format!(
+            "{:?}",
+            vec![Command::House(HouseCommand::Sell {
+                tl: 7,
+                money_amount: 10_000,
+                sell_to: String::new()
+            })]
+        )
+    );
+    Ok(())
+}
+
+/// `FUN_3932C800`: owner 0x28b, then for sale 0x28c.
+#[test]
+fn the_cancel_gates_refuse_in_the_native_order() -> mlua::Result<()> {
+    let (rt, state) = setup();
+    let cancel = || rt.lua.load("X2House:CancelHouseForSale()").exec().unwrap();
+    let take = || {
+        let notices = std::mem::take(&mut state.0.borrow_mut().notices);
+        let commands = std::mem::take(&mut state.0.borrow_mut().commands);
+        state.0.borrow_mut().pending = None;
+        (notices, commands)
+    };
+
+    open(&state, 5, 0, 0);
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 1_000_000;
+    cancel();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_CANCEL_SELL_AS_NOT_OWNER",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    open(&state, 42, 0, 0);
+    cancel();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_CANCEL_SELL_AS_NOT_FOR_SALE",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 1_000_000;
+    cancel();
+    let (notices, commands) = take();
+    assert!(notices.is_empty(), "{notices:?}");
+    assert_eq!(
+        format!("{commands:?}"),
+        format!(
+            "{:?}",
+            vec![Command::House(HouseCommand::CancelSell { tl: 7 })]
+        )
+    );
+    Ok(())
+}
+
+/// `FUN_3932E020`: owner 0x28f, not for sale 0x28e, designated buyer 0x290, money 0x291.
+#[test]
+fn the_buy_gates_refuse_in_the_native_order() -> mlua::Result<()> {
+    let (rt, state) = setup();
+    let buy = || rt.lua.load("X2House:BuyHouse()").exec().unwrap();
+    let take = || {
+        let notices = std::mem::take(&mut state.0.borrow_mut().notices);
+        let commands = std::mem::take(&mut state.0.borrow_mut().commands);
+        state.0.borrow_mut().pending = None;
+        (notices, commands)
+    };
+
+    // The owner is refused first, even when the house is not for sale.
+    open(&state, 42, 0, 0);
+    buy();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_BUY_AS_OWNER",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // Not the owner, no price: 0x28e.
+    open(&state, 5, 0, 0);
+    buy();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // Designated buyer 5, me 42: 0x290.
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 10_000;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_player_id = 5;
+    buy();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_BUY_AS_NOT_DESIGNATED_BUYER",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // The sale is open but 2 gold is more than 1 gold: 0x291.
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_player_id = 0;
+    state.0.borrow_mut().money = 10_000;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 20_000;
+    buy();
+    let (notices, commands) = take();
+    assert_eq!(
+        notices,
+        vec![Notice {
+            name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY",
+            arg: None
+        }]
+    );
+    assert!(commands.is_empty());
+
+    // A designated buyer who is me may buy it.
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 20_000;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_player_id = 42;
+    state.0.borrow_mut().money = 20_000;
+    buy();
+    let (notices, commands) = take();
+    assert!(notices.is_empty(), "{notices:?}");
+    assert_eq!(
+        format!("{commands:?}"),
+        format!(
+            "{:?}",
+            vec![Command::House(HouseCommand::Buy {
+                tl: 7,
+                money_amount: 20_000
+            })]
+        )
+    );
+    Ok(())
+}
+
+const SALE_EVENTS: &str = r#"
+    local w = UIParent:CreateWidget('emptywidget', 'saleSpy', 'UIParent')
+    for _, name in ipairs({'HOUSE_SET_SELL_SUCCESS', 'HOUSE_SET_SELL_FAIL', 'HOUSE_CANCEL_SELL_SUCCESS',
+        'HOUSE_CANCEL_SELL_FAIL', 'HOUSE_BUY_SUCCESS', 'HOUSE_BUY_FAIL', 'HOUSE_SALE_SUCCESS',
+        'HOUSE_INFO_UPDATED'}) do
+        w:RegisterEvent(name)
+    end
+    EVENTS = {}
+    w:SetHandler('OnEvent', function(self, event, ...) EVENTS[#EVENTS + 1] = {event, ...} end)
+"#;
+
+/// A sale refusal (`SCErrorMsg 0x266`, `0x282..=0x293`, `0x29C` or `0x2A9`) while a request is pending raises
+/// the script's fail event for the pending operation once and clears it; a stale error afterwards raises
+/// nothing. The native raiser is a packed thunk, so the trigger is inferred (C5).
+#[test]
+fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state, bridge) = setup_with_bridge(game);
+    bridge.borrow_mut().pos = Vec3::new(100.0, 100.0, 100.0);
+    bridge.borrow_mut().snapshot.name = "Self".into();
+    bridge.borrow_mut().snapshot.money = 100_000;
+    rt.lua.load(SALE_EVENTS).exec()?;
+    let seller = bridge.clone();
+    let mut inventory = Inventory::default();
+    inventory.bag.push(Some(aa_net::model::Item {
+        template_id: APPRAISAL_CERTIFICATE,
+        count: 2,
+        ..default()
+    }));
+    let units = {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(900, housing_unit(900, 7, 171, 100.0, 100.0));
+        units
+    };
+    let mut app = app_with_hud(
+        rt,
+        bridge,
+        units,
+        house_resource(snapshot(42, 0, 0)),
+        inventory.clone(),
+    );
+    open(&state, 42, 0, 0);
+    app.update();
+
+    // No request is pending: the error only reaches the ordinary SYSMSG path.
+    feed(&mut app, Event::ServerError { code: 648 });
+    app.update();
+    assert!(events(&app).is_empty(), "{:?}", events(&app));
+
+    // Sell: one CSSellHouse goes out, then 0x288 raises HOUSE_SET_SELL_FAIL once and clears the request.
+    lua(&app, "X2House:SetHouseForSale('1', '0', '0', '')");
+    app.update();
+    assert_eq!(
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .count(),
+        1,
+        "one CSSellHouse"
+    );
+    feed(&mut app, Event::ServerError { code: 648 });
+    app.update();
+    assert_eq!(events(&app), vec!["HOUSE_SET_SELL_FAIL"]);
+    assert!(
+        state.0.borrow().pending.is_none(),
+        "0x288 clears the request"
+    );
+    feed(&mut app, Event::ServerError { code: 648 });
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_FAIL"],
+        "the request is settled"
+    );
+
+    // A second sell request refused with the castle error still raises the SELL fail: the pending
+    // operation names the event, not the code (0x283 is also a buy refusal).
+    lua(&app, "X2House:SetHouseForSale('1', '0', '0', '')");
+    app.update();
+    let _ = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain();
+    feed(&mut app, Event::ServerError { code: 0x283 });
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_FAIL", "HOUSE_SET_SELL_FAIL"]
+    );
+
+    // Cancel: 0x28D (the cancel DB error) raises HOUSE_CANCEL_SELL_FAIL.
+    if let Some(c) = state.0.borrow_mut().current.as_mut()
+        && let Some(s) = c.snapshot.as_mut()
+    {
+        s.sell_price = 10_000;
+    }
+    app.world_mut()
+        .resource_mut::<Houses>()
+        .by_tl_id
+        .get_mut(&7)
+        .unwrap()
+        .snapshot
+        .sell_price = 10_000;
+    app.update();
+    lua(&app, "X2House:CancelHouseForSale()");
+    app.update();
+    feed(&mut app, Event::ServerError { code: 0x28d });
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec![
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_CANCEL_SELL_FAIL"
+        ]
+    );
+
+    // Buy as a stranger: the castle 0x283 raises HOUSE_BUY_FAIL, then 0x266 INVALID_HOUSE_INFO does too.
+    seller.borrow_mut().character_id = 7;
+    seller.borrow_mut().snapshot.name = "Buyer".into();
+    seller.borrow_mut().snapshot.money = 20_000;
+    {
+        let mut houses = app.world_mut().resource_mut::<Houses>();
+        let house = houses.by_tl_id.get_mut(&7).unwrap();
+        house.snapshot.sell_price = 20_000;
+        house.snapshot.sell_to_player_id = 0;
+    }
+    app.update();
+    lua(&app, "X2House:BuyHouse()");
+    app.update();
+    feed(&mut app, Event::ServerError { code: 0x283 });
+    app.update();
+    lua(&app, "X2House:BuyHouse()");
+    app.update();
+    feed(&mut app, Event::ServerError { code: 0x266 });
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec![
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_CANCEL_SELL_FAIL",
+            "HOUSE_BUY_FAIL",
+            "HOUSE_BUY_FAIL"
+        ]
+    );
+    Ok(())
+}
+
+/// `FUN_3932B680` / `FUN_3932B790`: the success event for the owner and then `HOUSE_INFO_UPDATED`; `FUN_3932B8A0`
+/// raises `HOUSE_INFO_UPDATED` before the seller's or buyer's receipt.
+#[test]
+fn the_sale_receipts_raise_their_events_in_the_native_order() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state, bridge) = setup_with_bridge(game);
+    bridge.borrow_mut().pos = Vec3::new(100.0, 100.0, 100.0);
+    bridge.borrow_mut().snapshot.name = "Self".into();
+    rt.lua.load(SALE_EVENTS).exec()?;
+    let me = bridge.clone();
+    let units = {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(900, housing_unit(900, 7, 171, 100.0, 100.0));
+        units
+    };
+    let mut app = app_with_hud(
+        rt,
+        bridge,
+        units,
+        house_resource(snapshot(42, 0, 0)),
+        Inventory::default(),
+    );
+    open(&state, 42, 0, 0);
+    app.update();
+
+    let sale = Event::Housing(HousingEvent::SetForSale(aa_net::housing::HouseSale {
+        tl_id: 7,
+        money_amount: 10_000,
+        sell_to_player_id: 0,
+        sell_to_name: String::new(),
+        house_name: "Farm".into(),
+    }));
+    app.world_mut().resource_mut::<Houses>().apply(&sale);
+    feed(&mut app, sale);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_INFO_UPDATED"]
+    );
+    assert_eq!(
+        event_arg(&app, 1),
+        "Farm",
+        "the success event carries the house name"
+    );
+
+    let reset = Event::Housing(HousingEvent::ResetForSale {
+        tl_id: 7,
+        house_name: "Farm".into(),
+    });
+    app.world_mut().resource_mut::<Houses>().apply(&reset);
+    feed(&mut app, reset);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec![
+            "HOUSE_SET_SELL_SUCCESS",
+            "HOUSE_INFO_UPDATED",
+            "HOUSE_CANCEL_SELL_SUCCESS",
+            "HOUSE_INFO_UPDATED"
+        ]
+    );
+    assert_eq!(event_arg(&app, 3), "Farm");
+
+    // The seller: the open house asks for its tax and refreshes, then HOUSE_SALE_SUCCESS.
+    let sold = Event::Housing(HousingEvent::Sold {
+        tl_id: 7,
+        previous_owner_id: 42,
+        new_owner_id: 7,
+        new_owner_account_id: 17,
+        owner_name: "Buyer".into(),
+        house_name: "Farm".into(),
+    });
+    feed(&mut app, sold.clone());
+    app.update();
+    assert_eq!(
+        events(&app)[4..],
+        [
+            "HOUSE_INFO_UPDATED".to_owned(),
+            "HOUSE_SALE_SUCCESS".to_owned()
+        ]
+    );
+    assert_eq!(event_arg(&app, 6), "Farm");
+    assert!(
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .any(|NetCommand(c)| matches!(c, Command::House(HouseCommand::RequestTax { tl: 7 }))),
+        "SCHouseSold re-requests the tax for the open house"
+    );
+
+    // The buyer sees the same receipt as HOUSE_BUY_SUCCESS, still after HOUSE_INFO_UPDATED.
+    me.borrow_mut().character_id = 7;
+    feed(&mut app, sold);
+    app.update();
+    assert_eq!(
+        events(&app)[6..],
+        [
+            "HOUSE_INFO_UPDATED".to_owned(),
+            "HOUSE_BUY_SUCCESS".to_owned()
+        ]
+    );
+    assert_eq!(event_arg(&app, 8), "Farm");
+    Ok(())
+}
+
+/// `FUN_3947A4D0` and `FUN_39479A40`: the sale form's button state and certificate counts. `canSell` does not
+/// look at construction or an existing sale (the click's gates do); `canBuy` does not look at ownership (the buy
+/// gate refuses the owner at 0x28f).
+#[test]
+fn the_sale_form_state_follows_the_native_getters() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let mut castle = design(172, false);
+    castle.category_id = 2;
+    game.housing.housings.insert(172, castle);
+    let mut unsellable = design(173, false);
+    unsellable.is_sellable = false;
+    game.housing.housings.insert(173, unsellable);
+    let (rt, state) = setup_with(game);
+    open(&state, 42, 10, 5);
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 20_000;
+    rt.lua
+        .load(
+            r#"
+            local sale = X2House:GetHouseSaleInfo()
+            assert(sale.onSale and sale.price == '20000' and sale.gold == 2)
+            assert(sale.canSell, 'the owner of a sellable design can sell')
+            assert(sale.canBuy, 'the native canBuy does not test ownership')
+            assert(sale.targetName == nil, 'no designated buyer: targetName is absent')
+            local item = X2House:GetHouseSaleItemInfo('101', '0', '0')
+            assert(item.needCount == 2 and item.itemType == 28085, tostring(item.needCount))
+            "#,
+        )
+        .exec()?;
+    // A designated buyer who is not me: canBuy false, targetName set.
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_player_id = 5;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_name = "Buyer".into();
+    rt.lua
+        .load(
+            r#"
+            local sale = X2House:GetHouseSaleInfo()
+            assert(not sale.canBuy and sale.targetName == 'Buyer')
+            "#,
+        )
+        .exec()?;
+    // A stranger without a designated buyer can buy; a castle or a non-sellable design cannot be sold.
+    open(&state, 5, 0, 0);
+    rt.lua
+        .load(
+            r#"
+            local sale = X2House:GetHouseSaleInfo()
+            assert(not sale.canSell and not sale.canBuy, 'not for sale')
+            "#,
+        )
+        .exec()?;
+    for (design, sellable) in [(172, false), (173, false)] {
+        open(&state, 42, 0, 0);
+        state.0.borrow_mut().current.as_mut().unwrap().design = design;
+        let sale = rt
+            .lua
+            .load("return X2House:GetHouseSaleInfo()")
+            .eval::<Table>()?;
+        assert_eq!(sale.get::<bool>("canSell")?, sellable, "design {design}");
+    }
+    Ok(())
+}
+
+/// `FUN_39478740` casts `DAT_39ac99e0` = 12945, not the 11404 copy; both have the `WI_DEMOLISH` effect 94 and a
+/// 20 000 ms cast in `skills` (the client gets the cast length from the server's `SCSkillStarted`).
+#[test]
+fn the_demolish_skill_is_12945_and_takes_20_seconds() {
+    assert_eq!(DEMOLISH_SKILL, 12_945);
+    let Ok(path) = std::env::var("AA_DB") else {
+        return;
+    };
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .expect("the game database");
+    for id in [12_945, 11_404] {
+        let cast: i64 = conn
+            .query_row("SELECT casting_time FROM skills WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or_else(|e| panic!("skill {id}: {e}"));
+        assert_eq!(cast, 20_000, "skill {id} casting_time");
+    }
+}
+
+/// `FUN_3932B680` / `FUN_3932B790` look the house up by tl: the owner gets `HOUSE_SET_SELL_SUCCESS` /
+/// `HOUSE_CANCEL_SELL_SUCCESS` even when the house window is closed; only `HOUSE_INFO_UPDATED` needs it open.
+#[test]
+fn the_sale_success_events_do_not_need_the_open_house_window() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state, bridge) = setup_with_bridge(game);
+    bridge.borrow_mut().snapshot.name = "Self".into();
+    rt.lua.load(SALE_EVENTS).exec()?;
+    let units = {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(900, housing_unit(900, 7, 171, 100.0, 100.0));
+        units
+    };
+    let mut app = app_with_hud(
+        rt,
+        bridge,
+        units,
+        house_resource(snapshot(42, 0, 0)),
+        Inventory::default(),
+    );
+    // No `HUD.house_interact`: the house window is closed.
+    app.update();
+    assert!(state.0.borrow().current.is_none());
+
+    let sale = Event::Housing(HousingEvent::SetForSale(aa_net::housing::HouseSale {
+        tl_id: 7,
+        money_amount: 10_000,
+        sell_to_player_id: 0,
+        sell_to_name: String::new(),
+        house_name: "Farm".into(),
+    }));
+    app.world_mut().resource_mut::<Houses>().apply(&sale);
+    feed(&mut app, sale);
+    app.update();
+    assert_eq!(events(&app), vec!["HOUSE_SET_SELL_SUCCESS"]);
+
+    let reset = Event::Housing(HousingEvent::ResetForSale {
+        tl_id: 7,
+        house_name: "Farm".into(),
+    });
+    app.world_mut().resource_mut::<Houses>().apply(&reset);
+    feed(&mut app, reset);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_CANCEL_SELL_SUCCESS"]
+    );
+
+    // The same receipt for a house owned by someone else raises nothing without the window.
+    app.world_mut()
+        .resource_mut::<Houses>()
+        .by_tl_id
+        .get_mut(&7)
+        .unwrap()
+        .snapshot
+        .owner_id = 5;
+    let other = Event::Housing(HousingEvent::SetForSale(aa_net::housing::HouseSale {
+        tl_id: 7,
+        money_amount: 10_000,
+        sell_to_player_id: 0,
+        sell_to_name: String::new(),
+        house_name: "Farm".into(),
+    }));
+    app.world_mut().resource_mut::<Houses>().apply(&other);
+    feed(&mut app, other);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_CANCEL_SELL_SUCCESS"]
+    );
     Ok(())
 }
 

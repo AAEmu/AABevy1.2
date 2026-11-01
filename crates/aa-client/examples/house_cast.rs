@@ -112,6 +112,7 @@ fn main() -> AppExit {
         .insert_resource(synthetic_houses())
         .init_resource::<Doodads>()
         .insert_resource(synthetic_inventory())
+        .init_resource::<aa_net::Shipyards>()
         .init_resource::<Builder>()
         .insert_non_send(HudBridge(bridge))
         .insert_non_send(rt)
