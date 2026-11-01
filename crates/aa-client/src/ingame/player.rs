@@ -105,6 +105,11 @@ const LANDING_GRACE: f32 = 1.5;
 const COLLISION_WAIT: f32 = 5.0;
 /// Interval between movement packets while moving.
 const SEND_INTERVAL: f32 = 0.1;
+/// The forced maximum send period of the native movement sender while nothing changes
+/// (`DAT_3a59f850`, cvar descriptor 0x39ac4640, default 0xbb8 = 3000 ms). A hanging climber sends
+/// one idle movement at this period; the on-foot controller has no equivalent and uses
+/// [`SEND_INTERVAL`] while active.
+const LADDER_KEEP_ALIVE: f32 = 3.0;
 
 /// Unit vectors of a game yaw: forward (north at 0, counter-clockwise) and right.
 pub fn forward(yaw: f32) -> Vec2 {
@@ -850,6 +855,8 @@ pub struct SendState {
     wait: f32,
     /// Seconds left of the grace period after settling or a teleport in which a landing is not reported.
     grace: f32,
+    /// The last hanging packet said "moving": the next idle one is the stop packet.
+    ladder_moving: bool,
 }
 
 impl SendState {
@@ -868,16 +875,22 @@ impl SendState {
         self.since_sent += dt;
     }
 
-    /// A hanging movement packet is due.
-    pub(super) fn ladder_due(&self) -> bool {
-        self.since_sent >= SEND_INTERVAL
+    /// A hanging movement packet is due: every [`SEND_INTERVAL`] while climbing, one at once when
+    /// the climb stops (the `moving: false` stop packet), then the native [`LADDER_KEEP_ALIVE`].
+    pub(super) fn ladder_due(&self, moving: bool) -> bool {
+        if moving {
+            self.since_sent >= SEND_INTERVAL
+        } else {
+            self.ladder_moving || self.since_sent >= LADDER_KEEP_ALIVE
+        }
     }
 
     /// A hanging movement packet was sent.
-    pub(super) fn ladder_sent(&mut self) {
+    pub(super) fn ladder_sent(&mut self, moving: bool) {
         self.since_sent = 0.0;
         self.sent_first = true;
-        self.was_active = true;
+        self.was_active = moving;
+        self.ladder_moving = moving;
     }
 
     /// The ladder was grabbed or left: the on-foot packet cadence starts over without a stop
@@ -889,6 +902,7 @@ impl SendState {
         self.swimming = false;
         self.took_off = false;
         self.freefall = false;
+        self.ladder_moving = false;
     }
 
     /// The script clock the `--walk` time windows use.

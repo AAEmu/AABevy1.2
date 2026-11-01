@@ -1175,7 +1175,18 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 let hanging = movement.actor_flags & actor_flags::HANGING_FROM_OBJECT != 0;
                 let was_hanging = unit.hanging.is_some();
                 unit.hanging = hanging.then(|| hangers.as_ref().and_then(|h| h.0.get(obj_id).copied()).unwrap_or(0));
-                unit.climb_up = if hanging { f32::from(movement.velocity[2]) / 1024.0 } else { 0.0 };
+                // the stop packet (moving: false) ends the climb clip even if it repeats the last
+                // velocity; a hull hang's 0x20 block replaces the moving bit with
+                // STANDING_ON_OBJECT, so its climb speed comes from the velocity
+                let climbing = hanging
+                    && (movement.flags & move_flags::MOVING != 0
+                        || (movement.flags & move_flags::STANDING_ON_OBJECT != 0
+                            && movement.velocity[2] != 0));
+                unit.climb_up = if climbing {
+                    f32::from(movement.velocity[2]) / 1024.0
+                } else {
+                    0.0
+                };
                 if hanging {
                     let support = movement.support.as_ref();
                     let parent = support.and_then(|s| (s.kind == 1 && s.obj_id != 0 && s.obj_id != 1).then_some(s.obj_id));
@@ -2091,6 +2102,70 @@ mod hang_tests {
         assert!(unit.pos.x > 0.0 && unit.pos.z > 0.0, "the world point moved: {:?}", unit.pos);
         let motion = app.world().get::<Motion>(entity).unwrap();
         assert_eq!(motion.climb.map(|c| c.kind), Some(1), "the climb clip family follows SCHung");
+    }
+
+    #[test]
+    fn a_stop_packet_stops_the_remote_climb_clip() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped (move_units probes the terrain)");
+            return;
+        }
+        let mut app = app();
+        let entity = actor(&mut app, 7);
+        app.world_mut().resource_mut::<Hangers>().0.insert(7, 1);
+        let support = MoveSupport {
+            obj_id: 1,
+            climb: Some(aa_net::climb::pack_ladder(1.0, 0.0)),
+            ..MoveSupport::default()
+        };
+        let mut up = movement(
+            Pos::new(1.0, 2.0, 3.0),
+            actor_flags::HANGING_FROM_OBJECT,
+            support.clone(),
+        );
+        up.velocity[2] = 1024;
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: up,
+        }));
+        step(&mut app, 0.2);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert!(
+            (unit.climb_up - 1.0).abs() < 1e-6,
+            "the climb plays: {}",
+            unit.climb_up
+        );
+        assert_eq!(
+            app.world()
+                .get::<Motion>(entity)
+                .unwrap()
+                .climb
+                .map(|c| c.up),
+            Some(1.0)
+        );
+        // the sender's stop packet repeats the last velocity but says moving: false
+        let mut stop = movement(
+            Pos::new(1.0, 2.0, 3.0),
+            actor_flags::HANGING_FROM_OBJECT,
+            support,
+        );
+        stop.flags = move_flags::STOPPING;
+        stop.velocity[2] = 1024;
+        app.world_mut().write_message(NetEvent(Event::UnitMoved {
+            obj_id: 7,
+            movement: stop,
+        }));
+        step(&mut app, 0.2);
+        let unit = app.world().get::<RemoteUnit>(entity).unwrap();
+        assert_eq!(unit.climb_up, 0.0, "the stop packet stops the climb");
+        assert_eq!(
+            app.world()
+                .get::<Motion>(entity)
+                .unwrap()
+                .climb
+                .map(|c| c.up),
+            Some(0.0)
+        );
     }
 
     #[test]

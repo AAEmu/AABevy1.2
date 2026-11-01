@@ -65,6 +65,11 @@ pub struct Model {
     /// Bounding boxes of every mesh chunk, in model space, kept also for proxy / helper meshes
     /// whose vertices are not parsed (a ship ladder stores only its box).
     pub mesh_boxes: Vec<(Vec3, Vec3)>,
+    /// The object chunk id of every node, parallel to `nodes`: the mesh chunk a helper names
+    /// (a `$ladder` helper's box is the mesh chunk it points at).
+    pub node_objects: Vec<i32>,
+    /// The box of every mesh chunk by its chunk id, in model space.
+    pub mesh_box_of_chunk: std::collections::HashMap<i32, (Vec3, Vec3)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +180,7 @@ impl Model {
         for c in file.of_type(ty::MESH) {
             if let Some(b) = mesh_bbox(c) {
                 model.mesh_boxes.push(b);
+                model.mesh_box_of_chunk.insert(c.id, b);
             }
         }
         let node_chunks: Vec<_> = file.of_type(ty::NODE).collect();
@@ -196,6 +202,7 @@ impl Model {
                     material_name: None,
                     properties: String::new(),
                 });
+                model.node_objects.push(c.id);
             }
         }
         let mut parents = Vec::with_capacity(node_chunks.len());
@@ -251,6 +258,7 @@ impl Model {
                 material_name,
                 properties,
             });
+            model.node_objects.push(object);
         }
         for (i, p) in parents.into_iter().enumerate() {
             if p > 0 {
@@ -392,7 +400,6 @@ fn i16n(b: &[u8], i: usize) -> f32 {
     i16::from_le_bytes([b[i], b[i + 1]]) as f32 / 32767.0
 }
 
-/// Reads a compiled mesh; `None` when it has nothing to render (no indices or positions).
 /// The box of a mesh chunk without reading its vertices (proxy / helper meshes have no kept
 /// vertices but keep the box).
 fn mesh_bbox(c: &crate::chunk::Chunk<'_>) -> Option<(Vec3, Vec3)> {
@@ -407,6 +414,7 @@ fn mesh_bbox(c: &crate::chunk::Chunk<'_>) -> Option<(Vec3, Vec3)> {
     (min.is_finite() && max.is_finite() && min.cmple(max).all()).then_some((min, max))
 }
 
+/// Reads a compiled mesh; `None` when it has nothing to render (no indices or positions).
 fn read_mesh(file: &ChunkFile<'_>, c: &crate::chunk::Chunk<'_>, skinned: bool) -> Result<Option<MeshData>> {
     if c.version == 0x744 {
         return read_mesh_744(c.data);

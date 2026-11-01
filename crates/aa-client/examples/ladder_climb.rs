@@ -35,7 +35,7 @@ use bevy::prelude::*;
 use ingame::data::Db;
 use ingame::doodad_model::LadderHelper;
 use ingame::doodad_visual::DoodadVisual;
-use ingame::ladder::{Ladder, control_ladder};
+use ingame::ladder::{Ladder, LadderClaim, control_ladder};
 use ingame::player::{LocalPlayer, Mover, PlayerInput, SendState};
 use ingame::units::{DeckHullPoses, RemoteDoodad, Views};
 use lua_value::lua_int;
@@ -79,6 +79,7 @@ fn main() -> AppExit {
     .init_resource::<Units>()
     .init_resource::<Views>()
     .init_resource::<DeckHullPoses>()
+    .init_resource::<LadderClaim>()
     .init_resource::<SendState>()
     .init_resource::<PlayerInput>()
     .init_resource::<settings::Actions>()

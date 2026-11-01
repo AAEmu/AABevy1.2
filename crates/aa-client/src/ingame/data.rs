@@ -348,6 +348,38 @@ impl Db {
         })
     }
 
+    /// A catalog with one climb phase (`doodad_func_group_id` -> kind) so the ladder
+    /// flow tests do not need the game database.
+    #[cfg(test)]
+    pub(crate) fn ladder_fixture(func_group_id: u32, kind: u8) -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-ladder-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).ok()?;
+        conn.execute_batch(
+            "CREATE TABLE doodad_funcs(id INTEGER PRIMARY KEY, doodad_func_group_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
+             CREATE TABLE doodad_func_climbs(id INTEGER PRIMARY KEY, climb_type_id INTEGER);",
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_func_climbs VALUES(1, ?1)",
+            params![kind],
+        )
+        .ok()?;
+        conn.execute(
+            "INSERT INTO doodad_funcs VALUES(1, ?1, 'DoodadFuncClimb', 1)",
+            params![func_group_id],
+        )
+        .ok()?;
+        drop(conn);
+        Db::open_path(path.to_str()?)
+    }
+
     /// The ship catalog with a synthetic floor already cached (the tests that
     /// need a raised deck do not read a hull brush).
     #[cfg(test)]

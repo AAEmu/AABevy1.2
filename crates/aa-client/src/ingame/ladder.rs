@@ -38,7 +38,7 @@ use aa_net::climb;
 use aa_net::model::{MoveSupport, radians_to_direction, stance};
 use aa_net::state::{Doodads, Units};
 use aa_net::{Command, MoveCommand, MoveState, NetCommand, Pos};
-use aa_world::bevy_to_cry;
+use aa_world::{TerrainQuery, WaterKind, WaterQuery, bevy_to_cry};
 use bevy::prelude::*;
 
 use super::anim::{ClimbPose, Locomotion, Motion};
@@ -46,6 +46,7 @@ use super::data::Db;
 use super::doodad_model::LadderHelper;
 use super::doodad_visual::DoodadVisual;
 use super::player::{self, LocalPlayer, Mover, PlayerInput, SendState};
+use super::swim::{ActorParams, Swim, Wet};
 use super::units::{DeckHullPoses, RemoteDoodad, Views};
 
 /// The reach of the use trace without an actor-model reach block (1.5 m, `FUN_390c1130`).
@@ -62,8 +63,30 @@ pub const TOP_STEP: f32 = 0.6;
 /// The mode-6 forward jump (`FUN_39135570`: 4.5 m/s forward, 7.0 m/s up).
 const JUMP_FORWARD: f32 = 4.5;
 const JUMP_UP: f32 = 7.0;
+/// How far the bottom exit snaps down (or up) to the ground before it counts as a fall (m).
+const BOTTOM_SNAP: f32 = 0.6;
 
 const EPS: f32 = 0.01;
+
+/// F is claimed for the ladder in reach (or the one being climbed), so NPC talk and loot-all
+/// do not fire on the same press. `Some(doodad)` names the ladder.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LadderClaim(pub Option<u32>);
+
+/// The optional world state the ladder controller reads (grouped to stay inside Bevy's
+/// system-parameter limit).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct LadderWorld<'w> {
+    pub mount: Option<Res<'w, super::mount::LocalMount>>,
+    pub gliding: Option<Res<'w, super::glide::Gliding>>,
+    pub terrain: Option<Res<'w, TerrainQuery>>,
+    pub water: Option<Res<'w, WaterQuery>>,
+    pub db: Option<Res<'w, Db>>,
+    pub views: Option<Res<'w, Views>>,
+    pub hull_poses: Option<Res<'w, DeckHullPoses>>,
+    pub sprint: Option<Res<'w, super::sprint::Sprint>>,
+    pub claim: ResMut<'w, LadderClaim>,
+}
 
 /// The ladder the local player hangs on.
 #[derive(Component, Clone, Debug)]
@@ -88,6 +111,8 @@ pub struct Ladder {
     pub angle_deg: f32,
     /// Metres per second along the ladder (the clip's root speed times `ladder_speed_mul`).
     pub speed: f32,
+    /// The weapon stance at the grab: a change while hanging leaves the ladder (`0xb`).
+    pub stance: bool,
     /// A top or bottom exit is playing.
     pub exiting: Option<Exit>,
 }
@@ -108,25 +133,36 @@ pub mod reason {
     pub const RELEASE: i32 = 1;
     /// The forward jump off (`FUN_39135570` mode 6).
     pub const FORWARD_JUMP: i32 = 6;
+    /// The posture/stance changed while hanging (`FUN_39137320`, `param_3 == 0`): "ladder lost".
+    pub const LADDER_LOST: i32 = 0xb;
 }
 
 /// The clip family of a climb kind.
+///
+/// From `player_full_body.xml`: kinds 1, 6, 9 and 10 (big tree) use the `fist_mo_ladder_*`
+/// states, and so does the net (kind 4: `net_up/idle/down` play `fist_mo_ladder_*`); kind 2
+/// (rope) plays `fist_mo_rope_up`, kind 3 (wood) `fist_mo_wood_up`, kind 5 (horizontal rope)
+/// the `fist_mo_hrope_*` states (`fist_mo_rope_front`/`_front_clip`/`_back_clip`/`_clip_idle`),
+/// kind 7 the mast and kind 8 the guardrail (`fist_mo_climb_*`). `fist_mo_prope_*` is the
+/// Vehicle prope, not a climb.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Ladder,
     Wood,
     Rope,
-    Net,
+    Hrope,
     Mast,
+    Guardrail,
 }
 
 impl Family {
     pub fn of(kind: u8) -> Family {
         match kind {
-            2 | 5 => Family::Rope,
+            2 => Family::Rope,
             3 => Family::Wood,
-            4 => Family::Net,
-            7 | 8 | 10 => Family::Mast,
+            5 => Family::Hrope,
+            7 => Family::Mast,
+            8 => Family::Guardrail,
             _ => Family::Ladder,
         }
     }
@@ -134,10 +170,11 @@ impl Family {
     fn prefix(self) -> &'static str {
         match self {
             Family::Ladder => "ladder",
-            Family::Wood => "climb",
+            Family::Wood => "wood",
             Family::Rope => "rope",
-            Family::Net => "prope",
+            Family::Hrope => "rope",
             Family::Mast => "mast",
+            Family::Guardrail => "climb",
         }
     }
 }
@@ -148,21 +185,21 @@ pub struct LadderClips {
     ladder: FamilyClips,
     wood: FamilyClips,
     rope: FamilyClips,
-    net: FamilyClips,
+    hrope: FamilyClips,
     mast: FamilyClips,
+    guardrail: FamilyClips,
     ladder_up_45: Option<aa_anim::pose::BoundClip>,
-    rope_front: Option<aa_anim::pose::BoundClip>,
-    net_front: Option<aa_anim::pose::BoundClip>,
     exit_ladder: Option<aa_anim::pose::BoundClip>,
+    exit_ladder_80: Option<aa_anim::pose::BoundClip>,
     exit_45: Option<aa_anim::pose::BoundClip>,
     exit_70: Option<aa_anim::pose::BoundClip>,
     exit_rope: Option<aa_anim::pose::BoundClip>,
 }
 
 impl LadderClips {
-    /// Binds the climb clips by path from the model's fist folder. The `.cal` names only the exit
-    /// clips (`fist_mo_ladder_end`, `_end_45`, `_end_70`, `_end_80`, `fist_mo_rope_end`), so the
-    /// same-name clips are bound from the folder of the model's `fist_` clips.
+    /// Binds the climb clips from the model's `.cal` (which names them through its includes; some
+    /// are aliases of another file, e.g. `fist_mo_wood_up` is the ladder up clip) and from the
+    /// folder of the model's `fist_` clips for a name the cal lacks.
     pub fn load(
         rig: &aa_anim::pose::Rig,
         cal: &aa_anim::Cal,
@@ -176,24 +213,30 @@ impl LadderClips {
             .rsplit_once('/')?
             .0
             .to_string();
-        let bind = |name: &str| bind_path(rig, clips, &folder, name);
-        let family = |f: Family| FamilyClips::load(rig, clips, &folder, f);
+        let bind = |name: &str| bind_path(rig, cal, clips, &folder, name);
+        let family = |f: Family| FamilyClips::load(rig, cal, clips, &folder, f);
         let mut set = LadderClips {
             ladder: family(Family::Ladder),
             wood: family(Family::Wood),
             rope: family(Family::Rope),
-            net: family(Family::Net),
+            hrope: family(Family::Hrope),
             mast: family(Family::Mast),
+            guardrail: family(Family::Guardrail),
             ladder_up_45: bind("fist_mo_ladder_up_45"),
-            rope_front: bind("fist_mo_rope_front_clip"),
-            net_front: bind("fist_mo_prope_frontward_idle"),
             exit_ladder: bind("fist_mo_ladder_end"),
+            exit_ladder_80: bind("fist_mo_ladder_end_80"),
             exit_45: bind("fist_mo_ladder_end_45"),
             exit_70: bind("fist_mo_ladder_end_70"),
             exit_rope: bind("fist_mo_rope_end"),
         };
         // a family without its own clips (a model that lacks them) climbs like a ladder
-        for f in [&mut set.wood, &mut set.rope, &mut set.net, &mut set.mast] {
+        for f in [
+            &mut set.wood,
+            &mut set.rope,
+            &mut set.hrope,
+            &mut set.mast,
+            &mut set.guardrail,
+        ] {
             if f.idle.is_none() {
                 *f = set.ladder.clone();
             }
@@ -207,8 +250,9 @@ impl LadderClips {
             Family::Ladder => &self.ladder,
             Family::Wood => &self.wood,
             Family::Rope => &self.rope,
-            Family::Net => &self.net,
+            Family::Hrope => &self.hrope,
             Family::Mast => &self.mast,
+            Family::Guardrail => &self.guardrail,
         }
     }
 
@@ -223,11 +267,7 @@ impl LadderClips {
 
     /// The standing clip on the ladder.
     pub fn idle(&self, kind: u8) -> Option<&aa_anim::pose::BoundClip> {
-        match kind {
-            5 => self.rope_front.as_ref().or(self.rope.idle.as_ref()),
-            4 => self.net_front.as_ref().or(self.net.idle.as_ref()),
-            _ => self.family(kind).idle.as_ref(),
-        }
+        self.family(kind).idle.as_ref()
     }
 
     /// The down clip (the rope and wood families have none: their up clip plays backwards).
@@ -240,7 +280,9 @@ impl LadderClips {
 
     /// The top exit clip by the ladder's angle class (`FUN_3916c1f0/c280`): kind 1/6 below 5
     /// degrees `exit_ladder_top`, below 35 `exit_70_ladder_top`, below 50 `exit_45_ladder_top`;
-    /// kind 9 `exit_45_ladder_top`; nets/ropes use their own.
+    /// kind 9 `exit_45_ladder_top`; nets `climb_net` below 1 degree and `climb_net_80` below 20
+    /// (both play `fist_mo_ladder_end[_80]`); the rope uses `fist_mo_rope_end`; the guardrail's
+    /// `exist_guardrail_top` state plays `fist_mo_climb_up`; masts and the big tree have none.
     pub fn exit(&self, kind: u8, angle_deg: f32) -> Option<&aa_anim::pose::BoundClip> {
         match kind {
             9 => self.exit_45.as_ref().or(self.exit_ladder.as_ref()),
@@ -256,8 +298,18 @@ impl LadderClips {
                     None
                 }
             }
-            2 | 4 | 5 => self.exit_rope.as_ref().or(self.exit_ladder.as_ref()),
-            _ => self.exit_70.as_ref().or(self.exit_ladder.as_ref()),
+            4 => {
+                if angle_deg < 1.0 {
+                    self.exit_ladder.as_ref()
+                } else if angle_deg < 20.0 {
+                    self.exit_ladder_80.as_ref()
+                } else {
+                    None
+                }
+            }
+            2 | 5 => self.exit_rope.as_ref().or(self.exit_ladder.as_ref()),
+            8 => self.guardrail.up.as_ref(),
+            _ => None,
         }
     }
 
@@ -278,21 +330,35 @@ struct FamilyClips {
 impl FamilyClips {
     fn load(
         rig: &aa_anim::pose::Rig,
+        cal: &aa_anim::Cal,
         clips: &aa_anim::ClipLibrary,
         folder: &str,
         family: Family,
     ) -> FamilyClips {
-        let bind = |suffix: &str| {
-            bind_path(
-                rig,
-                clips,
-                folder,
-                &format!("fist_mo_{}_{suffix}", family.prefix()),
-            )
+        let bind = |name: &str| bind_path(rig, cal, clips, folder, name);
+        let (up, down, idle) = match family {
+            // the rope and the wood wall have one clip only (their states' `ManualUpdateIdle`);
+            // a stopped climber keeps it, the down pass plays it backwards
+            Family::Rope => {
+                let up = bind("fist_mo_rope_up");
+                (up.clone(), up.clone(), up)
+            }
+            Family::Wood => {
+                let up = bind("fist_mo_wood_up");
+                (up.clone(), up.clone(), up)
+            }
+            // the horizontal rope: `hang_rope_front` idles, `hrope_front/back` move
+            Family::Hrope => (
+                bind("fist_mo_rope_front_clip"),
+                bind("fist_mo_rope_back_clip"),
+                bind("fist_mo_rope_clip_idle").or_else(|| bind("fist_mo_rope_front")),
+            ),
+            _ => (
+                bind(&format!("fist_mo_{}_up", family.prefix())),
+                bind(&format!("fist_mo_{}_down", family.prefix())),
+                bind(&format!("fist_mo_{}_idle", family.prefix())),
+            ),
         };
-        let up = bind("up");
-        let down = bind("down");
-        let idle = bind("idle");
         let speed = up.as_ref().map_or(0.0, |c| clip_speed(rig, c));
         FamilyClips {
             up,
@@ -305,11 +371,17 @@ impl FamilyClips {
 
 fn bind_path(
     rig: &aa_anim::pose::Rig,
+    cal: &aa_anim::Cal,
     clips: &aa_anim::ClipLibrary,
     folder: &str,
     name: &str,
 ) -> Option<aa_anim::pose::BoundClip> {
-    let path = format!("{folder}/{name}.caf");
+    // the cal (with its includes) names the climb clips too, and an alias can point at another
+    // file (`fist_mo_wood_up` is the ladder up clip); only a name the cal lacks uses the folder
+    let path = cal
+        .animation(name)
+        .map(|entry| entry.path.clone())
+        .unwrap_or_else(|| format!("{folder}/{name}.caf"));
     let clip = clips
         .bound(rig, &path, aa_anim::pose::SampleOptions::default())
         .ok()?;
@@ -412,6 +484,169 @@ fn body_point(bottom: Vec3, axis: Vec3, normal: Vec3, length: f32, fraction: f32
     bottom + axis * (fraction.clamp(0.0, 1.0) * length) + normal * STANDOFF
 }
 
+/// This frame's global transform of `entity`: the local `Transform`s of the `ChildOf` chain
+/// composed now. `GlobalTransform` still holds last frame's pose in `Update`, so a doodad on a
+/// moving hull would otherwise lag a frame behind the body and the packet.
+fn current_global(
+    entity: Entity,
+    transforms: &Query<(&Transform, Option<&ChildOf>), Without<LocalPlayer>>,
+) -> Option<GlobalTransform> {
+    let (transform, mut parent) = transforms.get(entity).ok()?;
+    let mut global = GlobalTransform::from(*transform);
+    let mut guard = 0;
+    while let Some(child_of) = parent {
+        let Ok((parent_transform, next)) = transforms.get(child_of.parent()) else {
+            break;
+        };
+        global = GlobalTransform::from(*parent_transform) * global;
+        parent = next;
+        guard += 1;
+        if guard > 64 {
+            break;
+        }
+    }
+    Some(global)
+}
+
+/// The climb doodad under the use trace: the nearest `$ladder` helper within [`REACH`].
+struct LadderHit {
+    obj_id: u32,
+    kind: u8,
+    helper: LadderHelper,
+    parent: u32,
+    attach_point: u8,
+    root_rotation: Quat,
+    bottom: Vec3,
+    top: Vec3,
+    axis: Vec3,
+    closest: Vec3,
+    length: f32,
+}
+
+fn nearest_ladder(
+    ladders: &Query<(&RemoteDoodad, &DoodadVisual, Entity)>,
+    transforms: &Query<(&Transform, Option<&ChildOf>), Without<LocalPlayer>>,
+    doodads: &Doodads,
+    db: Option<&Db>,
+    pos: Vec3,
+) -> Option<LadderHit> {
+    let db = db?;
+    let mut best: Option<(f32, LadderHit)> = None;
+    for (doodad, visual, entity) in ladders {
+        let Some(helper) = visual.ladder else {
+            continue;
+        };
+        let Some(source) = doodads.by_id.get(&doodad.obj_id) else {
+            continue;
+        };
+        let Some(kind) = db.ladder_kind(visual.func_group_id) else {
+            continue;
+        };
+        let Some(root) = current_global(entity, transforms) else {
+            continue;
+        };
+        let bottom = bevy_to_cry(root.transform_point(helper.bottom));
+        let top = bevy_to_cry(root.transform_point(helper.top));
+        let length = bottom.distance(top);
+        if length < 0.2 {
+            continue;
+        }
+        let (dist, _, closest) = segment_point(pos, bottom, top);
+        if dist > REACH {
+            continue;
+        }
+        if best.as_ref().is_none_or(|b| dist < b.0) {
+            best = Some((
+                dist,
+                LadderHit {
+                    obj_id: doodad.obj_id,
+                    kind,
+                    helper,
+                    parent: source.parent_obj_id,
+                    attach_point: source.attach_point,
+                    root_rotation: root.rotation(),
+                    bottom,
+                    top,
+                    axis: (top - bottom).normalize_or_zero(),
+                    closest,
+                    length,
+                },
+            ));
+        }
+    }
+    best.map(|(_, hit)| hit)
+}
+
+/// What the bottom exit does at a point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Rest {
+    /// Stand on the ground at this height.
+    Stand(f32),
+    Swim {
+        surface: f32,
+        kind: WaterKind,
+    },
+    /// Neither ground nor deep water is close: fall.
+    Fall,
+}
+
+fn bottom_rest(at: Vec3, ground: Option<f32>, wet: Option<Wet>, enter: f32) -> Rest {
+    if let Some(w) = wet.filter(|w| super::swim::should_swim(false, at.z, Some(*w), enter)) {
+        return Rest::Swim {
+            surface: w.surface,
+            kind: w.kind,
+        };
+    }
+    match ground {
+        Some(g) if at.z <= g || at.z - g <= BOTTOM_SNAP => Rest::Stand(g),
+        _ => Rest::Fall,
+    }
+}
+
+/// The bottom exit: stand on the ground under the feet, swim when the water is deep enough, or
+/// fall when neither is close. Never reports `grounded` at a point above the ground or in water.
+fn land_after_climb(
+    mover: &mut Mover,
+    terrain: Option<&TerrainQuery>,
+    water: Option<&WaterQuery>,
+    actor: ActorParams,
+) {
+    let at = mover.pos;
+    let ground = terrain
+        .and_then(|t| t.ground_at(at.x, at.y))
+        .map(|g| g.height);
+    let wet = water
+        .and_then(|w| w.water_at(at))
+        .map(|(surface, kind)| Wet {
+            surface,
+            kind,
+            depth: (surface - ground.unwrap_or(at.z)).max(0.0),
+        });
+    match bottom_rest(at, ground, wet, actor.swim_depth()) {
+        Rest::Stand(g) => {
+            mover.pos.z = g;
+            mover.grounded = true;
+            mover.vz = 0.0;
+        }
+        Rest::Swim { surface, kind } => {
+            mover.swim = Some(Swim {
+                surface,
+                kind,
+                local_dir: Vec2::ZERO,
+                speed: 0.0,
+                vertical: 0.0,
+                deep: false,
+            });
+            mover.grounded = false;
+            mover.vz = 0.0;
+        }
+        Rest::Fall => {
+            mover.grounded = false;
+            mover.vz = 0.0;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn control_ladder(
     mut commands: Commands,
@@ -429,14 +664,18 @@ pub fn control_ladder(
         Option<&Animator>,
         Option<&Locomotion>,
         Has<super::combat::Dead>,
+        Option<&super::skill_motion::SkillMove>,
+        Has<super::seating::Seated>,
+        Has<super::mount::Rider>,
+        Has<super::ship::DeckRide>,
+        Option<&super::weapons::Drawn>,
+        Option<&ActorParams>,
     )>,
     doodads: Res<Doodads>,
     units: Res<Units>,
-    views: Option<Res<Views>>,
-    hull_poses: Option<Res<DeckHullPoses>>,
-    db: Option<Res<Db>>,
-    ladders: Query<(&RemoteDoodad, &DoodadVisual, &GlobalTransform)>,
-    sprint: Option<Res<super::sprint::Sprint>>,
+    ladders: Query<(&RemoteDoodad, &DoodadVisual, Entity)>,
+    transforms: Query<(&Transform, Option<&ChildOf>), Without<LocalPlayer>>,
+    mut world: LadderWorld,
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
@@ -451,12 +690,20 @@ pub fn control_ladder(
         animator,
         locomotion,
         dead,
+        skill_moving,
+        seated,
+        rider,
+        deck,
+        drawn,
+        actor,
     )) = player.single_mut()
     else {
         return;
     };
     let typing = typing.is_some_and(|f| f.0);
     let dt = time.delta_secs().min(0.1);
+    let now = time.elapsed_secs_f64();
+    let stance = drawn.is_some_and(|d| d.stance(now).is_some());
     let used = !typing && actions.just_pressed("do_interaction_1", 0);
     let jump = !typing && actions.just_pressed("jump", 0);
     let up = if typing {
@@ -467,6 +714,7 @@ pub fn control_ladder(
     };
 
     if dead {
+        world.claim.0 = None;
         if ladder.is_some() {
             commands.entity(entity).remove::<Ladder>();
             motion.climb = None;
@@ -478,63 +726,45 @@ pub fn control_ladder(
     let Some(ladder) = ladder else {
         // a teleport or a mount took the ladder away without `release`: drop the climb pose
         motion.climb = None;
-        if !used || mover.swim.is_some() {
+        let found = nearest_ladder(
+            &ladders,
+            &transforms,
+            &doodads,
+            world.db.as_deref(),
+            mover.pos,
+        );
+        world.claim.0 = found.as_ref().map(|hit| hit.obj_id);
+        if !used {
             return;
         }
-        let Some(db) = db else { return };
-        let mut best: Option<(f32, u32, u8, LadderHelper, Vec3, Vec3, Vec3, Quat, u32, u8)> = None;
-        for (doodad, visual, root) in &ladders {
-            let Some(helper) = visual.ladder else {
-                continue;
-            };
-            let Some(source) = doodads.by_id.get(&doodad.obj_id) else {
-                continue;
-            };
-            let Some(kind) = db.ladder_kind(visual.func_group_id) else {
-                continue;
-            };
-            let bottom = bevy_to_cry(root.transform_point(helper.bottom));
-            let top = bevy_to_cry(root.transform_point(helper.top));
-            let length = bottom.distance(top);
-            if length < 0.2 {
-                continue;
-            }
-            let (dist, _, closest) = segment_point(mover.pos, bottom, top);
-            if dist > REACH {
-                continue;
-            }
-            if best.as_ref().is_none_or(|b| dist < b.0) {
-                best = Some((
-                    dist,
-                    doodad.obj_id,
-                    kind,
-                    helper,
-                    bottom,
-                    top,
-                    closest,
-                    root.rotation(),
-                    source.parent_obj_id,
-                    source.attach_point,
-                ));
-            }
+        // the native grab gate 1.4(b) (`FUN_393b8f40`): a unit on a vehicle (`+0x3af0`), on a
+        // seat, in a skill move or flying does not hang; a swimmer does (there is no swim gate in
+        // `FUN_393630e0`)
+        let blocked = world.mount.as_ref().is_some_and(|m| m.0.is_some())
+            || rider
+            || seated
+            || deck
+            || skill_moving.is_some()
+            || world.gliding.as_ref().is_some_and(|g| g.flying());
+        if blocked {
+            return;
         }
-        let Some((
-            _,
+        let Some(LadderHit {
             obj_id,
             kind,
             helper,
-            bottom,
-            top,
-            closest,
-            root_rotation,
             parent,
             attach_point,
-        )) = best
+            root_rotation,
+            bottom,
+            top: _,
+            axis,
+            closest,
+            length,
+        }) = found
         else {
             return;
         };
-        let length = bottom.distance(top);
-        let axis = (top - bottom).normalize_or_zero();
         let helper_forward_game = bevy_to_cry(root_rotation * helper.forward).normalize_or_zero();
         let mut normal = Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0);
         if normal.length_squared() < 1e-6 {
@@ -551,8 +781,7 @@ pub fn control_ladder(
         let facing = facing_of_normal(normal);
         let x_m = closest.distance(bottom).max(0.05).min(length);
         let fraction = (x_m / length).clamp(0.0, 1.0);
-        let forward_world = helper_forward_game;
-        let angle = relative_angle(kind, facing, forward_world);
+        let angle = relative_angle(kind, facing, helper_forward_game);
         let climb_data = climb::pack(x_m, 0.0, angle);
         // The outward normal back in the doodad root's Bevy space.
         let normal_bevy = aa_world::cry_to_bevy(normal);
@@ -560,7 +789,13 @@ pub fn control_ladder(
             .inverse()
             .mul_vec3(normal_bevy)
             .normalize_or_zero();
-        let speed = locomotive_speed(kind, animator, locomotion, &library, sprint.as_deref());
+        let speed = locomotive_speed(
+            kind,
+            animator,
+            locomotion,
+            &library,
+            world.sprint.as_deref(),
+        );
         let ladder = Ladder {
             obj_id,
             kind,
@@ -572,16 +807,17 @@ pub fn control_ladder(
             climb_data,
             angle_deg: axis.z.clamp(-1.0, 1.0).acos().to_degrees(),
             speed,
+            stance,
             exiting: None,
         };
-        let world = body_point(bottom, axis, normal, length, fraction);
-        mover.pos = world;
+        let world_point = body_point(bottom, axis, normal, length, fraction);
+        mover.pos = world_point;
         mover.facing = facing;
         mover.vz = 0.0;
         mover.grounded = false;
         mover.velocity = Vec3::ZERO;
         mover.swim = None;
-        *transform = player::placement(world, facing, 1.0);
+        *transform = player::placement(world_point, facing, 1.0);
         commands
             .entity(entity)
             .remove::<super::ship::DeckRide>()
@@ -603,16 +839,39 @@ pub fn control_ladder(
             &mover,
             &ladder,
             &units,
-            views.as_deref(),
-            hull_poses.as_deref(),
+            world.views.as_deref(),
+            world.hull_poses.as_deref(),
             0.0,
             false,
         );
+        state.ladder_sent(false);
         info!("ladder: grabbed doodad {obj_id} kind {kind} at {fraction:.2} of {length:.2} m");
         return;
     };
+    world.claim.0 = Some(ladder.obj_id);
 
     let mut ladder = ladder.clone();
+    // A posture change while hanging leaves the ladder with reason 0xb (`FUN_39137320`): mounting,
+    // a moving skill or a weapon stance change. Only the top exit (1) and this reason pass while
+    // the exit runs.
+    let left = world.mount.as_ref().is_some_and(|m| m.0.is_some())
+        || rider
+        || skill_moving.is_some()
+        || world.gliding.as_ref().is_some_and(|g| g.flying())
+        || stance != ladder.stance;
+    if left {
+        release(
+            &mut commands,
+            entity,
+            &mut mover,
+            &mut motion,
+            &mut state,
+            &mut out,
+            reason::LADDER_LOST,
+        );
+        return;
+    }
+
     if let Some(exit) = ladder.exiting {
         let left = exit.left - dt;
         if left > 0.0 {
@@ -636,12 +895,14 @@ pub fn control_ladder(
             &mut state,
             &mut out,
             exit.top,
+            ladder.kind,
         );
         return;
     }
 
     // Find the drawn doodad again; a vanished ladder is `FUN_39137470`'s "my ladder is missing".
-    let Some((_, _, root)) = ladders.iter().find(|(d, _, _)| d.obj_id == ladder.obj_id) else {
+    let Some((_, _, root_entity)) = ladders.iter().find(|(d, _, _)| d.obj_id == ladder.obj_id)
+    else {
         release(
             &mut commands,
             entity,
@@ -653,7 +914,19 @@ pub fn control_ladder(
         );
         return;
     };
-    let (bottom, top, axis, normal) = world_frame(&ladder.helper, ladder.normal, root);
+    let Some(root) = current_global(root_entity, &transforms) else {
+        release(
+            &mut commands,
+            entity,
+            &mut mover,
+            &mut motion,
+            &mut state,
+            &mut out,
+            reason::LADDER_MISSING,
+        );
+        return;
+    };
+    let (bottom, top, axis, normal) = world_frame(&ladder.helper, ladder.normal, &root);
     let length = bottom.distance(top);
     if length < 0.2 {
         release(
@@ -701,7 +974,7 @@ pub fn control_ladder(
         return;
     }
 
-    let speed = ladder.speed * sprint.as_ref().map_or(1.0, |s| s.ladder_speed_mul);
+    let speed = ladder.speed * world.sprint.as_ref().map_or(1.0, |s| s.ladder_speed_mul);
     ladder.fraction = (ladder.fraction + up * speed * dt / length).clamp(0.0, 1.0);
     let moving = up != 0.0;
     mover.pos = body_point(bottom, axis, normal, length, ladder.fraction);
@@ -734,8 +1007,12 @@ pub fn control_ladder(
     }
     if up < 0.0 && ladder.fraction <= EPS {
         mover.pos = body_point(bottom, axis, normal, length, 0.0);
-        mover.grounded = true;
-        mover.vz = 0.0;
+        land_after_climb(
+            &mut mover,
+            world.terrain.as_deref(),
+            world.water.as_deref(),
+            actor.copied().unwrap_or_default(),
+        );
         *transform = player::placement(mover.pos, facing, 1.0);
         release(
             &mut commands,
@@ -750,18 +1027,18 @@ pub fn control_ladder(
     }
     commands.entity(entity).insert(ladder.clone());
     state.ladder_clock(dt);
-    if moving && state.ladder_due() {
+    if state.ladder_due(moving) {
         send_climb(
             &mut out,
             &mover,
             &ladder,
             &units,
-            views.as_deref(),
-            hull_poses.as_deref(),
+            world.views.as_deref(),
+            world.hull_poses.as_deref(),
             up * speed,
-            true,
+            moving,
         );
-        state.ladder_sent();
+        state.ladder_sent(moving);
     }
 }
 
@@ -796,6 +1073,7 @@ fn send_climb(
 ) {
     let world = mover.pos;
     let mut primary = Pos::new(world.x, world.y, world.z);
+    let mut yaw = mover.facing;
     let mut support = MoveSupport {
         obj_id: 1,
         climb: Some(ladder.climb_data),
@@ -806,6 +1084,9 @@ fn send_climb(
     {
         let local = super::ship::deck::world_to_ship(root, rotation, world);
         primary = Pos::new(local.x, local.y, local.z);
+        // The primary position is hull-local, so its direction byte is the facing in the hull
+        // frame; the world facing stays in the auxiliary block, as `deck_move` sends it.
+        yaw = super::cart::wrap_angle(mover.facing - super::ship::deck::yaw_of(rotation));
         support = MoveSupport {
             obj_id: ladder.parent,
             kind: 1,
@@ -820,7 +1101,7 @@ fn send_climb(
     let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
     let cmd = MoveCommand {
         pos: primary,
-        yaw: mover.facing,
+        yaw,
         moving,
         stance: stance::CROUCH,
         velocity: [0, 0, to_wire(up)],
@@ -876,15 +1157,19 @@ fn finish_exit(
     state: &mut SendState,
     out: &mut MessageWriter<NetCommand>,
     top: bool,
+    kind: u8,
 ) {
     if top {
-        let f = player::forward(mover.facing);
-        mover.pos += Vec3::new(f.x, f.y, 0.0) * TOP_STEP;
-        mover.pos.z += 0.05;
+        // a horizontal rope (kind 5) has no "over the top" step: it ends at an arbitrary point
+        if kind != 5 {
+            let f = player::forward(mover.facing);
+            mover.pos += Vec3::new(f.x, f.y, 0.0) * TOP_STEP;
+            mover.pos.z += 0.05;
+        }
         mover.grounded = false;
         mover.vz = 0.0;
     } else {
-        mover.grounded = true;
+        mover.grounded = false;
         mover.vz = 0.0;
     }
     *transform = player::placement(mover.pos, mover.facing, 1.0);
@@ -951,19 +1236,24 @@ pub fn drive_climb(
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(
-        Update,
-        control_ladder
-            .after(super::ship::deck_control)
-            .before(super::player::control_player)
-            .run_if(super::world_screens),
-    )
-    .add_systems(
-        Update,
-        drive_climb
-            .after(super::anim::drive_locomotion)
-            .run_if(super::world_screens),
-    );
+    app.init_resource::<LadderClaim>()
+        .add_systems(
+            Update,
+            control_ladder
+                .after(super::ship::deck_control)
+                // `DeckHullPoses` is this frame's hull pose for the hull-local packet point
+                .after(super::units::place_deck_riders)
+                .before(super::player::control_player)
+                // the HUD's doodad/loot key claim reads this frame's ladder reach
+                .before(crate::hud::doodad::TrackDoodads)
+                .run_if(super::world_screens),
+        )
+        .add_systems(
+            Update,
+            drive_climb
+                .after(super::anim::drive_locomotion)
+                .run_if(super::world_screens),
+        );
 }
 
 #[cfg(test)]

@@ -649,12 +649,13 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals, mut target_decal): (
+    (mut glows, names, views, visuals, mut target_decal, ladder_claim): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
+        Option<Res<crate::ingame::ladder::LadderClaim>>,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
@@ -674,9 +675,18 @@ fn track(
         })
     });
     let directing = d.dialog.directing;
-    d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
-        !units.iter().any(|u| u.obj_id != own && !u.dead && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }) && d.pos.distance(to_vec(u.pos)) < f.dist)
-    });
+    // a climb doodad in reach (or the ladder being climbed) owns F over NPC talk and loot
+    d.doodad.claims_key = ladder_claim
+        .as_deref()
+        .is_some_and(|claim| claim.0.is_some())
+        || focus.as_ref().is_some_and(|f| {
+            !units.iter().any(|u| {
+                u.obj_id != own
+                    && !u.dead
+                    && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
+                    && d.pos.distance(to_vec(u.pos)) < f.dist
+            })
+        });
     d.doodad.focus = focus;
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
         drop(d);
