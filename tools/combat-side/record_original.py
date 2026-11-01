@@ -1543,15 +1543,10 @@ def gcd_run_complete(run: dict, slack_ms: float = 250.0) -> bool:
     return 0 <= duration <= total + slack_ms
 
 
-def gcd_run_press(run: dict, inputs: list[dict],
+def nearest_press(wall_ms: float | None, inputs: list[dict],
                   used: set[int] | None = None) -> tuple[int, dict] | None:
-    """The latest press before this rise, within ``PRESS_WINDOW_MS``.
-
-    A press starts at most one rise: ``used`` holds the input indexes already
-    matched to an earlier run, so two rises cannot both claim one press.
-    """
-    start_wall = run["start"].get("wall_ms")
-    if start_wall is None:
+    """The latest press before ``wall_ms``, within ``PRESS_WINDOW_MS``."""
+    if wall_ms is None:
         return None
     best: tuple[int, dict] | None = None
     best_delta = None
@@ -1561,11 +1556,21 @@ def gcd_run_press(run: dict, inputs: list[dict],
         before = event.get("before_wall_ms", event.get("wall_ms"))
         if before is None:
             continue
-        delta = start_wall - before
+        delta = wall_ms - before
         if 0.0 <= delta <= PRESS_WINDOW_MS and (best_delta is None or delta < best_delta):
             best = (index, event)
             best_delta = delta
     return best
+
+
+def gcd_run_press(run: dict, inputs: list[dict],
+                  used: set[int] | None = None) -> tuple[int, dict] | None:
+    """The press that started this GCD rise, within ``PRESS_WINDOW_MS``.
+
+    A press starts at most one rise: ``used`` holds the input indexes already
+    matched to an earlier run, so two rises cannot both claim one press.
+    """
+    return nearest_press(run["start"].get("wall_ms"), inputs, used)
 
 
 def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
@@ -1735,10 +1740,12 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
     difference instead of the zero the shift builds in.
 
     An unpaired rise is checked again against every unused cast start within
-    ``near_window_ms``.  If one is that close, the ordering does not match the
-    same-frame assumption (e.g. the GCD written 300 ms after its cast start)
-    and the run is reported as ``unpaired_near_start`` and fails.  Only an
-    instant skill with no cast start anywhere near it stays exempt.
+    ``near_window_ms``, but only when both belong to the same input press.  A
+    rise from another press, or a start that cannot be linked to a press at
+    all, never counts (e.g. an instant pressed near an interrupted cast).  If
+    the rise's own press did produce an unpaired start, the ordering does not
+    match the same-frame assumption (e.g. the GCD written 300 ms after its
+    cast start) and the run is reported as ``unpaired_near_start`` and fails.
 
     ``measurable`` needs at least one matched pair, but the offset is
     ``confirmed`` only with ``MIN_CONFIRMING_PAIRS`` pairs; one pair is
@@ -1747,6 +1754,7 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
     """
     gcd_rows = channels.get("gcd", [])
     cast_rows = channels.get("castbar", [])
+    inputs = channels.get("inputs", [])
     rises = []
     previous = None
     for row in gcd_rows:
@@ -1786,14 +1794,26 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
                 "offset_ms": round(best[0], 1),
                 "skill": best[2].get("player_name"),
             })
+    # A cast start or GCD rise belongs to the input press just before it.  A
+    # press may in principle produce more than one row, but the start stays
+    # one-to-one in the near pass below, so a second rise cannot claim it.
+    start_press: dict[int, int] = {}
+    for index, start in enumerate(starts):
+        match = nearest_press(start.get("wall_ms"), inputs)
+        if match is not None:
+            start_press[index] = match[0]
     unpaired_near_start: list[dict] = []
+    start_used = set(used)
     for rise_index, rise in enumerate(rises):
         if rise_index in paired:
+            continue
+        press = nearest_press(rise.get("wall_ms"), inputs)
+        if press is None:
             continue
         rise_ms = rise.get("client_ms_raw", rise.get("client_ms"))
         best = None
         for index, start in enumerate(starts):
-            if index in used:
+            if index in start_used or start_press.get(index) != press[0]:
                 continue
             start_ms = start.get("native_ms")
             if start_ms is None:
@@ -1803,13 +1823,15 @@ def measure_memory_ui_offset(channels: dict[str, list[dict]],
             delta = rise_ms - start_ms
             if (abs(delta) <= near_window_ms
                     and (best is None or abs(delta) < abs(best[0]))):
-                best = (delta, start, start_ms)
+                best = (delta, index, start, start_ms)
         if best is not None:
+            start_used.add(best[1])
             unpaired_near_start.append({
-                "cast_start_ms": int(round(best[2])),
+                "cast_start_ms": int(round(best[3])),
                 "gcd_rise_ms": int(rise_ms),
                 "delta_ms": round(best[0], 1),
-                "skill": best[1].get("player_name"),
+                "skill": best[2].get("player_name"),
+                "key": press[1].get("key"),
             })
     offsets = [pair["offset_ms"] for pair in pairs]
     median = statistics.median(offsets) if offsets else 0.0
@@ -1872,11 +1894,9 @@ def shift_estimate_rows(run: Path, offset_ms: float) -> int:
     wall-stamped estimate rows (``unit_state``, ``meta``) keep the fitted
     clock, and the unshifted memory time stays in ``client_ms_raw``.  The shift
     is idempotent: an existing ``client_ms_raw`` is never overwritten, so a
-    second call with the same offset changes nothing and a call with a new
-    offset re-shifts from the original time.
+    second call with the same offset changes nothing, a call with a new offset
+    re-shifts from the original time, and an offset of 0 restores the raw time.
     """
-    if not offset_ms:
-        return 0
     shifted = 0
     for path in sorted(run.glob("*.jsonl")):
         lines = []
@@ -2348,7 +2368,8 @@ def main() -> int:
                 for near in info.get("unpaired_near_start") or []:
                     log("memory->UI ordering mismatch: GCD rise",
                         near.get("delta_ms"), "ms from the cast start of",
-                        near.get("skill"), "(rise", near.get("gcd_rise_ms"),
+                        near.get("skill"), "on key", near.get("key"),
+                        "(rise", near.get("gcd_rise_ms"),
                         "cast start", near.get("cast_start_ms"), ")")
             if isinstance(result.get("quality"), dict):
                 mono = result["quality"]["monotonic"]

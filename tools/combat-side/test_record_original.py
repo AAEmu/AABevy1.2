@@ -38,9 +38,10 @@ def cast_channel(starts: list[int]) -> list[dict]:
     rows = []
     for start in starts:
         rows.append({"channel": "castbar", "clock": "ui", "native_ms": start - 100,
-                     "player_name": "", "player_show": "false", "player_current": ""})
+                     "wall_ms": start - 100, "player_name": "", "player_show": "false",
+                     "player_current": ""})
         rows.append({"channel": "castbar", "clock": "ui", "native_ms": start,
-                     "player_name": "Flamebolt", "player_show": "true",
+                     "wall_ms": start, "player_name": "Flamebolt", "player_show": "true",
                      "player_current": "0"})
     return rows
 
@@ -226,12 +227,14 @@ class MemoryUiOffsetTests(unittest.TestCase):
             {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
                      gcd_row(3000, 0, 0), gcd_row(3027, 1000, 1000),
                      gcd_row(6000, 0, 0), gcd_row(6300, 1000, 1000)],
-             "castbar": cast_channel([1000, 3000, 6000])})
+             "castbar": cast_channel([1000, 3000, 6000]),
+             "inputs": [input_row("1", 950.0), input_row("2", 2950.0),
+                        input_row("3", 5950.0)]})
         self.assertEqual(measured["pairs"], 2)
         self.assertTrue(measured["confirmed"])
         self.assertEqual(measured["unpaired_near_start"],
                          [{"cast_start_ms": 6000, "gcd_rise_ms": 6300,
-                           "delta_ms": 300.0, "skill": "Flamebolt"}])
+                           "delta_ms": 300.0, "skill": "Flamebolt", "key": "3"}])
         self.assertTrue(measured["ordering_mismatch"])
         self.assertFalse(measured["ok"])
 
@@ -240,11 +243,40 @@ class MemoryUiOffsetTests(unittest.TestCase):
             {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
                      gcd_row(3000, 0, 0), gcd_row(3027, 1000, 1000),
                      gcd_row(5900, 0, 0), gcd_row(5900, 1000, 1000)],
-             "castbar": cast_channel([1000, 3000, 6000])})
+             "castbar": cast_channel([1000, 3000, 6000]),
+             "inputs": [input_row("1", 950.0), input_row("2", 2950.0),
+                        input_row("3", 5850.0)]})
         self.assertEqual(measured["pairs"], 2)
         self.assertEqual(measured["unpaired_near_start"],
                          [{"cast_start_ms": 6000, "gcd_rise_ms": 5900,
-                           "delta_ms": -100.0, "skill": "Flamebolt"}])
+                           "delta_ms": -100.0, "skill": "Flamebolt", "key": "3"}])
+        self.assertTrue(measured["ordering_mismatch"])
+        self.assertFalse(measured["ok"])
+
+    def test_instant_near_an_unrelated_unused_start_is_exempt(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(1000, 0, 0), gcd_row(1027, 1000, 1000),
+                     gcd_row(3000, 0, 0), gcd_row(3027, 1000, 1000),
+                     gcd_row(5700, 0, 0), gcd_row(5700, 1000, 1000)],
+             "castbar": cast_channel([1000, 3000, 5000]),
+             "inputs": [input_row("1", 950.0), input_row("2", 2950.0),
+                        input_row("3", 4950.0), input_row("4", 5650.0)]})
+        self.assertEqual(measured["pairs"], 2)
+        self.assertTrue(measured["confirmed"])
+        self.assertEqual(measured["unpaired_near_start"], [])
+        self.assertFalse(measured["ordering_mismatch"])
+        self.assertTrue(measured["ok"])
+
+    def test_two_unpaired_rises_claim_one_start_once(self) -> None:
+        measured = rec.measure_memory_ui_offset(
+            {"gcd": [gcd_row(5000, 0, 0), gcd_row(5300, 1000, 1000),
+                     gcd_row(5400, 0, 1000), gcd_row(5400, 1000, 1000)],
+             "castbar": cast_channel([5100]),
+             "inputs": [input_row("1", 5000.0)]})
+        self.assertEqual(measured["pairs"], 0)
+        self.assertEqual(len(measured["unpaired_near_start"]), 1)
+        self.assertEqual(measured["unpaired_near_start"][0]["delta_ms"], 200.0)
+        self.assertEqual(measured["unpaired_near_start"][0]["key"], "1")
         self.assertTrue(measured["ordering_mismatch"])
         self.assertFalse(measured["ok"])
 
@@ -295,6 +327,11 @@ class MemoryUiOffsetTests(unittest.TestCase):
         self.assertEqual(rec.shift_estimate_rows(run, 27), 0)
         second = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
         self.assertEqual(second, first)
+        self.assertEqual(rec.shift_estimate_rows(run, 0), 1)
+        restored = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
+        self.assertEqual(restored["client_ms"], 1000)
+        self.assertEqual(restored["client_ms_raw"], 1000)
+        self.assertEqual(restored["t_ms"], 100)
         self.assertEqual(rec.shift_estimate_rows(run, 10), 1)
         third = json.loads((run / "gcd.jsonl").read_text().splitlines()[0])
         self.assertEqual(third["client_ms"], 990)
