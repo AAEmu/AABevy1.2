@@ -15,15 +15,16 @@ never prints the password.
 
 Usage:
     python tools/combat-side/prepare_account.py \\
-        --lane-env D:/aaemu-lanes/combatcap.env \\
+        --lane-env <lane>.env \\
         --user clienttest \\
-        --password-file D:/aaemu-live/cfg/client-test-password.txt
+        --password-file <password-file>
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path

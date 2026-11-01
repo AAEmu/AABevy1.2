@@ -17,22 +17,24 @@ input and never calls `X2World:LeaveWorld`.
 ```bash
 python tools/combat-side/record_original.py \
   --pid <client-pid> \
-  --run-dir D:/aaemu-client/handoff/2026-11-01-combat-recorder/run \
-  --driver D:/aaemu-target/combatcap/live/aaemu-clientdriver.exe \
-  --dll D:/aaemu-target/combatcap/aadriver/aadriver.dll \
-  --launcher D:/aaemu-target/combatcap/live/aaemu-launcher.exe \
-  --client D:/AA1.2/bin32/archeage.exe \
-  --login 127.0.0.1:35237 \
-  --password-file D:/aaemu-live/cfg/client-test-password.txt \
+  --run-dir <capture-root>/2026-11-01-combat-recorder/run \
+  --driver <lane-target>/live/aaemu-clientdriver.exe \
+  --dll <lane-target>/aadriver/aadriver.dll \
+  --launcher <lane-target>/live/aaemu-launcher.exe \
+  --client <client>/bin32/archeage.exe \
+  --login <login-host:port> \
+  --password-file <password-file> \
   --character CombatT1 --character-ability 2 --create-character \
   --spawn-npc 6409 --npc-name "rat_brown " \
-  --fight-keys 1,1,2,1,3,2,1,1 --server-log D:/aaemu-live-combatcap/logs/rs-game.log
+  --fight-keys 1,1,2,1,3,2,1,1 --server-log <lane-live>/logs/rs-game.log
 ```
 
-`--character-ability 2` selects the ability whose level-1 starter
-(`14376`, Earth's Grasp) has `default_gcd='t'`, so the first key press produces
-a real global cooldown.  Ability 1's starter (`18132`) has `default_gcd='f'`
-and would leave the GCD pair at zero.
+`--character-ability` is the index passed to the creation UI's
+`SelectAbility`; it is not the database ability id.  In the 1.2 dry run index 2
+produced ability 7 and its level-1 starter `10752` (Flamebolt,
+`default_gcd='t'`), so the first key press produced a 1000 ms global cooldown.
+Ability 1's starter `18132` has `default_gcd='f'` and would leave the GCD pair
+at zero.  Check `self_check.json`'s `gcd` block if you change the choice.
 
 The account must have GM before the client logs in (`access_level = 100` in
 the lane's game database `accounts` row for the account id).  The optional
@@ -90,7 +92,7 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
 
 The manager is inline in the unit at `+0x2c48`; the global pair is at `+0x08`
 (remaining ms) and `+0x0c` (total ms).  The evidence, from the 1.2 decompile
-`D:/aa-re/client12/out-x2game/x2game.dll.c`:
+`<re-notes>/client12/out-x2game/x2game.dll.c`:
 
 * `x2game.dll.c:1931135` `FUN_3989a290` — when its mode byte is 0 it writes the
   caller's two out-pointers from `*(uint *)(param_1 + 8)` and

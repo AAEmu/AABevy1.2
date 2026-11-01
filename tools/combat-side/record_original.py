@@ -30,12 +30,12 @@ Typical use against a lane stack (the lane's ``live-stack.sh client`` already
 started the client):
 
     python tools/combat-side/record_original.py \\
-        --pid 1234 --run-dir D:/aaemu-client/handoff/2026-11-01-combat-recorder/run \\
-        --driver D:/aaemu-target/combatcap/live/aaemu-clientdriver.exe \\
-        --dll D:/aaemu-target/combatcap/aadriver/aadriver.dll \\
-        --launcher D:/aaemu-target/combatcap/live/aaemu-launcher.exe \\
-        --client D:/AA1.2/bin32/archeage.exe --login 127.0.0.1:35237 \\
-        --password-file D:/aaemu-live/cfg/client-test-password.txt \\
+        --pid 1234 --run-dir <capture-root>/2026-11-01-combat-recorder/run \\
+        --driver <lane-target>/live/aaemu-clientdriver.exe \\
+        --dll <lane-target>/aadriver/aadriver.dll \\
+        --launcher <lane-target>/live/aaemu-launcher.exe \\
+        --client <client>/bin32/archeage.exe --login <login-host:port> \\
+        --password-file <password-file> \\
         --character CombatT1 --character-ability 2 \\
         --spawn-npc 6409 --npc-name "rat_brown " --fight-keys 1,1,2,1,3,2,1
 
@@ -60,8 +60,6 @@ import time
 from pathlib import Path
 
 SCHEMA = "aabevy.combat-recorder/v2"
-DEFAULT_UPDATER = "aabevy.combat-recorder"
-
 DUMP_BASE = 0x38FF0000
 G_CONNECTION = 0x39B02294       # local player global (docs/research/port-combat/structs.md)
 UNIT_MAP = 0x3A169998           # tree used by FUN_39360020
@@ -1040,7 +1038,7 @@ def main() -> int:
     parser.add_argument("--launcher", type=Path,
                         default=Path(os.environ.get("AA_LAUNCHER", "aaemu-launcher.exe")))
     parser.add_argument("--client", type=Path,
-                        default=Path(os.environ.get("AA_CLIENT", r"D:/AA1.2/bin32/archeage.exe")))
+                        default=Path(os.environ.get("AA_CLIENT", "archeage.exe")))
     parser.add_argument("--login", default=os.environ.get("AA_LOGIN", "127.0.0.1:1237"))
     parser.add_argument("--user", default=os.environ.get("AA_USER", "clienttest"))
     parser.add_argument("--password-file", type=Path, default=None)
