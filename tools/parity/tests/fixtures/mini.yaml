@@ -1,0 +1,24 @@
+name: mini
+version: 1
+description: offline runner fixture
+steps:
+  - id: gm_heal
+    gm: "/heal"
+  - id: wait_short
+    wait: 10
+  - id: mark_start
+    mark: start
+  - id: snap_one
+    snapshot: one
+  - id: press
+    key: "1"
+    hold_ms: 80
+  - id: wait_cond
+    wait:
+      until: "vehicle.mounted == false"
+      timeout_ms: 500
+      source: server
+  - id: snap_two
+    snapshot: two
+  - id: end
+    mark: end
