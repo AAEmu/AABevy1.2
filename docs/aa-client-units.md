@@ -389,7 +389,10 @@ poller never returns 5: dying is entered by the death path below.
   other active authored emitters stay. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
   `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
   Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
-  (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned.
+  (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A
+  burst (no `Continuous` emitter, like the explosion) is never primed: priming would advance its whole
+  life past the first frame. Vehicle prefab effects retire when finished, and the dead `_dead_effect`
+  plays only on a worsening transition into 6, not for a slave that arrives already dead.
 * **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
   (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying

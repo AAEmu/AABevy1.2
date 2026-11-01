@@ -344,12 +344,22 @@ fn check_states(
                     .any(|name| name == "x2_effects.fire_smoke.burning_smoke_01"),
                 "the dead prefab's smoke: {names:?}"
             );
-            assert!(
-                names
-                    .iter()
-                    .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
-                "the dead prefab's explosion: {names:?}"
-            );
+            if check.death_phase == 0 {
+                // the HP-0 step is the worsening transition into dead: its explosion plays here
+                assert!(
+                    names
+                        .iter()
+                        .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+                    "the dead prefab's explosion: {names:?}"
+                );
+            } else {
+                assert!(
+                    !names
+                        .iter()
+                        .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+                    "the death's 6 -> 5 -> 6 does not replay the explosion: {names:?}"
+                );
+            }
         }
         info!("vehicle_damage: verified state {state} {}", damage.variant);
         match check.death_phase {

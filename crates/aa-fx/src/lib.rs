@@ -248,6 +248,18 @@ impl Effect {
         self.scale = scale;
         self
     }
+
+    /// Whether to run this effect ahead when it starts (`bPrime`). Only a continuing effect may be primed: a
+    /// one-shot burst would be advanced past its lifetime before its first frame and would never be seen.
+    pub fn primes(&self, def: &EffectDef) -> bool {
+        self.prime && !def.one_shot()
+    }
+}
+
+/// Whether a finished effect retires its entity: a one-shot with [`Effect::despawn_when_finished`], unless the
+/// dev `force_loop` keeps it.
+fn retires_when_finished(effect: &Effect, def: Option<&EffectDef>) -> bool {
+    effect.despawn_when_finished && !effect.force_loop && def.is_some_and(|def| def.one_shot())
 }
 
 /// Runtime state of an [`Effect`] (inserted with it).
@@ -888,7 +900,7 @@ fn simulate(
                 }
             }
             if ready {
-                if effect.prime {
+                if run.def.as_ref().is_some_and(|def| effect.primes(def)) {
                     sim.prime(&ctx);
                 } else {
                     sim.primed = true;
@@ -919,14 +931,16 @@ fn simulate(
                 if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
                     sim.reset();
                     run.wind.restart(time.elapsed_secs_f64());
-                    if effect.prime {
+                    if run.def.as_ref().is_some_and(|def| effect.primes(def)) {
                         sim.prime(&ctx);
                     } else {
                         sim.primed = true;
                     }
                 } else {
                     run.finished = true;
-                    if effect.despawn_when_finished && let Ok(mut d) = despawn.lock() {
+                    if retires_when_finished(effect, run.def.as_deref())
+                        && let Ok(mut d) = despawn.lock()
+                    {
                         d.push(entity);
                     }
                 }
@@ -1178,5 +1192,30 @@ mod tests {
         let lib = library::Library::parse(xml).unwrap();
         assert!(lib.get("A.HELD").unwrap().loops());
         assert!(!lib.get("A.ONCE").unwrap().loops());
+    }
+
+    #[test]
+    fn a_burst_is_never_primed_and_retires_when_finished() {
+        let xml = r#"<ParticleLibrary Name="T">
+            <Particles Name="a.fire"><Params/><Childs><Particles Name="x"><Params Continuous="true" Texture="t.dds"/></Particles></Childs></Particles>
+            <Particles Name="a.burst"><Params/><Childs><Particles Name="x"><Params ParticleLifeTime="6" Texture="t.dds"/></Particles></Childs></Particles>
+            </ParticleLibrary>"#;
+        let lib = library::Library::parse(xml).unwrap();
+        let fire = lib.get("A.FIRE").unwrap();
+        let burst = lib.get("A.BURST").unwrap();
+        assert!(!fire.one_shot());
+        assert!(burst.one_shot());
+        // `Effect::new` asks for priming, but a burst must start at t=0 so its first frames are visible
+        let mut effect = Effect::new("T.A.BURST");
+        assert!(!effect.primes(burst));
+        assert!(Effect::new("T.A.FIRE").primes(fire));
+        // and a finished burst with the flag retires; a continuing effect never does
+        effect.despawn_when_finished = true;
+        assert!(retires_when_finished(&effect, Some(burst)));
+        effect.despawn_when_finished = false;
+        assert!(!retires_when_finished(&effect, Some(burst)));
+        let mut fire_effect = Effect::new("T.A.FIRE");
+        fire_effect.despawn_when_finished = true;
+        assert!(!retires_when_finished(&fire_effect, Some(fire)));
     }
 }
