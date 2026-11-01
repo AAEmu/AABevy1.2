@@ -39,6 +39,30 @@ class PacketClockTests(unittest.TestCase):
         self.assertEqual(packet_clock.packet_clock("PingPacket", b"\0" * 4),
                          (None, None))
 
+    def test_read_log_keeps_a_torn_line_for_the_next_read(self) -> None:
+        import tempfile
+        line = ("10:00:00 [TRACE] fields - C->S level=1 opcode=0x089 "
+                "CSMoveUnitPacket len=33 body=a6 21 00 01 e8 03 00 00 "
+                + "00 " * 25).rstrip()
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "server.log"
+            # half of the line, no newline yet: nothing is read, the offset stays
+            log.write_bytes(line[:70].encode())
+            self.assertEqual(packet_clock.read_log(log, 0), ([], 0))
+            # an invalid UTF-8 byte before it must not shift the byte offset
+            log.write_bytes(b"\xff junk\n" + line.encode() + b"\n" + line[:40].encode())
+            records, offset = packet_clock.read_log(log, 0)
+            self.assertEqual(len(records), 1)
+            self.assertEqual(offset, len(b"\xff junk\n" + line.encode() + b"\n"))
+        # a garbled body is skipped, not raised
+        self.assertIsNone(packet_clock.parse_line(line[:-1] + "zz"))
+
+    def test_run_ids_and_names_cannot_escape_the_run_dir(self) -> None:
+        for bad in [".", "..", "...", "a/b", ""]:
+            self.assertIsNone(scenario.STEP_ID_RE.match(bad), bad)
+        for good in ["k2", "run.1", "2026-11-01T10Z", "..a"]:
+            self.assertIsNotNone(scenario.STEP_ID_RE.match(good), good)
+
     def test_interpolation_and_tags(self) -> None:
         move = ("10:00:00 [TRACE] fields - C->S level=1 opcode=0x089 "
                 "CSMoveUnitPacket len=33 body=a6 21 00 01 e8 03 00 00 "

@@ -1594,6 +1594,8 @@ def main(argv: list[str] | None = None) -> int:
 
     scenario = scenario_format.load_scenario(args.scenario)
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if not scenario_format.STEP_ID_RE.match(run_id):
+        raise SystemExit(f"--run-id {run_id!r} must be file-safe ([A-Za-z0-9_.-], not only dots)")
     root = capture_root(args)
     run_dir = root / scenario["name"] / run_id
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -29,7 +29,8 @@ KEY_NAMES = set("wasdqrtyuiopfg1234567890") | {"space", "release"}
 MODIFIERS = {"ctrl", "shift", "alt"}
 WIDGET_PATH_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$")
-STEP_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,96}$")
+# file-safe: letters, digits, `_`, `.` and `-`, but not only dots (`.` / `..` would escape the run dir)
+STEP_ID_RE = re.compile(r"^(?!\.+$)[A-Za-z0-9_.-]{1,96}$")
 CONDITION_RE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_.]*)\s*(==|!=|<=|>=|<|>|contains)\s*(.+?)\s*$")
 FORBIDDEN = ("leaveworld", "system.quit", "application.quit", "quit game")

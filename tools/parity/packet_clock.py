@@ -52,7 +52,11 @@ def parse_line(line: str) -> dict | None:
     match = C2S_RE.search(line)
     if match:
         body_hex = match.group(4).strip()
-        body = bytes.fromhex(body_hex) if body_hex else b""
+        try:
+            body = bytes.fromhex(body_hex) if body_hex else b""
+        except ValueError:
+            # a torn or garbled trace line: skip it rather than fail the whole alignment
+            return None
         client_ms, anchor = packet_clock(match.group(2), body)
         return {
             "dir": "C->S", "log_time": log_time,
@@ -92,10 +96,12 @@ def read_log(path: Path, offset: int = 0) -> tuple[list[dict], int]:
     with path.open("rb") as handle:
         handle.seek(offset)
         data = handle.read(size - offset)
-    text = data.decode("utf-8", "replace")
-    complete = text.rsplit("\n", 1)[0] if not text.endswith("\n") else text
-    records = parse_log(complete)
-    return records, offset + len(complete.encode("utf-8"))
+    # complete lines only, cut on the raw bytes so the returned offset is exact even when the
+    # log holds invalid UTF-8; a line still being written is left for the next read
+    cut = data.rfind(b"\n") + 1
+    complete = data[:cut]
+    records = parse_log(complete.decode("utf-8", "replace"))
+    return records, offset + len(complete)
 
 
 def align(records: list[dict], clock: Any = None) -> list[dict]:
