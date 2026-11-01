@@ -1112,6 +1112,8 @@ def main() -> int:
                      system_ms=round(system, 1), ui_ms=round(ui, 1) if ui is not None else None)
 
         log("installing chat hook", mcp.text("client_lua", pid=pid, target="ui", code=CHAT_HOOK))
+        mcp.text("client_lua", pid=pid, target="ui",
+                 code="local o=assert(_G.__combat_recorder) o.chat={} return 1")
         if args.server_log:
             server_offset = args.server_log.stat().st_size if args.server_log.exists() else 0
 
@@ -1138,22 +1140,42 @@ def main() -> int:
             mcp.text("client_chat", pid=pid, message=f"/spawn npc {args.spawn_npc}")
             time.sleep(2.0)
         find_template = args.find_npc or args.spawn_npc
+        victim_id = 0
+        state: dict = {}
         if find_template:
-            mcp.text("client_chat", pid=pid, message=f"/findobject npc {find_template} 5")
-            time.sleep(1.2)
-            chat_text = mcp.text(
-                "client_lua", pid=pid, target="ui",
-                code="local o=assert(_G.__combat_recorder) return table.concat(o.chat, '\\n')")
-            ids = re.findall(r"BcId:\s*(\d+)", chat_text)
-            if not ids:
-                raise RuntimeError("spawned NPC not found in chat:\n" + chat_text[-4000:])
-            victim_id = int(ids[0])
-            target = mcp.text("client_target", pid=pid, unit_id=format(victim_id, "X"),
-                              expected_name=args.npc_name)
-            log("target", target)
-            state = json.loads(mcp.text("client_unit_state", pid=pid, target="target"))
-            if not state.get("present"):
-                raise RuntimeError("target is not present")
+            for attempt in range(3):
+                mcp.text("client_chat", pid=pid, message=f"/findobject npc {find_template} 5")
+                time.sleep(1.2)
+                chat_text = mcp.text(
+                    "client_lua", pid=pid, target="ui",
+                    code="local o=assert(_G.__combat_recorder) return table.concat(o.chat, '\\n')")
+                candidates = [int(value) for value in re.findall(r"BcId:\s*(\d+)", chat_text)]
+                if not candidates:
+                    raise RuntimeError("spawned NPC not found in chat:\n" + chat_text[-4000:])
+                for candidate in candidates:
+                    try:
+                        target = mcp.text("client_target", pid=pid,
+                                          unit_id=format(candidate, "X"),
+                                          expected_name=args.npc_name)
+                        candidate_state = json.loads(
+                            mcp.text("client_unit_state", pid=pid, target="target"))
+                    except Exception as error:
+                        log("target candidate", candidate, "failed", error)
+                        continue
+                    if (candidate_state.get("present")
+                            and candidate_state.get("name") == args.npc_name
+                            and int(candidate_state.get("health") or 0) > 0):
+                        victim_id = candidate
+                        state = candidate_state
+                        log("target", target)
+                        break
+                    log("target candidate", candidate, "not a live", args.npc_name,
+                        candidate_state.get("health"))
+                if victim_id:
+                    break
+                time.sleep(1.0)
+            if not victim_id:
+                raise RuntimeError("no live %r target after three findobject attempts" % args.npc_name)
             distance = float(state.get("distance", 999))
             log("target", args.npc_name, "distance", distance)
             if distance > 4.0 and args.move is None:
