@@ -97,6 +97,26 @@ fn grid_mesh() -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
+/// Where the target ring's unit stands (game coordinates): the drawn root's current `Transform` chain, else
+/// the parent-composed packet pose. An attached child's root `Transform` is parent-local, so composing the
+/// chain puts the ring on the ship rather than at its local offset.
+fn target_point<F: bevy::ecs::query::QueryFilter>(
+    unit: &aa_net::model::Unit,
+    plates: &PlateState,
+    units: &Units,
+    transforms: &Query<&Transform, F>,
+    parents: &Query<&ChildOf>,
+) -> Vec3 {
+    match plates
+        .entities
+        .get(&unit.obj_id)
+        .and_then(|e| crate::ingame::units::current_pose(*e, transforms, parents))
+    {
+        Some((pos, _)) => pos,
+        None => crate::ingame::units::unit_world(unit, units).unwrap_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)),
+    }
+}
+
 /// Keeps the ring under the selected target: spawned on selection, moved with the unit, gone with the selection.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_ring(
@@ -113,6 +133,7 @@ pub fn update_ring(
     mut materials: ResMut<Assets<ColorMaterial>>,
     world_camera: Query<(&Camera, &Transform), (With<Camera3d>, Without<TargetRing>, Without<crate::hud::ModelViewCamera>)>,
     transforms: Query<&Transform, (Without<TargetRing>, Without<Camera3d>)>,
+    parents: Query<&ChildOf>,
     mut rings: Query<(Entity, &mut Visibility, &mut MeshMaterial2d<ColorMaterial>), With<TargetRing>>,
 ) {
     let own = player.spawn.as_ref().map(|s| s.obj_id);
@@ -154,11 +175,7 @@ pub fn update_ring(
         }
     };
 
-    // where it stands (the unit's entity once it has one: it is smoothed towards the server's position)
-    let game_pos = match plates.entities.get(&unit.obj_id).and_then(|e| transforms.get(*e).ok()) {
-        Some(t) => bevy_to_cry(t.translation),
-        None => Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
-    };
+    let game_pos = target_point(unit, &plates, &units, &transforms, &parents);
     let ground_at = |x: f32, y: f32| terrain.as_ref().and_then(|t| t.ground_at(x, y)).map_or(game_pos.z, |ground| ground.height);
     let diameter = MIN_DIAMETER.max(0.95 * unit.scale.max(0.1));
     let size = diameter / INK;
@@ -230,4 +247,103 @@ pub fn despawn(mut commands: Commands, rings: Query<Entity, With<TargetRing>>) {
 pub fn plugin(app: &mut App) {
     // `update_ring` runs with the plates (`plates::plugin`), over the camera's final position
     app.init_resource::<RingAssets>().add_systems(OnExit(Screen::InGame), despawn);
+}
+
+#[cfg(test)]
+mod attached_ring_tests {
+    use super::*;
+    use aa_net::model::{Unit, UnitKind, UnitStateAttachments};
+    use aa_net::state::Units;
+
+    #[derive(Component)]
+    struct ShipRoot;
+    #[derive(Resource, Default)]
+    struct Seen(Option<Vec3>);
+    #[derive(Resource, Default)]
+    struct MoveShip(bool);
+
+    fn move_ship(mut moved: ResMut<MoveShip>, mut roots: Query<&mut Transform, With<ShipRoot>>) {
+        if moved.0
+            && let Ok(mut transform) = roots.single_mut()
+        {
+            transform.translation += Vec3::new(10.0, 0.0, 0.0);
+        }
+    }
+
+    fn read_ring(
+        plates: Res<PlateState>,
+        units: Res<Units>,
+        transforms: Query<&Transform, (Without<TargetRing>, Without<Camera3d>)>,
+        parents: Query<&ChildOf>,
+        mut seen: ResMut<Seen>,
+    ) {
+        seen.0 = units
+            .get(7)
+            .map(|u| target_point(u, &plates, &units, &transforms, &parents));
+    }
+
+    fn cannon(id: u32, parent: u32, local: Vec3) -> Unit {
+        let mut unit = crate::hud::fixture_spawn().unit;
+        unit.obj_id = id;
+        unit.kind = UnitKind::Slave {
+            id: 1,
+            tl_id: 1,
+            template_id: 1,
+            summoner_id: 0,
+        };
+        unit.pos = aa_net::Pos::new(local.x, local.y, local.z);
+        unit.state_attachments = Some(UnitStateAttachments {
+            first_point: 3,
+            first_obj_id: Some(parent),
+            bonding_obj_id: None,
+        });
+        unit
+    }
+
+    #[test]
+    fn an_attached_ring_follows_its_parent_in_the_same_update() {
+        let ship_at = Vec3::new(12000.0, 9000.0, 0.0);
+        let local = Vec3::new(2.0, 3.0, 1.0);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+            .init_resource::<PlateState>()
+            .init_resource::<Units>()
+            .init_resource::<Seen>()
+            .init_resource::<MoveShip>()
+            .add_systems(Update, (move_ship, read_ring).chain());
+        let parent = Transform::from_translation(cry_to_bevy(ship_at)).with_rotation(
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_x(-0.2),
+        );
+        let ship = app.world_mut().spawn((parent, ShipRoot)).id();
+        let child = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(cry_to_bevy(local)),
+                ChildOf(ship),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<PlateState>()
+            .entities
+            .insert(7, child);
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(7, cannon(7, 60, local));
+        app.update();
+        assert!(app.world().resource::<Seen>().0.is_some());
+        app.world_mut().resource_mut::<MoveShip>().0 = true;
+        app.update();
+        let moved = Transform::from_translation(cry_to_bevy(ship_at) + Vec3::new(10.0, 0.0, 0.0))
+            .with_rotation(
+                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2) * Quat::from_rotation_x(-0.2),
+            );
+        let expected = bevy_to_cry(moved.transform_point(cry_to_bevy(local)));
+        let seen = app.world().resource::<Seen>().0.expect("the ring point");
+        assert!(
+            seen.distance(expected) < 1e-3,
+            "the ring lags its parent: {seen:?} != {expected:?}"
+        );
+        assert!(seen.distance(local) > 1.0, "the ring used the local offset");
+    }
 }

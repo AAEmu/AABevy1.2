@@ -217,6 +217,7 @@ pub(super) fn remove_subtree(lua: &Lua, root: Id) {
         u.retiring.remove(&id);
         u.auto_clip_widgets.remove(&id);
         u.auto_textbox_scales.remove(&id);
+        u.auto_textbox_dirty.remove(&id);
     }
     u.drag.removed(&ids);
     for events in u.events.values_mut() {

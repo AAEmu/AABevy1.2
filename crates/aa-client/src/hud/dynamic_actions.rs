@@ -8,7 +8,7 @@ pub(super) enum Source {
         phase: u32,
         generation: u64,
     },
-    #[allow(dead_code)] // Native NPC context providers are not yet all qualified.
+    /// A slave unit's "Grab Machine" prompt (`FUN_393bbb80`): `template` is the slave template.
     Npc { obj_id: u32, template: u32 },
 }
 
