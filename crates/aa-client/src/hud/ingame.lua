@@ -418,6 +418,12 @@ local function slotContent(s)
     c.canUse = s.blocked == nil
     c.learned = HUD.book_learned(s.id)
     c.tooltip = HUD.skill_tip(s.id)
+  elseif s.kind == "function" then
+    -- mode bar function buttons (unbind, showSlaveInfo, command_unmount): the original
+    -- GetBindedType returns "function" and GetTooltip carries the ui_texts line in
+    -- `tootipText` (the field name the shipped mode_action.alb reads).
+    c.canUse = true
+    c.tooltip = { tootipText = s.desc, text = s.desc, name = s.name }
   end
   if s.cd_end ~= nil then
     local remain = s.cd_end - HUD.now_ms()

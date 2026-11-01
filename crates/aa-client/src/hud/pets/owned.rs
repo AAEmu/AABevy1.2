@@ -528,7 +528,7 @@ pub(super) fn cancel_mount_walk(data: &mut HudData) -> bool {
 
 /// Getting off the own pet: `X2Mate:UnMountMate()` (reason 9) from the seat the player is on; `DismissPet()` first gets off
 /// with reason 10 and then sends the pet away (the native client sends the removal when that dismount finishes).
-fn unmount(data: &mut HudData, dismiss: bool) {
+pub(in crate::hud) fn unmount(data: &mut HudData, dismiss: bool) {
     // an unmount, dismiss or new target action ends a walk to the mate
     cancel_mount_walk(data);
     let Some(pet) = &data.pets.owned.current else { return };

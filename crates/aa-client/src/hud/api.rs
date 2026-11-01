@@ -1161,7 +1161,16 @@ pub fn handle_requests(
                 panels::use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::UseModeAction { slot } => {
-                let data = bridge.0.borrow();
+                let mut data = bridge.0.borrow_mut();
+                let slot = slot - 1;
+                if let Some(function) = super::mode_actions::function_at(&data, slot) {
+                    super::mode_actions::run_function(
+                        &mut data,
+                        function,
+                        web_time::Instant::now(),
+                    );
+                    continue;
+                }
                 let env = Env::of(
                     &data,
                     Some(&skills),
@@ -1170,7 +1179,7 @@ pub fn handle_requests(
                 );
                 super::mode_actions::use_slot(
                     &data,
-                    slot - 1,
+                    slot,
                     &env,
                     &mut flight,
                     &target,
