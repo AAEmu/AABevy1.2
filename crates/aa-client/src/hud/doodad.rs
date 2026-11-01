@@ -9,7 +9,10 @@
 //! their own packets (`CSNaviTeleport`, `CSNaviOpenPortal`).
 //!
 //! Original 1.2 capture (2026-10-30, `tools/evidence/doodad_affordance/capture-results.txt`): the bar offers a phase's
-//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857) and the reach is the skill's `max_range` ([`reach`]).
+//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857). The candidate distance is the client setting
+//! `max_interaction_doodad_distance` that `FUN_3902f010` passes to its range predicate ([`DOODAD_REACH`]), not the
+//! skill's `max_range`: the capture bounds it at 3.0 m in and 4.5 m out for Gather (whose `max_range` is also 4),
+//! and storage skill 15307 (`max_range` 20) must still clear at the same distance.
 //! The lamp 2319's fake-use skill 13166 (offered by the original too) comes from the func's own detail row (`gather.rs`),
 //! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). Not listed here yet:
 //! the Mailbox's 11400 "Open Mailbox" (no `func_skill_id` and no detail row; the mail window opens with Ctrl-E, `mail.rs`).
@@ -62,10 +65,15 @@ mod gather;
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// Reach of a doodad use without a skill range, metres (not captured). A skill's own `max_range` is used as is
-/// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
-/// 4.5 m, so there is no extra slack.
+/// Fallback for a skill without a `max_range`, used by the right-click walk's stop distance.
 const BASE_REACH: f32 = 4.0;
+/// `max_interaction_doodad_distance`: `FUN_3902f010` reads this client setting (at
+/// `DAT_39aefb98+0x2a0`, not a static in the pak) for the doodad candidates, independent of the
+/// skill's `max_range`. The exact setting is not in the pak; the 2026-10-30 original-client
+/// capture bounds it: Gather 13990 (`max_range` 4) is offered at 3.0 m and absent at 4.5 m. The
+/// bar therefore uses this 4.0 m distance, not `max_range`: storage skill 15307 has
+/// `max_range` 20 but its button still clears at the doodad distance.
+pub(super) const DOODAD_REACH: f32 = 4.0;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
 /// A press that moves more than this many pixels before it is released was a camera drag.
@@ -465,10 +473,10 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
             continue;
         };
         let dist = from.distance(pos);
-        if dist > reach(data, uses) {
+        let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
+        if gap >= DOODAD_REACH {
             continue;
         }
-        let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
         let key = super::slave::native_key(from, forward, pos, gap);
         let preferred = data.doodad.preferred == Some(o.obj_id);
         let focus = Focus {
@@ -1553,6 +1561,34 @@ mod tests {
         assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
         assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
         assert_eq!(bar_skills(&mut data, &doodads, 8.0), None);
+    }
+
+    /// The bar's candidate distance is the doodad interaction setting, not the skill's range:
+    /// storage skill 15307 has `max_range` 20, but its button must clear at 4.5 m and 10 m from
+    /// the box (2026-11-01 owner retest: a "store a trade pack" icon stayed on screen 10 m away).
+    #[test]
+    fn a_doodad_bar_uses_the_interaction_distance_not_the_skill_range() {
+        let mut game = GameData::default();
+        game.doodad.add(8264, 15307, "DoodadFuncConsumeChanger");
+        game.skills.insert(
+            15307,
+            SkillInfo {
+                max_range: 20,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        let mut doodads = Doodads::default();
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(10990.0, 10123.0, 102.5));
+        assert!(doodads.apply(&aa_net::Event::DoodadsSpawned(vec![storage])));
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![15307]));
+        assert_eq!(
+            bar_skills(&mut data, &doodads, 4.5),
+            None,
+            "the bar clears at the interaction distance, not the 20 m skill range"
+        );
+        assert_eq!(bar_skills(&mut data, &doodads, 10.0), None);
     }
 
     #[test]
