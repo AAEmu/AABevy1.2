@@ -960,7 +960,8 @@ fn vehicle_engine_sounds(
     units: Option<Res<Units>>,
     book: Option<Res<SoundBook>>,
     packs: Option<Res<Packs>>,
-    vehicles: Query<(Entity, &RemoteUnit), Without<VehicleSound>>,
+    // only vehicle roots: `vehicle::spawn` gives them `VehicleMotion`, players and NPCs never get it
+    vehicles: Query<(Entity, &RemoteUnit), (With<VehicleMotion>, Without<VehicleSound>)>,
 ) {
     let (Some(units), Some(book), Some(packs)) = (units, book, packs) else { return };
     let Some(packs) = packs.get() else { return };
