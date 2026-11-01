@@ -1049,7 +1049,7 @@ pub fn handle_requests(
     credentials: Option<Res<crate::ingame::enter::Credentials>>,
     mut bar: ResMut<aa_net::state::ActionBar>,
     inventory: Res<aa_net::state::Inventory>,
-    target: Res<aa_net::state::Target>,
+    mut target: ResMut<aa_net::state::Target>,
     skills: Res<aa_net::state::Skills>,
     buffs: Res<aa_net::state::Buffs>,
     mut flight: ResMut<super::usable::InFlight>,
@@ -1069,7 +1069,14 @@ pub fn handle_requests(
             }
             Request::Party(command) => { net.write(NetCommand(Command::Party(command))); }
             Request::Friend(command) => { net.write(NetCommand(Command::Friend(command))); }
-            Request::Target { obj_id } => { net.write(NetCommand(Command::Target { obj_id })); }
+            Request::Target { obj_id } => {
+                // The native `ChangeTargetForUI` sets its local target before the send and sends only
+                // on a change (the server's `SCTargetChanged` confirms it); the own portrait's
+                // `X2Unit:TargetUnit('player')` comes here.
+                if target.set_local((obj_id != 0).then_some(obj_id)) {
+                    net.write(NetCommand(Command::Target { obj_id }));
+                }
+            }
             Request::Slave(command) => {
                 // The driver's leave: the capture's last type-4 0/0 goes out just before CSDiscardSlave.
                 if let aa_net::slave_control::SlaveCommand::Unbind { tl_id } = &command

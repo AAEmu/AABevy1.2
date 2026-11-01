@@ -507,6 +507,9 @@ bubbles").
 | `SCTargetChanged` (also echoed to the sender) | `TargetChanged { obj_id, target_obj_id }` | `Target::obj_id` when `obj_id` is the player |
 | `SCUnitsRemoved` | `UnitsRemoved` | cleared when the target left the view |
 
+`Target::set_local(Option<u32>)` sets the target from a client request before the server's echo (the native
+`ChangeTargetForUI` updates its local target first; the player's own unit is not in `Units`).
+
 `Target::unit(&Units) -> Option<&Unit>` gives the unit for the target frame (`name`, `level`, `hp` /
 `max_hp`, `faction_id`, `buffs`). NPC names are empty on the wire: show the template id from
 `Unit::kind` (`Npc { template_id, .. }`, `npcs.name` in the game database). `Event::TargetChanged`

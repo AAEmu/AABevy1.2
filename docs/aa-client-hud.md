@@ -322,6 +322,15 @@ window is the script's). The wire formats are checked against the server's own b
 
 **Tab** targets the nearest living enemy (the next one when pressed again), any unit if there is no enemy.
 
+**Self target.** `F1` is `round_target` in the client's `default_binding.g` (`hotkey.g` records the same):
+the native `round_target` handler (`FUN_3942a080`) targets the local player, and pressed again while the player
+is the target it targets the own pet (`FUN_3933f5e0` on the pet manager; no packet without one). `self_target`
+(`FUN_393f8fb0`) targets the player. A left click on the player frame goes through the original script's
+`eventWindow` `OnClick` -> `X2Unit:TargetUnit("player")` (native `ChangeTargetForUI`). The own portrait's
+CSChangeTarget `0x02c` carries the player's own bc (owner session 2026-11-01 14:18: `21 5f 00`). Both paths set
+`Target` locally before the send. The player is kept in `Player`, not `Units`, so `panels::refresh` builds the
+target frame's self snapshot from the player's spawn unit with the HUD's current points.
+
 **Not done / assumptions.** The afterimage, shake and critical bursts; the plate shows no party, guild or PvP marks;
 auto-away after 300 s is a guess; the capture's side-on camera is only approximated by
 `--hud-side-cam` (the character is not exactly side-on); a unit's height has no source for models without a skeleton
