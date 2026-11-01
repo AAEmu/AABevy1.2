@@ -40,6 +40,7 @@ use super::camera::OrbitCamera;
 use super::combat::{Dead, Sfx};
 use super::player::LocalPlayer;
 use super::units::RemoteUnit;
+use super::vehicle::VehicleMotion;
 use crate::Screen;
 use crate::sound::{Packs, log_enabled};
 
@@ -103,6 +104,8 @@ struct Inner {
     conn: Option<Connection>,
     /// `models.id` -> the name of its sound pack.
     model_packs: HashMap<u32, Option<Arc<str>>>,
+    /// `models.id` -> `vehicle_models.velocity` / `ship_models.velocity`.
+    vehicle_speeds: HashMap<u32, Option<f32>>,
     /// `$SoundEventDatabase` path -> the clips' sound events (read on a thread).
     tables: HashMap<String, Arc<OnceLock<ClipTable>>>,
     /// Particle library -> the sounds of its effects (read on a thread).
@@ -140,6 +143,7 @@ impl SoundBook {
             blows,
             weapon: weapon::Catalog::default(),
             model_packs: HashMap::new(),
+            vehicle_speeds: HashMap::new(),
             tables: HashMap::new(),
             particles: HashMap::new(),
             footsteps,
@@ -171,6 +175,28 @@ impl SoundBook {
             .map(|n| Arc::from(n.as_str()));
         inner.model_packs.insert(model, name.clone());
         name
+    }
+
+    /// The maximum speed of a vehicle or ship model (`vehicle_models.velocity` / `ship_models.velocity`): the
+    /// denominator `UpdateSound` normalizes the speed parameter by (`*(int *)(vtable+0x1e0) + 0x34`, `+0x74`).
+    pub fn vehicle_max_speed(&self, model: u32) -> Option<f32> {
+        let mut inner = self.inner();
+        if let Some(speed) = inner.vehicle_speeds.get(&model) {
+            return *speed;
+        }
+        let speed: Option<f32> = inner.conn.as_ref().and_then(|c| {
+            c.query_row(
+                "SELECT COALESCE( \
+                    (SELECT v.velocity FROM models m JOIN vehicle_models v ON v.id = m.sub_id WHERE m.id = ?1 AND m.sub_type = 'VehicleModel'), \
+                    (SELECT s.velocity FROM models m JOIN ship_models s ON s.id = m.sub_id WHERE m.id = ?1 AND m.sub_type = 'ShipModel'))",
+                params![model],
+                |r| r.get::<_, Option<f32>>(0),
+            )
+            .ok()
+            .flatten()
+        });
+        inner.vehicle_speeds.insert(model, speed);
+        speed
     }
 
     /// Resolve the impact before spawning its Sound, including all authored initial parameters.
@@ -893,29 +919,139 @@ fn init(mut commands: Commands, engine: Option<Res<Engine>>) {
     }
 }
 
-/// Marks a vehicle whose engine loop sound was started.
+/// A unit whose engine sounds were resolved once (including units whose model has neither item).
 #[derive(Component)]
-pub struct VehicleEngine;
+pub struct VehicleSound {
+    engine: Option<Entity>,
+    run: Option<Entity>,
+    engine_path: Option<Arc<str>>,
+    run_path: Option<Arc<str>>,
+    /// `vehicle_models.velocity` / `ship_models.velocity`, at least 0.1.
+    max_speed: f32,
+    /// The speed ratio last written (NaN: not written yet).
+    last_speed: f32,
+    run_playing: bool,
+    stopped: bool,
+}
 
-/// `VehicleUnitModel::UpdateSound`: a vehicle's sound pack `run` item loops while the vehicle exists
-/// (`sound_packs` 176 `run_tractor` -> sound 950, `sounds/x2vehicles:trailer:run`). Keyed from the data:
-/// only models whose pack has a `run` sound get one (`run_speedcar` has none). The [`Sound`] follows
-/// the vehicle root; a muted run has no [`Packs`] and starts nothing.
+impl VehicleSound {
+    fn checked_only() -> VehicleSound {
+        VehicleSound {
+            engine: None,
+            run: None,
+            engine_path: None,
+            run_path: None,
+            max_speed: 1.0,
+            last_speed: f32::NAN,
+            run_playing: false,
+            stopped: false,
+        }
+    }
+}
+
+/// `VehicleUnitModel::UpdateSound` (`FUN_390c6780`): resolves a unit's sound pack items once and marks it
+/// [`VehicleSound`]; an unchecked unit is only looked at while the packs are still loading. `engine` is the
+/// loop the original starts and keeps for the model's whole life; `run` starts only while the model moves
+/// (either of its two velocity vectors above 0.0003). The Farm Wagon's `sound_packs` 176 `run_tractor` has
+/// no `engine` item and `run` -> sound 950 (`sounds/x2vehicles:trailer:run`); the speedcar's `run_speedcar`
+/// has the reverse (`engine` -> `sounds/x2vehicles:speed_car:run`, `run` with no sound).
 fn vehicle_engine_sounds(
     mut commands: Commands,
     units: Option<Res<Units>>,
     book: Option<Res<SoundBook>>,
     packs: Option<Res<Packs>>,
-    vehicles: Query<(Entity, &RemoteUnit), Without<VehicleEngine>>,
+    vehicles: Query<(Entity, &RemoteUnit), Without<VehicleSound>>,
 ) {
     let (Some(units), Some(book), Some(packs)) = (units, book, packs) else { return };
     let Some(packs) = packs.get() else { return };
     for (entity, remote) in &vehicles {
-        let Some(unit) = units.by_id.get(&remote.obj_id) else { continue };
-        let Some(pack) = book.pack_of_model(unit.model_id) else { continue };
-        let Some(path) = packs.path(&pack, "run") else { continue };
-        commands.entity(entity).insert(VehicleEngine);
-        commands.spawn((ChildOf(entity), Transform::default(), Sound::event(path.to_string())));
+        let model = units.by_id.get(&remote.obj_id).map(|unit| unit.model_id);
+        let mut state = VehicleSound::checked_only();
+        if let Some(model) = model {
+            state.max_speed = book.vehicle_max_speed(model).unwrap_or(1.0).max(0.1);
+            if let Some(pack) = book.pack_of_model(model) {
+                state.engine_path = packs.path(&pack, "engine").map(Arc::from);
+                state.run_path = packs.path(&pack, "run").map(Arc::from);
+            }
+        }
+        state.engine = state
+            .engine_path
+            .as_ref()
+            .map(|path| commands.spawn((ChildOf(entity), Transform::default(), Sound::event(path.as_ref()))).id());
+        state.run = state
+            .run_path
+            .as_ref()
+            .map(|_| commands.spawn((ChildOf(entity), Transform::default())).id());
+        commands.entity(entity).insert(state);
+    }
+}
+
+/// The `UpdateSound` event parameters, from the composed speed ratio (0..1): `speed` is the ratio, and
+/// `pitch1`, `volume2` and `pitch2` are the same value; `volume1` is the ratio times `throttle * 0.8 + 0.2`
+/// (`DAT_399a1d94` 0.8, `_DAT_3999dd34` 0.2), all scaled by 0.99 (`DAT_399a3fb8`). The Bevy motion has no
+/// throttle, so the ratio stands in for it (capture-pending).
+fn write_vehicle_params(sound: &mut Sound, ratio: f32) {
+    let pitch = ratio * 0.99;
+    let volume1 = (ratio * (ratio * 0.8 + 0.2)).clamp(0.0, 1.0) * 0.99;
+    sound.params.clear();
+    sound.params.push(("speed".into(), pitch));
+    sound.params.push(("volume1".into(), volume1));
+    sound.params.push(("pitch1".into(), pitch));
+    sound.params.push(("volume2".into(), pitch));
+    sound.params.push(("pitch2".into(), pitch));
+}
+
+/// Toggles `run` with the model's movement and keeps the `engine` parameters on its speed. A destroyed
+/// unit (its root carries [`Dead`]) stops both; a resurrection plays the engine again.
+fn update_vehicle_engine_sounds(
+    mut commands: Commands,
+    dead: Query<(), With<Dead>>,
+    mut roots: Query<(Entity, &mut VehicleSound, Option<&VehicleMotion>)>,
+    mut sounds: Query<&mut Sound>,
+) {
+    for (entity, mut state, motion) in &mut roots {
+        let dead = dead.contains(entity);
+        if dead != state.stopped {
+            state.stopped = dead;
+            if dead {
+                if let Some(engine) = state.engine {
+                    commands.entity(engine).remove::<Sound>();
+                }
+                if let Some(run) = state.run {
+                    commands.entity(run).remove::<Sound>();
+                }
+                state.run_playing = false;
+            } else if let (Some(engine), Some(path)) = (state.engine, state.engine_path.as_ref()) {
+                commands.entity(engine).insert(Sound::event(path.as_ref()));
+                state.last_speed = f32::NAN;
+            }
+        }
+        if dead {
+            continue;
+        }
+        let (speed, moving) = motion.map_or((0.0, false), |motion| {
+            let speed = motion.velocity.length();
+            (speed, speed > 0.0003 || motion.yaw_rate.abs() > 0.0003)
+        });
+        if let Some(engine) = state.engine {
+            let ratio = (speed / state.max_speed).clamp(0.0, 1.0);
+            if (!state.last_speed.is_finite() || (ratio - state.last_speed).abs() > 0.001)
+                && let Ok(mut sound) = sounds.get_mut(engine)
+            {
+                write_vehicle_params(&mut sound, ratio);
+                state.last_speed = ratio;
+            }
+        }
+        if let (Some(run), Some(path)) = (state.run, state.run_path.as_ref())
+            && moving != state.run_playing
+        {
+            if moving {
+                commands.entity(run).insert(Sound::event(path.as_ref()));
+            } else {
+                commands.entity(run).remove::<Sound>();
+            }
+            state.run_playing = moving;
+        }
     }
 }
 
@@ -927,6 +1063,7 @@ pub fn plugin(app: &mut App) {
                 anim_sounds.run_if(resource_exists::<TerrainQuery>),
                 layer_sounds.run_if(resource_exists::<TerrainQuery>),
                 vehicle_engine_sounds,
+                update_vehicle_engine_sounds,
                 log_counts.run_if(log_enabled),
             )
                 .run_if(resource_exists::<SoundBook>)
@@ -1075,12 +1212,115 @@ mod tests {
         assert_eq!(material_surface(&String::from_utf8_lossy(&mtl)).as_deref(), Some("mat_dirt"));
     }
 
-    /// The Farm Wagon's pack (`sound_packs` 176 `run_tractor`), item `run`: the engine loop
-    /// `VehicleUnitModel::UpdateSound` plays (`sound 950`, `sounds/x2vehicles:trailer:run`).
+    /// The data `UpdateSound` keys from: `run` is the moving loop, `engine` the one that stays on.
     #[test]
-    fn the_tractor_pack_names_the_engine_loop() {
+    fn the_vehicle_packs_name_engine_and_run_items() {
         let Ok(db) = std::env::var("AA_DB") else { return };
-        let Ok(packs) = aa_audio::SoundPacks::open(db) else { return };
+        let Ok(packs) = SoundPacks::open(db) else { return };
         assert_eq!(packs.path("run_tractor", "run"), Some("sounds/x2vehicles:trailer:run"));
+        assert_eq!(packs.path("run_tractor", "engine"), None, "the wagon's pack has no engine item");
+        assert_eq!(packs.path("run_speedcar", "engine"), Some("sounds/x2vehicles:speed_car:run"));
+        assert_eq!(packs.path("run_speedcar", "run"), None, "the speedcar's run item has no sound");
+    }
+
+    /// The speedcar's `engine` event is the one `UpdateSound` feeds `speed`/`volume1`/`pitch1`/`volume2`/`pitch2`.
+    #[test]
+    fn the_speedcar_engine_event_has_the_updatesound_parameters() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let event = aa_audio::Library::global().event("sounds/x2vehicles:speed_car:run").expect("the speedcar engine event");
+        let aa_audio::fev::Body::Complex { parameters, .. } = &event.event().body else {
+            panic!("the speedcar engine event is not complex");
+        };
+        let names: Vec<&str> = parameters.iter().map(|p| p.name.as_str()).collect();
+        for name in ["speed", "volume1", "pitch1", "volume2", "pitch2"] {
+            assert!(names.contains(&name), "UpdateSound parameter {name} missing from {names:?}");
+        }
+    }
+
+    fn vehicle_app(model: u32) -> Option<(App, Entity)> {
+        let database = std::env::var("AA_DB").ok()?;
+        let packs = SoundPacks::open(database).ok()?;
+        let mut unit = super::super::seating::fixture_unit(1, 0, None);
+        unit.model_id = model;
+        let mut units = Units::default();
+        units.by_id.insert(unit.obj_id, unit.clone());
+        let mut app = App::new();
+        app.insert_resource(SoundBook::open()).insert_resource(Packs::fixture(packs)).insert_resource(units);
+        let root = app
+            .world_mut()
+            .spawn((Transform::default(), RemoteUnit::announced(&unit), VehicleMotion::at(&Transform::default())))
+            .id();
+        app.add_systems(Update, (vehicle_engine_sounds, update_vehicle_engine_sounds));
+        Some((app, root))
+    }
+
+    fn vehicle_sound_events(app: &mut App, root: Entity) -> Vec<String> {
+        let world = app.world_mut();
+        let mut query = world.query::<(&Sound, &ChildOf)>();
+        query
+            .iter(world)
+            .filter(|(_, child)| child.parent() == root)
+            .map(|(sound, _)| sound.event.clone())
+            .collect()
+    }
+
+    fn vehicle_engine_param(app: &mut App, root: Entity, name: &str) -> Option<f32> {
+        let world = app.world_mut();
+        let mut query = world.query::<(&Sound, &ChildOf)>();
+        query
+            .iter(world)
+            .filter(|(_, child)| child.parent() == root)
+            .find_map(|(sound, _)| sound.params.iter().find(|(n, _)| n == name).map(|(_, v)| *v))
+    }
+
+    /// A parked tractor is silent: its pack has no `engine`, and `run` only starts while it moves. The old
+    /// code played `run` at spawn, so this fails without the movement gate.
+    #[test]
+    fn a_parked_tractor_is_silent_and_runs_only_while_moving() {
+        let Some((mut app, root)) = vehicle_app(1008) else { return };
+        app.update();
+        app.update();
+        let parked = vehicle_sound_events(&mut app, root);
+        assert!(parked.is_empty(), "parked: {parked:?}");
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(2.0, 0.0, 0.0);
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:trailer:run"]);
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::ZERO;
+        app.update();
+        let stopped = vehicle_sound_events(&mut app, root);
+        assert!(stopped.is_empty(), "stopped: {stopped:?}");
+    }
+
+    /// The speedcar has only the `engine` item: it loops while parked and its `speed` parameter follows
+    /// `vehicle_models.velocity` (15 m/s).
+    #[test]
+    fn a_parked_speedcar_loops_its_engine_and_the_speed_parameter_follows_it() {
+        let Some((mut app, root)) = vehicle_app(1323) else { return };
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:speed_car:run"]);
+        assert_eq!(vehicle_engine_param(&mut app, root, "speed"), Some(0.0));
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(15.0, 0.0, 0.0);
+        app.update();
+        let speed = vehicle_engine_param(&mut app, root, "speed").expect("the engine's speed parameter");
+        assert!((speed - 0.99).abs() < 1e-4, "full speed at 15 m/s: {speed}");
+    }
+
+    #[test]
+    fn a_destroyed_vehicle_stops_its_engine_and_restarts_it_on_resurrection() {
+        let Some((mut app, root)) = vehicle_app(1323) else { return };
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root).len(), 1);
+        app.world_mut().entity_mut(root).insert(Dead { at: 0.0 });
+        app.update();
+        let dead = vehicle_sound_events(&mut app, root);
+        assert!(dead.is_empty(), "dead: {dead:?}");
+        app.world_mut().entity_mut(root).remove::<Dead>();
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:speed_car:run"]);
     }
 }

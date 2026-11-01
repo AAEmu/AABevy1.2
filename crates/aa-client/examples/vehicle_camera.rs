@@ -100,6 +100,7 @@ fn main() -> AppExit {
             aa_dev::DevPlugin,
             aa_cry::CryPlugin,
             aa_anim::AnimPlugin,
+            ingame::vehicle::VehiclePlugin,
             aa_anim::facial::FacialPlugin,
             aa_world::pipelines::build,
         ))

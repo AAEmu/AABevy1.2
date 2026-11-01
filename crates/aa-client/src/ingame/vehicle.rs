@@ -10,15 +10,17 @@
 
 use std::collections::HashMap;
 
-use aa_anim::{Animator, ClipLibrary, pose::BoundClip};
+use aa_anim::{AnimSet, Animator, ClipLibrary, pose::BoundClip};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_cry::{CryLoader, PreparedModel};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 
 use super::cart::{YAW_RATE_PER_STEER, wrap_angle};
+use super::combat::Dead;
 use super::data::{VehicleLook, model_file};
 use super::housing::prefab::{self, Part};
 
@@ -366,16 +368,21 @@ pub struct Spindle {
     pub rear: f32,
     /// The smoothed angle stored at model+0x3f8 in the original.
     pub angle: f32,
-    /// The bone entity and its bind rotation, found from the body's [`Animator`] on first use.
-    pub joint: Option<(Entity, Quat)>,
+    /// The bone entity, the body's [`Animator`] and the bone index, found on first use.
+    pub joint: Option<(Entity, Entity, usize)>,
 }
 
 /// The looping idle of a prefab body (`X2::PrefabUnitModel::UpdateIdleAnim`, `FUN_390d6690`): the
 /// body's `fist_ba_relaxed_idle` runs for as long as the vehicle exists, whatever its driver or speed.
-/// On the body's Animator; [`start_vehicle_idle`] starts it whenever the model has no clip.
+/// On the body's Animator; [`start_vehicle_idle`] starts it whenever the model has no clip. A destroyed
+/// vehicle stops it and plays the `.cal`'s `dead_01`/`dead_02` ([`stop_dead_vehicles`]).
 #[derive(Component, Clone, Debug)]
 pub struct VehicleIdle {
     pub clip: BoundClip,
+    /// The body's death clip (`dead_01`, else `dead_02`), played once when the unit dies.
+    pub dead: Option<BoundClip>,
+    /// The unit is dead: the idle stays stopped (until a resurrection clears [`Dead`]).
+    pub stopped: bool,
 }
 
 /// Starts the prefab body's idle when the model has no clip, as 1.2 does on model init and refresh.
@@ -383,8 +390,73 @@ pub struct VehicleIdle {
 /// this prefab-vehicle path; ships and land vehicles are kinds 1-4 and get the loop.
 pub fn start_vehicle_idle(mut bodies: Query<(&VehicleIdle, &mut Animator)>) {
     for (idle, mut animator) in &mut bodies {
-        if animator.starts_enabled() && animator.current.is_none() {
+        if !idle.stopped && animator.starts_enabled() && animator.current.is_none() {
             animator.play(idle.clip.clone(), true, 0.0);
+        }
+    }
+}
+
+/// Stops one prefab body's idle and plays its `.cal` death clip.
+fn stop_vehicle_idle(animator: &mut Animator, idle: &mut VehicleIdle) {
+    if idle.stopped {
+        return;
+    }
+    idle.stopped = true;
+    animator.stop_layer(0.0);
+    animator.random_idle = None;
+    match idle.dead.clone() {
+        Some(dead) => {
+            animator.speed = 1.0;
+            animator.play(dead, false, 0.0);
+        }
+        // no death clip: leave the body on its last pose rather than restarting the idle
+        None => animator.current = None,
+    }
+}
+
+/// Stops a destroyed vehicle's idle (the prefab body's Animator is a child of the root that carries [`Dead`],
+/// which `combat::ensure_corpses` does not visit).
+fn stop_dead_vehicles(
+    dead: Query<Entity, Added<Dead>>,
+    children: Query<&Children>,
+    mut bodies: Query<(&mut Animator, &mut VehicleIdle)>,
+) {
+    for root in &dead {
+        let Ok(kids) = children.get(root) else { continue };
+        for child in kids.iter() {
+            let Ok((mut animator, mut idle)) = bodies.get_mut(child) else { continue };
+            stop_vehicle_idle(&mut animator, &mut idle);
+        }
+    }
+}
+
+/// A body that appears after its unit was announced dead (a corpse in view) is stopped as soon as it exists.
+fn stop_dead_new_bodies(
+    mut bodies: Query<(&mut Animator, &mut VehicleIdle, &ChildOf), Added<VehicleIdle>>,
+    parents: Query<&Dead>,
+) {
+    for (mut animator, mut idle, parent) in &mut bodies {
+        if parents.contains(parent.parent()) {
+            stop_vehicle_idle(&mut animator, &mut idle);
+        }
+    }
+}
+
+/// A resurrected vehicle starts its idle again (the server removed [`Dead`]).
+fn resume_vehicle_idle(
+    mut removed: RemovedComponents<Dead>,
+    children: Query<&Children>,
+    mut bodies: Query<(&mut Animator, &mut VehicleIdle)>,
+) {
+    for root in removed.read() {
+        let Ok(kids) = children.get(root) else { continue };
+        for child in kids.iter() {
+            let Ok((mut animator, mut idle)) = bodies.get_mut(child) else { continue };
+            if !idle.stopped {
+                continue;
+            }
+            idle.stopped = false;
+            animator.current = None;
         }
     }
 }
@@ -394,7 +466,15 @@ pub(crate) struct VehiclePlugin;
 
 impl Plugin for VehiclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, start_vehicle_idle);
+        app.add_systems(
+            Update,
+            (stop_dead_vehicles, stop_dead_new_bodies, resume_vehicle_idle, start_vehicle_idle).chain(),
+        )
+        // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
+        .add_systems(
+            PostUpdate,
+            steer_spindles.after(AnimSet).before(TransformSystems::Propagate),
+        );
     }
 }
 
@@ -413,7 +493,7 @@ pub struct VehicleMotion {
 }
 
 impl VehicleMotion {
-    fn at(transform: &Transform) -> Self {
+    pub(crate) fn at(transform: &Transform) -> Self {
         Self {
             last_pos: transform.translation,
             last_yaw: transform.rotation.to_euler(EulerRot::YXZ).0,
@@ -533,7 +613,11 @@ pub fn spawn(
                 if let Some(bodies) = &spawned
                     && let Some(idle) = &bodies.idle
                 {
-                    commands.entity(bodies.root).insert(VehicleIdle { clip: idle.clone() });
+                    commands.entity(bodies.root).insert(VehicleIdle {
+                        clip: idle.clone(),
+                        dead: bodies.dead.clone(),
+                        stopped: false,
+                    });
                 }
                 spawned.map(|spawned| spawned.root)
             }
@@ -595,7 +679,9 @@ pub fn spin_wheels(
     }
 }
 
-/// Turns the body's `Bone_spindle` by [`spindle_angle`] and [`spindle_step`] (`FUN_390cffd0`).
+/// Turns the body's `Bone_spindle` by [`spindle_angle`] and [`spindle_step`] (`FUN_390cffd0`), over the rotation
+/// the idle has just sampled (PostUpdate, after [`AnimSet`]): the same local Z turn on the bind pose would be
+/// overwritten every frame by the animation.
 pub fn steer_spindles(
     time: Res<Time>,
     motion: Query<&VehicleMotion>,
@@ -621,13 +707,11 @@ pub fn steer_spindles(
                 let Some(&joint) = animator.bones.get(index) else {
                     continue;
                 };
-                if let Ok(transform) = joints.get(joint) {
-                    spindle.joint = Some((joint, transform.rotation));
-                }
+                spindle.joint = Some((joint, child, index));
                 break;
             }
         }
-        let (Some((joint, base)), Ok(motion)) = (spindle.joint, motion.get(entity)) else {
+        let (Some((joint, animator_entity, index)), Ok(motion)) = (spindle.joint, motion.get(entity)) else {
             continue;
         };
         let target = spindle_angle(
@@ -637,8 +721,14 @@ pub fn steer_spindles(
             spindle.rear,
         );
         spindle.angle = spindle_step(spindle.angle, target, dt);
+        let Ok(animator) = animators.get(animator_entity) else {
+            continue;
+        };
+        let Some(animated) = animator.pose().rot.get(index).copied() else {
+            continue;
+        };
         if let Ok(mut transform) = joints.get_mut(joint) {
-            transform.rotation = base * Quat::from_rotation_z(spindle.angle);
+            transform.rotation = animated * Quat::from_rotation_z(spindle.angle);
         }
     }
 }
@@ -773,15 +863,13 @@ mod tests {
         assert!((wheel_radius(&rear).unwrap() - 0.885).abs() < 0.01);
     }
 
-    /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine
-    /// bones move while the cart stands still. The vehicle idle owns the loop (no generic creature idle).
-    #[test]
-    fn the_wagon_body_idles_its_engine() {
+    /// A spawned Farm Wagon (model 1008) and its root, with the vehicle systems ticking.
+    fn wagon() -> Option<(App, Entity)> {
         use bevy::time::TimeUpdateStrategy;
         if !aa_cry::pak_available() {
-            return; // no client pak
+            return None; // no client pak
         }
-        let Some(db) = super::super::data::Db::open() else { return };
+        let db = super::super::data::Db::open()?;
         let look = db.vehicle_look(1008).expect("the Farm Wagon's look");
         let mut app = App::new();
         app.add_plugins((
@@ -801,13 +889,20 @@ mod tests {
             let (_, mut cry, _) = state.get_mut(app.world_mut()).unwrap();
             prepare(&cry.loader(), &look)
         };
-        {
+        let root = {
             let (mut commands, mut cry, clips) = state.get_mut(app.world_mut()).unwrap();
-            spawn(&mut commands, &mut cry, &clips, pieces, Transform::default());
-        }
+            spawn(&mut commands, &mut cry, &clips, pieces, Transform::default())
+        };
         state.apply(app.world_mut());
         app.update();
+        Some((app, root))
+    }
 
+    /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine
+    /// bones move while the cart stands still. The vehicle idle owns the loop (no generic creature idle).
+    #[test]
+    fn the_wagon_body_idles_its_engine() {
+        let Some((mut app, _)) = wagon() else { return };
         let body = app
             .world_mut()
             .query_filtered::<Entity, With<VehicleIdle>>()
@@ -828,6 +923,66 @@ mod tests {
         }
         let second = app.world().get::<Transform>(bone).expect("the engine bone transform").rotation;
         assert!(first.angle_between(second) > 0.02, "the engine bone moved from {first:?} to {second:?}");
+    }
+
+    /// The idle writes `Bone_spindle` every frame; the steering has to turn that sampled rotation, not the bind
+    /// pose it was found with. Driving with a yaw rate must leave the bone turned away from the idle pose.
+    #[test]
+    fn the_idle_does_not_overwrite_the_steered_front_axle() {
+        let Some((mut app, root)) = wagon() else { return };
+        for _ in 0..10 {
+            app.update();
+        }
+        {
+            let mut motion = app.world_mut().get_mut::<VehicleMotion>(root).expect("the vehicle root's motion");
+            motion.forward_speed = 4.0;
+            motion.yaw_rate = 0.4;
+            motion.velocity = Vec3::new(4.0, 0.0, 0.0);
+        }
+        for _ in 0..30 {
+            app.update();
+        }
+        let spindle = *app.world().get::<Spindle>(root).expect("the wagon's spindle");
+        assert!(spindle.angle.abs() > 0.05, "the front axle should steer, angle {}", spindle.angle);
+        let (joint, animator_entity, index) = spindle.joint.expect("the spindle bone");
+        let animated = app.world().get::<Animator>(animator_entity).expect("the body's animator").pose().rot[index];
+        let bone = app.world().get::<Transform>(joint).expect("the spindle bone transform").rotation;
+        let turned = animated.angle_between(bone);
+        assert!(turned > 0.05, "the idle overwrote the steered spindle (the bone is {turned} from its pose)");
+    }
+
+    /// A destroyed vehicle stops its idle and plays the body's `dead_01` (its Animator is a child of the root that
+    /// carries `Dead`, so `combat::ensure_corpses` alone never reaches it); a resurrection starts the idle again.
+    #[test]
+    fn a_destroyed_wagon_stops_its_idle_and_plays_dead_01() {
+        let Some((mut app, root)) = wagon() else { return };
+        for _ in 0..5 {
+            app.update();
+        }
+        let body = app
+            .world_mut()
+            .query_filtered::<Entity, With<VehicleIdle>>()
+            .iter(app.world())
+            .next()
+            .expect("the wagon body carries its idle");
+        let clip = |app: &App| {
+            app.world()
+                .get::<Animator>(body)
+                .and_then(|a| a.current.as_ref())
+                .and_then(|p| p.clip.source.as_deref())
+                .map(str::to_string)
+        };
+        assert!(clip(&app).is_some_and(|s| s.contains("fist_ba_relaxed_idle")), "the idle starts: {:?}", clip(&app));
+        app.world_mut().entity_mut(root).insert(Dead { at: 0.0 });
+        app.update();
+        assert!(app.world().get::<VehicleIdle>(body).unwrap().stopped, "the idle stays stopped on death");
+        assert!(clip(&app).is_some_and(|s| s.contains("dead_01")), "the body plays dead_01: {:?}", clip(&app));
+        app.world_mut().entity_mut(root).remove::<Dead>();
+        for _ in 0..2 {
+            app.update();
+        }
+        assert!(!app.world().get::<VehicleIdle>(body).unwrap().stopped, "resurrection re-enables the idle");
+        assert!(clip(&app).is_some_and(|s| s.contains("fist_ba_relaxed_idle")), "the idle resumes: {:?}", clip(&app));
     }
 
     fn find_named(world: &mut World, name: &str) -> Option<Entity> {

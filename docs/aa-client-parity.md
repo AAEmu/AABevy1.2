@@ -1,20 +1,30 @@
 # ArcheAge 1.2 feature parity
 
-## Vehicle engine idle checkpoint, 2026-11-01
+## Vehicle idle ownership and engine sound checkpoint, 2026-11-01
 
 The Farm Wagon (slave 60 -> model 1008 -> `vehicle_models` 38) draws the prefab body
 `objects/env/06_unit/05_carriage/transfers_trailer_a_body.chr`; its `.cal` loops `fist_ba_relaxed_idle`, whose tracks
 drive `Bone_engine01..03`. 1.2 starts that loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init
-and refresh, for every unit-model kind except 5 and 6 (Mate and Shipyard), with no driver or speed condition. Bevy had
-the loop only as a side effect of the generic creature spawn; it is now a `VehicleIdle` on the body started by
+and refresh, for every unit-model kind except 5 and 6 (Mate and Shipyard), with no driver or speed condition. Upstream
+already looped the idle as a side effect of the generic creature spawn (`creature.rs:174`); this work moves that
+ownership to the vehicle path, where 1.2 puts it: a `VehicleIdle` on the body started by
 `vehicle::start_vehicle_idle` (`VehiclePlugin`), so every rigged prefab vehicle/ship body with the idle loops it, and
 `creature::spawn_with_idle` no longer starts a vehicle body's creature idle. Measured 2026-11-01: the clip binds (19 of
 21 tracks) and `Bone_engine01` rotates in a bare `vehicle::spawn` and in a live GM-spawned wagon on lane `owner-test`;
-the 22 vehicle models and 3 fishboats with this idle and the engine sound (`run_tractor` `run` -> sound 950,
-`sounds/x2vehicles:trailer:run`) are listed in [units](aa-client-units.md#engine-idle-vehicleidle-start_vehicle_idle).
-The self-checking `vehicle_idle` example and `the_wagon_body_idles_its_engine` test fail when the driver is disabled.
-Not read: how `UpdateSound` maps speed to the loop; the ships use the same idle path but only the fishboats have the
-clip (the galleon/rowboat hulls are `.cgf` parts), and neither has a bead on the 1.2 speed mix (capture-pending).
+the 22 vehicle models and 3 fishboats with this idle are listed in
+[units](aa-client-units.md#engine-idle-and-engine-sound-vehicleidle-start_vehicle_idle-vehiclesound).
+
+The same checkpoint adds the 1.2 engine sound (`VehicleUnitModel::UpdateSound`, `FUN_390c6780`): `engine` loops for the
+model's whole life with the `speed`/`volume1`/`pitch1`/`volume2`/`pitch2` parameters (normalized by
+`vehicle_models.velocity` / `ship_models.velocity`), `run` starts only while the model moves (either velocity vector
+above 0.0003), and both stop on `Dead`. A destroyed vehicle also stops its idle and plays the body's `dead_01`, which
+`combat::ensure_corpses` missed because the prefab body's `Animator` is a child of the root with `Dead`.
+`steer_spindles` now runs after `AnimSet`, over the sampled idle pose, so the permanent idle no longer overwrites the
+front axle every frame. The self-checking `vehicle_idle` example and the wagon tests (`the_wagon_body_idles_its_engine`,
+`the_idle_does_not_overwrite_the_steered_front_axle`, `a_destroyed_wagon_stops_its_idle_and_plays_dead_01`) fail when
+their rule is disabled. Not read: the exact second velocity vector and the throttle term in `volume1` (the speed ratio
+stands in; capture-pending); the ships use the same idle path but only the fishboats have the clip (the
+galleon/rowboat hulls are `.cgf` parts).
 
 ## Mount-walk checkpoint, 2026-10-31
 
@@ -950,7 +960,7 @@ not turn it into a current completion claim.
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall; original auction house search, bid, buy-out, listing, cancel and bid history, driven live between two accounts | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction settlement mails claimed through the window, bid/buy-out chat notices of other players |
 | Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F with the "Gather" cast bar and phase 4513->4514, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; legacy ore/rock/shear capture-pending) | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows |
 | Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open) |
-| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded; vehicle and prefab engine idle loop (`VehicleIdle` from `UpdateIdleAnim`) and the data-keyed `run` engine sound | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
+| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded; vehicle and prefab engine idle loop (`VehicleIdle` from `UpdateIdleAnim`), the speed-keyed `engine` loop and movement-gated `run` sound, dead stop, and spindle steering after the animation pose | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
 | Duels | Challenge from the target popup, challenge prompt (default dialog with the original `locale.duel` texts), accept/refuse, `STARTED_DUEL`/`ENDED_DUEL`, start text and result notice, temporary team factions on plates/target | Retail placement of the countdown text (system message here); the AAEmu server now sends `SCDuelStartCountdownPacket` at acceptance (NickMesser/AAEmu#15), so the countdown shows live; `SCAreaChatBubble` 0x153 (type 543, ignored) |
 | Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury headers, queue request, original labels/hover/waiting tooltip and dishonor glyph; native19-key trial data, record pages, callback snapshots/ticks and actual Task6/7/8, Confirm/Cancel/Verdict controls; original ranking tabs/records/rewards over static catalog, received boards, independent streamed names, native calendar/locks and typed controls; bounty getters/setup/empty bulletin | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking reward-mail formatter and live settlement, original nonempty bounty asset defect/payment lane gaps, trial spatial strings and mixed-subsystem ordering, crime reporting/prison and racing flows; paired live crime/jury settlement |

@@ -64,10 +64,12 @@ pub(crate) fn configured_cdf(db: &aa_anim::GameDb, file: &str, model: u32, equip
     Ok(cdf)
 }
 
-/// A spawned rigged model: its root and the idle clip its `.cal` declares (the loop a caller may own).
+/// A spawned rigged model: its root, the idle clip its `.cal` declares (the loop a caller may own) and, for a
+/// vehicle body, its death clip.
 pub(crate) struct Spawned {
     pub root: Entity,
     pub idle: Option<BoundClip>,
+    pub dead: Option<BoundClip>,
 }
 
 /// Spawns the model at `file` (`.cdf`, `.chr` or `.cgf`, pak path). Returns the root entity with
@@ -119,7 +121,7 @@ pub(crate) fn spawn_with_idle(commands: &mut Commands, cry: &mut CryAssets, clip
         let model = spawn_loaded(commands, &main, &loaded, &options);
         let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
         commands.entity(model).insert(ChildOf(root));
-        return Some(Spawned { root, idle: None });
+        return Some(Spawned { root, idle: None, dead: None });
     };
     let skeleton = rig.skeleton.clone();
     let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
@@ -167,11 +169,15 @@ pub(crate) fn spawn_with_idle(commands: &mut Commands, cry: &mut CryAssets, clip
     // animations: `<model>.cal` next to the skeleton file
     let mut animator = Animator::new(rig.clone(), bones);
     let mut idle = None;
+    let mut dead = None;
     let mut entity = commands.entity(root);
     if let Some(set) = super::anim::shared_clip_set(&main, &cal_path, clips) {
         idle = Some(set.idle.clone());
         if play_idle {
             animator.play(set.idle.clone(), true, 0.0);
+        } else {
+            // the vehicle path plays its own death clip (`vehicle::stop_dead_vehicles`): `dead_01`/`dead_02` of this `.cal`
+            dead = ["dead_01", "dead_02"].iter().find_map(|name| super::anim::bind_clip(&rig, &set.cal, clips, name));
         }
         // monsters stand in a fighting stance while they fight (`fist_ba_combat_idle`)
         if let Some(combat) = super::idle::combat_idle(&rig, &set.cal, clips) {
@@ -181,7 +187,7 @@ pub(crate) fn spawn_with_idle(commands: &mut Commands, cry: &mut CryAssets, clip
     }
     entity.insert((animator, Motion::default()));
     if let Some(facial) = facial { entity.insert(facial); }
-    Some(Spawned { root, idle })
+    Some(Spawned { root, idle, dead })
 }
 
 #[cfg(test)]
