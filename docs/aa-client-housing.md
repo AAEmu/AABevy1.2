@@ -16,12 +16,13 @@ Code:
 | `crates/aa-client/src/hud/housing.rs` | `X2House`, the housing events, opening the windows at a house, own houses on the map |
 | `crates/aa-client/src/hud/housing/fixture.rs` | the owner-menu self-check: original scripts over synthetic `SCMyHouse` / `SCHouseTaxInfo` |
 | `crates/aa-client/examples/house_owner.rs` | runs the self-check (`--state paid|due|overdue`, headless with `--mute`) |
+| `crates/aa-client/examples/house_sale.rs` | two-session sale/cancel/buy/demolish self-check over synthetic receipts |
 
 Tests: `cargo test -p aa-client housing` (land polygons, zone origins, the design / step / prefab tables of the real
 database, prefab parsing, the placement checks (the rotated model box and lowest terrain sample, an existing house as
 0x70, unrestricted and zero-footprint designs, the player's own units and house-attached doodads), the locks with
 their seconds, the `X2House` getters and setters, taxes and sale certificates, the build action of a stage, the map
-icons, the interaction view type, the permission gates, the deco/actability counters, the raw tax weeks, and that no
+icons, the interaction view type, the permission gates, the deco/actability counters, the raw tax weeks, the sale gates and receipt order, the sale form state, the fail events, and that no
 housing system has conflicting parameters). The owner menu has a self-check
 example: `cargo run -p aa-client --example house_owner -- --headless --mute --state paid --exit-after 2` (needs
 `AA_PAK` and `AA_DB`; it asserts the `HOUSE_INTERACTION_START` / `HOUSE_TAX_INFO` tuples with a Lua spy, the one
@@ -103,6 +104,59 @@ construct a building here." and `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` is 
 The spot Bevy used to accept, (15338.53, 14632.33), crosses area 338's south-east notch; the captured valid spot is
 (15328.4, 14631.8), snapped to (15328, 14632).
 
+## Sale, cancel, buy and demolish
+
+The sell form's buttons (`sell_register_window.alb`) call `X2House:SetHouseForSale(gold, silver, copper, name)`
+(price = `copper + (gold * 100 + silver) * 100`, `FUN_394799C0`), `CancelHouseForSale` (0x5f) and `BuyHouse`
+(0x60). The client gates are `FUN_3932C640` (sell), `FUN_3932C800` (cancel) and `FUN_3932E020` (buy; the handoff
+called it `FUN_3932C900`, which is a rendering function - the gate code is at `DEC:658897-659025`):
+
+| Click | Gate, in the native order | `ERROR_MSG` |
+|---|---|---|
+| Sell | not owner | 0x282 `HOUSE_CANNOT_SELL_AS_NOT_OWNER` |
+| | castle (`housings.category_id` 2..=5 or 14) | 0x283 `HOUSE_CANNOT_SELL_AS_CASTLE` |
+| | under construction (demolished flag 0 and `current_actions < all_actions`) | 0x29c `HOUSE_CANNOT_SELL_AS_UNDER_CONSTRUCTION` |
+| | already for sale (`sell_price != 0`) | 0x286 `HOUSE_CANNOT_SELL_AS_ALREADY_FOR_SALE` |
+| | design missing from `housings` (`FUN_3963B390` 0): silent | |
+| | `is_sellable` false | 0x284 `HOUSE_CANNOT_SELL_AS_TYPE` |
+| | fewer appraisal certificates 28085 than `ceil(price / 100 gold)`, at least one | 0x287 `HOUSE_CANNOT_SELL_AS_NOT_ENOUGH_SEAL` |
+| | sell-to name equals my own name | 0x2a9 `HOUSE_CANNOT_SELL_TO_ONESELF` |
+| Cancel | not owner | 0x28b `HOUSE_CANNOT_CANCEL_SELL_AS_NOT_OWNER` |
+| | nothing for sale (`sell_price == 0`) | 0x28c `HOUSE_CANNOT_CANCEL_SELL_AS_NOT_FOR_SALE` |
+| Buy | I am the owner | 0x28f `HOUSE_CANNOT_BUY_AS_OWNER` |
+| | nothing for sale | 0x28e `HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE` |
+| | designated buyer is someone else | 0x290 `HOUSE_CANNOT_BUY_AS_NOT_DESIGNATED_BUYER` |
+| | money < price | 0x291 `HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY` |
+
+`GetHouseSaleInfo` (`FUN_3947A4D0`) answers `canSell` = `is_sellable` and owner and not a castle (it does not
+look at construction or an existing sale: the click's gates do), `canBuy` = on sale and (no designated buyer or
+me) - it does not look at ownership, the buy gate refuses the owner. `targetName` is absent without a designated
+buyer. `GetHouseSaleItemInfo` (the form's certificate row) returns `itemType` 28085, `needCount` and `hasCount`
+(bag).
+
+The receipts (`FUN_3932B680`, `FUN_3932B790`, `FUN_3932B8A0`):
+`SCHouseSetForSale` raises `HOUSE_SET_SELL_SUCCESS(houseName)` for the owner, then `HOUSE_INFO_UPDATED` when the
+house is the open one; `SCHouseResetForSale` raises `HOUSE_CANCEL_SELL_SUCCESS(houseName)` then
+`HOUSE_INFO_UPDATED`; `SCHouseSold` updates the owner, clears the sale, re-requests the open house's tax and
+raises `HOUSE_INFO_UPDATED` first, then `HOUSE_SALE_SUCCESS(houseName)` for the previous owner or
+`HOUSE_BUY_SUCCESS(houseName)` for the new one. The event ids are 0x109..0x10c (`FUN_39214380`), and the scripts
+print their texts (`house_sale_success` ...).
+
+The fail events `HOUSE_SET_SELL_FAIL` 0x106, `HOUSE_BUY_FAIL` 0x107 and `HOUSE_CANCEL_SELL_FAIL` 0x108 are
+registered by `housing_manager.alb` and printed by `chat_msg_event.alb` (`house_set_sell_fail` ...). Their native
+raiser is not visible: the error display at `FUN_39428370` is a packed thunk. Bevy raises them for an
+`SCErrorMsg` in 0x286/0x287, 0x28b/0x28c or 0x28e..0x293 while a sale request is pending, and clears the pending
+request; a stale error still shows its own `ERROR_MSG` text. This trigger is **inferred, capture-pending (C5)**.
+
+`X2House:Demolish` (`FUN_39478740`) casts the skill at the house; the skill id in the data image (`DAT_39ac99e0`)
+is **12945**, and `skills.casting_time` is 20000 ms (the 11404 copy has the same interaction 94 and cast time).
+`SCHouseDemolished` (`FUN_391D7A40` -> `FUN_3932A300`) marks the house, clears the owner and calls
+`FUN_39326770` with `destroy_effect`, which walks the unit's effect objects and starts the one of that name. None
+of the 30 housing prefab XMLs in `game_pak` contains a `destroy_effect` object; the other sources of that list
+were not read, so whether 1.2 shows anything at runtime is not settled (capture-pending C5). Bevy marks the
+`House` demolished (aa-net), drops the open house's snapshot/owner, and `render::model_of` and the drawn-house
+`drops` check remove the house model.
+
 ## Construction
 
 A right click on a house within 6 m starts the interaction (`393BEFD0`): `CSRequestHouseTax`, then
@@ -132,15 +186,16 @@ interacted with) they answer for the current house.
 |---|---|
 | House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` (`placed - housing_binding_doodads`, `absolute_deco_limit - housing_binding_doodads`, `FUN_394796B0`) |
 | Actability | `GetActabilityDecoCount`, `GetDecoActabilityPoint(i)` (`name`, `decoPoint`), `GetDecoActabilityByType(i)` (totals `type`/`totalDecoPoint`/`totalPoint`, item rows `name`/`decoPoint`), `GetDecoActabilityLimitGroup()` (`name`, `arrangeCount`, `maxCount` from `housing_deco_limit_elems`, or nil without a limit list, `FUN_3947A310`); the house entries group `housing_decorations.actability_group_id` and sum `actability_up`, but only for a design with a limit list and a decoration with a `deco_actability_group_id` (`FUN_3932FD00`); the limit rows count `deco_actability_group_id` |
-| Owner | `SetHouseName`, `SetHousePermission` (owner only; one `CSChangeHousePermission` with the server enum, none for an always-public design 0x80, family needs a family 0x178, guild needs an expedition 0x137), `SetHouseAllowRecover` (owner; a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
+| Owner | `SetHouseName`, `SetHousePermission` (owner only; one `CSChangeHousePermission` with the server enum, none for an always-public design 0x80, family needs a family 0x178, guild needs an expedition 0x137), `SetHouseAllowRecover` (owner; a toggle, only when it differs), `Demolish` (skill 12945 on the house) |
 | Construction | `GetHousingModelName`, `GetHousingModelConstructionInfo`, `GetHouseConstructionStepInfo`, `NextStepFromBuildCheck`, `PrevStepFromBuildCheck` |
 | Tax | `CountTaxItemForTax` (one certificate 31891 / 31892 per gold, rounded up; `featureSet.taxItem`), the `HOUSE_TAX_INFO` event |
-| Sale | `GetHouseSaleInfo`, `GetHouseSaleItemInfo` (one appraisal certificate 28085 per 100 gold, at least one), `SetHouseForSale`, `CancelHouseForSale`, `BuyHouse` (refused with `HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY` locally) |
+| Sale | `GetHouseSaleInfo` (native `canSell`/`canBuy`/`targetName`), `GetHouseSaleItemInfo` (one appraisal certificate 28085 per 100 gold, at least one), `SetHouseForSale`, `CancelHouseForSale`, `BuyHouse`, with the gates and events of "Sale, cancel, buy and demolish" |
 
 Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO` (raw `weeksWithoutPay`, the native order),
 `HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`, `BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`,
 `HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`, `HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`,
-`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (raised here when
+`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_SET_SELL_FAIL`/`HOUSE_BUY_FAIL`/`HOUSE_CANCEL_SELL_FAIL`,
+`HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (raised here when
 the received actability points change; native `0x23c` is raised by `FUN_3907BA10`, which only resets the struct at
 `DAT_39aff990`, so this trigger is capture-pending C7).
 
@@ -175,6 +230,12 @@ cursor ray).
   ids asserted, no blank frame and no respawn for a same-model progress.
 * `house_cast --mute` (needs `AA_DB` and the pak for the UI): one click sends one captured `CSStartSkill`; without
   the bag material it sends none and shows "Not enough Stone Pack.", and an equipped backpack still casts.
+* `house_sale --mute` (needs `AA_PAK` and `AA_DB`): two sessions over synthetic receipts. One click sends one
+  `07 00 10 27 00 00 00 00` (`CSSellHouse`, tl 7, 10000 copper, empty sell-to), `07 00` (`CSSellHouseCancel`) or
+  `07 00 10 27 00 00` (`CSBuyHouse`); a refused gate sends nothing and shows its `ERROR_MSG` text; the receipts
+  raise the events in the native order. The original `sell_register_window.alb` is created over the live getters:
+  its register button is off for 0/0/0, on for 1 gold with the seller's two certificates, and off for 201 gold
+  (three certificates needed).
 
 ## Recovery live check (2026-10-23, superseded)
 
