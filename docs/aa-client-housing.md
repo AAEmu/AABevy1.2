@@ -135,27 +135,31 @@ buyer. `GetHouseSaleItemInfo` (the form's certificate row) returns `itemType` 28
 (bag).
 
 The receipts (`FUN_3932B680`, `FUN_3932B790`, `FUN_3932B8A0`):
-`SCHouseSetForSale` raises `HOUSE_SET_SELL_SUCCESS(houseName)` for the owner, then `HOUSE_INFO_UPDATED` when the
-house is the open one; `SCHouseResetForSale` raises `HOUSE_CANCEL_SELL_SUCCESS(houseName)` then
-`HOUSE_INFO_UPDATED`; `SCHouseSold` updates the owner, clears the sale, re-requests the open house's tax and
-raises `HOUSE_INFO_UPDATED` first, then `HOUSE_SALE_SUCCESS(houseName)` for the previous owner or
-`HOUSE_BUY_SUCCESS(houseName)` for the new one. The event ids are 0x109..0x10c (`FUN_39214380`), and the scripts
-print their texts (`house_sale_success` ...).
+`SCHouseSetForSale` looks the house up by tl and raises `HOUSE_SET_SELL_SUCCESS(houseName)` for its owner even
+when the window is closed, then `HOUSE_INFO_UPDATED` when the house is the open one; `SCHouseResetForSale` raises
+`HOUSE_CANCEL_SELL_SUCCESS(houseName)` the same way, then `HOUSE_INFO_UPDATED`; `SCHouseSold` updates the owner,
+clears the sale, re-requests the open house's tax and raises `HOUSE_INFO_UPDATED` first, then
+`HOUSE_SALE_SUCCESS(houseName)` for the previous owner or `HOUSE_BUY_SUCCESS(houseName)` for the new one. The
+event ids are 0x109..0x10c (`FUN_39214380`), and the scripts print their texts (`house_sale_success` ...).
 
 The fail events `HOUSE_SET_SELL_FAIL` 0x106, `HOUSE_BUY_FAIL` 0x107 and `HOUSE_CANCEL_SELL_FAIL` 0x108 are
 registered by `housing_manager.alb` and printed by `chat_msg_event.alb` (`house_set_sell_fail` ...). Their native
-raiser is not visible: the error display at `FUN_39428370` is a packed thunk. Bevy raises them for an
-`SCErrorMsg` in 0x286/0x287, 0x28b/0x28c or 0x28e..0x293 while a sale request is pending, and clears the pending
-request; a stale error still shows its own `ERROR_MSG` text. This trigger is **inferred, capture-pending (C5)**.
+raiser is not visible: the error display at `FUN_39428370` is a packed thunk. Bevy raises the event of the
+**pending operation** (`sell`, `cancel` or `buy`) for an `SCErrorMsg` in 0x266 (the buy's
+`INVALID_HOUSE_INFO`), 0x282..=0x293 (including the 0x283 castle answer from `set_for_sale`/`buy_house` and the
+0x28D cancel DB error), 0x29C or 0x2A9, and clears the pending request; a stale error still shows its own
+`ERROR_MSG` text. This trigger is **inferred, capture-pending (C5)**.
 
 `X2House:Demolish` (`FUN_39478740`) casts the skill at the house; the skill id in the data image (`DAT_39ac99e0`)
 is **12945**, and `skills.casting_time` is 20000 ms (the 11404 copy has the same interaction 94 and cast time).
-`SCHouseDemolished` (`FUN_391D7A40` -> `FUN_3932A300`) marks the house, clears the owner and calls
-`FUN_39326770` with `destroy_effect`, which walks the unit's effect objects and starts the one of that name. None
-of the 30 housing prefab XMLs in `game_pak` contains a `destroy_effect` object; the other sources of that list
-were not read, so whether 1.2 shows anything at runtime is not settled (capture-pending C5). Bevy marks the
-`House` demolished (aa-net), drops the open house's snapshot/owner, and `render::model_of` and the drawn-house
-`drops` check remove the house model.
+`SCHouseDemolished` (`FUN_391D7A40` -> `FUN_3932A300`) sets the house's demolished flag, clears its owner (the 600
+sentinel) and owner name and calls `FUN_39326770` with `destroy_effect`, which walks the unit's effect objects and
+starts the one of that name. It **keeps the model**: the server keeps the unit as an ownerless, attackable house
+(`ops.rs:580-597`). None of the 30 housing prefab XMLs in `game_pak` contains a `destroy_effect` object; the other
+sources of that list were not read, so whether 1.2 shows anything at runtime is not settled (capture-pending C5).
+Bevy marks the `House` demolished and clears its owner/owner name in aa-net (the snapshot and model stay), the
+open window sees no snapshot/owner, and `render::model_of` keeps drawing the demolished house; `drops` only
+removes units that are gone or too far.
 
 ## Construction
 

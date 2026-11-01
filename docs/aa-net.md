@@ -3687,7 +3687,7 @@ limits.
 | `SCHouseBuildProgress` 0x0bd | `u16 tl, u32 model, i32 all steps, i32 current steps` | `BuildProgress`; known TL only |
 | `SCHouseBuildPayChanged` 0x0bf | `u16 tl, i32 money` | `BuildPay`; known TL only |
 | `SCHousePermissionChanged` 0x0be | `u16 tl, u8 permission` | `PermissionChanged`; raw enum, known TL only |
-| `SCHouseDemolished` 0x0c0, `SCMyHouseRemoved` 0x0c2 | `u16 tl` | `Demolished` / `MyHouseRemoved`; marks `House::demolished`, never invents `UnitsRemoved` |
+| `SCHouseDemolished` 0x0c0, `SCMyHouseRemoved` 0x0c2 | `u16 tl` | `Demolished` / `MyHouseRemoved`; marks `House::demolished`, clears the snapshot owner/name (native `FUN_3932A300`) and keeps the model; never invents `UnitsRemoved` |
 | `SCHouseFarm` 0x0c3 | `string name, i32 total, i32 harvestable` | `Farm`; stored as `Houses.last_farm` (no timeline on the wire) |
 | `SCHouseTaxInfo` 0x0c4 | `u16 tl, i32 dominion rate, i32 money, i32 money2, i64 due, bool paid, i32 weeks, bool heavy` | `TaxInfo`; stored on the known TL |
 | `SCConstructHouseTax` 0x0c5 | `u32 design, i32 heavy count, i32 normal count, bool heavy, i32 base, i32 deposit, i32 total` | `ConstructHouseTax`; `Houses.construct_quote` |

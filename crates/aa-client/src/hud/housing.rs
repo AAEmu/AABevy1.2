@@ -1142,19 +1142,20 @@ pub(crate) fn sync(
     for NetEvent(event) in events.read() {
         if let Event::ServerError { code } = event {
             // A sale request the server refuses raises the fail event the scripts listen to
-            // (`0x106` sell, `0x107` buy, `0x108` cancel, `FUN_39214380`). The error ranges are the
-            // `HOUSE_CANNOT_*` answers; without a pending sale request the ordinary `SYSMSG` text stands.
-            if v.pending.is_some() {
-                let fail = match *code {
-                    0x286 | 0x287 => Some(Signal::SellFailed),
-                    0x28b | 0x28c => Some(Signal::CancelFailed),
-                    0x28e..=0x293 => Some(Signal::BuyFailed),
-                    _ => None,
-                };
-                if let Some(fail) = fail {
-                    v.pending = None;
-                    v.signals.push(fail);
-                }
+            // (`0x106` sell, `0x107` buy, `0x108` cancel, `FUN_39214380`). The error set is the sell
+            // range 0x282..=0x28A plus 0x29C/0x2A9, the cancel DB error 0x28D, the buy range
+            // 0x28E..=0x293, and the castle 0x283 and `INVALID_HOUSE_INFO` 0x266 the buy/sell ops
+            // really send; the pending operation, not the code, names the event. The native raiser is
+            // a packed thunk, so the trigger is inferred (capture-pending C5). Without a pending sale
+            // request the ordinary `SYSMSG` text stands.
+            if matches!(*code, 0x266 | 0x282..=0x293 | 0x29c | 0x2a9)
+                && let Some((kind, _)) = v.pending.take()
+            {
+                v.signals.push(match kind {
+                    Pending::Sell => Signal::SellFailed,
+                    Pending::Cancel => Signal::CancelFailed,
+                    Pending::Buy => Signal::BuyFailed,
+                });
             }
             continue;
         }
@@ -1190,25 +1191,40 @@ pub(crate) fn sync(
             {
                 v.signals.push(Signal::InfoUpdated)
             }
-            // `FUN_3932B680` / `FUN_3932B790`: the success event only for the owner, then
-            // `HOUSE_INFO_UPDATED` when this is the open house.
-            HousingEvent::SetForSale(sale) if ours(&sale.tl_id) => {
+            // `FUN_3932B680` / `FUN_3932B790`: the house is looked up by tl; the success event goes to
+            // its owner even when another house (or no house) is open, and only `HOUSE_INFO_UPDATED` is
+            // limited to the open house.
+            HousingEvent::SetForSale(sale) => {
                 if v.pending.is_some_and(|(_, tl)| tl == sale.tl_id) {
                     v.pending = None;
                 }
-                if v.current.as_ref().is_some_and(|c| c.mine) {
+                let mine = me != 0
+                    && houses
+                        .by_tl_id
+                        .get(&sale.tl_id)
+                        .is_some_and(|h| h.snapshot.owner_id == me);
+                if mine {
                     v.signals.push(Signal::SetSell(sale.house_name.clone()));
                 }
-                v.signals.push(Signal::InfoUpdated);
+                if ours(&sale.tl_id) {
+                    v.signals.push(Signal::InfoUpdated);
+                }
             }
-            HousingEvent::ResetForSale { tl_id, house_name } if ours(tl_id) => {
+            HousingEvent::ResetForSale { tl_id, house_name } => {
                 if v.pending.is_some_and(|(_, tl)| tl == *tl_id) {
                     v.pending = None;
                 }
-                if v.current.as_ref().is_some_and(|c| c.mine) {
+                let mine = me != 0
+                    && houses
+                        .by_tl_id
+                        .get(tl_id)
+                        .is_some_and(|h| h.snapshot.owner_id == me);
+                if mine {
                     v.signals.push(Signal::CancelSell(house_name.clone()));
                 }
-                v.signals.push(Signal::InfoUpdated);
+                if ours(tl_id) {
+                    v.signals.push(Signal::InfoUpdated);
+                }
             }
             // `FUN_3932B8A0`: the open house asks for its tax first and raises `HOUSE_INFO_UPDATED`,
             // then the seller (`0x109`) or the buyer (`0x10B`) gets the receipt with the house name.

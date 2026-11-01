@@ -1249,8 +1249,9 @@ const SALE_EVENTS: &str = r#"
     w:SetHandler('OnEvent', function(self, event, ...) EVENTS[#EVENTS + 1] = {event, ...} end)
 "#;
 
-/// `SCErrorMsg 0x286..=0x293` while a sale request is pending raises the script's fail event once; a stale
-/// error afterwards raises nothing.
+/// A sale refusal (`SCErrorMsg 0x266`, `0x282..=0x293`, `0x29C` or `0x2A9`) while a request is pending raises
+/// the script's fail event for the pending operation once and clears it; a stale error afterwards raises
+/// nothing. The native raiser is a packed thunk, so the trigger is inferred (C5).
 #[test]
 fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Result<()> {
     let mut game = super::super::data::GameData::default();
@@ -1285,11 +1286,11 @@ fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Resu
     app.update();
 
     // No request is pending: the error only reaches the ordinary SYSMSG path.
-    feed(&mut app, Event::ServerError { code: 647 });
+    feed(&mut app, Event::ServerError { code: 648 });
     app.update();
     assert!(events(&app).is_empty(), "{:?}", events(&app));
 
-    // Sell: one CSellHouse goes out, then 0x287 raises HOUSE_SET_SELL_FAIL once.
+    // Sell: one CSSellHouse goes out, then 0x288 raises HOUSE_SET_SELL_FAIL once and clears the request.
     lua(&app, "X2House:SetHouseForSale('1', '0', '0', '')");
     app.update();
     assert_eq!(
@@ -1300,10 +1301,14 @@ fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Resu
         1,
         "one CSSellHouse"
     );
-    feed(&mut app, Event::ServerError { code: 647 });
+    feed(&mut app, Event::ServerError { code: 648 });
     app.update();
     assert_eq!(events(&app), vec!["HOUSE_SET_SELL_FAIL"]);
-    feed(&mut app, Event::ServerError { code: 647 });
+    assert!(
+        state.0.borrow().pending.is_none(),
+        "0x288 clears the request"
+    );
+    feed(&mut app, Event::ServerError { code: 648 });
     app.update();
     assert_eq!(
         events(&app),
@@ -1311,7 +1316,22 @@ fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Resu
         "the request is settled"
     );
 
-    // Cancel: 0x28c (the error range of the cancel answer) raises HOUSE_CANCEL_SELL_FAIL.
+    // A second sell request refused with the castle error still raises the SELL fail: the pending
+    // operation names the event, not the code (0x283 is also a buy refusal).
+    lua(&app, "X2House:SetHouseForSale('1', '0', '0', '')");
+    app.update();
+    let _ = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain();
+    feed(&mut app, Event::ServerError { code: 0x283 });
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_FAIL", "HOUSE_SET_SELL_FAIL"]
+    );
+
+    // Cancel: 0x28D (the cancel DB error) raises HOUSE_CANCEL_SELL_FAIL.
     if let Some(c) = state.0.borrow_mut().current.as_mut()
         && let Some(s) = c.snapshot.as_mut()
     {
@@ -1327,14 +1347,18 @@ fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Resu
     app.update();
     lua(&app, "X2House:CancelHouseForSale()");
     app.update();
-    feed(&mut app, Event::ServerError { code: 652 });
+    feed(&mut app, Event::ServerError { code: 0x28d });
     app.update();
     assert_eq!(
         events(&app),
-        vec!["HOUSE_SET_SELL_FAIL", "HOUSE_CANCEL_SELL_FAIL"]
+        vec![
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_SET_SELL_FAIL",
+            "HOUSE_CANCEL_SELL_FAIL"
+        ]
     );
 
-    // Buy as a stranger: 0x290 raises HOUSE_BUY_FAIL.
+    // Buy as a stranger: the castle 0x283 raises HOUSE_BUY_FAIL, then 0x266 INVALID_HOUSE_INFO does too.
     seller.borrow_mut().character_id = 7;
     seller.borrow_mut().snapshot.name = "Buyer".into();
     seller.borrow_mut().snapshot.money = 20_000;
@@ -1347,13 +1371,19 @@ fn server_refusals_raise_the_sale_fail_events_only_while_pending() -> mlua::Resu
     app.update();
     lua(&app, "X2House:BuyHouse()");
     app.update();
-    feed(&mut app, Event::ServerError { code: 656 });
+    feed(&mut app, Event::ServerError { code: 0x283 });
+    app.update();
+    lua(&app, "X2House:BuyHouse()");
+    app.update();
+    feed(&mut app, Event::ServerError { code: 0x266 });
     app.update();
     assert_eq!(
         events(&app),
         vec![
             "HOUSE_SET_SELL_FAIL",
+            "HOUSE_SET_SELL_FAIL",
             "HOUSE_CANCEL_SELL_FAIL",
+            "HOUSE_BUY_FAIL",
             "HOUSE_BUY_FAIL"
         ]
     );
@@ -1483,7 +1513,16 @@ fn the_sale_form_state_follows_the_native_getters() -> mlua::Result<()> {
     game.housing.housings.insert(173, unsellable);
     let (rt, state) = setup_with(game);
     open(&state, 42, 10, 5);
-    state.0.borrow_mut().current.as_mut().unwrap().snapshot.as_mut().unwrap().sell_price = 20_000;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_price = 20_000;
     rt.lua
         .load(
             r#"
@@ -1498,8 +1537,26 @@ fn the_sale_form_state_follows_the_native_getters() -> mlua::Result<()> {
         )
         .exec()?;
     // A designated buyer who is not me: canBuy false, targetName set.
-    state.0.borrow_mut().current.as_mut().unwrap().snapshot.as_mut().unwrap().sell_to_player_id = 5;
-    state.0.borrow_mut().current.as_mut().unwrap().snapshot.as_mut().unwrap().sell_to_name = "Buyer".into();
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_player_id = 5;
+    state
+        .0
+        .borrow_mut()
+        .current
+        .as_mut()
+        .unwrap()
+        .snapshot
+        .as_mut()
+        .unwrap()
+        .sell_to_name = "Buyer".into();
     rt.lua
         .load(
             r#"
@@ -1521,7 +1578,10 @@ fn the_sale_form_state_follows_the_native_getters() -> mlua::Result<()> {
     for (design, sellable) in [(172, false), (173, false)] {
         open(&state, 42, 0, 0);
         state.0.borrow_mut().current.as_mut().unwrap().design = design;
-        let sale = rt.lua.load("return X2House:GetHouseSaleInfo()").eval::<Table>()?;
+        let sale = rt
+            .lua
+            .load("return X2House:GetHouseSaleInfo()")
+            .eval::<Table>()?;
         assert_eq!(sale.get::<bool>("canSell")?, sellable, "design {design}");
     }
     Ok(())
@@ -1546,4 +1606,80 @@ fn the_demolish_skill_is_12945_and_takes_20_seconds() {
             .unwrap_or_else(|e| panic!("skill {id}: {e}"));
         assert_eq!(cast, 20_000, "skill {id} casting_time");
     }
+}
+
+/// `FUN_3932B680` / `FUN_3932B790` look the house up by tl: the owner gets `HOUSE_SET_SELL_SUCCESS` /
+/// `HOUSE_CANCEL_SELL_SUCCESS` even when the house window is closed; only `HOUSE_INFO_UPDATED` needs it open.
+#[test]
+fn the_sale_success_events_do_not_need_the_open_house_window() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state, bridge) = setup_with_bridge(game);
+    bridge.borrow_mut().snapshot.name = "Self".into();
+    rt.lua.load(SALE_EVENTS).exec()?;
+    let units = {
+        let mut units = Units::default();
+        units
+            .by_id
+            .insert(900, housing_unit(900, 7, 171, 100.0, 100.0));
+        units
+    };
+    let mut app = app_with_hud(
+        rt,
+        bridge,
+        units,
+        house_resource(snapshot(42, 0, 0)),
+        Inventory::default(),
+    );
+    // No `HUD.house_interact`: the house window is closed.
+    app.update();
+    assert!(state.0.borrow().current.is_none());
+
+    let sale = Event::Housing(HousingEvent::SetForSale(aa_net::housing::HouseSale {
+        tl_id: 7,
+        money_amount: 10_000,
+        sell_to_player_id: 0,
+        sell_to_name: String::new(),
+        house_name: "Farm".into(),
+    }));
+    app.world_mut().resource_mut::<Houses>().apply(&sale);
+    feed(&mut app, sale);
+    app.update();
+    assert_eq!(events(&app), vec!["HOUSE_SET_SELL_SUCCESS"]);
+
+    let reset = Event::Housing(HousingEvent::ResetForSale {
+        tl_id: 7,
+        house_name: "Farm".into(),
+    });
+    app.world_mut().resource_mut::<Houses>().apply(&reset);
+    feed(&mut app, reset);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_CANCEL_SELL_SUCCESS"]
+    );
+
+    // The same receipt for a house owned by someone else raises nothing without the window.
+    app.world_mut()
+        .resource_mut::<Houses>()
+        .by_tl_id
+        .get_mut(&7)
+        .unwrap()
+        .snapshot
+        .owner_id = 5;
+    let other = Event::Housing(HousingEvent::SetForSale(aa_net::housing::HouseSale {
+        tl_id: 7,
+        money_amount: 10_000,
+        sell_to_player_id: 0,
+        sell_to_name: String::new(),
+        house_name: "Farm".into(),
+    }));
+    app.world_mut().resource_mut::<Houses>().apply(&other);
+    feed(&mut app, other);
+    app.update();
+    assert_eq!(
+        events(&app),
+        vec!["HOUSE_SET_SELL_SUCCESS", "HOUSE_CANCEL_SELL_SUCCESS"]
+    );
+    Ok(())
 }
