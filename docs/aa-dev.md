@@ -14,8 +14,24 @@ headless support). Every example and `aa-client` use them. `default_plugins_with
 | `--headless`, `--headless-fps N` | no window and no GPU, a timed schedule loop (default 30 Hz) |
 | `--offscreen-shot FILE.png` | headless with the GPU: the window cameras draw into an image that is saved |
 | `--allow-lua-error TEXT` | do not count Lua errors that contain TEXT (see `capture.rs`) |
+| `--require-wall-clock` | after 1 s of wall time, exit non-zero unless game time runs at wall rate (see Clock) |
 
-`aa-dev: fps=… frame_ms=…` is logged every 2 s.
+`aa-dev: fps=… frame_ms=… clock=wall|manual game_per_wall=…` is logged every 2 s.
+
+## Clock
+
+Bevy's `Time` (the app clock, `Time<Virtual>`) normally follows `Time<Real>` (the wall clock): `game_per_wall` is 1,
+so a duration measured on `Time` is a real duration. `--headless` only caps the loop rate (`--headless-fps`, which
+defaults to 30); it does not change the clock. The script runner's `wait`, its timeouts and combat's visual schedule
+read the same `Time`, so a comparison or replay script must not run on a manual step.
+
+`--record` and deterministic replay examples (`crates/aa-client/examples/remote_vehicle_motion.rs`) set
+`TimeUpdateStrategy::ManualDuration`: every frame advances the app clock by exactly the step, however fast the loop
+runs. Their timings are game time. The 2 s log line and the final `recorded … frames` line report the measured
+`clock` and `game/wall` ratio, so a tool that prefers the fixed step can divide its timings by it. A run that claims
+wall time instead passes `--require-wall-clock`; the audit fails when the ratio leaves 1 by more than 5 % after 1 s
+(`clock.rs`). The regression `manual_duration_at_an_uncapped_rate_fails_the_wall_clock_check` is the
+`ManualDuration(1/60)` + fast-loop mutation.
 
 ## Headless
 

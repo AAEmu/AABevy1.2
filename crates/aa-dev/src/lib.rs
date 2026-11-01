@@ -16,10 +16,11 @@
 //!   image instead, and the image is saved `--shot-after` seconds (default 5) after start (the process then exits
 //!   unless a script is running, see [`capture`])
 //! * `--allow-lua-error <text>`  (repeatable) a Lua error whose message contains the text is not counted, see [`capture`]
+//! * `--require-wall-clock`  exit non-zero when game time does not run at wall rate (a comparison run; see [`clock`])
 //!
-//! FPS and frame time are logged every 2 s (`aa-dev: fps=… frame_ms=…`) so performance can be
-//! compared from the console. With `--shot` or `--exit-after` the app also runs uncapped when the
-//! window is unfocused. Typical check:
+//! FPS, frame time and the app clock are logged every 2 s (`aa-dev: fps=… frame_ms=… clock=… game_per_wall=…`) so
+//! performance can be compared from the console and a timing run can prove (or divide by) its time base. With `--shot`
+//! or `--exit-after` the app also runs uncapped when the window is unfocused. Typical check:
 //!
 //! ```text
 //! cargo run -p aa-ui --example login -- --shot shots/aa-ui/login.png
@@ -32,8 +33,10 @@ use bevy::window::{PresentMode, WindowResolution};
 use bevy::winit::WinitSettings;
 
 pub mod capture;
+pub mod clock;
 mod headless;
 mod record;
+pub use clock::{ClockAudit, ClockMode};
 pub use headless::{OffscreenTarget, SCRIPTED, take_offscreen_shot};
 pub use record::RecordGate;
 
@@ -56,6 +59,8 @@ pub struct DevArgs {
     pub headless_fps: f32,
     /// `--offscreen-shot <png>`: render into an image, save it, see [`headless`].
     pub offscreen_shot: Option<String>,
+    /// `--require-wall-clock`: exit non-zero when game time does not run at wall rate (see [`clock`]).
+    pub require_wall_clock: bool,
 }
 
 /// The command line flags: `std::env::args` natively; in the browser built from the page URL's query string, so
@@ -132,6 +137,7 @@ impl DevArgs {
             headless: args.iter().any(|a| a == "--headless") || value("--offscreen-shot").is_some(),
             headless_fps: value("--headless-fps").and_then(|s| s.parse().ok()).unwrap_or(30.0),
             offscreen_shot: value("--offscreen-shot"),
+            require_wall_clock: args.iter().any(|a| a == "--require-wall-clock"),
         };
         // No file system, no second window and no GPU-less mode in the browser.
         #[cfg(target_arch = "wasm32")]
@@ -209,9 +215,11 @@ impl Plugin for DevPlugin {
             // logged FPS is meaningless.
             app.insert_resource(WinitSettings::continuous());
         }
+        let require_wall_clock = args.require_wall_clock;
         app.insert_resource(args)
             .init_resource::<DevState>()
             .add_systems(Update, (log_fps, shot_and_exit));
+        clock::plugin(app, require_wall_clock);
         record::plugin(app);
         headless::plugin(app);
     }
@@ -224,7 +232,12 @@ struct DevState {
     shot_wait: f32,
 }
 
-fn log_fps(time: Res<Time>, diagnostics: Res<DiagnosticsStore>, mut state: ResMut<DevState>) {
+fn log_fps(
+    time: Res<Time>,
+    diagnostics: Res<DiagnosticsStore>,
+    audit: Res<ClockAudit>,
+    mut state: ResMut<DevState>,
+) {
     state.since_log += time.delta_secs();
     if state.since_log < 2.0 {
         return;
@@ -238,7 +251,11 @@ fn log_fps(time: Res<Time>, diagnostics: Res<DiagnosticsStore>, mut state: ResMu
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    info!("aa-dev: fps={fps:.1} frame_ms={ms:.2}");
+    info!(
+        "aa-dev: fps={fps:.1} frame_ms={ms:.2} clock={} game_per_wall={:.3}",
+        audit.mode_name(),
+        audit.ratio()
+    );
 }
 
 fn shot_and_exit(
