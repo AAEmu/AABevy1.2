@@ -835,9 +835,11 @@ def wait_player(mcp: Mcp, pid: int, timeout: float) -> str:
     raise RuntimeError("player did not appear: " + last)
 
 
-def create_character(mcp: Mcp, pid: int, name: str, ability: int) -> None:
+def create_character(mcp: Mcp, pid: int, name: str, ability: int,
+                     open_ui: bool = True) -> None:
     lua = lambda code: mcp.text("client_lua", pid=pid, target="ui", code=code)
-    lua("X2LoginCharacter:CreateCharacter()")
+    if open_ui:
+        lua("X2LoginCharacter:CreateCharacter()")
     for _ in range(240):
         if lua("return characterCreate and characterCreate.state").strip() == "Step1":
             break
@@ -908,7 +910,7 @@ def ensure_world(mcp: Mcp, pid: int, character: str, ability: int,
     if stage == "5":
         if not create:
             raise RuntimeError("the account has no character; pass --create-character")
-        create_character(mcp, pid, character, ability)
+        create_character(mcp, pid, character, ability, open_ui=False)
         stage = "4"
     if stage == "4":
         lua = lambda code: mcp.text("client_lua", pid=pid, target="ui", code=code)
@@ -920,7 +922,7 @@ def ensure_world(mcp: Mcp, pid: int, character: str, ability: int,
         if character not in names:
             if not create:
                 raise RuntimeError(f"character {character!r} not in {names}; pass --create-character")
-            create_character(mcp, pid, character, ability)
+            create_character(mcp, pid, character, ability, open_ui=True)
             names = []
             for index in range(1, 6):
                 value = lua("return X2LoginCharacter:GetLoginCharacterName(%d)" % index).strip()
