@@ -373,21 +373,26 @@ pub struct Spindle {
 }
 
 /// The looping idle of a prefab body (`X2::PrefabUnitModel::UpdateIdleAnim`, `FUN_390d6690`): the
-/// body's `fist_ba_relaxed_idle` runs for as long as the vehicle exists, whatever its driver or speed.
-/// On the body's Animator; [`start_vehicle_idle`] starts it whenever the model has no clip. A destroyed
-/// vehicle stops it and plays the `.cal`'s `dead_01`/`dead_02` ([`stop_dead_vehicles`]).
+/// body's `fist_ba_relaxed_idle` runs while the model exists, whatever its driver or speed. The 1.2
+/// callers skip it in prefab damage state 5 (dying) or 6 (dead): `FUN_390e69d0` (DEC 184925),
+/// `FUN_390eb7d0` (DEC 187546), `FUN_390ebaa0` (DEC 187601) and the interaction "opened" path
+/// `FUN_390d64a0` (DEC 173191). This branch has no dying state yet (PR #69), so it gates on [`Dead`]
+/// (state 6). On the body's Animator; [`start_vehicle_idle`] starts it whenever the model has no clip.
+/// A destroyed vehicle stops it and plays the `.cal`'s `dead_01`/`dead_02` ([`stop_dead_vehicles`]).
 #[derive(Component, Clone, Debug)]
 pub struct VehicleIdle {
     pub clip: BoundClip,
     /// The body's death clip (`dead_01`, else `dead_02`), played once when the unit dies.
     pub dead: Option<BoundClip>,
-    /// The unit is dead: the idle stays stopped (until a resurrection clears [`Dead`]).
+    /// The unit is dead (native: damage state 5 or 6, but only state 6 exists here until PR #69): the
+    /// idle stays stopped until a resurrection clears [`Dead`].
     pub stopped: bool,
 }
 
 /// Starts the prefab body's idle when the model has no clip, as 1.2 does on model init and refresh.
-/// `UpdateIdleAnim` runs for every unit-model kind except 5 and 6 (Mate and Shipyard), which never take
-/// this prefab-vehicle path; ships and land vehicles are kinds 1-4 and get the loop.
+/// `UpdateIdleAnim` itself has no driver or speed condition; its 1.2 callers skip it in prefab damage
+/// state 5 (dying) or 6 (dead) - not for the Mate and Shipyard model kinds. This branch gates on
+/// [`Dead`] (state 6) until PR #69 adds dying; ships and land vehicles get the loop.
 pub fn start_vehicle_idle(mut bodies: Query<(&VehicleIdle, &mut Animator)>) {
     for (idle, mut animator) in &mut bodies {
         if !idle.stopped && animator.starts_enabled() && animator.current.is_none() {
