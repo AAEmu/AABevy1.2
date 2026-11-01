@@ -178,6 +178,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
             .add_plugins(sounds::plugin)
+            .add_plugins(vehicle::VehiclePlugin)
             .add_plugins(stealth::plugin)
             .add_plugins(tools::plugin)
             .add_plugins(flow::plugin)
@@ -237,7 +238,6 @@ impl Plugin for InGamePlugin {
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
-                    vehicle::steer_spindles.after(vehicle::track_motion),
                     (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
