@@ -516,6 +516,10 @@ impl Houses {
             return false;
         }
         house.demolished = true;
+        // `FUN_3932A300` (`DEC:655557`): the native house object keeps its model and clears only its
+        // owner (the 600 sentinel) and owner name on `SCHouseDemolished`; the model stays standing.
+        house.snapshot.owner_id = 0;
+        house.snapshot.owner_name.clear();
         true
     }
 
@@ -1111,6 +1115,9 @@ pub(crate) mod tests {
         assert!(world.houses.apply(&demolished));
         assert!(!world.houses.apply(&demolished));
         assert!(world.houses.by_tl_id[&8].demolished, "removal notice does not erase the snapshot");
+        assert_eq!(world.houses.by_tl_id[&8].snapshot.owner_id, 0, "the owner is cleared");
+        assert!(world.houses.by_tl_id[&8].snapshot.owner_name.is_empty());
+        assert_ne!(world.houses.by_tl_id[&8].snapshot.model_id, 0, "the model stays");
 
         assert!(!world.houses.apply(&Event::UnitsRemoved(vec![999])));
         assert!(world.houses.apply(&Event::UnitsRemoved(vec![other.obj_id])));
