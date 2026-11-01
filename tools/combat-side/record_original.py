@@ -1020,6 +1020,7 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
             "samples": len(gcd_rows),
         },
         "animations": {
+            "controller_lists": bool(caster_ctrl or victim_ctrl),
             "caster_ctrl": caster_ctrl,
             "victim_ctrl": victim_ctrl,
             "tried": ctrl_tried,
@@ -1061,9 +1062,12 @@ def main() -> int:
     parser.add_argument("--fight-seconds", type=float, default=0.0,
                         help="record this long after the last key (0 = a little over one interval)")
     parser.add_argument("--server-log", type=Path, default=None)
+    parser.add_argument("--controller-lists", action="store_true",
+                        help="also sample the old controller scheduler lists; needs the "
+                             "PlayAnim hook driver extension, off by default")
     parser.add_argument("--keep-client", action="store_true")
     parser.add_argument("--no-self-check", action="store_true")
-    parser.add_argument("--required", default="clock_sync,anim_state,anim_controller,gcd,castbar,unit_state,chat,inputs",
+    parser.add_argument("--required", default="clock_sync,anim_state,gcd,castbar,unit_state,chat,inputs",
                         help="comma-separated channels that must have rows")
     args = parser.parse_args()
 
@@ -1195,13 +1199,14 @@ def main() -> int:
             log("victim unit", hex(victim_unit) if victim_unit else "unresolved",
                 "id", victim_id)
 
-        pointers = actor_pointers(mcp, pid, player_name, args.npc_name)
-        caster_ctrl, tried = resolve_controller(mem, actor, pointers.get(player_name), "caster")
-        ctrl_tried["caster"] = tried
-        if victim_unit:
-            victim_ctrl, tried = resolve_controller(
-                mem, victim_unit, pointers.get(args.npc_name), "victim")
-            ctrl_tried["victim"] = tried
+        if args.controller_lists:
+            pointers = actor_pointers(mcp, pid, player_name, args.npc_name)
+            caster_ctrl, tried = resolve_controller(mem, actor, pointers.get(player_name), "caster")
+            ctrl_tried["caster"] = tried
+            if victim_unit:
+                victim_ctrl, tried = resolve_controller(
+                    mem, victim_unit, pointers.get(args.npc_name), "victim")
+                ctrl_tried["victim"] = tried
 
         # Timers: 16 ms animation state, 50 ms cast bar, 1000 ms buffs.
         system_code = (SYSTEM_SAMPLE.replace("CHAR_NAME", json.dumps(player_name))

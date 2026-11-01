@@ -52,7 +52,7 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
 | `meta` | one start row and one end row (character, ids, counts, self-check result) |
 | `clock_sync` | once per second: `System.GetCurrTime` and `X2Time:GetUiMsec` beside `wall_ms` |
 | `anim_state` | every 16 ms: caster/victim `GetCurrentAnimationState`, `GetAnimationTime`, actor pointer, world position (system state) |
-| `anim_controller` | every 5 ms: caster and victim controller list entries A/B (`anim_id`, weapon, data, start, duration, fire, clip time) |
+| `anim_controller` | optional (`--controller-lists`): the old caster/victim scheduler lists A/B; off by default |
 | `gcd` | every 5 ms: cooldown-manager global pair and the unit combat fields |
 | `castbar` | every 50 ms: `X2Unit:UnitCastingInfo` for `player` and `target` plus HP/MP/combat state |
 | `buffs` | once per second: one `list`/`count` row and one row per `UnitBuff`/`UnitDeBuff` entry for player and target |
@@ -112,21 +112,21 @@ layout and the owning unit offset.
 
 ## Animation lists
 
-`anim_state` always has a row per Lua tick with the actor state string and clip
-time for both units.  `anim_controller` resolves the caster's and the victim's
-controller object and reads the two scheduler lists the old recorder used
-(`ctrl+0x24`/`ctrl+0x30`, entries at `+0x28` start, `+0x2c` duration, `+0x30`
-fire, `ctrl+0x70` last time).  The controller address is resolved from the
-client's own Lua actor pointer (`x.actor.__this`) and, if that is not usable,
-from the unit's model pointers; the candidates tried are in
-`self_check.json` under `animations.tried`.
+`anim_state` has a row per system Lua tick with the actor state string for both
+the caster and the victim (``GetCurrentAnimationState``), their world positions
+and the actor handle.  The clip time field is empty when the client's actor
+table does not expose a time getter; this build has no ``GetAnimationTime``
+method, so the recorder does not invent one.
 
-The PlayAnim hook from the old recorder is **not** installed here: it needs
-the driver's `alloc`/`write`/`call` memory commands, which the lane's standard
-`aadriver.dll` does not implement.  `anim_controller` covers the same
-scheduler entries without patching the client.  If a driver build with the
-memory commands is used, the hook can be added back without changing the row
-schema.
+The old recorder's controller scheduler lists are **optional** and off by
+default (``--controller-lists``).  They need the PlayAnim pass-through hook,
+which uses the driver's ``alloc``/``write``/``call`` memory commands; the lane's
+standard ``aadriver.dll`` does not implement them.  Without the hook the
+unit/model pointer chain did not expose the old ``ctrl+0x24``/``ctrl+0x30``
+lists: the candidate that looked plausible produced entry words that were not
+an animation entry, so the default recorder does not write that channel.  The
+lane dry run therefore reads the caster/victim animation list through
+``anim_state`` and reports the scheduler channel as not read.
 
 ## Self-check
 
