@@ -37,7 +37,8 @@ fn combined_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Optio
 
 /// The global cooldown (left, total) a skill waits for: the last successful cast's `gcd_ms` counted from its start, or the
 /// one a plot step's `GlobalCooldown` effect started, whichever lasts longer; none for the skills that ignore it and for the
-/// 1.2 basic attacks (K2: the auto attack never changes the cooldown-manager pair).
+/// basic attacks (inferred: the K2 cooldown-manager pair stays 0/1000, but the capture cannot tell whether it is written at the
+/// request or on the server's reply, and the skill 2 path has no explicit GCD test).
 pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> (u32, u32) {
     if game.skills.get(&id).is_none_or(|info| info.ignore_gcd || info.auto_attack) {
         return (0, 0);

@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use aa_anim::{Animator, BoneMask, Cal, ClipLibrary, pose::{BoundClip, Rig, SampleOptions}};
 use bevy::prelude::*;
 
-use super::combat::{Acting, CombatStance, Dead};
+use super::combat::{Acting, CombatIdle, Dead};
 use super::jump::{self, JumpDir, JumpKind, JumpPhase, JumpTrack};
 use super::player::LocalPlayer;
 use super::weapons::{Drawn, Out, Wield};
@@ -343,8 +343,8 @@ impl Locomotion {
         self.state = State::Unknown;
     }
 
-    /// The combat stance the playing clip belongs to (`None`: the peaceful clips). A fighting unit with its weapon sheathed
-    /// stands in [`Stance::Fist`] (the 1.2 `stance_perm` with no weapon out).
+    /// The combat stance the playing clip belongs to (`None`: the peaceful clips). A unit in the 1.2 combat idle with its weapon
+    /// sheathed stands in [`Stance::Fist`].
     #[cfg(test)]
     pub fn stance(&self) -> Option<Stance> {
         self.stance
@@ -406,7 +406,7 @@ pub fn drive_locomotion(
     time: Res<Time>,
     library: Res<ClipLibrary>,
     local_jump: Option<Res<LocalJump>>,
-    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatStance>), (Without<Dead>, Without<super::seating::SeatPose>)>,
+    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatIdle>), (Without<Dead>, Without<super::seating::SeatPose>)>,
 ) {
     let now = time.elapsed_secs_f64();
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();
@@ -420,11 +420,15 @@ pub fn drive_locomotion(
             }
             continue;
         }
-        // a weapon in the hand sets the stance; a fighting unit without one stands in its fist combat idle (`stance_perm`, K2)
-        let stance = match drawn.and_then(|d| d.stance(now)) {
-            Some(out) => Some(Stance::of(out, wield.copied().unwrap_or_default())),
-            None if fighting => Some(Stance::Fist),
-            None => None,
+        // the combat idle is the 1.2 derived flag `+0x5fc4` (`FUN_39355ee0`), not the battle byte and not the weapon: it holds
+        // for 10 s after the last engagement or skill use. The weapon in the hand picks which idle; without one it is the fist.
+        let stance = if fighting {
+            match drawn.and_then(|d| d.stance(now)) {
+                Some(out) => Some(Stance::of(out, wield.copied().unwrap_or_default())),
+                None => Some(Stance::Fist),
+            }
+        } else {
+            None
         };
         if stance != loco.stance {
             loco.stance = stance;

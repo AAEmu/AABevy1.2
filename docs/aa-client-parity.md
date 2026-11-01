@@ -2,20 +2,20 @@
 
 ## Combat stance and auto-attack checkpoint, 2026-11-01
 
-The K2 capture (2026-11-01-combat-k2k3) and the 1.2 decompile settle the auto attack and the stance exit. The client's battle
-stance is the `X2Unit + 0x3bba` byte (`stance_perm`): `OnCombatEngaged` sets it (`FUN_391d69a0` -> `FUN_390b36f0`) and
-`OnCombatCleared` clears it (`FUN_391d6a60` -> vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`). The capture's 1 -> 0 at
-t=59,322 is the server's `SCCombatCleared` 0.772 s after the recorder lost the target (0.613 s after the no-target press), not a
-client timer. The weapon byte `+0x3ba8` and the `onehand_combat_idle` stay for the 7.6 s until the next fight, so the client keeps
-the **battle stance** (`combat.rs` `CombatStance`, read from `CombatChanged`, a unit-targeted `SkillStarted` and `UnitDamaged`)
-separate from the **drawn weapon** (`Drawn`, still 10 s; the capture shows no sheathe). A fighting unit with no weapon out stands in
-its fist combat idle (K2 `fist_combat_idle`). The raw K2 rows contradict the report's "second press toggles off": the clips and the
-target's HP keep going every 2 s for 30 s after the re-press, and `FUN_393989e0` swallows the second skill 2 press without a
-toggle; the client's auto attack flag is cleared by the server's `SCSkillStopped`. The first attack clip starts at +280 ms after
-the key (`DRAW_LEAD` 0.28 s; the first damage at +1.28 s) and the basic attacks (2, 3, 4) are exempt from the global cooldown
-(K2: 0/1000 across every press); their refused presses are silent. Open: the client's own sheathe after a fight is not recovered
-(K2 shows none in 240 s; Bevy's 10 s is an approximation), and the auto-attack's white/yellow combat text split is now keyed on the
-basic ids, not `weapon_slot_for_autoattack_id`.
+The 1.2 decompile settles the combat state; the K2 capture (2026-11-01-combat-k2k3) only supplies the client's outbound packets.
+The battle flag is the `X2Unit + 0x3bba` byte: `OnCombatEngaged` sets it (`FUN_391d69a0` -> `FUN_390b36f0`), a blow sets it on
+both sides (`FUN_39391670`), and `OnCombatCleared` clears it at once (`FUN_391d6a60` -> vtable `+0x48` -> `FUN_39355ec0` ->
+`FUN_390b3710`). The capture's 1 -> 0 at t=59,322 is our server's `SCCombatCleared` 0.772 s after the recorder lost the target
+(0.613 s after the no-target press), not a client timer. Separate from the flag is the derived combat idle
+(`combat.rs` `CombatIdle`, `X2Unit + 0x5fc4`): `FUN_39355ee0` refreshes `+0x5fc0` every update while the flag is set and for
+1000 ms after a skill request, and the idle falls `DAT_39ac7424` = 10000 ms after the last refresh (the model's `+0x428`); the
+deadline does not clear the flag and does not put the weapon away. The weapon byte `+0x3ba8` stayed 1 after the K2 clear, so the
+**drawn weapon** (`Drawn`) remains a separate state (Bevy's 10 s auto-sheathe is inferred; the capture shows no sheathe). The
+combat idle with no weapon in the hand is the fist one. The K2 client sent another `CSStartSkill 2` on the re-press and at 11.2 m:
+there is no local toggle, no stop-on-walk and no local swing timer, and the first clip and 2 s cadence were our server's
+`SCSkillFired` timing (CONT). The GCD exemption (K2 pair 0/1000) is **inferred**, not decompile-proven, and the white/yellow
+combat text split follows the same inferred basic ids (2, 3, 4), not `weapon_slot_for_autoattack_id`. Open: the client's own
+sheathe after a fight is not recovered.
 
 ## Mount-walk checkpoint, 2026-10-31
 

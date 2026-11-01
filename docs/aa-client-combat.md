@@ -98,7 +98,7 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 | `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
 | `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it; a unit other than the player is also thrown away from its last attacker (`Thrown`, see Death) |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
-| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once, the unit takes its combat stance (`<weapon>_ba_combat_idle`) and turns to the target, and the server's events of that skill wait until `DRAW_LEAD` (0.6 s) after the key (`Combat::held`): the first swing starts as late as in the real client (see Weapon draw). A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
+| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once and the unit turns to the target (the 1.2 `FUN_39390f80` -> `FUN_39360920` changes the weapon at the request; `+0x5fc5` / `+0x5fc6` refresh the combat idle). Nothing is timed locally: the clip and the damage play on the server's `SCSkillFired` / `SCUnitDamaged` as they arrive. A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
 | the player presses another skill during a cast time (`preempt_cast`) | the cast is cancelled (`CSStopCasting`, clip and held effects end) and the skill is asked for again 0.25 s later (the server answers `ON_CASTING` to it while the cast runs); the same skill again waits for its cast |
 | the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | the casts of skills with `source_not_swim` are cancelled the same way (36 skills of the data, none in the ten player trees: the other skills are cast swimming as on land, the server refuses a `source_not_swim` skill in water with `CANNOT_CAST_IN_SWIMMING`) |
 | the local player moves or jumps during a cast time (or turns, for `stop_casting_by_turn`), or moves during a `channeling_cancelable` channel (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
@@ -189,49 +189,45 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   client does: the kick steps about a metre towards its target and comes back while the unit's own position, the camera and the
   server's idea of the position stay where they are (`reference/ingame/combat_kick`). A clip whose root travels more than 2.5 m
   from where it starts (a dash, a charge: the server moves the unit then) stays locked, and so do the locomotion clips.
-* **Weapon draw and combat stance** (`weapons.rs` `Drawn`, `combat.rs` `request_skill` / `CombatStance` / `sheathe`,
-  `anim.rs` `Stance`). The real client (`reference/ingame/combat_melee`, `combat_triple_slash`): from the key the shield is on the
-  arm and the sword in the hand within 0.12 s (frame 3), the body turns to the target and stands in the combat idle, the swing's
-  clip starts at about 0.6 s (the first damage number is at 0.85 s; `onehand_co_attack_r_slash_2` meets the server's timeline
-  0.25 s into the clip, the first Triple Slash step 0.19 s), then the unit keeps the stance: in `combat_death_2` the shield is still
-  up 7 s after the kill. The K2 capture (5 ms memory samples, 2026-11-01) measures the same start more finely: the weapon byte
-  `+0x3ba8` 0 -> 1 at +255 ms and the first attack clip at +280 ms after the press; with the weapon already out the clip starts at
-  +267 ms (the server's first auto attack fire is skill 2's 300 ms `cooldown_time`, so the 0.6 s of the older frames is the coarse
-  frame spacing). The data has no draw clip (only `*_ac_holster_*`), so the draw is the weapon swap plus the stance idle:
+* **Weapon draw and combat stance** (`weapons.rs` `Drawn`, `combat.rs` `request_skill` / `CombatStance` / `CombatIdle` /
+  `sheathe`, `anim.rs` `Stance`). The data has no draw clip (only `*_ac_holster_*`), so the draw is the weapon swap plus the
+  combat idle. The rules below are the **decompile** (`x2game.dll.c`), not a timing read from our own server's replies:
   * `request_skill` reads the player's `UseSkill` (the key), finds the weapon the skill is played with (`skill_weapon`: the clips of
     its `SkillVisual`, the first plot step, the carried blade for the basic attack, which has no clip in the data) and, when it is not
-    out in that stance already, inserts `Drawn` and starts a `Lead` of `DRAW_LEAD` = 0.28 s (the K2 clip start). The server answers
-    after 0.12 s: its
-    events of that skill (`SkillStarted`, `SkillFired`, `PlotEvent`, the `UnitDamaged` and end events of its timelines) wait in
-    `Combat::held` until the lead is over (`hold_until`, `apply` runs them in order), so the clip, the effects and the damage all
-    shift by the same time. A refused skill (`cancel_draw`) lets them go and the weapon goes back; events of other units go on.
-    A swing while the weapon is out (the second melee swing, the next Triple Slash) is not delayed.
-  * The drawn weapon (`Drawn::stance`: weapon out and not holstering) changes the locomotion clips (`drive_locomotion`): standing is
-    `<prefix>_ba_combat_idle` (the one handed idle for the bow and the staff), running is `<prefix>_mo_combat_run_<dir>` (the
-    model's `fist_mo_combat_run_*` where it has none: `music_`, `bow_`), walking stays the peaceful walk. The prefix is `onehand`
-    (also dual wield), `twohand`, `music`, else `fist`. The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
-    shared by the characters of a skeleton). A unit in the **battle** stance with no weapon in the hand stands in its fist combat
-    idle (`Stance::Fist`; the K2 state before the first press is `fist_combat_idle+fist_ba_combat_idle`).
-  * **Battle stance** (`combat.rs` `CombatStance`, the client's `X2Unit + 0x3bba`, `stance_perm` in the K2 capture). The decompile
-    sets it on `OnCombatEngaged` (`FUN_391d69a0` -> `FUN_390b36f0`) and on a blow (`FUN_39391670` from the damage handler), and
-    clears it on `SCCombatCleared`: `OnCombatCleared` (`FUN_391d6a60`) calls the unit's vtable `+0x48`, which is `FUN_39355ec0`
-    (`FUN_390b3710` sets `+0x3bba` to 0). The K2 rows: the byte goes 1 -> 0 at t=59,322, **0.772 s after the target was lost**
-    (the target frame went empty at 58,550; the recorder's `clear_target` came at 58,529) and 0.613 s after the no-target press
-    (58,709); that gap is our server's `SCCombatCleared`
-    (10:27:32), not a client timer, so the client ends the stance the moment the packet arrives. The same rows show the *weapon*
-    byte `+0x3ba8` staying 1 and the character keeping `onehand_combat_idle` for the 7.6 s until the next fight: `Drawn` (the
-    weapon/combat idle, 10 s after the last action) and `CombatStance` (the battle flag) are separate states, and ending the weapon
-    timer at the clear would put the sword away 7 s too early. `CombatStance` is written by `handle_events` from `CombatChanged`
-    (both directions), a unit-targeted `SkillStarted` and `UnitDamaged`; the capture's "Battle Start" is the `Combat Start` layer of
-    the first clip (no separate text was seen).
+    out in that stance already, inserts `Drawn` and the combat idle **at once**. The client changes the weapon on the request path:
+    `FUN_39390f80` calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610` (skill 2,
+    `+0x5fc5`) or `FUN_39354640` (another skill, `+0x5fc6`). The server's events are **not** held: the clip starts on
+    `SCSkillFired` and the damage on `SCUnitDamaged` when they arrive. The older 0.6 s `DRAW_LEAD` and the K2 report's +280 ms
+    are not client timers: the K2 first fire was our server's `start_auto_skill` (CONT), and a localhost reply lands in the same
+    client frame (the audit's F2). A refused skill (`cancel_draw`) puts the weapon back.
+  * The **combat idle** (`combat.rs` `CombatIdle`, the client's `X2Unit + 0x5fc4`) changes the locomotion clips
+    (`drive_locomotion`): standing is `<prefix>_ba_combat_idle` (the one handed idle for the bow and the staff), running is
+    `<prefix>_mo_combat_run_<dir>` (the model's `fist_mo_combat_run_*` where it has none: `music_`, `bow_`), walking stays the
+    peaceful walk. The prefix is `onehand` (also dual wield), `twohand`, `music`, else `fist`; without a weapon in the hand it is
+    the fist combat idle (`Stance::Fist`). The clips are bound the first time a unit fights in the stance (`ClipSet::stances`,
+    shared by the characters of a skeleton).
+  * The **battle flag** (`combat.rs` `CombatStance`, `X2Unit + 0x3bba`). Set by `SCCombatEngaged` (`OnCombatEngaged`,
+    `FUN_391d69a0` -> `FUN_390b36f0`) and by a blow dealt or taken (`FUN_39391670` from the damage handler, both sides; the heal
+    handler also re-sets an engaged target, `FUN_393992d0`); cleared only by `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60`
+    -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`). It is **not** set by a skill start, and it has no timer.
+  * The **10 s deadline** (`CombatIdle`, `X2Unit + 0x5fc0` / `+0x5fc4`, `FUN_39355ee0`). Every update, while the battle flag is
+    set, `+0x5fc0` = now; a skill request sets `+0x5fc5` / `+0x5fc6` for 1000 ms and those flags refresh `+0x5fc0` too; a skill
+    used while the derived flag is already set only refreshes it (`FUN_393545e0`). The derived flag is
+    `now - +0x5fc0 <= DAT_39ac7424` = **10000 ms** (read from `x2game_unpacked.dll` at file offset `0xad5a24`); on its falling edge
+    `FUN_39355ee0` writes `false` to the model's `+0x428` and zeroes `+0x5fc0`. It does **not** clear the battle flag and does not
+    put the weapon away. So the model keeps `onehand_combat_idle` for 10 s after the last engagement or skill use, which is the
+    K2 state after the clear (CAP: the weapon byte `+0x3ba8` was still 1, and the 240 s run shows no sheathe).
+  * The K2 rows: the byte went 1 -> 0 at t=59,322, 0.772 s after the recorder cleared the target and 0.613 s after the
+    no-target press. That gap is our server's `SCCombatCleared` (CONT), not a client timer. The no-target press sent no
+    `CSStartSkill` (the client's own target check, `FUN_393be4e0`), and our server's clear is what ended the flag.
   * The weapon stays out 10 s after the last action with it (`Drawn::after_action`; 4 s for an instrument): a lower bound from
-    `combat_death_2`, where the shield is up at the last frame 7 s after the kill, and K2 shows the weapon byte still 1 and the
-    combat idle 7.6 s after the clear (no sheathe in the 240 s run; `0x3ba8` goes 0 only at 226,960, after a teleport). Then
-    `sheathe` plays the holster clip (`onehand_ac_holster_side_l`, `twohand_ac_holster_back_r`) on a standing unit, ends the stance
-    and moves the weapon into its sheath at the clip's `aw_none` event (0.43 s into the one handed clip); a unit that is running has
-    no holster clip (the real `_ub` variant is 1 s long) and puts the weapon away at once; a unit that starts to run during the clip
-    leaves it; the bow and the instruments have none. An action in progress keeps the weapon out. The 10 s is an approximation of an
-    automatic sheathe the capture does not show; the client's own return of the weapon is not recovered.
+    `combat_death_2`, where the shield is up at the last frame 7 s after the kill, and K2 shows the weapon byte still 1 after the
+    clear. Then `sheathe` plays the holster clip (`onehand_ac_holster_side_l`, `twohand_ac_holster_back_r`) on a standing unit and
+    moves the weapon into its sheath at the clip's `aw_none` event (0.43 s into the one handed clip); a unit that is running has no
+    holster clip (the real `_ub` variant is 1 s long) and puts the weapon away at once; a unit that starts to run during the clip
+    leaves it; the bow and the instruments have none. An action in progress keeps the weapon out. The 10 s auto-sheathe is
+    **inferred**: the decompile's deadline ends the combat idle (`+0x428`), not the weapon, and the client's own return of the
+    weapon is not recovered.
 * **Death** (`Thrown`, `throw_corpses`). In `combat_death_2` the rat is thrown up and back when the killing blow lands (frame at
   1.6 s: in the air about 0.9 m behind where it stood), lies on the water surface 0.3 s later, is gone from the surface
   0.3 s after that and is seen faintly on the pond floor for the rest of the capture. A unit other than the player that dies is
@@ -267,29 +263,30 @@ the upper body, the legs running).
 
 ## Auto attack (basic attack, skill 2)
 
-The K2 capture (2026-11-01, original 1.2 client against our server) and the decompile settle the basic attack:
+The decompile settles the client side; the K2 capture (2026-11-01, original 1.2 client against our server) supplies the outbound
+packets. The swing timing and cadence in that capture are our server's (CONT):
 
-* **One press repeats the swings.** The server's auto attack loop (`start_auto_skill`) fires skill 2 every weapon speed (the
-  one-hand sword's `holdables.speed` 2000 ms); the client plays each `SCSkillFired` clip. The K2 clips start at 10,086; 12,085;
-  14,082; ... (1.99-2.04 s). The damage ticks in the target frame are 0.6-1.6 s apart because a swing has more than one hit.
-* **A second press is not a toggle.** The raw K2 rows contradict the first report: after the re-press at 68,588 the attack clips
-  continue (69,087; 71,090; 73,091; ...) and the target's HP keeps falling every 2 s to 2454 at 99,095, until the scenario clears
-  the target at 100,086. The decompile agrees: `FUN_393989e0` (the `UseSkill` path) returns 1 for skill 2 when the local auto
-  attack flag `+0x3ad5` is set, so the press starts nothing and stops nothing; the client's flag is cleared by the server's
-  `SCSkillStopped` (`OnSkillStopped` -> `FUN_39398410`) or a unit reset, not by a second press.
-* **Walking** stops the swings by geometry, not by a client latch: the weapon's `holdables.max_range` (4 m for the one-hand
-  sword) is the client's reach (`Env::reach`), and the server's tick refuses past it. The swing that is in flight is not
-  cancelled: it continues on the upper body over the run (`onehand_co_attack_r_slash_2_ub_anim`, K2 113,072) and no new clip
-  starts. Sitting on a smaller target or another weapon changes only the number.
-* **Out of reach and no target are silent.** The K2 press at 11.2 m (target selected) sent no `CSStartSkill` and wrote no chat
-  row; the no-target press only set the client's auto attack flag. Bevy's action bar drops the press without a `UseFailed` text
-  for the basic attacks (`panels::use_slot`, `Env::is_auto_attack`).
-* **GCD-exempt.** The K2 cooldown-manager pair stays 0/1000 across all five presses. `SkillInfo::auto_attack` is now the three
-  basic skills (2, 3, 4; the 1.2 `DAT_39ac769c` = 2 for the local flag), not `weapon_slot_for_autoattack_id` (Triple Slash 18132
-  carries 15 there), so `uses_gcd`/`gcd_at` return 0 for skill 2 and the combat text prints its hits white while Triple Slash's stay
-  yellow. Skill 3 (off-hand) and 4 (ranged) are exempt the same way.
-* **First clip**: the K2 rows above (+280 ms). `DRAW_LEAD` is 0.28 s; the server's first fire (skill 2's 300 ms `cooldown_time`)
-  already arrives inside it.
+* **Every press sends `CSStartSkill 2`.** CAP: the K2 server log has a `CSStartSkill 2` for every press, including the re-press at
+  68,588 (10:27:41) and the press at 11.2 m (10:28:30). The client has **no local toggle**: its only swallow is the internal
+  auto attack flag `+0x3ad5` (`FUN_393989e0` returns for skill 2 while it is set), which the server's `SCSkillStopped` clears
+  (`OnSkillStopped` -> `FUN_39398410`); a second press does not clear it. Bevy sends a `SkillPressed` on every press
+  (`hud::panels::use_slot`).
+* **The press starts the swing loop on the server.** CONT: `start_auto_skill` / `schedule_auto_attack` repeat skill 2 every weapon
+  speed (the one-hand sword's `holdables.speed` 2000 ms), and every swing reaches the client as `SCSkillFired` with the clip id
+  (`fire_anim_id`). The K2 clips at 10,086; 12,085; ... and the +280 ms first clip are that server timer, not a client rule. The
+  client plays each `SCSkillFired` clip; Bevy does the same and has no repeat timer and no first-clip delay.
+* **Walking sends nothing.** CAP: no packet while the K2 character walked. The swings stop because our server's tick refuses the
+  damage past the weapon's range (CONT), not because the client cancels anything; Bevy has no stop-on-walk.
+* **Out of range is not refused.** The decompile's skill 2 path checks only `FUN_393be4e0` (`CanAutoAttackTargetUnit`: a living,
+  attackable unit; **no distance test**) and then sends the request. The K2 press at 11.2 m sent `CSStartSkill 2` (CAP); our
+  server's reach tick did nothing with it (CONT). Bevy's `precheck_auto_attack` checks only the target and sends out-of-range
+  presses; a press with no valid target sends nothing and shows the client's refusal (`UseFailed`).
+* **GCD-exempt: inferred.** The K2 cooldown-manager pair stays 0/1000 across every press (CAP, client memory), but the capture
+  cannot tell whether the pair is written at the request or on our server's reply (F2), and the skill 2 path has no explicit GCD
+  test, so `uses_gcd` returning false for the basic attacks is an inference, not a decompile rule. The data's `default_gcd` for
+  skill 2 is set, which is why it needs the exemption at all. `SkillInfo::auto_attack` is keyed on the basic ids (2, 3, 4; the
+  1.2 `DAT_39ac769c` = 2 is the melee one the decompile special-cases), not `weapon_slot_for_autoattack_id` (Triple Slash 18132
+  carries 15 there); the white/yellow combat text split that follows from the same ids is likewise inferred.
 
 ## Sounds (`ingame/sounds.rs`)
 
@@ -396,7 +393,7 @@ to a quarter turn. Frames and sheets are in `shots/combat/cmp/` (not committed).
 
 | capture | matches | does not match |
 |---|---|---|
-| melee (skill 2, `combat_melee`, K2) | the clips (`onehand_co_attack_r_slash_2`, then `_slash`), about 1.5 s per swing as in the real frames, the sword in the right hand, the cut ending with the blade extended and the low guard between swings, the shield forward on the arm; the swing repeats every weapon speed (2.0 s) | the real first clip starts at +280 ms after the key (K2, 5 ms samples; +267 ms with the weapon already out; the older frames at 0.3 s spacing read about 0.5 s) and the first damage shows at +1.28 s. Mine holds the server's events by `DRAW_LEAD` 0.28 s and starts the clip on the fire; the rat is not visible in the pond (the water of aa-world is too opaque for a rat on the bed) |
+| melee (skill 2, `combat_melee`, K2) | the clips (`onehand_co_attack_r_slash_2`, then `_slash`), about 1.5 s per swing as in the real frames, the sword in the right hand, the cut ending with the blade extended and the low guard between swings, the shield forward on the arm | the K2 first clip (+280 ms) and the 2 s cadence are our server's `SCSkillFired` timing (CONT); the client does no local delay, so mine starts the clip when the fire arrives. The rat is not visible in the pond (the water of aa-world is too opaque for a rat on the bed) |
 | Triple Slash (18132) | the three clips of the plot (`streakattack_1` / `_2` / `_3`) from the server's steps, the body pose of the third slam (sword down to the right, body bent) at the same time as the real frame, the jump of stage 3, a red streak on the hit | the jump of stage 3 comes about 0.4 s before the real one; the blue-white weapon trail is not visible in my frames (nor clearly in the real ones at the 0.3 s spacing) |
 | Kick (14495) | the clip `all_co_sk_lowkick` of plot step 2517 (a standing target; `all_co_sk_trample` is the fallen target's), the body now steps towards the target and back (root motion, about 0.7 m against about 1 m) | the real character already has the sword out and the shield on the arm from an earlier fight (mine is at peace: an `all_` clip draws nothing); the kick is not on bevytest's bar, the frames are from `AA_COMBAT_FAKE="16:plot:300:2517:14495"` |
 | Return (10594) | the cast pose (hands out at chest height, palms together), the 10 s cast, the effect group (`return_skill_form` on the right hand: 110 particles alive); with the shield no longer shown at peace the pose is the real one | the glowing sphere: at the effect's own scale 1 mine is a faint haze hidden by the hands, the real one is a bright spiky white-purple orb about 0.39 m across; with `AA_FX_SCALE=2` mine has the same size, colour, halo and place (but less bright). The emitter says `Size 0.2`: aa-fx draws its sprites at half the size the real client does here (not changed: aa-fx). In the real the arms hang for the first 4 s and the pose comes in slowly; mine plays the pose at once |

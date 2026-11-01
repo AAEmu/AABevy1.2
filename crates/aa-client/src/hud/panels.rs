@@ -577,12 +577,11 @@ pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inve
             if env.held_back(skill, flight) {
                 return;
             }
-            if let Some(f) = env.precheck(skill) {
-                // the 1.2 client drops a refused basic attack without a word (K2: no target and out of range presses are silent);
-                // the other skills say why
-                if !env.is_auto_attack(skill) {
-                    failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
-                }
+            // a basic attack checks only its target: an out-of-range press is still sent (the K2 client sent `CSStartSkill 2` at
+            // 11.2 m; the server's reach owns the swing), and the client's own refusal shows the same alert as any skill
+            let refusal = if env.is_auto_attack(skill) { env.precheck_auto_attack(skill) } else { env.precheck(skill) };
+            if let Some(f) = refusal {
+                failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
                 return;
             }
             // `ground_target::route` sends the command, or aims first when the skill takes a spot of the ground

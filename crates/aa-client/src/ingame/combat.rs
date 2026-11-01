@@ -75,14 +75,40 @@ pub struct Acting {
     pub layered: bool,
 }
 
-/// The client's combat stance (`X2Unit + 0x3bba`, `stance_perm` in the K2 capture): the unit is in battle, set by
-/// `SCCombatEngaged`, by an attack it starts and by a blow it deals or takes (the 1.2 handlers `OnCombatEngaged`,
-/// `FUN_39391670`), and cleared by `SCCombatCleared` (`OnCombatCleared` -> the unit's vtable `+0x48`, `FUN_39355ec0`, which sets
-/// the byte to 0 and calls `FUN_390b3710`). It is **not** the weapon in the hand: the K2 run's `weapon_active` (`+0x3ba8`) stays 1
-/// and the character keeps `onehand_combat_idle` for the whole 7.6 s between the stance exit and the next fight. A unit in the
-/// stance with no weapon out stands in its fist combat idle (`fist_ba_combat_idle`, the K2 state before the first press).
+/// The client's battle flag (`X2Unit + 0x3bba`): set by `SCCombatEngaged` (`OnCombatEngaged`, `FUN_391d69a0` -> `FUN_390b36f0`)
+/// and by a blow dealt or taken (the damage handler's `FUN_39391670`), and cleared only by `SCCombatCleared` (`OnCombatCleared`,
+/// `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`). It has no timer of its own.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CombatStance;
+
+/// Seconds the model keeps its combat idle after the last combat activity: `FUN_39355ee0` compares the current time with
+/// `+0x5fc0` against `DAT_39ac7424` (10000 ms, read at `x2game_unpacked.dll` file offset `0xad5a24`).
+const COMBAT_IDLE_SECS: f64 = 10.0;
+/// The skill-use pulse of `FUN_39355ee0`: `+0x5fc5` / `+0x5fc6` refresh `+0x5fc0` for 1000 ms after the skill request.
+const SKILL_PULSE_SECS: f64 = 1.0;
+
+/// The model's "recent combat" flag (`X2Unit + 0x5fc4`, derived from the `+0x5fc0` deadline in `FUN_39355ee0`): it drives the
+/// combat idle (`[model + 0x14] + 0x428`). It is refreshed every update while [`CombatStance`] is set (the deadline never clears
+/// the stance byte), for 1000 ms after a skill request (`+0x5fc5` auto attack / `+0x5fc6` other skill), and when a skill is used
+/// while it is already set (`FUN_393545e0`). It falls 10 s after the last refresh; `FUN_39355ee0` then writes `false` to the model
+/// and zeroes `+0x5fc0`. It does not put the weapon away (`+0x3ba8` is separate).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct CombatIdle {
+    /// `+0x5fc0`: the last activity time the 10 s is counted from.
+    pub last: f64,
+    /// `+0x5fc5` / `+0x5fc6`: a skill request refreshes `last` until this moment.
+    pub pulse_until: f64,
+}
+
+impl CombatIdle {
+    pub fn at(now: f64) -> CombatIdle {
+        CombatIdle { last: now, pulse_until: 0.0 }
+    }
+
+    pub fn from_skill(now: f64) -> CombatIdle {
+        CombatIdle { last: now, pulse_until: now + SKILL_PULSE_SECS }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
@@ -157,8 +183,8 @@ struct Flying {
 }
 
 /// A damage packet at the moment its blow lands (a swing at the clip's sync point, a shot after its flight, a plot step as it
-/// comes; after the draw of the weapon): what the HUD's floating numbers and combat log show, as in the real client. `received` is the
-/// time the combat code took the packet up (the draw may have held it), not the time the blow lands.
+/// comes): what the HUD's floating numbers and combat log show, as in the real client. `received` is the time the combat code took
+/// the packet up, not the time the blow lands.
 #[derive(Message, Clone, Debug)]
 pub(crate) struct DamageLanded {
     pub damage: UnitDamage,
@@ -182,26 +208,15 @@ struct Combat {
     owner: HashMap<u32, u16>,
     /// Who hit a unit (object id) last: the blow that kills throws it away from there.
     last_attacker: HashMap<u32, Entity>,
-    /// The player has drawn its weapon for a skill and its swing waits for the draw (see [`DRAW_LEAD`]).
-    lead: Option<Lead>,
-    /// Server events of the skill that wait for the draw, with the moment they are let through; in the order they came.
-    held: Vec<(f64, Event)>,
-    /// The timelines of the held events (their later events wait too).
-    held_tls: Vec<u16>,
+    /// The skill the player drew its weapon for, to put it back when the server refuses that skill: a notice only, no delay
+    /// (the 1.2 client changes the weapon at the request (`FUN_39360920` from `FUN_39390f80`) and plays the clip on the server's
+    /// `SCSkillFired`).
+    draw: Option<Draw>,
 }
-
-/// Seconds from the key to the first attack clip: the weapon comes out and the shield onto the arm first, then the swing. The K2
-/// capture (5 ms memory samples) has the weapon byte 0 -> 1 at +255 ms and the clip at +280 ms after the press; the second fight
-/// (weapon already out) starts its clip at +267 ms, so this is the client's attack start, not only the draw. The server's first
-/// auto attack fire is the skill's 300 ms `cooldown_time`, so its events arrive inside this lead in play; the lead only caps a
-/// faster answer (the older `combat_melee` frames at 0.3 s spacing read about 0.6 s and are not fine enough to separate these).
-const DRAW_LEAD: f64 = 0.28;
 
 /// The player asked for a weapon skill with the weapon away.
 #[derive(Clone, Copy)]
-struct Lead {
-    /// When the draw is over (seconds on the app clock).
-    ready: f64,
+struct Draw {
     skill: u32,
     caster: u32,
 }
@@ -668,7 +683,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (request_skill, handle_events, cancel_on_move.after(super::player::control_player).in_set(InputCancellation), cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
+                (request_skill, handle_events, tick_combat_idle, cancel_on_move.after(super::player::control_player).in_set(InputCancellation), cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
                     .run_if(resource_exists::<SkillBook>),
@@ -1315,20 +1330,6 @@ fn handle_events(
     mut buff_visuals: Query<&mut buffs::BuffVisuals>,
 ) {
     let now = time.elapsed_secs_f64();
-    // what waited for the draw of the weapon goes first
-    if combat.held.first().is_some_and(|(at, _)| *at <= now) {
-        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut combat.held).into_iter().partition(|(at, _)| *at <= now);
-        combat.held = later;
-        for (_, event) in &due {
-            apply(event, now, &mut st, &mut combat, &mut clock, &mut shot);
-        }
-    }
-    if combat.held.is_empty() {
-        combat.held_tls.clear();
-    }
-    if combat.lead.is_some_and(|l| l.ready <= now) {
-        combat.lead = None;
-    }
     for NetEvent(event) in events.read() {
         if let Some(holds) = frameholds.as_deref_mut() {
             let change = holds.before_receipt(event, &mut st);
@@ -1340,45 +1341,7 @@ fn handle_events(
         {
             sheathe_for_tool(&mut st, unit, skill, now);
         }
-        if let Some(at) = hold_until(&combat, event, now) {
-            if let Some(tl) = tl_of(event)
-                && !combat.held_tls.contains(&tl)
-            {
-                combat.held_tls.push(tl);
-            }
-            combat.held.push((at, event.clone()));
-            continue;
-        }
         apply(event, now, &mut st, &mut combat, &mut clock, &mut shot);
-    }
-}
-
-/// When the event of a skill the player drew its weapon for may go on: after the draw (`None`: now).
-fn hold_until(combat: &Combat, event: &Event, now: f64) -> Option<f64> {
-    let lead = combat.lead.filter(|l| l.ready > now)?;
-    let mine = |obj: u32| obj == lead.caster;
-    let held = |tl: &u16| combat.held_tls.contains(tl);
-    let hold = match event {
-        Event::SkillStarted(s) => !s.failed() && mine(s.caster.obj_id),
-        Event::SkillFired(f) => mine(f.caster.obj_id),
-        Event::PlotEvent(p) => mine(p.caster_obj_id),
-        Event::UnitDamaged(d) => mine(d.caster_obj_id) || held(&d.action.tl),
-        Event::UnitDeath { .. } => !combat.held.is_empty(),
-        Event::SkillEnded { tl } | Event::CastingStopped { tl, .. } | Event::PlotEnded { tl } | Event::PlotStopped { tl, .. } => held(tl),
-        Event::SkillStopped { obj_id, .. } => mine(*obj_id),
-        _ => false,
-    };
-    hold.then_some(lead.ready)
-}
-
-/// The timeline an event of a skill belongs to.
-fn tl_of(event: &Event) -> Option<u16> {
-    match event {
-        Event::SkillStarted(s) => Some(s.tl),
-        Event::SkillFired(f) => Some(f.tl),
-        Event::PlotEvent(p) => Some(p.tl),
-        Event::UnitDamaged(d) => Some(d.action.tl),
-        _ => None,
     }
 }
 
@@ -1389,6 +1352,31 @@ fn tool_event(event: &Event) -> Option<(u32, u32)> {
         Event::SkillFired(f) => Some((f.caster.obj_id, f.skill_id)),
         Event::PlotEvent(p) => Some((p.caster_obj_id, p.skill_id)),
         _ => None,
+    }
+}
+
+/// The `+0x5fc0` deadline of `FUN_39355ee0`: refreshed every update while the battle flag is set (`+0x3bba`) and for the 1000 ms
+/// after a skill request (`+0x5fc5` / `+0x5fc6`). Ten seconds after the last refresh the derived flag `+0x5fc4` falls and the
+/// model leaves its combat idle; the stance byte is not touched.
+fn tick_combat_idle(time: Res<Time>, mut commands: Commands, mut units: Query<(Entity, Has<CombatStance>, Option<&mut CombatIdle>)>) {
+    let now = time.elapsed_secs_f64();
+    for (unit, stance, idle) in &mut units {
+        if stance {
+            match idle {
+                Some(mut idle) => idle.last = now,
+                None => {
+                    commands.entity(unit).insert(CombatIdle::at(now));
+                }
+            }
+            continue;
+        }
+        let Some(mut idle) = idle else { continue };
+        if now < idle.pulse_until {
+            idle.last = now;
+        }
+        if now - idle.last > COMBAT_IDLE_SECS {
+            commands.entity(unit).remove::<CombatIdle>();
+        }
     }
 }
 
@@ -1419,7 +1407,10 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             // not facing the target: turn, tell the server, and ask once more (the real client turns on its own)
             let own = st.local.iter().any(|(_, l)| l.obj_id == s.caster.obj_id);
             // a skill that does not start (not ready, too far ...) puts the weapon it drew away again; a missing turn only waits
-            if own && s.result != aa_net::skill::result::OUTOF_ANGLE && combat.lead.is_some_and(|l| l.skill == s.skill_id) {
+            if own
+                && s.result != aa_net::skill::result::OUTOF_ANGLE
+                && combat.draw.is_some_and(|d| d.skill == s.skill_id && d.caster == s.caster.obj_id)
+            {
                 cancel_draw(st, combat, now);
             }
             if own && s.result == aa_net::skill::result::OUTOF_ANGLE && s.target.obj_id != 0 && combat.retry.is_none() {
@@ -1432,14 +1423,12 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
         }
         Event::SkillStarted(s) => {
             let Some(caster) = st.caster_entity(s.caster.obj_id) else { return };
-            // attacking a unit starts the battle stance (the 1.2 `OnCombatEngaged`/`FUN_39391670`); the target takes it on the
-            // blow. A doodad caster has no stance (only units are in `Stage::entity`).
-            if s.target.kind == target_kind::UNIT
-                && s.target.obj_id != 0
-                && s.target.obj_id != s.caster.obj_id
-                && let Some(attacker) = st.entity(s.caster.obj_id)
-            {
-                st.commands.entity(attacker).insert(CombatStance);
+            // a skill use refreshes the combat idle once (`FUN_39390f80` -> `FUN_39354610` / `FUN_39354640`, the 1000 ms
+            // `+0x5fc5` / `+0x5fc6` pulses). It does **not** set the battle flag: that comes only from `SCCombatEngaged` and a
+            // blow (`FUN_39391670`).
+            st.commands.entity(caster).insert(CombatIdle::from_skill(now));
+            if combat.draw.is_some_and(|d| d.caster == s.caster.obj_id) {
+                combat.draw = None;
             }
             if let Some(shot) = shot.as_mut()
                 && st.is_local(caster)
@@ -1696,10 +1685,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
             let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
             let caster = st.entity(d.caster_obj_id);
-            // a blow puts both sides in the battle stance (`FUN_39391670` from the damage handler)
-            st.commands.entity(target).insert(CombatStance);
+            // a blow puts both sides in the battle stance (`FUN_39391670` from the damage handler) and so keeps the combat
+            // idle alive (the next update refreshes its deadline from the stance byte)
+            st.commands.entity(target).insert((CombatStance, CombatIdle::at(now)));
             if let Some(attacker) = caster {
-                st.commands.entity(attacker).insert(CombatStance);
+                st.commands.entity(attacker).insert((CombatStance, CombatIdle::at(now)));
             }
             if let Some(attacker) = caster.filter(|c| *c != target) {
                 combat.last_attacker.insert(d.target_obj_id, attacker);
@@ -1710,14 +1700,22 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             combat.after(at, Later::Hit { caster, target, items: if missed { Arc::default() } else { items }, shakes: if missed { Arc::default() } else { shakes }, hurt, sound });
         }
         // `SCCombatEngaged` / `SCCombatCleared` (`OnCombatEngaged` sets `+0x3bba`; `OnCombatCleared` clears it at once through
-        // `FUN_39355ec0`). The K2 capture's exit is the server's `SCCombatCleared`; the 0.772 s before it was the gap from the
-        // target being lost, not a client timer.
+        // `FUN_39355ec0`). The clear ends the flag only; the combat idle (`+0x5fc4`, `FUN_39355ee0`) keeps its 10 s deadline,
+        // which is why the model stays in `onehand_combat_idle` after the K2 capture's clear.
         Event::CombatChanged { obj_id, engaged } => {
             if let Some(unit) = st.entity(*obj_id) {
                 if *engaged {
-                    st.commands.entity(unit).insert(CombatStance);
+                    st.commands.entity(unit).insert((CombatStance, CombatIdle::at(now)));
                 } else {
                     st.commands.entity(unit).remove::<CombatStance>();
+                    // the deadline keeps counting from the clear; a skill pulse that is still running keeps refreshing it
+                    st.commands.queue(move |w: &mut World| {
+                        if let Some(mut idle) = w.get_mut::<CombatIdle>(unit) {
+                            idle.last = now;
+                        } else {
+                            w.entity_mut(unit).insert(CombatIdle::at(now));
+                        }
+                    });
                 }
                 if verbose() {
                     info!("combat: [{now:.3}] the battle stance of {unit:?} is {engaged}");
@@ -1810,9 +1808,10 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
     })
 }
 
-/// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now, the
-/// character takes its combat stance and turns to the target, and the server's answer to the skill waits for the draw
-/// ([`DRAW_LEAD`]): the swing starts when the real client's does.
+/// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now
+/// (the 1.2 client changes the weapon at the request, `FUN_39390f80` -> `FUN_39360920`), the combat idle is refreshed
+/// (`+0x5fc5` / `+0x5fc6`) and the character turns to the target. The clip is not timed here: it plays when the server's
+/// `SCSkillFired` arrives.
 fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, mut shot: Option<ResMut<DevShot>>) {
     let now = time.elapsed_secs_f64();
     for NetCommand(cmd) in requests.read() {
@@ -1838,23 +1837,22 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
         if st.drawn.get(me).is_ok_and(|d| d.stance(now) == Some(out)) {
             continue;
         }
-        st.commands.entity(me).insert(Drawn::after_action(now + DRAW_LEAD, out));
+        // the weapon is drawn at once; the server's events of this skill are not held back (the clip and the damage come when
+        // `SCSkillFired` / `SCUnitDamaged` arrive)
+        st.commands.entity(me).insert((Drawn::after_action(now, out), CombatIdle::from_skill(now)));
         if let Some(target) = st.entity(*target_obj_id).filter(|t| *t != me) {
             st.commands.entity(me).insert(FaceTarget { entity: Some(target), pos: None, until: now + 0.8 });
         }
-        combat.lead = Some(Lead { ready: now + DRAW_LEAD, skill: *skill_id, caster: obj });
+        combat.draw = Some(Draw { skill: *skill_id, caster: obj });
         if verbose() {
-            info!("combat: [{now:.3}] the weapon comes out for skill {skill_id}, the swing waits {DRAW_LEAD} s");
+            info!("combat: [{now:.3}] the weapon comes out for skill {skill_id}");
         }
     }
 }
 
-/// The skill did not start: the events held for the draw go on at once and the weapon goes back.
+/// The skill did not start: the weapon it drew goes back.
 fn cancel_draw(st: &mut Stage, combat: &mut Combat, now: f64) {
-    combat.lead = None;
-    for held in &mut combat.held {
-        held.0 = now;
-    }
+    combat.draw = None;
     if let Ok((me, _)) = st.local.single() {
         st.commands.queue(move |w: &mut World| {
             if let Some(mut d) = w.get_mut::<Drawn>(me) {
@@ -2700,7 +2698,6 @@ mod tests {
                 Some(sheath),
                 "the weapon moved to its sheath bone in the same frame the tool appeared"
             );
-            assert!(app.world().resource::<Combat>().held.is_empty(), "the tool skill's events are not held");
         }
         // the tool prop is a child of the local player's off hand bone (the shovel of uproot)
         app.update();
@@ -2775,23 +2772,12 @@ mod tests {
         }
     }
 
-    /// The first attack clip waits the captured lead: the K2 rows have the weapon byte 0 -> 1 at +255 ms and the clip at +280 ms
-    /// (the second fight, weapon already out, +267 ms). The server's own first fire (skill 2's 300 ms `cooldown_time`) already
-    /// arrives inside it; the lead caps a faster answer.
+    /// The battle flag is the `+0x3bba` byte: a blow sets it on both units (`FUN_39391670`), `SCCombatCleared` clears it at once
+    /// (`FUN_391d6a60` -> `FUN_39355ec0` -> `FUN_390b3710`) and nothing else does. The separate combat idle (`+0x5fc4`,
+    /// `FUN_39355ee0`) is refreshed while the flag is set and keeps its 10 s deadline after the clear (`DAT_39ac7424` = 10000 ms);
+    /// its expiry ends the idle, not the flag and not the weapon.
     #[test]
-    fn the_first_attack_clip_waits_the_captured_lead() {
-        assert_eq!(DRAW_LEAD, 0.28);
-        let combat = Combat { lead: Some(Lead { ready: DRAW_LEAD, skill: 2, caster: 1 }), ..Default::default() };
-        let event = Fake::event("fire", &[1, 2, 0], 1, 2, None).expect("a fire event");
-        assert_eq!(hold_until(&combat, &event, 0.0), Some(DRAW_LEAD), "the server's fire waits for the draw");
-        assert_eq!(hold_until(&combat, &event, DRAW_LEAD), None, "and goes at the captured moment");
-    }
-
-    /// The K2 stance exit (2026-11-01): `stance_perm` (`CombatStance`) goes 1 -> 0 when the server's `SCCombatCleared` arrives
-    /// (`OnCombatCleared` -> vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`), while the weapon byte (`Drawn`, `+0x3ba8`) and the
-    /// `onehand_combat_idle` stay. The clear came 0.772 s after the target was lost in the capture; the loss alone ends nothing.
-    #[test]
-    fn the_battle_stance_ends_on_the_combat_clear_not_with_the_weapon_timer() {
+    fn the_combat_flag_clears_on_the_packet_and_the_idle_keeps_its_ten_second_deadline() {
         if !aa_cry::pak_available() {
             return;
         }
@@ -2810,32 +2796,51 @@ mod tests {
         let local = world.spawn((LocalPlayer { obj_id: 1 }, GlobalTransform::default(), Drawn::after_action(10.0, Out::Blade { dual: false }))).id();
         let rat = world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default())).id();
         let mut schedule = Schedule::default();
-        schedule.add_systems(handle_events);
-        // the blow puts both units in the battle stance (`FUN_39391670`)
+        schedule.add_systems((handle_events, bevy::ecs::schedule::ApplyDeferred, tick_combat_idle).chain());
+        // the blow puts both units in the battle stance (`FUN_39391670`) and refreshes the combat idle
         world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Fake::event("hit", &[1, 2, 100], 1, 2, None).expect("a hit event")));
         schedule.run(&mut world);
-        assert!(world.get::<CombatStance>(local).is_some(), "a blow starts the stance");
-        assert!(world.get::<CombatStance>(rat).is_some());
-        // the target is lost 0.7 s later: the stance stays (the capture kept it until the server's clear)
+        for unit in [local, rat] {
+            assert!(world.get::<CombatStance>(unit).is_some(), "a blow starts the battle flag");
+            assert!(world.get::<CombatIdle>(unit).is_some(), "and the combat idle");
+        }
+        // the target is lost 0.7 s later: neither the flag nor the idle ends (only the server's clear ends the flag)
         world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(700));
         schedule.run(&mut world);
-        assert!(world.get::<CombatStance>(local).is_some(), "losing the target alone ends no stance");
-        // the server's clear 0.772 s after the loss: the stance ends at once, the weapon timer (10 s) does not touch it
+        assert!(world.get::<CombatStance>(local).is_some(), "losing the target alone ends no flag");
+        assert!(world.get::<CombatIdle>(local).is_some());
+        // the server's clear 0.772 s after the loss: the flag ends at once; the idle keeps its 10 s from the clear
         world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(72));
         world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::CombatChanged { obj_id: 1, engaged: false }));
         schedule.run(&mut world);
-        assert!(world.get::<CombatStance>(local).is_none(), "OnCombatCleared clears the stance");
+        assert!(world.get::<CombatStance>(local).is_none(), "OnCombatCleared clears the flag");
+        let idle = *world.get::<CombatIdle>(local).expect("the combat idle stays after the clear");
+        assert!((idle.last - 0.772).abs() < 1e-6, "the deadline is the clear time ({idle:?})");
         let drawn = world.get::<Drawn>(local).expect("the weapon stays");
-        assert_eq!(drawn.stance(0.772), Some(Out::Blade { dual: false }), "the K2 weapon byte stays 1");
-        assert!(world.get::<CombatStance>(rat).is_some(), "another unit's stance is its own packet");
+        assert_eq!(drawn.stance(0.772), Some(Out::Blade { dual: false }), "the weapon byte is separate");
+        assert!(world.get::<CombatStance>(rat).is_some(), "another unit's flag is its own packet");
+        // 9 s after the clear: the idle is still there; the rat's flag keeps refreshing its own deadline
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(9000));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(local).is_some(), "the clear + 9 s is inside the 10 s deadline");
+        let rat_idle = *world.get::<CombatIdle>(rat).expect("the flag refreshes the idle every update");
+        assert!((rat_idle.last - 9.772).abs() < 1e-6, "the deadline follows the update while engaged ({rat_idle:?})");
+        // 10.1 s after the clear: the idle falls (FUN_39355ee0 writes false to the model); the flag was already gone
+        world.resource_mut::<Time>().advance_by(std::time::Duration::from_millis(1100));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(local).is_none(), "the 10 s deadline ended the idle");
+        assert!(world.get::<CombatStance>(local).is_none(), "the deadline does not touch the flag");
+        assert!(world.get::<CombatIdle>(rat).is_some(), "the rat's flag is still set, so its idle never expires");
+        assert!(world.get::<Drawn>(local).is_some(), "the weapon is not put away by the idle deadline");
         // the next fight engages it again (OnCombatEngaged)
         world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::CombatChanged { obj_id: 1, engaged: true }));
         schedule.run(&mut world);
-        assert!(world.get::<CombatStance>(local).is_some(), "re-engaging restores the stance");
+        assert!(world.get::<CombatStance>(local).is_some(), "re-engaging restores the flag");
+        assert!(world.get::<CombatIdle>(local).is_some());
     }
 
-    /// A unit in the battle stance with no weapon in the hand stands in its fist combat idle (`fist_ba_combat_idle`, the K2 state
-    /// before the first press); without the stance it stands in the peaceful idle. A weapon in the hand keeps its own stance.
+    /// A unit in the combat idle with no weapon in the hand stands in its fist combat idle (`fist_ba_combat_idle`, the K2 state
+    /// before the first press); without the idle it stands in the peaceful one. A weapon in the hand keeps its own stance.
     #[test]
     fn a_fighting_unit_without_a_weapon_stands_in_the_fist_combat_idle() {
         let Ok(rig) = shared_rig(SKELETON) else { return };
@@ -2855,12 +2860,12 @@ mod tests {
         app.update();
         assert!(idle(&app).contains("fist_ba_relaxed_idle"), "at peace: {}", idle(&app));
         assert_eq!(app.world().get::<Locomotion>(local).unwrap().stance(), None);
-        app.world_mut().entity_mut(local).insert(CombatStance);
+        app.world_mut().entity_mut(local).insert(CombatIdle::at(0.0));
         app.world_mut().get_mut::<Locomotion>(local).unwrap().invalidate();
         app.update();
-        // the model's `.cal` names the fist combat idle after the one handed clip on this rig; the stance is what the client picks
+        // the model's `.cal` names the fist combat idle after the one handed clip on this rig; the idle is what the client picks
         assert_eq!(app.world().get::<Locomotion>(local).unwrap().stance(), Some(crate::ingame::anim::Stance::Fist));
-        assert!(idle(&app).contains("_ba_combat_idle"), "in the battle stance: {}", idle(&app));
+        assert!(idle(&app).contains("_ba_combat_idle"), "in the combat idle: {}", idle(&app));
     }
 
     #[test]

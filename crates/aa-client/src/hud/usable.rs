@@ -599,13 +599,15 @@ impl Env<'_> {
         super::cooldown::gcd_at(game, skills, skill, Instant::now()).0
     }
 
-    /// The skill starts the global cooldown (it is known and does not ignore it). The 1.2 basic attacks are exempt: the K2
-    /// capture's cooldown-manager pair stays 0/1000 across all five auto attack presses (skill 2 never changes it).
+    /// The skill starts the global cooldown (it is known and does not ignore it). The 1.2 basic attacks are exempt **by
+    /// inference**: the K2 cooldown-manager pair stays 0/1000 across every auto attack press, but that capture cannot tell whether
+    /// the pair is written at the request or on the server's reply (the localhost reply lands in the same frame), so the exemption
+    /// is not decompile-proven (the skill 2 path has no explicit GCD test).
     pub fn uses_gcd(&self, skill: u32) -> bool {
         self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd && !i.auto_attack)
     }
 
-    /// A 1.2 basic attack (skill 2 melee, 3 off-hand, 4 ranged): what the client refuses is dropped without an alert.
+    /// A 1.2 basic attack (skill 2 melee, 3 off-hand, 4 ranged).
     pub fn is_auto_attack(&self, skill: u32) -> bool {
         self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| i.auto_attack)
     }
@@ -624,6 +626,18 @@ impl Env<'_> {
     /// cooldown (the sweep shows it, the slot stays lit).
     pub fn precheck(&self, skill: u32) -> Option<Fail> {
         self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
+    }
+
+    /// What refuses a basic attack before it is sent. The 1.2 skill 2 path (`FUN_393989e0`) checks only a valid auto attack
+    /// target (`FUN_393be4e0`, `CanAutoAttackTargetUnit`: a living unit that can be attacked) and shows its own error text; it
+    /// does not test the distance. The K2 press at 11.2 m still sent `CSStartSkill 2`, and the server's reach tick is what
+    /// stopped the damage. No mana, cooldown or GCD test is applied here either.
+    pub fn precheck_auto_attack(&self, skill: u32) -> Option<Fail> {
+        let r = self.rules()?.skills.get(&skill)?;
+        if self.dead() {
+            return Some(fail(code::SOURCE_DIED));
+        }
+        self.target_rules(r)
     }
 
     /// Why an action bar slot is dark: the result that refuses it, `None` for a lit slot. An item needs to be in the bag
@@ -916,8 +930,9 @@ mod tests {
         g
     }
 
-    /// The K2 capture's cooldown-manager pair (0/1000) is unchanged by every auto attack press: the basic attacks are exempt
-    /// from the global cooldown even though the data gives them `default_gcd` (skill 2: 1000 ms).
+    /// Inferred, not decompile-proven: the K2 cooldown-manager pair (0/1000) is unchanged by every auto attack press, so the
+    /// basic attacks are treated as exempt from the global cooldown even though the data gives them `default_gcd` (skill 2:
+    /// 1000 ms). The capture cannot tell whether the pair is written at the request or on our server's reply.
     #[test]
     fn the_basic_attacks_do_not_start_the_global_cooldown() {
         let mut g = gcd_game();
@@ -959,11 +974,11 @@ mod tests {
         assert!(Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(18132));
     }
 
-    /// K2 rows 3-4 and 6: a basic attack the client refuses (out of the weapon's reach) sends nothing and shows no text, and a
-    /// second press is sent again (the 1.2 `FUN_393989e0` swallows a press only when the auto attack flag is already set; it is
-    /// no toggle). The auto attack starts no global cooldown (`SkillPressed::gcd` false).
+    /// The K2 client's outbound packets: a press at 11.2 m still sent `CSStartSkill 2` (the server's reach tick stopped the
+    /// damage), and a second press sent another one (no toggle). The decompile's skill 2 path checks only a valid auto attack
+    /// target (`FUN_393be4e0`), never the distance. A press without a target sends nothing and shows the client's own refusal.
     #[test]
-    fn a_refused_basic_attack_is_silent_and_a_second_press_goes_out_again() {
+    fn an_out_of_range_basic_attack_is_sent_and_a_second_press_goes_out_again() {
         use aa_net::state::{ActionBar, Target};
         use bevy::ecs::message::Messages;
         use bevy::prelude::{App, MessageWriter, MinimalPlugins, Res, Update};
@@ -988,7 +1003,7 @@ mod tests {
             mut failed: MessageWriter<UseFailed>,
         ) {
             let snap = TargetSnap { obj_id: 77, hp: 100, max_hp: 100, relation: "hostile", ..Default::default() };
-            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: Some(&snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: None, buffs: &[], inventory: None };
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: target.obj_id.map(|_| &snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: None, buffs: &[], inventory: None };
             use_slot(press.0, &env, &InFlight::default(), &bar, &inventory, &target, &mut net, &mut failed);
         }
         let mut g = game(Rules::default().with_skill(2, melee()));
@@ -1016,18 +1031,26 @@ mod tests {
             m.drain().count()
         };
         app.update();
-        assert!(sent(&mut app).is_empty(), "out of reach: nothing is sent");
-        assert_eq!(failed(&mut app), 0, "and nothing is said");
+        let far = sent(&mut app);
+        assert_eq!(far.len(), 1, "out of reach is still sent: {far:?}");
+        assert_eq!((far[0].skill, far[0].target_obj_id), (2, 77));
+        assert!(!far[0].gcd, "the auto attack starts no global cooldown (inferred)");
+        assert_eq!(failed(&mut app), 0);
+        // walking does not change the send, and a re-press is another start (the client has no toggle)
         app.world_mut().insert_resource(Press(1, 2.0));
         app.update();
         let first = sent(&mut app);
         assert_eq!(first.len(), 1, "{first:?}");
         assert_eq!(first[0].skill, 2);
-        assert!(!first[0].gcd, "the auto attack starts no global cooldown");
-        assert_eq!(failed(&mut app), 0);
         app.update();
         let second = sent(&mut app);
         assert_eq!(second.len(), 1, "the second press is sent again: no toggle ({second:?})");
+        // the target is gone: the client's own target check refuses and says why
+        app.world_mut().resource_mut::<Target>().obj_id = None;
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        assert!(sent(&mut app).is_empty(), "no target: nothing is sent");
+        assert_eq!(failed(&mut app), 1, "the refusal is shown");
     }
 
     /// The player cast skill 1 `ago` ago.
