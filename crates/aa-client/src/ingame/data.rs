@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aa_anim::GameDb;
+use crate::hud::formula::Formula;
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -51,6 +52,10 @@ struct Lookups {
     /// `slaves.id` -> whether any of its mount skills is `BallisticPos` (11) or `ArtilleryPos`
     /// (15), the skills whose use enters the native camera-aim mode (8).
     cannon_seats: HashMap<u32, bool>,
+    /// `models.id` -> the normal and per-state prefab refs of a vehicle or ship.
+    vehicle_variants: HashMap<u32, Option<VehicleVariants>>,
+    /// `(slaves.id, level)` -> the unit attribute 6 (`MaxHealth`) of the template.
+    slave_max_hp: HashMap<(u32, u8), Option<i32>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -300,6 +305,8 @@ impl Lookups {
             turrets: HashMap::new(),
             cannon_skills: HashMap::new(),
             cannon_seats: HashMap::new(),
+            vehicle_variants: HashMap::new(),
+            slave_max_hp: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
             skill_links: HashMap::new(),
@@ -737,6 +744,127 @@ impl Db {
         let normal = normal.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())?;
         let file = |w: Option<String>| w.as_deref().and_then(model_file);
         Some(VehicleLook { normal, wheels: [file(wheel), file(wheel2)] })
+    }
+
+    /// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`):
+    /// state 2 is `damaged25`, 3 `damaged50`, 4 `damaged75`, 5 `dying` (the vehicle column only; a ship has
+    /// none), 6 `dead` ([`VehicleVariants::for_state`]).
+    pub fn vehicle_variants(&self, model_id: u32) -> Option<VehicleVariants> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(variants) = l.vehicle_variants.get(&model_id) {
+            return variants.clone();
+        }
+        let variants = l
+            .conn
+            .query_row(
+                "SELECT COALESCE(v.normal, s.normal), v.damaged25, s.damaged25, v.damaged50, s.damaged50,
+                        v.damaged75, s.damaged75, v.dead, s.dead, v.dying
+                 FROM models m
+                 LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+                 LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
+                 WHERE m.id = ?1",
+                params![model_id],
+                |r| {
+                    let text = |index: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(r.get::<_, Option<String>>(index)?
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()))
+                    };
+                    let variant = |vehicle: usize, ship: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(text(vehicle)?.or(text(ship)?))
+                    };
+                    Ok(VehicleVariants {
+                        normal: text(0)?.unwrap_or_default(),
+                        damaged25: variant(1, 2)?,
+                        damaged50: variant(3, 4)?,
+                        damaged75: variant(5, 6)?,
+                        dying: text(9)?,
+                        dead: variant(7, 8)?,
+                    })
+                },
+            )
+            .ok()
+            .filter(|v: &VehicleVariants| !v.normal.is_empty());
+        l.vehicle_variants.insert(model_id, variants.clone());
+        variants
+    }
+
+    /// `models.dying_time` in seconds: the template field at +0x14 that `FUN_390eaac0` compares with the elapsed
+    /// time since the dying start (+0x274). 0 (no dying window) when the row is missing or negative.
+    pub fn vehicle_dying_time(&self, model_id: u32) -> f32 {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT dying_time FROM models WHERE id = ?1",
+                params![model_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .ok()
+            .flatten()
+            .filter(|time| time.is_finite())
+            .map_or(0.0, |time| time.max(0.0) as f32)
+    }
+
+    /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
+    /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
+    /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
+    ///
+    /// The base comes from `FUN_398a0d60`'s `case 6: 0xe`, the `MaxHealth` formula (kind 14) of the slave owner
+    /// type (2). Its primary attributes are their own formulas (kind 24 is `Sta`; both are parsed, not hardcoded).
+    /// The unit's maximum is not on the wire, so this is the only source for every template, including the ones
+    /// without a `unit_modifiers` row (their base alone).
+    pub fn slave_max_hp(&self, template_id: u32, level: u8) -> Option<i32> {
+        let key = (template_id, level);
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(hp) = l.slave_max_hp.get(&key) {
+            return *hp;
+        }
+        let base = {
+            let max_health = unit_formula(&l.conn, SLAVE_OWNER, MAX_HEALTH)?;
+            let mut vars = HashMap::from([("level", f64::from(level))]);
+            for (name, kind) in PRIMARY_STAT_FORMULAS {
+                if let Some(formula) = unit_formula(&l.conn, SLAVE_OWNER, kind) {
+                    let value = formula.eval(&vars) as i32;
+                    vars.insert(name, f64::from(value));
+                }
+            }
+            max_health.eval(&vars) as i32
+        };
+        let mut flat = 0i32;
+        let mut percent = 0f32;
+        {
+            let row = l.conn.prepare(
+                "SELECT unit_modifier_type_id, value, linear_level_bonus FROM unit_modifiers
+                 WHERE owner_type = 'Slave' AND owner_id = ?1 AND unit_attribute_id = 6 ORDER BY id",
+            );
+            if let Ok(mut stmt) = row
+                && let Ok(rows) = stmt.query_map(params![template_id], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+            {
+                for row in rows.flatten() {
+                    let value = i32::try_from(row.1).unwrap_or(0);
+                    let linear = i32::try_from(row.2).unwrap_or(0);
+                    // `FUN_3989fde0`: value + linear_level_bonus * level / 100, truncated
+                    let value =
+                        value.wrapping_add((linear as f32 * f32::from(level) * 0.01) as i32);
+                    if row.0 == 1 {
+                        percent += value as f32;
+                    } else {
+                        flat = flat.wrapping_add(value);
+                    }
+                }
+            }
+        }
+        // `FUN_398a0bc0` multiplies the sum by one 0.01-scaled multiplier (`local_8 = 100 + percent`)
+        let hp = (((base.wrapping_add(flat)) as f32) * (100.0 + percent) * 0.01) as i32;
+        let hp = Some(hp.max(0));
+        l.slave_max_hp.insert(key, hp);
+        hp
     }
 
     /// The clip (`.cal` entry name, lower case) of an animation action (`anim_actions.anim_name`): the idle pose of an NPC.
@@ -1250,16 +1378,53 @@ impl Db {
     }
 }
 
-/// The `ParticleEffect` entities (the `<export>` list) of a prefab element path.
-fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+/// `UnitFormulaOwnerType::Slave` (`unit_formulas.owner_type_id`).
+const SLAVE_OWNER: u8 = 2;
+/// `UnitFormulaKind::MaxHealth`.
+const MAX_HEALTH: u8 = 14;
+/// The primary attribute formulas a pool formula may read: `Str`..`Fai` (kinds 22..27).
+const PRIMARY_STAT_FORMULAS: [(&str, u8); 6] = [
+    ("str", 22),
+    ("dex", 23),
+    ("sta", 24),
+    ("int", 25),
+    ("spi", 26),
+    ("fai", 27),
+];
+
+/// The parsed `unit_formulas` row of an owner type and formula kind (the first row of an id).
+fn unit_formula(conn: &Connection, owner: u8, kind: u8) -> Option<Formula> {
+    let text: Option<String> = conn
+        .query_row(
+            "SELECT formula FROM unit_formulas WHERE owner_type_id = ?1 AND kind_id = ?2 ORDER BY id LIMIT 1",
+            params![owner, kind],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    text.as_deref().and_then(|text| Formula::parse(text).ok())
+}
+
+/// The named `ParticleEffect` entities (the `<Objects>` list) of a prefab element path; inactive ones are kept
+/// (a vehicle's `_spawn_effect` elements are authored `bActive="0"` and played on a state change).
+pub(crate) fn prefab_effects_named(path: &str) -> Vec<aa_world::placement::NamedEffect> {
     let Some((file, name)) = path.strip_prefix("prefab://").and_then(|r| r.rsplit_once('/')) else { return Vec::new() };
     let Ok(xml) = aa_pak::Pak::global().read_string(&norm(file)) else { return Vec::new() };
     let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
     let tail = &xml[from..];
     let prefab = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
-    let Some(start) = prefab.find("<export>") else { return Vec::new() };
-    let export = &prefab[start..prefab[start..].find("</export>").map_or(prefab.len(), |e| start + e + "</export>".len())];
-    aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
+    // the `<Objects>` list carries every entity's Pos (the `<export>` list omits a zero one)
+    let Some(start) = prefab.find("<Objects>") else { return Vec::new() };
+    let objects = &prefab[start..prefab[start..].find("</Objects>").map_or(prefab.len(), |e| start + e + "</Objects>".len())];
+    aa_world::placement::parse_named_effect_entities(objects)
+        .into_iter()
+        .filter(|e| !e.effect.effect.to_ascii_lowercase().starts_with("x2_sounds."))
+        .collect()
+}
+
+/// The active `ParticleEffect` entities (the `<Objects>` list) of a prefab element path.
+fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+    prefab_effects_named(path).into_iter().filter(|e| e.active).map(|e| e.effect).collect()
 }
 
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
@@ -1296,6 +1461,49 @@ pub struct VehicleLook {
     pub normal: String,
     /// The wheel models (pak paths): `wheel` for the `wheelN` mounts, `wheel2` for the `wheel_type2N` ones.
     pub wheels: [Option<String>; 2],
+}
+
+/// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VehicleVariants {
+    pub normal: String,
+    pub damaged25: Option<String>,
+    pub damaged50: Option<String>,
+    pub damaged75: Option<String>,
+    /// The `vehicle_models.dying` prefab (5). Ships have no such column.
+    pub dying: Option<String>,
+    pub dead: Option<String>,
+}
+
+impl VehicleVariants {
+    /// The model ref for a model state, walking down to the next lower non-empty row as `FUN_397a7980` /
+    /// `FUN_397a7810` do: 6 `dead`, 5 `dying`, 4 `damaged75`, 3 `damaged50`, 2 `damaged25`, else `normal`.
+    /// A state with no row takes the next lower one (so a vehicle without a `dying` prefab shows its
+    /// `damaged75` one while dying, and a ship, which has no dying column, does the same).
+    pub fn for_state(&self, state: u8) -> &str {
+        let wanted = match state {
+            0 | 1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 4,
+            5 => 5,
+            _ => 6,
+        };
+        for step in (1..=wanted).rev() {
+            let variant = match step {
+                2 => self.damaged25.as_deref(),
+                3 => self.damaged50.as_deref(),
+                4 => self.damaged75.as_deref(),
+                5 => self.dying.as_deref(),
+                6 => self.dead.as_deref(),
+                _ => None,
+            };
+            if let Some(variant) = variant {
+                return variant;
+            }
+        }
+        &self.normal
+    }
 }
 
 /// Lower case with `/` separators, as the pak wants paths.
@@ -1381,6 +1589,102 @@ mod tests {
         assert!(
             Arc::ptr_eq(&floor, &again),
             "the cache keeps the loaded floor"
+        );
+    }
+
+    /// `FUN_397a7980` / `FUN_397a7810`: a state with no row uses the next lower one; 5 reads `dying`.
+    #[test]
+    fn a_variant_falls_back_to_the_next_lower_state() {
+        let all = VehicleVariants {
+            normal: "normal".into(),
+            damaged25: None,
+            damaged50: Some("damaged50".into()),
+            damaged75: Some("damaged75".into()),
+            dying: Some("dying".into()),
+            dead: None,
+        };
+        assert_eq!(all.for_state(1), "normal");
+        assert_eq!(all.for_state(2), "normal", "no damaged25 row");
+        assert_eq!(all.for_state(3), "damaged50");
+        assert_eq!(all.for_state(4), "damaged75");
+        assert_eq!(all.for_state(5), "dying");
+        assert_eq!(all.for_state(6), "dying", "no dead row: down through 5");
+        let no_dying = VehicleVariants {
+            dying: None,
+            ..all.clone()
+        };
+        assert_eq!(no_dying.for_state(5), "damaged75", "no dying row");
+        assert_eq!(no_dying.for_state(6), "damaged75", "no dead row");
+        let none = VehicleVariants {
+            normal: "normal".into(),
+            ..VehicleVariants::default()
+        };
+        for state in 0..=6 {
+            assert_eq!(none.for_state(state), "normal", "state {state}");
+        }
+    }
+
+    /// The 1.2 Eznan Cutter, the Farm Wagon and the airship as the real catalog has them.
+    #[test]
+    fn the_database_holds_the_vehicle_variants() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let galleon = db.vehicle_variants(393).expect("the Eznan Cutter");
+        assert!(galleon.for_state(1).ends_with("galleon.step_10galleon_normal"), "{}", galleon.for_state(1));
+        assert!(galleon.for_state(2).ends_with("galleon.damaged25"), "{}", galleon.for_state(2));
+        assert!(galleon.for_state(3).ends_with("galleon.damaged25"), "{}", galleon.for_state(3));
+        assert!(galleon.for_state(4).ends_with("galleon.damaged75"), "{}", galleon.for_state(4));
+        assert_eq!(galleon.for_state(5), galleon.for_state(4), "a ship has no dying column");
+        assert!(galleon.for_state(6).ends_with("galleon.dead"), "{}", galleon.for_state(6));
+
+        let tractor = db.vehicle_variants(1008).expect("the Farm Wagon");
+        assert!(tractor.for_state(4).ends_with("vehicle_tractor.tractor_body_damage75"));
+        assert!(
+            tractor.for_state(5).ends_with("vehicle_tractor.tractor_body_dying"),
+            "{}",
+            tractor.for_state(5)
+        );
+        assert!(tractor.for_state(6).ends_with("vehicle_tractor.tractor_body_dead"));
+        assert_eq!(db.vehicle_dying_time(1008), 3.3, "models.dying_time");
+        assert_eq!(db.vehicle_dying_time(129), 0.0, "the rowboat has no dying window");
+
+        // the airship has only `normal`, so every state keeps it
+        let airship = db.vehicle_variants(657).expect("the airship");
+        assert_eq!(airship.for_state(1), airship.normal);
+        assert_eq!(airship.for_state(5), airship.normal);
+        assert_eq!(airship.for_state(6), airship.normal);
+        assert_eq!(db.vehicle_variants(139), None, "a mount is no vehicle");
+    }
+
+    /// Unit attribute 6 is the formula base plus the `unit_modifiers` rows: the Eznan Cutter (21), the Farm
+    /// Wagon (60, 2500 flat), and template 105 with no row (the formula alone, 4796 at level 50).
+    #[test]
+    fn slave_max_health_comes_from_the_formula_and_the_unit_modifiers() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        assert_eq!(
+            db.slave_max_hp(21, 50),
+            Some(52_216),
+            "Eznan Cutter template 21: 4796 + 47420"
+        );
+        assert_eq!(
+            db.slave_max_hp(60, 50),
+            Some(7_296),
+            "Farm Wagon template 60: 4796 + 2500"
+        );
+        assert_eq!(
+            db.slave_max_hp(105, 50),
+            Some(4_796),
+            "template 105 has no MaxHealth row"
+        );
+        assert_eq!(
+            db.slave_max_hp(91, 10),
+            Some(1_126),
+            "level 10: 700 + (10 + 9 * 2) * 12 + 90 flat"
         );
     }
 

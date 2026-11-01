@@ -6,13 +6,31 @@
 //! The wheels spin about their axle from the cart's forward speed (`FUN_390d6b10`) and the body's
 //! `Bone_spindle` turns the front axle (`FUN_390cffd0`); see [`spin_wheels`] and [`steer_spindles`].
 //!
-//! Left out: the damaged and dead looks, the prefabs' particle effects, propeller spin, turrets.
+//! Damage states ([`model_state`] / [`update_damage`]) swap the whole body prefab to the state's
+//! `vehicle_models` / `ship_models` row (`damaged25` / `damaged50` / `damaged75` / `dying` / `dead`, falling
+//! down to the next lower non-empty row). A death enters dying (5) first, shows that prefab for
+//! `models.dying_time`, then switches to dead (6) (`FUN_390e7ad0`, `FUN_390eaac0`). The variant prefab's
+//! active particle entities (the fire and smoke of the damaged and dead looks) are drawn with it, and a
+//! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). The
+//! new prefab is read on the workers ([`VehicleSwaps`]); the old parts stay until it is ready.
+//!
+//! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
+//! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
+//!
+//! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
+//! Combat effects anchored to a body
+//! bone (`super::attachments`) go away with the old parts on a swap: re-anchoring them by bone name is
+//! not implemented (they are a skill's own one-shot effects, not the vehicle's prefab emitters).
 
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use aa_anim::{AnimSet, Animator, ClipLibrary, pose::BoundClip};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
+use aa_cry::workers::Workers;
 use aa_cry::{CryLoader, PreparedModel};
+use aa_net::state::Units;
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
 use bevy::math::Affine3A;
@@ -21,8 +39,9 @@ use bevy::transform::TransformSystems;
 
 use super::cart::{YAW_RATE_PER_STEER, wrap_angle};
 use super::combat::Dead;
-use super::data::{VehicleLook, model_file};
+use super::data::{Db, VehicleLook, model_file};
 use super::housing::prefab::{self, Part};
+use super::units::RemoteUnit;
 
 /// `_DAT_399a440c` (0x399a440c = 0.52359879): the largest spindle angle, 30 degrees.
 pub const SPINDLE_MAX_ANGLE: f32 = std::f32::consts::FRAC_PI_6;
@@ -35,6 +54,127 @@ pub const SPINDLE_LERP: f32 = 0.1;
 /// runtime from the vehicle data, so the value cannot be read from the unpacked dll; the captured
 /// full-lock rate [`YAW_RATE_PER_STEER`] stands in for it.
 pub const SPINDLE_YAW_LIMIT: f32 = YAW_RATE_PER_STEER;
+
+/// The prefab-unit model state of `FUN_3989f8b0`: 1 normal, 2 `damaged25`, 3 `damaged50`, 4 `damaged75`,
+/// 6 dead. The percentage is C integer division, so it truncates: 7599/10000 is 75 (state 2), 7600/10000
+/// is 76 (state 1). `hp == 0` or `max_hp == 0` is dead before the divide. This is only the polled state:
+/// 5 (dying) is entered by the death path (`FUN_390e7ad0`), never by the HP percentage.
+pub fn model_state(hp: i32, max_hp: i32) -> u8 {
+    if hp == 0 || max_hp == 0 {
+        return 6;
+    }
+    let pct = hp * 100 / max_hp;
+    if pct > 75 {
+        1
+    } else if pct > 50 {
+        2
+    } else if pct < 26 {
+        4
+    } else {
+        3
+    }
+}
+
+/// The damage state a vehicle is drawn in, the model ref it was built from, the cached maximum health and the
+/// dying window (`models.dying_time`).
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct VehicleDamage {
+    pub state: u8,
+    /// The variant ref, so a state change that keeps the same model does not rebuild or fire effects
+    /// (`FUN_390e7910` logs "same model" and returns before the effect trigger).
+    pub variant: String,
+    /// The template maximum (`slave_max_hp`), constant for the vehicle's life: held here so the per-frame
+    /// state check does not lock the database.
+    pub max_hp: i32,
+    /// The state a worker is preparing, so one state change queues one swap.
+    pub requested: Option<u8>,
+    /// The dying start time (`model+0x274`, in [`Time::elapsed_secs_f64`]): `Some` from entering state 5 until
+    /// the dead prefab is applied. While it is set the per-frame update does not recompute the state from HP.
+    pub dying_start: Option<f64>,
+    /// `models.dying_time` seconds (`template+0x14`, checked by `FUN_390eaac0`); 0 means dying lasts one tick.
+    pub dying_time: f32,
+    /// The current death has already entered dying, so a later update does not restart it. Cleared when the unit
+    /// is alive again (hp > 0 and not dead).
+    pub death_seen: bool,
+    /// The dead prefab's one-shot `_spawn_effect*` already played for this death: an HP-0 update shows 6 first,
+    /// then the death's 6 -> 5 -> 6 route must not play them a second time. Cleared when a living state is adopted.
+    pub dead_effect_played: bool,
+}
+
+/// A body part root spawned by [`spawn`]: replaced when the damage state changes.
+#[derive(Component)]
+pub struct VehiclePart;
+
+/// A particle entity spawned with a damage variant: replaced when the state changes.
+#[derive(Component)]
+pub struct VehicleEffect;
+
+/// A body prefab being read on the workers for [`VehicleDamage::requested`].
+struct VehicleSwapBuilt {
+    root: Entity,
+    obj_id: u32,
+    state: u8,
+    variant: String,
+    pieces: Vec<Piece>,
+}
+
+/// The damage variants being prepared off the main thread, and their delivery channel. A swap replaces the old
+/// parts only after [`finish_damage_swaps`] receives the new ones, so a slow or failed read never leaves the
+/// vehicle invisible.
+#[derive(Resource)]
+pub struct VehicleSwaps {
+    tx: Sender<VehicleSwapBuilt>,
+    rx: Mutex<Receiver<VehicleSwapBuilt>>,
+}
+
+impl Default for VehicleSwaps {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        Self {
+            tx,
+            rx: Mutex::new(rx),
+        }
+    }
+}
+
+/// The maximum health of a slave vehicle: unit attribute 6 (`FUN_390b4a70` reads it through
+/// `FUN_398a0bc0`), the formula base plus the template's `unit_modifiers`. The unit's own `max_hp` is only a
+/// last resort when the database has no `MaxHealth` formula; 1.2 never uses the wire maximum or
+/// `SCMySlave.max_hp`.
+pub fn slave_max_hp(db: &Db, unit: &aa_net::model::Unit) -> i32 {
+    db.slave_max_hp(unit.kind.template_id(), unit.level)
+        .unwrap_or(unit.max_hp)
+        .max(0)
+}
+
+/// The damage state of a unit from its current health (`SCUnitPoints` / `SCUnitState`) and the attribute-6
+/// maximum. Used when a vehicle is first announced; [`update_damage`] then uses the cached [`VehicleDamage::max_hp`].
+pub fn damage_state(db: &Db, unit: &aa_net::model::Unit) -> u8 {
+    model_state(unit.hp, slave_max_hp(db, unit))
+}
+
+/// The state a newly announced vehicle is built in. `InitClientUnit` (`FUN_3936b000`) and `OnModelChanged`
+/// (`FUN_39364db0`) call the model's Die slot when `hp == 0`, which tries the dying state first
+/// (`FUN_390eaa80` -> `FUN_390e7ad0`), so such a unit starts dying (5); every other unit takes the polled state.
+pub fn initial_state(db: &Db, unit: &aa_net::model::Unit) -> u8 {
+    if unit.hp == 0 {
+        5
+    } else {
+        damage_state(db, unit)
+    }
+}
+
+/// Adopt `state` without a worker swap: every state but dying ends the dying window, and a living state starts a
+/// new effect life (a later death may play the dead prefab's one-shots again).
+fn adopt_state(damage: &mut VehicleDamage, state: u8) {
+    damage.state = state;
+    if state != 5 {
+        damage.dying_start = None;
+    }
+    if !matches!(state, 5 | 6) {
+        damage.dead_effect_played = false;
+    }
+}
 
 /// The wheel model slot of a mount name: `wheel0`, `wheel12` take `wheel` (0), `wheel_type2`, `wheel_type21` take
 /// `wheel2` (1). Other names (`bone_steeringwheel`, `wheel_l`) are not mounts.
@@ -304,8 +444,11 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                  wheel,
                  spindle,
              }| {
-                let rigged = part.model.ends_with(".chr")
-                    && aa_anim::pose::shared_rig(&part.model).is_ok_and(|r| !r.is_empty());
+                // a `.cdf` is a creature wrapper (several dying prefabs use one): creature::spawn reads it
+                // as a rigged model, not a static mesh
+                let rigged = part.model.ends_with(".cdf")
+                    || (part.model.ends_with(".chr")
+                        && aa_anim::pose::shared_rig(&part.model).is_ok_and(|r| !r.is_empty()));
                 let (model, radius, helpers) = if rigged {
                     let models: Vec<PreparedModel> =
                         super::creature::model_files(&part.model, None)
@@ -569,6 +712,14 @@ pub fn spawn(
             VehicleMotion::at(&transform),
         ))
         .id();
+    add_parts(commands, cry, clips, pieces, root);
+    root
+}
+
+/// Spawns the prepared parts as children of `root` and installs the seat helpers and spindle they define.
+/// Used for the initial look and for every damage-state body swap; the caller removes the old `Spindle`
+/// and the old [`VehiclePart`] children first.
+pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, pieces: Vec<Piece>, root: Entity) {
     let mut helpers = HashMap::new();
     for Piece {
         part,
@@ -628,11 +779,259 @@ pub fn spawn(
             }
         };
         if let Some(e) = entity {
-            commands.entity(e).insert(ChildOf(root));
+            commands.entity(e).insert((ChildOf(root), VehiclePart));
         }
     }
     commands.entity(root).insert(SeatHelpers(helpers));
-    root
+}
+
+/// The prefab's speed-driven emitters. `FUN_390eaf40` collects the type-5 particles named exactly `splash_l`,
+/// `splash_r` (the bubble list at +0x2f0) and `exhaust` (the list at +0x2c0); `FUN_390c78d0` scales them from
+/// the ship's speed and angular velocity. This slice does not draw them, so a swap leaves them out instead of
+/// showing a wake at a standstill. Other active prefab particles are ordinary authored emitters.
+fn is_speed_emitter(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "exhaust" | "splash_l" | "splash_r" | "bubble"
+    )
+}
+
+fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placement::PlacedEffect, one_shot: bool) -> Entity {
+    let mut command = commands.spawn((
+        aa_fx::Effect {
+            scale: effect.scale,
+            speed_scale: effect.speed_scale,
+            count_scale: effect.count_scale,
+            prime: if one_shot { false } else { effect.prime },
+            despawn_when_finished: one_shot,
+            no_body: true,
+            ..aa_fx::Effect::new(effect.effect.clone())
+        },
+        Transform {
+            translation: cry_to_bevy(effect.pos),
+            rotation: cry_rot_to_bevy(effect.rot),
+            ..default()
+        },
+        VehicleEffect,
+    ));
+    let entity = command.id();
+    command.insert(ChildOf(root));
+    entity
+}
+
+/// Whether a swap plays the new prefab's one-shot `_spawn_effect*` elements (`FUN_39109120`). The Die path
+/// always passes 1 to `FUN_390e7910`, so entering dying (5) does too, even on the 6 -> 5 route of an HP-0 update
+/// followed by the death packet. A worsening state plays them, except that the dead prefab's one-shots are not
+/// replayed when that death already showed 6 through the poller.
+fn plays_state_effects(old: u8, state: u8, dead_effect_played: bool) -> bool {
+    state == 5 || (state > old && !(state == 6 && dead_effect_played))
+}
+
+/// Spawns the particle entities of a damage variant: its active standing effects (damaged fire, dead
+/// smoke) and, when [`plays_state_effects`] says so, its `_spawn_effect*` elements once (`FUN_39109120`). The
+/// `_despawn_effect` trigger has no traced call site and is left out.
+pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str, worsening: bool) {
+    if !variant.to_ascii_lowercase().starts_with("prefab://") {
+        return;
+    }
+    for named in super::data::prefab_effects_named(variant) {
+        let name = named.name.to_ascii_lowercase();
+        if name.starts_with("_spawn_effect") {
+            if worsening {
+                spawn_effect(commands, root, &named.effect, true);
+            }
+            continue;
+        }
+        if name.starts_with("_despawn_effect") || !named.active || is_speed_emitter(&name) {
+            continue;
+        }
+        spawn_effect(commands, root, &named.effect, false);
+    }
+}
+
+/// The state check of `FUN_390eb610`: while the unit is dying (5) it only checks the dying window
+/// (`FUN_390eaac0`); otherwise the unit's health picks the state. A death (`SCUnitDeath`, i.e. `unit.dead`, or
+/// an announcement at 0 hp) enters dying first (`FUN_390e7ad0`), even when an earlier HP-0 update already showed
+/// the dead prefab. The new variant's prefab is read on the workers (`FUN_390e7b20` -> `FUN_390e7910`); nothing
+/// is removed yet, [`finish_damage_swaps`] applies the swap once the models are ready. A state whose row names
+/// the same prefab only updates the state, as `FUN_390e7910` returns before the brush swap ("same model").
+pub fn update_damage(
+    db: Option<Res<Db>>,
+    units: Option<Res<Units>>,
+    mut cry: CryAssets,
+    swaps: ResMut<VehicleSwaps>,
+    time: Res<Time>,
+    mut roots: Query<(Entity, &RemoteUnit, &mut VehicleDamage)>,
+) {
+    let (Some(db), Some(units)) = (db, units) else {
+        return;
+    };
+    let now = time.elapsed_secs_f64();
+    for (root, remote, mut damage) in &mut roots {
+        let Some(unit) = units.by_id.get(&remote.obj_id) else {
+            continue;
+        };
+        if unit.hp > 0 && !unit.dead {
+            damage.death_seen = false;
+        }
+        let mut started = false;
+        if unit.dead && !damage.death_seen {
+            damage.death_seen = true;
+            damage.dying_start = Some(now);
+            started = true;
+            debug!("vehicle {}: entering dying (5)", remote.obj_id);
+        } else if damage.state == 5 && damage.dying_start.is_none() {
+            // built already dead at 0 hp (`InitClientUnit` calls Die), so its dying window starts now
+            damage.death_seen = true;
+            damage.dying_start = Some(now);
+            started = true;
+        }
+        let state = match damage.dying_start {
+            // `FUN_390eaac0`: `dying_time <= elapsed` switches to dead; 0 lasts the entry tick only
+            Some(start) if !started && now - start >= f64::from(damage.dying_time) => {
+                debug!(
+                    "vehicle {}: dying expired after {:.3} s",
+                    remote.obj_id, damage.dying_time
+                );
+                6
+            }
+            Some(_) => 5,
+            None => model_state(unit.hp, damage.max_hp),
+        };
+        if state == damage.state || damage.requested == Some(state) {
+            continue;
+        }
+        let Some(look) = db.vehicle_look(unit.model_id) else {
+            adopt_state(&mut damage, state);
+            continue;
+        };
+        let Some(variants) = db.vehicle_variants(unit.model_id) else {
+            adopt_state(&mut damage, state);
+            continue;
+        };
+        let variant = variants.for_state(state).to_string();
+        if variant == damage.variant {
+            adopt_state(&mut damage, state);
+            continue;
+        }
+        debug!(
+            "vehicle {}: state {} -> {state} ({variant})",
+            remote.obj_id, damage.state
+        );
+        damage.requested = Some(state);
+        let look = VehicleLook {
+            normal: variant.clone(),
+            wheels: look.wheels,
+        };
+        let loader = cry.loader();
+        let tx = swaps.tx.clone();
+        let priority = 0.0;
+        let obj_id = remote.obj_id;
+        Workers::global().spawn(priority, move || {
+            // the browser downloads the models, then their textures, before reading them; natively this runs straight on
+            let files = if cfg!(target_arch = "wasm32") {
+                let mut files: Vec<String> = model_files(&look)
+                    .iter()
+                    .flat_map(|(path, material)| {
+                        aa_cry::deps::model_files(path, material.as_deref())
+                    })
+                    .collect();
+                files.sort();
+                files.dedup();
+                files
+            } else {
+                Vec::new()
+            };
+            Workers::global().then_after(priority, files.clone(), move || {
+                let textures = aa_cry::deps::texture_files(&files);
+                Workers::global().then_after(priority, textures, move || {
+                    let pieces = prepare(&loader, &look);
+                    let _ = tx.send(VehicleSwapBuilt {
+                        root,
+                        obj_id,
+                        state,
+                        variant,
+                        pieces,
+                    });
+                });
+            });
+        });
+    }
+}
+
+/// Applies the swaps the workers finished: only now are the old parts and effects despawned (the state may have
+/// moved on meanwhile, in which case the newer request wins and this build is dropped). Installs the new parts,
+/// resets the spindle and the turret bone cache (`TurretGun`; the new skeleton's `bone_yaw` / `bone_pitch` are
+/// found again by `turret::aim_turrets`), and plays the new prefab's `_spawn_effect*` when it worsened.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn finish_damage_swaps(
+    mut commands: Commands,
+    units: Option<Res<Units>>,
+    mut cry: CryAssets,
+    clips: Res<ClipLibrary>,
+    swaps: ResMut<VehicleSwaps>,
+    time: Res<Time>,
+    mut roots: Query<(Entity, &mut VehicleDamage)>,
+    stale: Query<(Entity, &ChildOf), Or<(With<VehiclePart>, With<VehicleEffect>)>>,
+) {
+    let mut done = Vec::new();
+    {
+        let rx = swaps.rx.lock().unwrap_or_else(|e| e.into_inner());
+        while let Ok(built) = rx.try_recv() {
+            done.push(built);
+        }
+    }
+    let now = time.elapsed_secs_f64();
+    for built in done {
+        let Ok((root, mut damage)) = roots.get_mut(built.root) else {
+            continue;
+        };
+        if damage.requested != Some(built.state) {
+            continue;
+        }
+        // the health may have moved on (damage then a heal) while the models were read: keep the old,
+        // correct look and let the next frame request the current state. While dying, HP does not drive
+        // the state; the dying window decides between 5 and 6.
+        let desired = match damage.dying_start {
+            Some(start) if now - start >= f64::from(damage.dying_time) => 6,
+            Some(_) => 5,
+            None => units
+                .as_deref()
+                .and_then(|units| units.by_id.get(&built.obj_id))
+                .map_or(built.state, |unit| model_state(unit.hp, damage.max_hp)),
+        };
+        if desired != built.state {
+            damage.requested = None;
+            continue;
+        }
+        if built.pieces.is_empty() {
+            warn!(
+                "vehicle {}: the state {} prefab {} has no parts; keeping the old body",
+                built.root, built.state, built.variant
+            );
+            adopt_state(&mut damage, built.state);
+            damage.requested = None;
+            continue;
+        }
+        let old = damage.state;
+        let effects = plays_state_effects(old, built.state, damage.dead_effect_played);
+        for (entity, parent) in &stale {
+            if parent.parent() == root {
+                commands.entity(entity).try_despawn();
+            }
+        }
+        commands.entity(root).remove::<Spindle>();
+        commands.entity(root).remove::<super::turret::TurretGun>();
+        add_parts(&mut commands, &mut cry, &clips, built.pieces, root);
+        spawn_state_effects(&mut commands, root, &built.variant, effects);
+        if built.state == 6 {
+            damage.dead_effect_played = true;
+        }
+        adopt_state(&mut damage, built.state);
+        damage.variant = built.variant;
+        damage.requested = None;
+    }
 }
 
 /// Measures each vehicle's motion from its root transform: the position and yaw change since the
@@ -1056,5 +1455,836 @@ mod tests {
             angle = spindle_step(angle, 1.0, 0.1);
         }
         assert!((angle - 1.0).abs() < 1e-4, "converges: {angle}");
+    }
+
+    /// `FUN_3989f8b0`: 100/76 -> 1, 75/51 -> 2, 50/26 -> 3, 25 and the truncated 0 -> 4, hp 0 or max 0 -> 6.
+    #[test]
+    fn the_damage_state_follows_the_decompiled_thresholds() {
+        for (hp, max_hp, state) in [
+            (100, 100, 1),
+            (76, 100, 1),
+            (75, 100, 2),
+            (51, 100, 2),
+            (50, 100, 3),
+            (26, 100, 3),
+            (25, 100, 4),
+            (9, 1000, 4),
+            (0, 100, 6),
+            (0, 0, 6),
+            (100, 0, 6),
+        ] {
+            assert_eq!(model_state(hp, max_hp), state, "{hp}/{max_hp}");
+        }
+        // C integer division truncates: 7599 * 100 / 10000 is 75, not 76
+        assert_eq!(model_state(7599, 10000), 2);
+        assert_eq!(model_state(7600, 10000), 1);
+        assert_eq!(model_state(5099, 10000), 3);
+        assert_eq!(model_state(5100, 10000), 2);
+        assert_eq!(model_state(2599, 10000), 4);
+        assert_eq!(model_state(2600, 10000), 3);
+    }
+
+    /// `FUN_390e7910(5,1)` plays the prefab effects on every death, including 6 -> 5, but the dead prefab's
+    /// one-shots are not replayed when the HP-0 poller already showed 6 for this death.
+    #[test]
+    fn the_die_path_plays_effects_and_the_dead_ones_only_once() {
+        assert!(plays_state_effects(6, 5, false), "6 -> 5 plays dying");
+        assert!(plays_state_effects(6, 5, true), "6 -> 5 still plays dying");
+        assert!(plays_state_effects(1, 6, false), "a first dead state plays");
+        assert!(
+            !plays_state_effects(5, 6, true),
+            "the dead one-shots do not replay after the poller showed them"
+        );
+        assert!(!plays_state_effects(4, 2, false), "a heal plays none");
+        assert!(plays_state_effects(1, 4, false), "a worse state plays");
+    }
+
+    fn slave_unit(obj_id: u32, template_id: u32, model_id: u32, hp: i32) -> aa_net::model::Unit {
+        aa_net::model::Unit {
+            obj_id,
+            name: format!("slave {obj_id}"),
+            kind: aa_net::model::UnitKind::Slave {
+                id: template_id,
+                tl_id: 1,
+                template_id,
+                summoner_id: 1,
+            },
+            owner_name: String::new(),
+            pos: aa_net::Pos::new(0.0, 0.0, 0.0),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 50,
+            model_id,
+            equipment: aa_net::model::Equipment::default(),
+            model_params: aa_net::model::ModelParams::default(),
+            hp,
+            mp: 0,
+            max_hp: hp,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            anim_action: 0,
+            house_posture: None,
+            turret: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    fn slave_unit_kind(
+        obj_id: u32,
+        kind: u32,
+        template_id: u32,
+        model_id: u32,
+        hp: i32,
+        max_hp: i32,
+    ) -> aa_net::model::Unit {
+        let mut unit = slave_unit(obj_id, template_id, model_id, hp);
+        unit.kind = aa_net::model::UnitKind::Slave {
+            id: kind,
+            tl_id: 1,
+            template_id,
+            summoner_id: 1,
+        };
+        unit.max_hp = max_hp;
+        unit
+    }
+
+    /// The state of a real slave template on the `SCUnitPoints` path (`Units::apply`), max from attribute 6.
+    #[test]
+    fn an_hp_update_changes_the_state_of_a_real_slave_template() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let max_hp = db
+            .slave_max_hp(21, 50)
+            .expect("Eznan Cutter template 21's MaxHealth");
+        assert_eq!(max_hp, 52_216);
+        let unit = slave_unit(7, 21, 393, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit)));
+        let state = |units: &Units| units.by_id.get(&7).map(|unit| damage_state(&db, unit));
+        assert_eq!(state(&units), Some(1));
+
+        let update = |units: &mut Units, hp: i32| {
+            units.apply(&aa_net::Event::UnitPoints {
+                obj_id: 7,
+                hp,
+                mp: 0,
+            });
+        };
+        update(&mut units, max_hp * 3 / 4); // 75 %
+        assert_eq!(state(&units), Some(2));
+        update(&mut units, max_hp / 2); // 50 %
+        assert_eq!(state(&units), Some(3));
+        update(&mut units, max_hp / 4); // 25 %
+        assert_eq!(state(&units), Some(4));
+        update(&mut units, 0);
+        assert_eq!(state(&units), Some(6), "dead");
+        assert_eq!(units.by_id.get(&99), None, "not in view");
+    }
+
+    /// The unit's own `max_hp` (wire / `SCMySlave`) does not override unit attribute 6: a 500-HP slave of
+    /// template 21 is at 0 % of 52216, state 4, even when the wire says its maximum is 1000.
+    #[test]
+    fn the_owned_slave_report_does_not_override_the_attribute() {
+        let Some(db) = Db::open() else { return };
+        let unit = slave_unit(7, 21, 393, 500);
+        assert_eq!(unit.max_hp, 500, "the wire maximum");
+        assert_eq!(slave_max_hp(&db, &unit), 52_216);
+        assert_eq!(damage_state(&db, &unit), 4);
+    }
+
+    /// The damaged and dead tractor prefabs carry the `_spawn_effect*` trigger and the standing fire / smoke.
+    #[test]
+    fn the_damage_prefabs_name_their_effects() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let damaged = super::super::data::prefab_effects_named(
+            "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body_damage75",
+        );
+        assert!(
+            damaged
+                .iter()
+                .any(|e| e.name.eq_ignore_ascii_case("_spawn_effect_dmg") && !e.active),
+            "the damage trigger"
+        );
+        assert!(
+            damaged.iter().any(|e| e.name == "_spawn" && e.active),
+            "the standing fire"
+        );
+        let dead = super::super::data::prefab_effects_named(
+            "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body_dead",
+        );
+        assert!(
+            dead.iter().any(|e| e.name == "_spawn" && e.active),
+            "the burning smoke"
+        );
+        assert!(dead.iter().any(|e| e.name == "_dead_effect" && e.active));
+        // the exact names `FUN_390eaf40` collects; a prefab's other active emitters are not speed-driven
+        assert!(is_speed_emitter("exhaust"));
+        assert!(is_speed_emitter("splash_l"));
+        assert!(is_speed_emitter("splash_r"));
+        assert!(!is_speed_emitter("_spawn"));
+        assert!(!is_speed_emitter("caravel_cruise_pool"));
+        assert!(!is_speed_emitter("airship_smoke"));
+    }
+
+    /// A slave first announced already damaged is built in its state's prefab with the same attribute-6
+    /// maximum the per-frame check will use, including a template with no `unit_modifiers` row.
+    #[test]
+    fn a_slave_first_seen_damaged_plans_its_state() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let damaged = slave_unit(7, 60, 1008, 7_296 / 4);
+        let plan = super::super::prepare::plan_unit(&db, &damaged);
+        let super::super::prepare::UnitPlan::Vehicle(plan) = plan else {
+            panic!("the Farm Wagon is a vehicle");
+        };
+        assert_eq!((plan.state, plan.max_hp), (4, 7_296));
+        assert!(
+            plan.look.normal.ends_with("tractor_body_damage75"),
+            "{}",
+            plan.look.normal
+        );
+
+        // template 105 has no unit_modifiers attribute-6 row: the formula's 4796 at level 50 alone
+        let no_row = slave_unit(8, 105, 1293, 4_796 / 4);
+        let plan = super::super::prepare::plan_unit(&db, &no_row);
+        let super::super::prepare::UnitPlan::Vehicle(plan) = plan else {
+            panic!("template 105 is a vehicle");
+        };
+        assert_eq!((plan.state, plan.max_hp), (4, 4_796));
+
+        // a unit announced at 0 hp is dead already: `InitClientUnit` calls Die, so it is built dying
+        let dead = slave_unit(9, 60, 1008, 0);
+        let plan = super::super::prepare::plan_unit(&db, &dead);
+        let super::super::prepare::UnitPlan::Vehicle(plan) = plan else {
+            panic!("the Farm Wagon is a vehicle");
+        };
+        assert_eq!((plan.state, plan.max_hp), (5, 7_296));
+        assert_eq!(plan.dying_time, 3.3);
+        assert!(
+            plan.look.normal.ends_with("tractor_body_dying"),
+            "{}",
+            plan.look.normal
+        );
+    }
+
+    #[derive(Resource)]
+    struct DamageRoot(Entity);
+
+    fn damage_app(
+        db: &Db,
+        look: VehicleLook,
+        unit: aa_net::model::Unit,
+        state: u8,
+        variant: String,
+        max_hp: i32,
+        finish: bool,
+    ) -> App {
+        use bevy::asset::AssetPlugin;
+        use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
+        let dying_time = db.vehicle_dying_time(unit.model_id);
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            aa_cry::CryPlugin,
+            aa_anim::AnimPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
+        .init_asset::<SkinnedMeshInverseBindposes>()
+        .insert_resource(db.clone())
+        .init_resource::<Units>()
+        .init_resource::<VehicleSwaps>();
+        app.add_systems(
+            Startup,
+            move |mut commands: Commands, mut cry: CryAssets, clips: Res<ClipLibrary>| {
+                let loader = cry.loader();
+                let pieces = prepare(&loader, &look);
+                assert!(!pieces.is_empty(), "the vehicle's prefab has parts");
+                let root = spawn(
+                    &mut commands,
+                    &mut cry,
+                    &clips,
+                    pieces,
+                    Transform::default(),
+                );
+                commands.entity(root).insert((
+                    RemoteUnit::announced(&unit),
+                    VehicleDamage {
+                        state,
+                        variant: variant.clone(),
+                        max_hp,
+                        requested: None,
+                        dying_start: None,
+                        dying_time,
+                        death_seen: state == 5,
+                        dead_effect_played: false,
+                    },
+                ));
+                commands.insert_resource(DamageRoot(root));
+            },
+        );
+        if finish {
+            app.add_systems(Update, (update_damage, finish_damage_swaps).chain());
+        } else {
+            app.add_systems(Update, update_damage);
+        }
+        app
+    }
+
+    fn set_dying_time(app: &mut App, seconds: f32) {
+        let root = app.world().resource::<DamageRoot>().0;
+        app.world_mut()
+            .get_mut::<VehicleDamage>(root)
+            .expect("the vehicle root")
+            .dying_time = seconds;
+    }
+
+    /// Shorten the running dying window so it ends `seconds` from now, keeping its original start time.
+    fn end_dying_window_in(app: &mut App, seconds: f32) {
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        let root = app.world().resource::<DamageRoot>().0;
+        let mut damage = app
+            .world_mut()
+            .get_mut::<VehicleDamage>(root)
+            .expect("the vehicle root");
+        let start = damage.dying_start.expect("a running dying window");
+        damage.dying_time = (now - start) as f32 + seconds.max(0.0);
+    }
+
+    fn die(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<Units>()
+            .apply(&aa_net::Event::UnitDeath { obj_id: 7 });
+    }
+
+    fn wait_for_state(app: &mut App, wanted: u8) -> VehicleDamage {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            app.update();
+            let root = app.world().resource::<DamageRoot>().0;
+            let damage = app
+                .world()
+                .get::<VehicleDamage>(root)
+                .expect("the vehicle root")
+                .clone();
+            if damage.state == wanted {
+                return damage;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the swap to state {wanted} never finished (state {})",
+                damage.state
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    fn set_hp(app: &mut App, hp: i32) {
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .get_mut(&7)
+            .expect("the vehicle")
+            .hp = hp;
+    }
+
+    fn parts_under(app: &mut App, root: Entity) -> Vec<Entity> {
+        app.world_mut()
+            .query::<(Entity, &ChildOf, &VehiclePart)>()
+            .iter(app.world())
+            .filter(|(_, parent, _)| parent.parent() == root)
+            .map(|(entity, _, _)| entity)
+            .collect()
+    }
+
+    fn hp_update(app: &mut App, hp: i32) {
+        app.world_mut()
+            .resource_mut::<Units>()
+            .apply(&aa_net::Event::UnitPoints { obj_id: 7, hp, mp: 0 });
+    }
+
+    /// A damage state change swaps the body off the main thread: the old parts and effects go only once the
+    /// new prefab is ready, the new prefab's `_spawn_effect*` plays on a worsening, and a heal swaps back
+    /// without playing one.
+    #[test]
+    fn update_damage_swaps_the_body_and_effects_and_a_heal_swaps_back() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let Some(look) = db.vehicle_look(1008) else {
+            return;
+        };
+        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
+        assert_eq!(max_hp, 7_296);
+        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            look.clone(),
+            unit,
+            1,
+            look.normal.clone(),
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let old_parts = parts_under(&mut app, root);
+        assert!(!old_parts.is_empty());
+        let fake_effect = app.world_mut().spawn((VehicleEffect, ChildOf(root))).id();
+
+        set_hp(&mut app, max_hp / 4);
+        let damage = wait_for_state(&mut app, 4);
+        assert!(
+            damage.variant.ends_with("tractor_body_damage75"),
+            "{}",
+            damage.variant
+        );
+        for part in old_parts {
+            assert!(
+                app.world().get_entity(part).is_err(),
+                "an old part outlives the swap"
+            );
+        }
+        assert!(
+            app.world().get_entity(fake_effect).is_err(),
+            "an old effect outlives the swap"
+        );
+        assert!(
+            !parts_under(&mut app, root).is_empty(),
+            "the new body has parts"
+        );
+        let one_shots = app
+            .world_mut()
+            .query::<(&VehicleEffect, &aa_fx::Effect)>()
+            .iter(app.world())
+            .filter(|(_, effect)| effect.despawn_when_finished)
+            .count();
+        assert!(
+            one_shots > 0,
+            "the damage prefab's _spawn_effect_dmg plays once"
+        );
+
+        let limits = db.turret_limits(1008).expect("the tractor's turret block");
+        app.world_mut()
+            .entity_mut(root)
+            .insert(super::super::turret::TurretGun {
+                limits,
+                bones: None,
+                bones_checked: true,
+            });
+        set_hp(&mut app, max_hp * 3 / 4);
+        let damage = wait_for_state(&mut app, 2);
+        assert!(
+            damage.variant.ends_with("tractor_body"),
+            "{}",
+            damage.variant
+        );
+        assert!(
+            app.world()
+                .get::<super::super::turret::TurretGun>(root)
+                .is_none(),
+            "a swap drops the stale turret bones so the next aim resolves them again"
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<(&VehicleEffect, &aa_fx::Effect)>()
+                .iter(app.world())
+                .filter(|(_, effect)| effect.despawn_when_finished)
+                .count(),
+            0,
+            "healing back plays no _spawn_effect"
+        );
+    }
+
+    /// While the worker reads the new prefab the old body is untouched: `update_damage` only records the request,
+    /// so a slow read never shows an empty vehicle.
+    #[test]
+    fn update_damage_keeps_the_old_body_until_the_swap_finishes() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1008) else {
+            return;
+        };
+        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
+        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            look.clone(),
+            unit,
+            1,
+            look.normal.clone(),
+            max_hp,
+            false,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let old_parts = parts_under(&mut app, root);
+        assert!(!old_parts.is_empty());
+
+        set_hp(&mut app, max_hp / 4);
+        app.update();
+        for part in &old_parts {
+            assert!(
+                app.world().get_entity(*part).is_ok(),
+                "the old body is despawned before the new prefab is ready"
+            );
+        }
+        let damage = app
+            .world()
+            .get::<VehicleDamage>(root)
+            .expect("the vehicle root");
+        assert_eq!((damage.state, damage.requested), (1, Some(4)));
+        assert_eq!(
+            parts_under(&mut app, root),
+            old_parts,
+            "no new parts before they are ready"
+        );
+    }
+
+    fn synthetic_turret_bones(app: &mut App, root: Entity) -> (Entity, Entity, Entity) {
+        let bone = |name: &str| aa_cry::Bone {
+            name: name.into(),
+            controller_id: name
+                .bytes()
+                .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b))),
+            parent: None,
+            limb_id: 0,
+            bind_model: default(),
+            bind_local: default(),
+            physics: [default(); 2],
+        };
+        let rig = std::sync::Arc::new(aa_anim::Rig::new(aa_cry::Skeleton {
+            bones: vec![bone("bone_yaw"), bone("bone_pitch")],
+        }));
+        let holder = app
+            .world_mut()
+            .spawn((ChildOf(root), Transform::default()))
+            .id();
+        let yaw = app
+            .world_mut()
+            .spawn((ChildOf(holder), Transform::default()))
+            .id();
+        let pitch = app
+            .world_mut()
+            .spawn((ChildOf(holder), Transform::default()))
+            .id();
+        app.world_mut()
+            .entity_mut(holder)
+            .insert(Animator::new(rig, vec![yaw, pitch]));
+        (holder, yaw, pitch)
+    }
+
+    /// After a swap the turret's cached `bone_yaw` / `bone_pitch` entities are gone; with the cache reset,
+    /// `aim_turrets` resolves the new prefab's bones on the next frame.
+    #[test]
+    fn a_swap_reresolves_the_turret_bones() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1008) else {
+            return;
+        };
+        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
+        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            look.clone(),
+            unit,
+            1,
+            look.normal.clone(),
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let (old_holder, old_yaw, old_pitch) = synthetic_turret_bones(&mut app, root);
+        let limits = db.turret_limits(1008).expect("the tractor's turret block");
+        app.world_mut().entity_mut(root).insert((
+            super::super::turret::TurretGun {
+                limits,
+                bones: Some(super::super::turret::BonePair {
+                    yaw: old_yaw,
+                    pitch: old_pitch,
+                    bind_yaw: Quat::IDENTITY,
+                    bind_pitch: Quat::IDENTITY,
+                    bind_aim: Default::default(),
+                }),
+                bones_checked: true,
+            },
+            super::super::turret::TurretTarget(aa_net::TurretAim {
+                pitch: 0.2,
+                yaw: 0.3,
+            }),
+        ));
+
+        set_hp(&mut app, max_hp / 4);
+        wait_for_state(&mut app, 4);
+        assert!(
+            app.world()
+                .get::<super::super::turret::TurretGun>(root)
+                .is_none()
+        );
+        app.world_mut().entity_mut(old_holder).despawn();
+        let (_new_holder, new_yaw, new_pitch) = synthetic_turret_bones(&mut app, root);
+        app.add_systems(Update, super::super::turret::aim_turrets);
+        app.update();
+        let gun = app
+            .world()
+            .get::<super::super::turret::TurretGun>(root)
+            .expect("the new turret cache");
+        let bones = gun.bones.expect("the new prefab's bone_yaw / bone_pitch");
+        assert_eq!((bones.yaw, bones.pitch), (new_yaw, new_pitch));
+        assert_ne!(bones.yaw, old_yaw, "the new bones, not the removed ones");
+    }
+
+    fn tractor_app(finish: bool) -> Option<(App, Db, i32)> {
+        if !aa_cry::pak_available() {
+            return None;
+        }
+        let db = Db::open()?;
+        let look = db.vehicle_look(1008)?;
+        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
+        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(&db, look.clone(), unit, 1, look.normal, max_hp, finish);
+        app.insert_resource(units);
+        app.update();
+        Some((app, db, max_hp))
+    }
+
+    /// `SCUnitDeath` enters dying (5) with the `dying` prefab, keeps it for `models.dying_time`, then switches
+    /// to dead (6) (`FUN_390e7ad0`, `FUN_390eaac0`).
+    #[test]
+    fn a_death_enters_dying_for_its_time_then_switches_to_dead() {
+        let Some((mut app, _db, _max_hp)) = tractor_app(true) else {
+            return;
+        };
+        // long enough that a slow prefab build cannot expire the window before state 5 is observed
+        set_dying_time(&mut app, 60.0);
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(
+            dying.variant.ends_with("tractor_body_dying"),
+            "{}",
+            dying.variant
+        );
+        // a 5 s window still shows dying a fifth of the way in, then the shortened window expires to dead
+        end_dying_window_in(&mut app, 5.0);
+        app.update();
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        assert_eq!(
+            app.world().get::<VehicleDamage>(root).expect("the root").state,
+            5,
+            "dying does not end early"
+        );
+        end_dying_window_in(&mut app, 0.2);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(
+            dead.variant.ends_with("tractor_body_dead"),
+            "{}",
+            dead.variant
+        );
+    }
+
+    /// A model without a `dying` row (the real sigetank, model 1465) dies in the next lower prefab
+    /// (`FUN_397a7980` walks 5 -> 4 -> 3 -> 2 -> 1).
+    #[test]
+    fn a_death_without_a_dying_prefab_uses_the_damaged_one() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1465) else {
+            return;
+        };
+        let variants = db.vehicle_variants(1465).expect("the sigetank's state rows");
+        assert!(variants.dying.is_none());
+        let max_hp = db.slave_max_hp(60, 50).expect("a maximum");
+        let unit = slave_unit_kind(7, 7, 60, 1465, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(&db, look.clone(), unit, 1, look.normal, max_hp, true);
+        app.insert_resource(units);
+        app.update();
+        set_dying_time(&mut app, 60.0);
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(
+            dying.variant.ends_with("sigetank_rus_a_damage75"),
+            "{}",
+            dying.variant
+        );
+    }
+
+    /// A model with neither a `dying` nor a `dead` row keeps its `normal` prefab through 5 and 6. The early
+    /// `variant == damage.variant` path must still end the dying window, or a revive can never leave 6.
+    #[test]
+    fn a_dead_model_without_dead_or_dying_rows_heals_again() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(657) else {
+            return;
+        };
+        let variants = db.vehicle_variants(657).expect("the airship's state rows");
+        assert!(variants.dying.is_none() && variants.dead.is_none());
+        let max_hp = db.slave_max_hp(60, 50).expect("a maximum");
+        let unit = slave_unit_kind(7, 7, 60, 657, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            look.clone(),
+            unit,
+            1,
+            look.normal.clone(),
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        set_dying_time(&mut app, 60.0);
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert_eq!(dying.variant, look.normal, "no dying prefab: normal");
+        end_dying_window_in(&mut app, 0.2);
+        wait_for_state(&mut app, 6);
+        hp_update(&mut app, max_hp);
+        let healed = wait_for_state(&mut app, 1);
+        assert_eq!(healed.variant, look.normal);
+        assert!(
+            app.world()
+                .get::<VehicleDamage>(app.world().resource::<DamageRoot>().0)
+                .expect("the root")
+                .dying_start
+                .is_none(),
+            "the heal cleared the stale dying window"
+        );
+    }
+
+    /// The polled HP-0 update may show dead first (`FUN_390eb610` recomputes from HP); the later death still
+    /// forces dying, then dead (`0x390e7ad0` has no state guard).
+    #[test]
+    fn an_hp_zero_update_before_the_death_still_enters_dying() {
+        let Some((mut app, _db, _max_hp)) = tractor_app(true) else {
+            return;
+        };
+        set_dying_time(&mut app, 60.0);
+        hp_update(&mut app, 0);
+        let polled = wait_for_state(&mut app, 6);
+        assert!(
+            polled.variant.ends_with("tractor_body_dead"),
+            "{}",
+            polled.variant
+        );
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(
+            dying.variant.ends_with("tractor_body_dying"),
+            "{}",
+            dying.variant
+        );
+        end_dying_window_in(&mut app, 0.2);
+        wait_for_state(&mut app, 6);
+    }
+
+    /// `dying_time == 0` switches to dead on the update after the death, not in the entry tick
+    /// (`FUN_390eaac0` checks `limit <= elapsed`).
+    #[test]
+    fn a_zero_dying_time_lasts_one_tick() {
+        let Some((mut app, _db, _max_hp)) = tractor_app(false) else {
+            return;
+        };
+        set_dying_time(&mut app, 0.0);
+        die(&mut app);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let damage = app.world().get::<VehicleDamage>(root).expect("the root");
+        assert_eq!(damage.requested, Some(5), "the death tick enters dying");
+        app.update();
+        let damage = app.world().get::<VehicleDamage>(root).expect("the root");
+        assert_eq!(damage.requested, Some(6), "the next update expires dying");
+    }
+
+    /// A vehicle announced at 0 hp is built dying (`InitClientUnit` / `OnModelChanged` call Die), and its
+    /// dying window then expires to dead like any other death.
+    #[test]
+    fn a_vehicle_announced_at_zero_hp_starts_dying() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let unit = slave_unit(7, 60, 1008, 0);
+        let super::super::prepare::UnitPlan::Vehicle(plan) =
+            super::super::prepare::plan_unit(&db, &unit)
+        else {
+            panic!("the Farm Wagon is a vehicle");
+        };
+        assert_eq!(plan.state, 5);
+        assert!(plan.look.normal.ends_with("tractor_body_dying"));
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            plan.look.clone(),
+            unit,
+            plan.state,
+            plan.look.normal.clone(),
+            plan.max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        set_dying_time(&mut app, 60.0);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(dying.variant.ends_with("tractor_body_dying"));
+        end_dying_window_in(&mut app, 0.2);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(dead.variant.ends_with("tractor_body_dead"));
     }
 }

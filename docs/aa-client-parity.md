@@ -338,6 +338,33 @@ copper boiler colour, the mode-bar function slots (unbind / Summon Info, G13), t
 vehicle engine idle and sound (G15/A3); PR #58 (ship cannons drawn and manned at the parent's attach point) is in
 review; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures,
 and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
+
+
+- **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim
+  clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState`, the drawn
+  `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
+  (`docs/aa-client-units.md`, S12).
+
+- **S15 vehicle damage states.** A vehicle or ship is drawn in its HP state's prefab: `FUN_3989f8b0`'s
+  truncating percentage (100-76 % normal, 75-51 `damaged25`, 50-26 `damaged50`, 25-0 `damaged75`, hp 0
+  or max 0 `dead`), max HP from unit attribute 6 (the `unit_formulas` base plus `unit_modifiers`; 52 216
+  for the Eznan Cutter, 7 296 for the Farm Wagon, 4 796 for a template with no row), and the state row
+  walked down to the next non-empty one. A death enters dying (5) first (`0x390e7ad0`, also for a unit
+  announced at 0 hp), shows the `vehicle_models.dying` prefab or the next lower row for `models.dying_time`
+  seconds (`FUN_390eaac0`; HP does not drive the state meanwhile), then switches to dead (6). An HP-0
+  update may show dead first; the later `SCUnitDeath` still forces dying. `SCUnitPoints` / `SCUnitState` /
+  `SCUnitDeath` drive `vehicle::update_damage`, which reads the new body on the workers and swaps the
+  parts, wheels, spindle and `$` helpers only when it is ready (resetting the turret bone cache), spawns
+  the new prefab's active damage fire/smoke, and on a worsening state plays its `_spawn_effect*` particles
+  once (`FUN_39109120`). Dying prefabs that wrap a `.cdf` are drawn as rigged creature models. Dead hulls
+  render: `aa-cry` keeps meshes under a plain-named helper container in LOD 0 (the `*_dead.cgf` files; a
+  pak sweep changed 133 of 31 636 geometry files with no double geometry). Covered by
+  `examples/vehicle_damage`, the threshold/max-HP/variant/dying/swap/turret unit tests and the `aa-cry`
+  dead-hull test.
+
+Still open across these slices: hanging (S13), the speed-driven exhaust / splash scales and the engine sound of S15,
+auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders
+(S14) landed with their own captures, and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
 [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.
