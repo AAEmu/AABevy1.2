@@ -43,7 +43,6 @@ use std::collections::{HashMap, HashSet};
 use crate::ingame::data::Db;
 use crate::ingame::doodad_affordance::{DoodadDecal, DoodadTargetDecal};
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
-use crate::ingame::ladder::LadderGrab;
 use crate::ingame::units::{Views, doodad_world};
 use aa_net::interaction::Interact;
 use aa_net::CofferCommand;
@@ -327,9 +326,9 @@ pub(super) struct View {
     chosen: Vec<i64>,
     /// The doodad under the pointer (its name tooltip is up).
     hover: Option<u32>,
-    /// Ray distance to the climb doodad under the pointer when it is the nearest doodad and in
-    /// grab reach: a right click grabs it instead of a ship or NPC behind the rungs.
-    cursor_climb: Option<f32>,
+    /// A right click on the climb doodad under the pointer when it is the nearest doodad and in
+    /// grab reach: `(distance, id)`, handled by the dialog's unit comparison.
+    climb_click: Option<(f32, u32)>,
     /// What the doodad tooltip shows now.
     tip: Option<Tip>,
     /// The doodad last right clicked: the bar is about it while it is in reach.
@@ -407,9 +406,9 @@ impl View {
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
     }
-    /// Ray distance to the climb doodad under the pointer (the nearest doodad, in grab reach).
-    pub(super) fn cursor_climb(&self) -> Option<f32> {
-        self.cursor_climb
+    /// The right-clicked climb doodad (nearest doodad, in grab reach): distance and id.
+    pub(super) fn climb_click(&self) -> Option<(f32, u32)> {
+        self.climb_click
     }
 }
 
@@ -793,7 +792,6 @@ fn track(
         mut target_decal,
         ladder_claim,
         db,
-        mut grab,
         ladder_visuals,
     ): (
         ResMut<DoodadHighlights>,
@@ -804,7 +802,6 @@ fn track(
         ResMut<DoodadTargetDecal>,
         Option<Res<crate::ingame::ladder::LadderClaim>>,
         Option<Res<Db>>,
-        Option<ResMut<LadderGrab>>,
         Query<(&DoodadVisual, &GlobalTransform)>,
     ),
     mut out: MessageWriter<NetCommand>,
@@ -948,36 +945,25 @@ fn track(
                 .is_some_and(|p| d.pos.distance(p) <= crate::ingame::ladder::REACH)
     });
     let mut clicked = None;
+    let mut climb_click = None;
     if !blocked && pointer.mouse.just_released(MouseButton::Right)
         && let (Some(start), Some(end)) = (pressed_at.take(), cursor)
         && start.distance(end) <= CLICK_SLOP
     {
-        // a climb doodad out of reach is not passed to the skill bar: leave the click to the
-        // unit/other-doodad path instead of consuming it silently
+        // The ladder grab is decided in the dialog against the unit/ship hit, so this only
+        // records the ladder click. A climb doodad never goes to the doodad skill bar.
+        climb_click = ladder_click;
         clicked = nearest.map(|(_, id)| id).filter(|id| {
-            ladder_click.is_some_and(|(_, ladder)| ladder == *id)
-                || !doodads.by_id.get(id).is_some_and(|o| {
-                    db.as_deref()
-                        .is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
-                })
+            !doodads.by_id.get(id).is_some_and(|o| {
+                db.as_deref()
+                    .is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
+            })
         });
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
         clicked = (!blocked).then(|| nearest_usable(&d, &doodads, &units)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
-    }
-    // A right click on a climb doodad is taken as its use (inferred: the native use-target path
-    // `FUN_393b8f40` is the only CSHang sender, but no right-click-on-ladder capture exists).
-    // Hand it to the ladder controller only when it is the nearest hit and in reach.
-    if let Some((_, id)) = ladder_click
-        && clicked == Some(id)
-    {
-        if let Some(grab) = grab.as_mut() {
-            grab.0 = Some(id);
-        }
-        info!("doodad: {id} is a climb doodad: grab request");
-        clicked = None;
     }
     if script.hovers.last().is_some_and(|t| script.since >= *t) {
         script.hovers.pop();
@@ -990,7 +976,7 @@ fn track(
             .flatten()
     });
     d.doodad.hover = hover;
-    d.doodad.cursor_climb = ladder_click.map(|(along, _)| along);
+    d.doodad.climb_click = climb_click;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;

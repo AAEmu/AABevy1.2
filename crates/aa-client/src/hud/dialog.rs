@@ -692,9 +692,10 @@ pub fn talk_input(
     mut script: ResMut<ScriptedTalk>,
     mut script_pick: ResMut<crate::script::ScriptPick>,
     mut pressed_at: Local<Option<Vec2>>,
-    (teleport, ladder_claim): (
+    (teleport, ladder_claim, ladder_grab): (
         Option<Res<crate::ingame::teleport::Teleport>>,
         Option<Res<crate::ingame::ladder::LadderClaim>>,
+        Option<ResMut<crate::ingame::ladder::LadderGrab>>,
     ),
     suspended: Res<super::HudSuspended>,
 ) {
@@ -759,10 +760,10 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    // A climb doodad under the cursor takes the click only when it is in front of the unit/ship
-    // pick: a nearer unit (the hull included) keeps the right click (`cursor_climb` is this
-    // frame's nearest ladder distance along the ray).
-    let over_climb = bridge.0.borrow().doodad.cursor_climb();
+    // A right-clicked climb doodad takes the click only when it is in front of the unit/ship
+    // pick: a nearer unit (the hull included) keeps the right click (`climb_click` is this
+    // frame's nearest ladder distance and id along the ray).
+    let over_climb = bridge.0.borrow().doodad.climb_click();
     let unit = right_click_pick(
         &pointer,
         &units,
@@ -772,7 +773,19 @@ pub fn talk_input(
         blocked,
         &mut pick,
     );
-    let picked = if climb_takes_click(over_climb, unit.map(|(along, _)| along)) {
+    let ladder_wins = climb_takes_click(
+        over_climb.map(|(along, _)| along),
+        unit.map(|(along, _)| along),
+    );
+    if ladder_wins
+        && let Some((_, id)) = over_climb
+        && let Some(mut grab) = ladder_grab
+    {
+        // inferred: the native use-target path FUN_393b8f40 is the only CSHang sender, but no
+        // right-click-on-ladder capture exists
+        grab.0 = Some(id);
+    }
+    let picked = if ladder_wins {
         None
     } else {
         unit.map(|(_, id)| id)
