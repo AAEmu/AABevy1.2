@@ -396,11 +396,6 @@ pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
     });
 }
 
-/// How near the character walks to a doodad whose use reaches `reach` metres: well inside it.
-fn stop_distance(reach: f32) -> f32 {
-    (reach - 1.0).clamp(1.5, 3.0)
-}
-
 impl View {
     /// Ends a doodad walk because a mount walk takes over: no use follows. Returns whether a walk was running.
     pub(super) fn cancel_walk(&mut self) -> bool {
@@ -1001,7 +996,7 @@ fn owner_name(owner_id: u32, own: Option<(u32, &str)>, units: &Units, names: &aa
 enum Walk {
     /// Keep running at the doodad.
     Run,
-    /// The doodad is inside [`stop_distance`]: use it.
+    /// The doodad is inside [`INTERACTION_DISTANCE`]: use it.
     Arrived,
     /// It has not got nearer for [`STUCK_SECS`]: give up (the use may still be in reach).
     Stuck,
@@ -1022,7 +1017,7 @@ fn advance(
     target_gone: bool,
     moving: bool,
     dist: f32,
-    reach: f32,
+    stop: f32,
     best: f32,
     best_at: f32,
     now: f32,
@@ -1039,7 +1034,7 @@ fn advance(
     } else {
         (best, best_at)
     };
-    let walk = if dist <= stop_distance(reach) {
+    let walk = if dist < stop {
         Walk::Arrived
     } else if now - best_at > STUCK_SECS {
         Walk::Stuck
@@ -1487,14 +1482,6 @@ mod tests {
     }
 
     #[test]
-    fn the_walk_stops_well_inside_the_reach() {
-        assert_eq!(stop_distance(4.0), 3.0);
-        assert_eq!(stop_distance(3.0), 2.0);
-        assert_eq!(stop_distance(1.0), 1.5, "never closer than this");
-        assert_eq!(stop_distance(30.0), 3.0, "never further than this");
-    }
-
-    #[test]
     fn a_skill_reach_is_its_max_range() {
         // 2026-10-30 1.2 capture: Gather 13990 (`skills.max_range` 4) has the bar at 3 m and not at 4.5 m.
         assert_eq!(skill_reach(4.0), 4.0);
@@ -1749,33 +1736,33 @@ mod tests {
 
     #[test]
     fn the_walk_keeps_running_until_it_is_inside_the_reach() {
-        let start = advance(false, false, 10.0, 4.0, 10.0, 0.0, 0.0);
+        let start = advance(false, false, 10.0, INTERACTION_DISTANCE, 10.0, 0.0, 0.0);
         assert_eq!(start.walk, Walk::Run);
         assert_eq!((start.best, start.best_at), (10.0, 0.0));
-        let closer = advance(false, false, 6.0, 4.0, 10.0, 0.0, 1.0);
+        let closer = advance(false, false, 6.0, INTERACTION_DISTANCE, 10.0, 0.0, 1.0);
         assert_eq!(closer.walk, Walk::Run);
         assert_eq!((closer.best, closer.best_at), (6.0, 1.0));
         assert_eq!(
-            advance(false, false, 3.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(false, false, 2.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Arrived
         );
         assert_eq!(
-            advance(false, true, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(false, true, 6.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Cancel,
             "the player took over"
         );
         assert_eq!(
-            advance(true, false, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(true, false, 6.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Cancel,
             "the doodad is gone"
         );
         assert_eq!(
-            advance(false, false, 5.9, 4.0, 6.0, 1.0, 4.0).walk,
+            advance(false, false, 5.9, INTERACTION_DISTANCE, 6.0, 1.0, 4.0).walk,
             Walk::Run,
             "5.9 is progress"
         );
         assert_eq!(
-            advance(false, false, 5.9, 4.0, 5.9, 4.0, 7.1).walk,
+            advance(false, false, 5.9, INTERACTION_DISTANCE, 5.9, 4.0, 7.1).walk,
             Walk::Stuck,
             "no progress for 3.1 s"
         );

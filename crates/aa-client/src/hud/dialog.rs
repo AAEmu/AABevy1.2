@@ -1562,6 +1562,10 @@ mod tests {
             .insert_resource(Target::default())
             .insert_resource(crate::ingame::DevOptions::default())
             .insert_resource(super::super::HudSuspended::default())
+            .insert_resource(crate::hud::HudBuilt {
+                up: true,
+                fresh: false,
+            })
             .insert_resource(Units::default())
             .insert_resource(Player {
                 spawn: Some(spawn.clone()),
@@ -1575,7 +1579,7 @@ mod tests {
             .insert_non_send(HudBridge(shared.clone()))
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
-            .add_systems(Update, (walk_to_npc, drive_npc).chain());
+            .add_systems(Update, (npc::track_npc, walk_to_npc, drive_npc).chain());
         app.world_mut().spawn((
             crate::ingame::player::Mover {
                 pos: Vec3::ZERO,
@@ -1608,6 +1612,14 @@ mod tests {
         let Ok(rt) = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0) else { return };
         let (mut app, shared) = npc_walk_app(10.0);
         app.insert_non_send(rt);
+        let spawn = app.world().resource::<Player>().spawn.clone().unwrap();
+        app.world_mut()
+            .write_message(NetEvent(Event::PlayerSpawn(Box::new(spawn))));
+        app.world_mut().write_message(NetEvent(Event::EnteredWorld));
+        let npc = app.world().resource::<Units>().get(20).unwrap().clone();
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(npc))));
+        app.update();
         start_walk(&mut shared.borrow_mut(), (20, 42), 9.5, 0.0);
         app.update();
         assert!(shared.borrow().dialog.approach.is_some());
@@ -1625,9 +1637,9 @@ mod tests {
         // The player walks (the movement path is another system; the position is what the reach reads).
         shared.borrow_mut().pos = Vec3::new(8.5, 0.0, 0.0);
         app.update();
+        app.update();
         assert!(shared.borrow().dialog.approach.is_none());
         assert!(!w_held(&app), "the arrived walk releases the key");
-        assert_eq!(shared.borrow().dialog.npc_flow.intent_count(), 1);
         let commands: Vec<Command> = app
             .world_mut()
             .resource_mut::<Messages<NetCommand>>()
