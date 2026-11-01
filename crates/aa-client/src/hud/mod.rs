@@ -566,7 +566,16 @@ impl Plugin for HudPlugin {
         notices::plugin(app);
         cinema::plugin(app);
         doodad::plugin(app);
-        app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
+        // The death window's OnUpdate asks `GetResurrectionCountdown` as soon as it opens: the
+        // timers must be set before any UI frame and before `show` raises `UNIT_DEAD`.
+        app.add_systems(
+            Update,
+            alerts::track_death
+                .before(sync_hud)
+                .before(aa_ui::UiFrame)
+                .before(alerts::show)
+                .run_if(crate::ingame::world_screens),
+        );
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
         app.insert_resource(HudOptions { enabled: !aa_dev::args().into_iter().any(|a| a == "--no-hud") })

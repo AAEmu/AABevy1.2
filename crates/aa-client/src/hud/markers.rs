@@ -404,7 +404,7 @@ fn build_icons(
     }
     if DOTS.load(Ordering::Relaxed) {
         for u in units.iter() {
-            let UnitKind::Npc { .. } = u.kind else { continue };
+            let UnitKind::Npc { template_id, .. } = u.kind else { continue };
             let here = Vec3::new(u.pos.x, u.pos.y, u.pos.z);
             if u.dead || me.distance(here) > DOT_RANGE {
                 continue;
@@ -414,7 +414,10 @@ fn build_icons(
                 "friendly" => "friendly",
                 _ => continue,
             };
-            out.push(Icon { x: here.x, y: here.y, kind, tip: u.name.clone(), city: city_at(game, here.x, here.y) });
+            // The 1.2 map names the NPC from its template (`npc_name`), like the quest marks;
+            // an unnamed dot must not fall back to the untranslated `M_FRIENDLY`/`M_HOSTILE` key.
+            let tip = Some(npc_name(template_id)).filter(|n| !n.is_empty()).unwrap_or_else(|| u.name.clone());
+            out.push(Icon { x: here.x, y: here.y, kind, tip, city: city_at(game, here.x, here.y) });
         }
     }
     out.append(&mut quest_icons);
@@ -627,5 +630,37 @@ mod tests {
             assert!(count("npc_station") > 10, "carriage and airship conductors");
             assert!(count("common_farm") > 0, "public farm managers");
         }
+    }
+
+    /// A friendly dot without a name must not show the raw `M_FRIENDLY` ui_texts key: the 1.2
+    /// table has no MAP_TEXT row for it (`FUN_3904ce90`, x2game.dll.c:73822) and the native
+    /// `LocalizeUiText` only answers "category ?? key" on a miss (x2game.dll.c:942636).
+    #[test]
+    fn friendly_dot_without_a_name_has_no_label() -> Result<(), Box<dyn std::error::Error>> {
+        if !std::path::Path::new(aa_anim::db::DEFAULT_DB).exists() {
+            return Ok(());
+        }
+        let (rt, _bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;
+        rt.lua.load("AAUI.WorldMap = function() return { level = 2, zone = 5, player = { u = 0.5, v = 0.5, angle = 0 }, maps = {} } end").exec()?;
+        super::load_script(&rt.lua)?;
+        rt.lua.load(r#"
+            HUD.state.zone_rect = {0, 0, 1000, 1000}
+            HUD.state.zone_group = 5
+            HUD.map_icons = {
+                { x = 500, y = 500, kind = 'friendly', tip = '' },
+                { x = 600, y = 500, kind = 'friendly', tip = 'Guard' },
+            }
+            HUD.map_icons_version = 42
+            HUD.map_atlas = {}
+            HUD.map_atlas_version = 42
+            local r = AAUI.WorldMap()
+            assert(r ~= nil, 'no world map')
+            assert(r.markers ~= nil, 'no markers')
+            assert(#r.markers == 2, 'markers ' .. tostring(#r.markers))
+            assert(r.markers[1].tooltip == nil, tostring(r.markers[1].tooltip))
+            assert(r.markers[2].tooltip == 'Guard', tostring(r.markers[2].tooltip))
+        "#).exec()?;
+        if path.exists() { std::fs::remove_file(path)?; }
+        Ok(())
     }
 }

@@ -175,6 +175,18 @@ fn say(engine: &Engine, packs: &Packs, me: &Snapshot, item: &str) -> Option<Stri
     Some(path.to_string())
 }
 
+/// The local player's object id. `Player` is seeded on `PlayerSpawn` and keeps its id through
+/// `UnitsRemoved`; `Skills` drops its id when the player's own unit is removed from the view, which
+/// would otherwise lose the death timer (the 15:33:18 death in the owner session followed
+/// `SCUnitsRemoved` packets at 15:32:07).
+fn local_id(skills: &Skills, player: Option<&Player>) -> u32 {
+    player
+        .and_then(|p| p.spawn.as_ref())
+        .map(|spawn| spawn.obj_id)
+        .filter(|id| *id != 0)
+        .unwrap_or(skills.obj_id)
+}
+
 /// Keep death state even while the loading screen is building the HUD. Offers may arrive before the death packet.
 pub fn track_death(
     mut events: MessageReader<NetEvent>,
@@ -184,12 +196,14 @@ pub fn track_death(
     player: Option<Res<Player>>,
 ) {
     let data = bridge.0.borrow();
+    let own = local_id(&skills, player.as_deref());
     for NetEvent(event) in events.read() {
         match event {
             Event::PlayerSpawn(_) | Event::CharacterSelected(_) => {
                 data.death_ends.set(None);
                 data.death_started.set(None);
                 data.revive_caster.set(None);
+                data.death_requested.set(false);
                 data.revive_caster_name.borrow_mut().take();
             }
             Event::ResurrectionOffered { caster } => {
@@ -200,15 +214,24 @@ pub fn track_death(
                 };
                 *data.revive_caster_name.borrow_mut() = (!name.is_empty()).then_some(name);
             }
-            Event::DeathDetails { obj_id, resurrect_wait_ms, .. } if skills.obj_id != 0 && *obj_id == skills.obj_id => {
+            // `FUN_39369c10` (x2game.dll.c:706612-706613): for the local player's death the
+            // client stores the packet time in `+0xaf4` and `SCUnitDeath.resurrect_wait_time` in
+            // `+0xaf8`; `SCNotifyResurrection` only raises the offer flag (`FUN_391d39f0`).
+            Event::DeathDetails { obj_id, resurrect_wait_ms, .. } if own != 0 && *obj_id == own => {
                 let now = super::panels::now_ms(data.start);
+                if data.death_started.get().is_none() {
+                    data.death_requested.set(false);
+                }
                 data.death_started.set(Some(now));
                 data.death_ends.set(Some(now + (*resurrect_wait_ms).max(0) as u64));
             }
-            Event::Resurrected { obj_id, .. } if skills.obj_id != 0 && *obj_id == skills.obj_id => {
+            // `FUN_391d3ad0` (x2game.dll.c:363191-363192) clears `+0xaf4` and the offer flag and
+            // raises `PLAYER_RESURRECTED` (event 93) for the local player.
+            Event::Resurrected { obj_id, .. } if own != 0 && *obj_id == own => {
                 data.death_ends.set(None);
                 data.death_started.set(None);
                 data.revive_caster.set(None);
+                data.death_requested.set(false);
                 data.revive_caster_name.borrow_mut().take();
             }
             _ => {}
@@ -239,7 +262,7 @@ pub fn show(
         events.clear();
         return;
     };
-    let own = skills.obj_id;
+    let own = local_id(&skills, player.as_deref());
     let mut alerts: Vec<UseFailed> = failed.read().copied().collect();
     // scripted refusals, relative to the first frame they were looked at
     let now = time.elapsed_secs();
@@ -438,6 +461,92 @@ mod tests {
              assert(resurrection[1] == '2a', tostring(resurrection[1])); \
              assert(resurrection[2] == 'Priest', tostring(resurrection[2]))",
         ).exec()?;
+        if path.exists() { std::fs::remove_file(path)?; }
+        Ok(())
+    }
+
+    /// The owner session's 15:33:18 death: the 41-byte `SCUnitDeathPacket` of the log, after the
+    /// cannon teleport's `SCUnitsRemoved` (which can clear `Skills.obj_id`). The window must keep the
+    /// server's 15 s wait and the five-minute deadline, send nothing before the wait, and send
+    /// one request per death; `SCCharacterResurrected` then closes it.
+    #[test]
+    fn real_death_packet_starts_the_countdown_and_sends_one_request() -> Result<(), Box<dyn std::error::Error>> {
+        if !std::path::Path::new(aa_anim::db::DEFAULT_DB).exists() {
+            return Ok(());
+        }
+        let (rt, bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;
+        let frame = {
+            let mut w = aa_net::wire::Writer::new();
+            w.bc(100).u8(0).i32(15_000).i32(0).u8(0).bc(100);
+            w.u8(0).u16(0).u8(0).u8(0).u8(0).string("Testcinema2");
+            let body = w.finish();
+            let mut frame = vec![aa_net::game::MAGIC, aa_net::game::LEVEL_GAME, 0, 0, 0x71, 0x00];
+            frame.extend(body);
+            frame
+        };
+        assert_eq!(frame.len(), 41, "the owner log's SCUnitDeathPacket (41 bytes)");
+        let aa_net::game::ServerMsg::UnitDeath { obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer, .. } =
+            aa_net::game::ServerMsg::decode(&frame)? else { panic!("SCUnitDeath") };
+        assert_eq!((obj_id, resurrect_wait_ms), (100, 15_000));
+        let mut spawn = super::super::expansion::fixture::spawn();
+        spawn.obj_id = 100;
+        spawn.unit.obj_id = 100;
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<ScriptedFails>()
+            .insert_resource(Skills::default()) // as if SCUnitsRemoved had cleared the id
+            .insert_resource(HudBuilt { up: true, ..default() })
+            .insert_resource(Player { spawn: Some(spawn) })
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::Units>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Inventory>()
+            .init_resource::<aa_net::state::Target>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<super::super::usable::InFlight>()
+            .add_message::<UseFailed>().add_message::<ShowError>().add_message::<NetEvent>()
+            .add_message::<aa_net::NetCommand>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .insert_non_send(HudBridge(bridge.clone()))
+            .insert_non_send(rt)
+            .add_systems(Update, (track_death, show, super::super::api::handle_requests).chain());
+        app.world_mut().write_message(NetEvent(Event::DeathDetails {
+            obj_id, kill_reason, resurrect_wait_ms, lost_exp, killer,
+        }));
+        app.update();
+        let started = bridge.borrow().death_started.get().expect("the real SCUnitDeath starts the five-minute deadline");
+        assert_eq!(bridge.borrow().death_ends.get(), Some(started + 15_000));
+        aa_ui::lua::tick(&app.world().non_send::<UiRuntime>().lua, 16.0);
+        assert!(
+            app.world().non_send::<UiRuntime>().lua
+                .load("return ADDON:GetContent(UIC_DEATH_AND_RESURRECTION_WND):IsVisible()").eval::<bool>()?,
+            "the death window is open"
+        );
+        assert!(bridge.borrow().requests.is_empty(), "the window must not auto-resurrect: {:?}", bridge.borrow().requests);
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<aa_net::NetCommand>>().drain().collect();
+        assert!(commands.is_empty(), "no CSResurrectCharacter before the countdown ends: {commands:?}");
+        // A click before the server wait is refused, as `FUN_39186e70` does.
+        bridge.borrow_mut().requests.push(super::super::api::Request::Resurrect { in_place: false });
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<aa_net::NetCommand>>().drain().collect();
+        assert!(commands.is_empty(), "a click before the wait sends nothing: {commands:?}");
+        // The wait ends: one request; the duplicate for the same death is dropped.
+        let now = super::super::panels::now_ms(bridge.borrow().start);
+        bridge.borrow().death_ends.set(Some(now));
+        bridge.borrow_mut().requests.push(super::super::api::Request::Resurrect { in_place: false });
+        bridge.borrow_mut().requests.push(super::super::api::Request::Resurrect { in_place: false });
+        app.update();
+        let commands: Vec<_> = app.world_mut().resource_mut::<Messages<aa_net::NetCommand>>().drain().collect();
+        assert!(matches!(&commands[..], [aa_net::NetCommand(aa_net::Command::Resurrect { in_place: false })]), "{commands:?}");
+        // `SCCharacterResurrected` raises PLAYER_RESURRECTED (native event 93) and hides the window.
+        app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 100, pos: Default::default(), yaw: 0.0 }));
+        app.update();
+        aa_ui::lua::tick(&app.world().non_send::<UiRuntime>().lua, 16.0);
+        assert!(
+            !app.world().non_send::<UiRuntime>().lua
+                .load("return ADDON:GetContent(UIC_DEATH_AND_RESURRECTION_WND):IsVisible()").eval::<bool>()?,
+            "PLAYER_RESURRECTED hides the window"
+        );
+        assert_eq!(bridge.borrow().death_started.get(), None);
         if path.exists() { std::fs::remove_file(path)?; }
         Ok(())
     }

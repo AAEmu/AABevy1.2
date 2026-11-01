@@ -154,6 +154,9 @@ pub struct HudData {
     pub death_started: std::cell::Cell<Option<u64>>,
     /// The server offered an in-place resurrection (the caster may be the player below level 10).
     pub revive_caster: std::cell::Cell<Option<u32>>,
+    /// `CSResurrectCharacter` was sent for this death (`FUN_39186e70` sends once per death; the
+    /// two-second native debounce still lets a refused click through again, so the HUD latches it).
+    pub death_requested: std::cell::Cell<bool>,
     /// The offered caster's name, for `X2Unit:GetUnitNameById` in the death window
     /// (`PLAYER_RESURRECTION`), which may name a unit outside the player's target or party.
     pub revive_caster_name: std::cell::RefCell<Option<String>>,
@@ -241,6 +244,7 @@ impl Default for HudData {
             death_ends: Default::default(),
             death_started: Default::default(),
             revive_caster: Default::default(),
+            death_requested: Default::default(),
             revive_caster_name: Default::default(),
             tips: Default::default(),
             stats_pushed: 0,
@@ -1197,7 +1201,19 @@ pub fn handle_requests(
                 panels::use_bag_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
-                net.write(NetCommand(Command::Resurrect { in_place }));
+                // `FUN_39186e70` (`X2Player:Resurrect`): the native sends only while the death
+                // timestamp is set and the server's resurrect wait has run out; an in-place
+                // revival also needs the offer. It debounces 2 s, which still allowed the
+                // countdown and a click to send twice: latch one request per death.
+                let data = bridge.0.borrow();
+                let now = panels::now_ms(data.start);
+                let dead = data.death_started.get().is_some();
+                let wait_over = data.death_ends.get().is_some_and(|end| now >= end);
+                let allowed = !in_place || data.revive_caster.get().is_some();
+                if dead && wait_over && allowed && !data.death_requested.replace(true) {
+                    drop(data);
+                    net.write(NetCommand(Command::Resurrect { in_place }));
+                }
             }
             Request::LearnSkill { id } => super::skillbook::learn_skill(&bridge.0.borrow(), id, &mut net),
             Request::LearnBuff { id } => super::skillbook::learn_buff(&bridge.0.borrow(), id, &mut net),
