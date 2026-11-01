@@ -167,6 +167,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::VehicleCamera>()
+            .init_resource::<vehicle::VehicleSwaps>()
             .init_resource::<camera::CameraFollowed>()
             .init_resource::<quest_camera::QuestShot>()
             .init_resource::<quest_camera::QuestTalkCamera>()
@@ -231,9 +232,12 @@ impl Plugin for InGamePlugin {
                         .chain()
                         .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units, glide::track_remote_gliders).chain(),
-                    vehicle::update_damage
-                        .after(units::sync_views)
-                        .after(units::move_units),
+                    (
+                        vehicle::update_damage
+                            .after(units::sync_views)
+                            .after(units::move_units),
+                        vehicle::finish_damage_swaps.after(vehicle::update_damage),
+                    ),
                     vehicle::track_motion
                         .after(units::move_units)
                         .after(cart::drive_cart),

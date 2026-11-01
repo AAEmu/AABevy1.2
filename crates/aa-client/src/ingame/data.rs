@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aa_anim::GameDb;
+use crate::hud::formula::Formula;
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -48,8 +49,8 @@ struct Lookups {
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
     /// `models.id` -> the normal and per-state prefab refs of a vehicle or ship.
     vehicle_variants: HashMap<u32, Option<VehicleVariants>>,
-    /// `slaves.id` -> the unit attribute 6 (`MaxHealth`) sum of its `unit_modifiers` rows.
-    slave_max_hp: HashMap<u32, Option<i32>>,
+    /// `(slaves.id, level)` -> the unit attribute 6 (`MaxHealth`) of the template.
+    slave_max_hp: HashMap<(u32, u8), Option<i32>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -600,40 +601,65 @@ impl Db {
         variants
     }
 
-    /// The maximum health of a slave template from its `unit_modifiers` rows of unit attribute 6 (`MaxHealth`).
-    /// The 1.2 client's `FUN_390b4a70` reads that attribute (not a maximum on the wire); all 104 Slave rows of the
-    /// catalog are flat values, and the percent rows (none today) are applied in row order like the attribute getter.
-    /// `None` when the template has no row (40 slave templates; the caller then keeps the unit's last known maximum).
-    pub fn slave_max_hp(&self, template_id: u32) -> Option<i32> {
+    /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
+    /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
+    /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
+    ///
+    /// The base comes from `FUN_398a0d60`'s `case 6: 0xe`, the `MaxHealth` formula (kind 14) of the slave owner
+    /// type (2). Its primary attributes are their own formulas (kind 24 is `Sta`; both are parsed, not hardcoded).
+    /// The unit's maximum is not on the wire, so this is the only source for every template, including the ones
+    /// without a `unit_modifiers` row (their base alone).
+    pub fn slave_max_hp(&self, template_id: u32, level: u8) -> Option<i32> {
+        let key = (template_id, level);
         let mut l = self.lookups.lock().unwrap();
-        if let Some(hp) = l.slave_max_hp.get(&template_id) {
+        if let Some(hp) = l.slave_max_hp.get(&key) {
             return *hp;
         }
-        let mut res = 0i32;
-        let mut any = false;
+        let base = {
+            let max_health = unit_formula(&l.conn, SLAVE_OWNER, MAX_HEALTH)?;
+            let mut vars = HashMap::from([("level", f64::from(level))]);
+            for (name, kind) in PRIMARY_STAT_FORMULAS {
+                if let Some(formula) = unit_formula(&l.conn, SLAVE_OWNER, kind) {
+                    let value = formula.eval(&vars) as i32;
+                    vars.insert(name, f64::from(value));
+                }
+            }
+            max_health.eval(&vars) as i32
+        };
+        let mut flat = 0i32;
+        let mut percent = 0f32;
         {
             let row = l.conn.prepare(
-                "SELECT unit_modifier_type_id, value FROM unit_modifiers
+                "SELECT unit_modifier_type_id, value, linear_level_bonus FROM unit_modifiers
                  WHERE owner_type = 'Slave' AND owner_id = ?1 AND unit_attribute_id = 6 ORDER BY id",
             );
             if let Ok(mut stmt) = row
                 && let Ok(rows) = stmt.query_map(params![template_id], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
                 })
             {
                 for row in rows.flatten() {
-                    any = true;
                     let value = i32::try_from(row.1).unwrap_or(0);
-                    res = if row.0 == 1 {
-                        res.wrapping_add((res as f32 * value as f32 / 100.0) as i32)
+                    let linear = i32::try_from(row.2).unwrap_or(0);
+                    // `FUN_3989fde0`: value + linear_level_bonus * level / 100, truncated
+                    let value =
+                        value.wrapping_add((linear as f32 * f32::from(level) * 0.01) as i32);
+                    if row.0 == 1 {
+                        percent += value as f32;
                     } else {
-                        res.wrapping_add(value)
-                    };
+                        flat = flat.wrapping_add(value);
+                    }
                 }
             }
         }
-        let hp = any.then_some(res.max(0));
-        l.slave_max_hp.insert(template_id, hp);
+        // `FUN_398a0bc0` multiplies the sum by one 0.01-scaled multiplier (`local_8 = 100 + percent`)
+        let hp = (((base.wrapping_add(flat)) as f32) * (100.0 + percent) * 0.01) as i32;
+        let hp = Some(hp.max(0));
+        l.slave_max_hp.insert(key, hp);
         hp
     }
 
@@ -1098,6 +1124,33 @@ impl Db {
     }
 }
 
+/// `UnitFormulaOwnerType::Slave` (`unit_formulas.owner_type_id`).
+const SLAVE_OWNER: u8 = 2;
+/// `UnitFormulaKind::MaxHealth`.
+const MAX_HEALTH: u8 = 14;
+/// The primary attribute formulas a pool formula may read: `Str`..`Fai` (kinds 22..27).
+const PRIMARY_STAT_FORMULAS: [(&str, u8); 6] = [
+    ("str", 22),
+    ("dex", 23),
+    ("sta", 24),
+    ("int", 25),
+    ("spi", 26),
+    ("fai", 27),
+];
+
+/// The parsed `unit_formulas` row of an owner type and formula kind (the first row of an id).
+fn unit_formula(conn: &Connection, owner: u8, kind: u8) -> Option<Formula> {
+    let text: Option<String> = conn
+        .query_row(
+            "SELECT formula FROM unit_formulas WHERE owner_type_id = ?1 AND kind_id = ?2 ORDER BY id LIMIT 1",
+            params![owner, kind],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    text.as_deref().and_then(|text| Formula::parse(text).ok())
+}
+
 /// The named `ParticleEffect` entities (the `<Objects>` list) of a prefab element path; inactive ones are kept
 /// (a vehicle's `_spawn_effect` elements are authored `bActive="0"` and played on a state change).
 pub(crate) fn prefab_effects_named(path: &str) -> Vec<aa_world::placement::NamedEffect> {
@@ -1327,16 +1380,34 @@ mod tests {
         assert_eq!(db.vehicle_variants(139), None, "a mount is no vehicle");
     }
 
-    /// Unit attribute 6 from `unit_modifiers`: the galleon template (21) and the Farm Wagon template (60).
+    /// Unit attribute 6 is the formula base plus the `unit_modifiers` rows: the Eznan Cutter (21), the Farm
+    /// Wagon (60, 2500 flat), and template 105 with no row (the formula alone, 4796 at level 50).
     #[test]
-    fn slave_max_health_comes_from_the_unit_modifiers() {
+    fn slave_max_health_comes_from_the_formula_and_the_unit_modifiers() {
         let Some(db) = Db::open() else {
             eprintln!("skip: no client database");
             return;
         };
-        assert_eq!(db.slave_max_hp(21), Some(47_420), "Eznan Cutter template 21");
-        assert_eq!(db.slave_max_hp(60), Some(2_500), "Farm Wagon template 60");
-        assert_eq!(db.slave_max_hp(105), None, "a slave template with no MaxHealth attribute row");
+        assert_eq!(
+            db.slave_max_hp(21, 50),
+            Some(52_216),
+            "Eznan Cutter template 21: 4796 + 47420"
+        );
+        assert_eq!(
+            db.slave_max_hp(60, 50),
+            Some(7_296),
+            "Farm Wagon template 60: 4796 + 2500"
+        );
+        assert_eq!(
+            db.slave_max_hp(105, 50),
+            Some(4_796),
+            "template 105 has no MaxHealth row"
+        );
+        assert_eq!(
+            db.slave_max_hp(91, 10),
+            Some(1_126),
+            "level 10: 700 + (10 + 9 * 2) * 12 + 90 flat"
+        );
     }
 
     #[test]

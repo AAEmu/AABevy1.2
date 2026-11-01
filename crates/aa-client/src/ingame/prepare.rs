@@ -48,6 +48,7 @@ pub enum UnitBuild {
         pieces: Vec<super::vehicle::Piece>,
         state: u8,
         variant: String,
+        max_hp: i32,
     },
     /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
     Effects(Vec<aa_world::placement::PlacedEffect>),
@@ -82,6 +83,8 @@ pub fn humanoid_of_file(file: &str) -> Option<(Race, Gender)> {
 pub struct VehiclePlan {
     pub look: super::data::VehicleLook,
     pub state: u8,
+    /// Unit attribute 6 (the formula base plus `unit_modifiers`), cached by [`super::vehicle::VehicleDamage`].
+    pub max_hp: i32,
 }
 
 /// What a unit is made of, decided from the database before any model is read ([`plan_unit`]).
@@ -98,17 +101,16 @@ pub fn plan_unit(db: &Db, unit: &Unit) -> UnitPlan {
     if let Some(look) = db.vehicle_look(unit.model_id) {
         // a damaged slave that comes into view is built in its state's prefab at once (`FUN_390e8b30` /
         // `FUN_390f0510`), not in the normal one and then swapped
-        let (state, normal) = db
+        let max_hp = super::vehicle::slave_max_hp(db, unit);
+        let state = super::vehicle::damage_state(db, unit);
+        let normal = db
             .vehicle_variants(unit.model_id)
-            .map(|variants| {
-                let max_hp = super::vehicle::slave_max_hp(db, unit);
-                let state = super::vehicle::model_state(unit.hp, max_hp);
-                (state, variants.for_state(state).to_string())
-            })
-            .unwrap_or((1, look.normal.clone()));
+            .map(|variants| variants.for_state(state).to_string())
+            .unwrap_or_else(|| look.normal.clone());
         return UnitPlan::Vehicle(VehiclePlan {
             look: super::data::VehicleLook { normal, wheels: look.wheels },
             state,
+            max_hp,
         });
     }
     let file = db.actor_model_file(unit.model_id);
@@ -192,6 +194,7 @@ pub fn build_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit,
                     pieces,
                     state: plan.state,
                     variant: plan.look.normal,
+                    max_hp: plan.max_hp,
                 },
             }
         }

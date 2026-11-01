@@ -36,6 +36,8 @@ pub use voxels::PlacedVoxel;
 pub(crate) use voxels::collision as voxel_collision;
 pub(crate) use voxels::decoded_size as voxel_decoded_size;
 
+use std::collections::HashMap;
+
 use bevy::math::{Mat4, Quat, Vec3};
 
 use crate::coords::SECTOR_SIZE;
@@ -312,32 +314,127 @@ pub struct NamedEffect {
     pub effect: PlacedEffect,
 }
 
-/// The `ParticleEffect` entities of an `entities.xml` or a prefab's `<Objects>` with their names (positions are local).
+/// The `ParticleEffect` entities of an `entities.xml` or a prefab's `<Objects>` with their names (positions are local to
+/// their parent object). A prefab `<Object Parent="{guid}">` (and an entity's `ParentGUID`) is placed in its parent's
+/// space, like `CEntityLoader::LoadEntity` composes the parent matrix into the child's.
 pub fn parse_named_effect_entities(xml: &str) -> Vec<NamedEffect> {
-    let Ok(doc) = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')) else { return Vec::new() };
-    let floats = |s: Option<&str>| -> Vec<f32> { s.map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect()).unwrap_or_default() };
-    let mut out = Vec::new();
-    for e in doc.descendants().filter(|n| (n.has_tag_name("Entity") || n.has_tag_name("Object")) && n.attribute("EntityClass") == Some("ParticleEffect")) {
-        let Some(props) = e.children().find(|c| c.has_tag_name("Properties")) else { continue };
-        let Some(effect) = props.attribute("ParticleEffect").map(str::trim).filter(|n| !n.is_empty()) else { continue };
-        let p = floats(e.attribute("Pos"));
-        if p.len() < 3 {
-            continue;
+    let Ok(doc) = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')) else {
+        return Vec::new();
+    };
+    let floats = |s: Option<&str>| -> Vec<f32> {
+        s.map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect())
+            .unwrap_or_default()
+    };
+    // every object / entity that can be a parent, by its `Id` (prefab) or `EntityGuid` (cell entity)
+    let mut by_id: HashMap<String, roxmltree::Node<'_, '_>> = HashMap::new();
+    for n in doc
+        .descendants()
+        .filter(|n| n.has_tag_name("Entity") || n.has_tag_name("Object"))
+    {
+        for key in ["Id", "EntityGuid"] {
+            if let Some(id) = n.attribute(key).map(str::trim).filter(|id| !id.is_empty()) {
+                by_id.entry(id.to_ascii_lowercase()).or_insert(n);
+            }
         }
-        let rot = match floats(e.attribute("Rotate"))[..] {
+    }
+    let local = |n: roxmltree::Node<'_, '_>| -> (Vec3, Quat, Vec3) {
+        let p = floats(n.attribute("Pos"));
+        let pos = if p.len() >= 3 {
+            Vec3::new(p[0], p[1], p[2])
+        } else {
+            Vec3::ZERO
+        };
+        let rot = match floats(n.attribute("Rotate"))[..] {
             [w, x, y, z] => Quat::from_xyzw(x, y, z, w).normalize(),
             _ => Quat::IDENTITY,
         };
-        let entity_scale = floats(e.attribute("Scale")).first().copied().unwrap_or(1.0);
-        let prop = |name: &str| props.attribute(name).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0);
+        let s = floats(n.attribute("Scale"));
+        let scale = if s.len() >= 3 {
+            Vec3::new(s[0], s[1], s[2])
+        } else {
+            Vec3::ONE
+        };
+        (pos, rot, scale)
+    };
+    // the world transform of an object: its own transform times its parent's (`Parent` / `ParentGUID`)
+    let world = |node: roxmltree::Node<'_, '_>| -> Option<(Vec3, Quat, Vec3)> {
+        let mut chain = Vec::new();
+        let mut current = node;
+        let mut visiting = std::collections::HashSet::new();
+        loop {
+            let key = ["Id", "EntityGuid"]
+                .into_iter()
+                .find_map(|k| {
+                    current
+                        .attribute(k)
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                })
+                .map(str::to_ascii_lowercase);
+            if let Some(key) = &key
+                && !visiting.insert(key.clone())
+            {
+                return None;
+            }
+            chain.push(current);
+            if chain.len() > 64 {
+                return None;
+            }
+            let Some(parent) = current
+                .attribute("Parent")
+                .or_else(|| current.attribute("ParentGUID"))
+                .map(str::trim)
+            else {
+                break;
+            };
+            current = *by_id.get(&parent.to_ascii_lowercase())?;
+        }
+        let mut pos = Vec3::ZERO;
+        let mut rot = Quat::IDENTITY;
+        let mut scale = Vec3::ONE;
+        for n in chain.into_iter().rev() {
+            let (p, r, s) = local(n);
+            pos += rot * (scale * p);
+            rot *= r;
+            scale *= s;
+        }
+        Some((pos, rot, scale))
+    };
+    let mut out = Vec::new();
+    for e in doc.descendants().filter(|n| {
+        (n.has_tag_name("Entity") || n.has_tag_name("Object"))
+            && n.attribute("EntityClass") == Some("ParticleEffect")
+    }) {
+        let Some(props) = e.children().find(|c| c.has_tag_name("Properties")) else {
+            continue;
+        };
+        let Some(effect) = props
+            .attribute("ParticleEffect")
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        else {
+            continue;
+        };
+        if floats(e.attribute("Pos")).len() < 3 {
+            continue;
+        }
+        let Some((pos, rot, scale)) = world(e) else {
+            continue;
+        };
+        let prop = |name: &str| {
+            props
+                .attribute(name)
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .unwrap_or(1.0)
+        };
         out.push(NamedEffect {
             name: e.attribute("Name").unwrap_or("").trim().to_string(),
             active: props.attribute("bActive").map(str::trim) != Some("0"),
             effect: PlacedEffect {
                 effect: effect.to_string(),
-                pos: Vec3::new(p[0], p[1], p[2]),
+                pos,
                 rot,
-                scale: entity_scale * prop("Scale"),
+                scale: scale.x * prop("Scale"),
                 speed_scale: prop("SpeedScale"),
                 count_scale: prop("CountScale"),
                 prime: props.attribute("bPrime").map(str::trim) != Some("0"),
@@ -795,6 +892,16 @@ mod tests {
         assert_eq!(named[1].name, "b");
         assert!(!named[1].active);
         assert_eq!(named[1].effect.effect, "x.y.z");
+        // a prefab child object is placed in its parent's space
+        let parented = r#"<Prefab><Objects>
+          <Object Type="Brush" Name="hull" Id="{AAAA}" Pos="0,0,10" Rotate="0.7071068,0,0,0.7071068" Scale="2,2,2"/>
+          <Object Type="Entity" Name="fx" Id="{BBBB}" Parent="{aaaa}" Pos="1,0,0" EntityClass="ParticleEffect"><Properties bActive="1" ParticleEffect="x.y.z"/></Object>
+        </Objects></Prefab>"#;
+        let fx = parse_named_effect_entities(parented);
+        assert_eq!(fx.len(), 1);
+        let p = fx[0].effect.pos;
+        assert!((p.x - 0.0).abs() < 1e-5 && (p.y - 2.0).abs() < 1e-5 && (p.z - 10.0).abs() < 1e-5, "{p}");
+        assert_eq!(fx[0].effect.scale, 2.0);
     }
 
     #[test]

@@ -65,7 +65,7 @@ mod expansion;
 pub(crate) use expansion::fixture::spawn as fixture_spawn;
 mod sorting;
 mod specialty;
-mod formula;
+pub(crate) mod formula;
 mod family;
 mod expedition;
 mod territory;

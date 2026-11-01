@@ -2,10 +2,11 @@
 //! live boat stepped through them by `FUN_3989f8b0`'s thresholds.
 //!
 //! The example builds the `smallboat.smallboat_a` prefab for 100 %, 74 %, 50 %, 25 % and 0 % of the
-//! template's `unit_modifiers` maximum (template 15, 1420 HP), then drives a sixth boat through
-//! 74 -> 50 -> 25 -> 0 % through `vehicle::update_damage` (the `SCUnitPoints` path is in the unit
-//! tests). It asserts the state and the prefab ref of every step (2 `damege50`, 3 `damege50`,
-//! 4 `damege75`, 6 `dead`) and exits non-zero on a mismatch. `--shot` keeps it open for the picture.
+//! template's attribute-6 maximum (template 15: 4796 formula base + 1420 `unit_modifiers` = 6216 HP), then
+//! drives a sixth boat through 74 -> 50 -> 25 -> 0 % through `vehicle::update_damage` (the `SCUnitPoints`
+//! path is in the unit tests). It asserts the state and the prefab ref of every step (2 `damege50`,
+//! 3 `damege50`, 4 `damege75`, 6 `dead`) and exits non-zero on a mismatch. `--shot` keeps it open for the
+//! picture.
 //!
 //! `cargo run -p aa-client --example vehicle_damage -- --mute --offscreen-shot shots/aa-client/vehicle_damage.png --shot-after 5`
 
@@ -149,9 +150,9 @@ fn main() -> AppExit {
         return AppExit::Success;
     };
     let max_hp = db
-        .slave_max_hp(TEMPLATE)
+        .slave_max_hp(TEMPLATE, 50)
         .expect("rowboat template 15's MaxHealth");
-    assert!(max_hp > 0);
+    assert_eq!(max_hp, 6_216, "4796 formula base + 1420 unit_modifiers");
     App::new()
         .add_plugins((
             aa_dev::default_plugins("Vehicle damage states"),
@@ -168,10 +169,11 @@ fn main() -> AppExit {
             ..default()
         })
         .init_resource::<aa_net::state::Units>()
+        .init_resource::<ingame::vehicle::VehicleSwaps>()
         .add_systems(Startup, (stage, scene).chain())
         .add_systems(
             Update,
-            (ingame::vehicle::update_damage, check_states).chain(),
+            (ingame::vehicle::update_damage, ingame::vehicle::finish_damage_swaps, check_states).chain(),
         )
         .run()
 }
@@ -234,6 +236,8 @@ fn scene(
             .insert(ingame::vehicle::VehicleDamage {
                 state,
                 variant: variant.clone(),
+                max_hp: check.max_hp,
+                requested: None,
             });
         ingame::vehicle::spawn_state_effects(&mut commands, root, &variant, false);
         info!(
@@ -256,7 +260,7 @@ fn scene(
     commands.entity(root).insert((
         Live,
         ingame::units::RemoteUnit::announced(&unit),
-        ingame::vehicle::VehicleDamage { state: 1, variant },
+        ingame::vehicle::VehicleDamage { state: 1, variant, max_hp: check.max_hp, requested: None },
     ));
     ingame::vehicle::spawn_state_effects(&mut commands, root, variants.for_state(1), false);
     units.by_id.insert(LIVE, unit);

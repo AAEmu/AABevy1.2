@@ -150,7 +150,11 @@ transform is ignored (e.g. a 1.05 scale on costume nodes). Kinds: `$lodN ...`/`$
 of the parent (drawn in the parent's frame); other `$...` (`$picking`, `$occlusion`, ...) and
 helper chunks = helpers; `proxy*`, `$collision`, `PhysicsProxy` = physics, never drawn. A
 plain-named helper (no `$`) is a transform container: the dead ship hulls (`smallboat_body_dead`,
-`galleon_dead`) put their meshes under one, and those meshes are LOD 0 (S15).
+`galleon_dead`) put their meshes under one, and those meshes are LOD 0 (S15). The rule is generic: a pak
+sweep (31636 `.cgf`/`.cga`/`.chr` parsed) changes 133 models by 561 LOD 0 nodes against the old
+mesh-ancestry-only rule, mostly `.cga` doors and making props that were invisible, with no model drawing
+both a compiled `Merged` node and its source meshes. `mesh::tests::helper_container_lod_scope` repeats it
+(`--ignored`).
 Compiled CGFs often have a `Merged` node with the merged geometry; the source nodes keep
 hierarchy and helpers but their meshes have no indices.
 

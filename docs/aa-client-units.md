@@ -333,33 +333,51 @@ produced: the `dying` prefab column is dead data in 1.2. Table: 100/76 -> 1, 75/
 25/0 % -> 4, hp 0 -> 6 (`examples/vehicle_damage` checks 5/50/75 with the truncation).
 
 * **Maximum HP.** The client gets no maximum on the wire: `FUN_390b4a70` (x2game.dll.c:149223) reads
-  unit attribute 6 (`FUN_398a0bc0`). The remake sums the template's `unit_modifiers`
-  (`owner_type='Slave'`, `unit_attribute_id=6`) through `Db::slave_max_hp`; all 104 rows are flat
-  values (template 21 / the Eznan Cutter 47 420, template 60 / the Farm Wagon 2 500). `SCMySlave.max_hp`
-  overrides it for the owned slave (`Slaves::position`).
+  unit attribute 6 through `FUN_398a0bc0`: the `unit_formulas` base of the attribute, plus the flat
+  `unit_modifiers` (`owner_type='Slave'`, `unit_attribute_id=6`), then one summed percent multiplier on
+  that sum. `FUN_398a0d60`'s `case 6: 0xe` makes the base formula kind 14 (`MaxHealth`) of the slave owner
+  type (2); its inputs are the primary formulas of the same owner (kind 24 `Sta` = `10 + (level-1)*2`).
+  `Db::slave_max_hp(template, level)` parses those rows instead of hardcoding them. At level 50 the base is
+  4796, so template 21 / the Eznan Cutter is 4796 + 47 420 = 52 216, template 60 / the Farm Wagon is
+  4796 + 2 500 = 7 296, and a template with no row (105) is 4796. Every template uses this attribute; the
+  wire `max_hp` and `SCMySlave.max_hp` are not used (all 104 Slave attribute-6 rows are flat today).
+  The maximum is cached in `VehicleDamage::max_hp` at spawn, so the per-frame check locks no database.
 * **Variant.** `FUN_397a7810` / `FUN_397a7980` walk down from the state to 1 and take the first non-empty
   `vehicle_models` / `ship_models` row: state 2 `damaged25`, 3 `damaged50`, 4 `damaged75`, 6 `dead`,
   else `normal` (`VehicleVariants::for_state`). A slave that comes into view already damaged is built in
   its state's prefab at once (`FUN_390e8b30` / `FUN_390f0510` -> `prepare::plan_unit`). The rowboat
   (129) has distinct `damege50` / `damege75` / `dead` hulls; the airship has only `normal`.
 * **Swap.** `vehicle::update_damage` runs after `units::sync_views`: `FUN_390eb610` (`UpdateModelChange`)
-  recomputes the state, `FUN_390e7b20` stores it and `FUN_390e7910` rebuilds the body. The old parts,
-  wheels, spindle and effects are despawned; the new variant's parts and `$` helpers replace them. A
-  state change that keeps the same prefab does nothing (`FUN_390e7910`'s "same model" return).
+  recomputes the state from the cached maximum and `FUN_390e7b20` stores it. The new variant's models are
+  read on the workers (`VehicleSwaps`, like `prepare::plan_unit`); `vehicle::finish_damage_swaps` then
+  despawns the old parts/wheels/effects and installs the new parts and `$` helpers, and drops the stale
+  `Spindle` and `TurretGun` caches. The old body therefore stays visible while the new prefab is read, and
+  a failed read keeps it instead of leaving an empty vehicle. A state change that keeps the same prefab
+  only updates the state (`FUN_390e7910`'s "same model" return). `SCMySlave.max_hp` does not take part.
 * **Effects.** The new prefab's active `ParticleEffect` entities are spawned with it (damaged fire,
   dead smoke). On a worsening state (`old < new`, also 1 -> 6) the prefab's `_spawn_effect*` entities
   are played once (`FUN_39109120`, x2game.dll.c:206810). `_despawn_effect` has no traced caller and is
-  left out. `exhaust`, `splash_*` and `bubble` are skipped here: 1.2 scales them from the ship's speed
-  and angular velocity (`FUN_390c78d0`), which this slice does not draw.
+  left out. The spawn-time filter is exactly `FUN_390eaf40`'s lists: type-5 particles named `exhaust`
+  (the +0x2c0 list), `splash_l` / `splash_r` (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the
+  ship's speed and angular velocity, which this slice does not draw. A sweep of the 89 `normal` vehicle /
+  ship prefabs found 116 `ParticleEffect` objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7
+  inactive `splash_l` + 7 `splash_r`, 10 inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2
+  active `_spawn` + 2 active named particles (`caravel_cruise_pool`, `airship_smoke`); only the exact
+  speed-driven names are filtered, the other active authored emitters stay.
 * **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
-  their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule now accepts that (the mesh
-  is still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). The ship
-  entity, motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle
-  gate at states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
+  their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule accepts that (the mesh is
+  still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). A sweep of every
+  `.cgf` / `.cga` / `.chr` in the pak (`mesh::tests::helper_container_lod_scope`, `--ignored`) parsed
+  31 636 files: 133 models gain 561 LOD 0 nodes (mostly `.cga` doors and making props, plus the dead
+  hulls) and no model has both a compiled `Merged` node and its source meshes drawn. The ship entity,
+  motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle gate at
+  states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
 
 Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the dying state
 (5), the ship deck floor of a dead hull (the deck still uses `ship_models.normal`), and the engine
-sound (`FUN_390c6780`, needed only once the idle branch lands).
+sound (`FUN_390c6780`, needed only once the idle branch lands). Combat effects anchored to a body bone
+(`super::attachments`) go away with the old parts on a swap; re-anchoring them by bone name is not
+implemented.
 
 ### Vehicle and creature seats
 

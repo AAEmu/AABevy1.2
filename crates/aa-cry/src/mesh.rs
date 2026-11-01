@@ -861,6 +861,100 @@ mod tests {
         }
     }
 
+    /// The rule before the helper-container change: only meshes under mesh nodes are LOD 0.
+    fn old_lod0(model: &Model, node: usize) -> bool {
+        let mut i = Some(node);
+        while let Some(n) = i {
+            if model.nodes[n].kind != NodeKind::Mesh {
+                return false;
+            }
+            i = model.nodes[n].parent;
+        }
+        true
+    }
+
+    /// Every geometry file in the pak, comparing the helper-container LOD 0 rule with the strict mesh-only
+    /// rule. Run with `cargo test -p aa-cry --release helper_container_lod_scope -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "walks every .cgf/.cga/.chr in the pak; run with --ignored"]
+    fn helper_container_lod_scope() {
+        if !crate::pak_available() {
+            return;
+        }
+        let pak = aa_pak::Pak::global();
+        let mut parsed = 0usize;
+        let mut failed = 0usize;
+        let mut changed = Vec::new();
+        let mut doubles = Vec::new();
+        for path in pak.names() {
+            let lower = path.to_ascii_lowercase();
+            if !(lower.ends_with(".cgf") || lower.ends_with(".cga") || lower.ends_with(".chr")) {
+                continue;
+            }
+            let Ok(model) = Model::load(path) else {
+                failed += 1;
+                continue;
+            };
+            parsed += 1;
+            let new: std::collections::BTreeSet<usize> = model.lod_nodes(0).into_iter().collect();
+            let old: std::collections::BTreeSet<usize> = (0..model.nodes.len())
+                .filter(|&i| model.nodes[i].mesh.is_some() && old_lod0(&model, i))
+                .collect();
+            if new == old {
+                continue;
+            }
+            // a compiled `Merged` node next to its non-empty source meshes would draw the geometry twice
+            let drawn: Vec<_> = new
+                .iter()
+                .filter(|&&i| {
+                    model
+                        .meshes
+                        .get(model.nodes[i].mesh.unwrap())
+                        .is_some_and(|m| !m.indices.is_empty())
+                })
+                .copied()
+                .collect();
+            let merged = drawn
+                .iter()
+                .any(|&i| model.nodes[i].name.eq_ignore_ascii_case("Merged"));
+            let sources = drawn
+                .iter()
+                .filter(|&&i| !model.nodes[i].name.eq_ignore_ascii_case("Merged"))
+                .count();
+            if merged && sources > 0 {
+                doubles.push((path.to_string(), drawn.len()));
+            }
+            changed.push((path.to_string(), old.len(), new.len()));
+        }
+        let added: usize = changed
+            .iter()
+            .map(|(_, old, new)| new.saturating_sub(*old))
+            .sum();
+        println!(
+            "LOD sweep: {parsed} geometry files parsed, {failed} unreadable, {} models changed, {added} extra LOD 0 nodes",
+            changed.len()
+        );
+        for (path, old, new) in changed.iter().take(20) {
+            println!("  {path}: {old} -> {new}");
+        }
+        println!(
+            "double geometry candidates (Merged + source meshes): {}",
+            doubles.len()
+        );
+        for (path, n) in doubles.iter().take(10) {
+            println!("  {path}: {n} drawn nodes");
+        }
+        assert!(
+            doubles.is_empty(),
+            "no model draws a Merged node and its source meshes twice"
+        );
+        assert!(
+            changed.len() < parsed / 10,
+            "the helper rule touched {} of {parsed} models",
+            changed.len()
+        );
+    }
+
     /// Legacy uncompiled skinned part (Mesh 0x744 + BoneAnim / BoneNameList / BoneInitialPos).
     #[test]
     fn real_legacy_mesh() {
