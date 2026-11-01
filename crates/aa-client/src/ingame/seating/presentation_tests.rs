@@ -82,6 +82,7 @@ pub(crate) fn app() -> (App, Entity, Entity) {
                     Affine3A::from_translation(Vec3::new(0.0, -1.3, 0.0)),
                 )]
                 .into(),
+                ladder: None,
                 growth: None,
                 remaining_ms: 0.0,
                 total_ms: 0.0,
@@ -600,7 +601,7 @@ fn old_release_does_not_reset_a_same_id_replacement_to_its_first_report() {
         Event::UnitMoved { obj_id:47,movement:aa_net::model::Movement::unit(Pos::new(31.0,0.0,5.0),0.0,100) },
     ] { app.world_mut().write_message(NetEvent(event)); }
     app.update();
-    let point = app.world().resource::<Views>().unit_point(&replacement).unwrap();
+    let point = app.world().resource::<Views>().unit_point(&replacement, app.world().resource::<Units>()).unwrap();
     assert!(point.x < 31.0,"new incarnation must follow normal playback, not consume the old accepted release: {point:?}");
 }
 
@@ -627,6 +628,6 @@ fn replacement_snapshot_release_is_not_the_new_incarnations_movement_boundary() 
     app.world_mut().write_message(NetEvent(Event::UnitMoved { obj_id:47,
         movement:aa_net::model::Movement::unit(Pos::new(31.0,0.0,5.0),0.0,100) }));
     app.update();
-    let point = app.world().resource::<Views>().unit_point(&replacement).unwrap();
+    let point = app.world().resource::<Views>().unit_point(&replacement, app.world().resource::<Units>()).unwrap();
     assert!(point.x < 31.0,"release and birth at the same snapshot belong to different incarnations: {point:?}");
 }

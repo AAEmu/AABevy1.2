@@ -435,3 +435,16 @@ fn receipt_fold_runs_before_input_without_an_in_game_screen() {
     app.update();
     assert!(app.world().resource::<Seats>().own_free());
 }
+
+/// `player+0x3b94`: the seat bond makes the local player seated (no interaction prompts); it is
+/// cleared by the local unbind.
+#[test]
+fn own_seated_follows_the_received_own_bond() {
+    let mut seats = active(None);
+    assert!(!seats.own_seated());
+    seats.apply(&received(bond()));
+    assert!(seats.own_seated());
+    let request = seats.capture_unbond().unwrap();
+    seats.apply(&completion(request));
+    assert!(!seats.own_seated(), "a local unbind stands the player up");
+}

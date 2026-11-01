@@ -112,6 +112,20 @@ loop `sounds/x2ambience:_zone_loop:underwater`; coming up stops the loop and pla
 the character's swim state, here the camera below the surface is used. The kind 4 effect (`nuian_bodyfall_feedback`, the
 landing after a fall) has no known trigger here and is not played.
 
+### Vehicle engine sounds (`sounds.rs`, `VehicleUnitModel::UpdateSound`)
+
+`vehicle_engine_sounds` resolves each unit's engine sounds once (a `VehicleSound` marker keeps it checked), from the CRC-keyed items of its
+model's pack (`engine`, `run`; see [units](aa-client-units.md#engine-idle-and-engine-sound-vehicleidle-start_vehicle_idle-vehiclesound)).
+`engine` is the loop 1.2 starts and updates while the model's prefab damage state is 1..4, and `run` plays only while
+the model moves (either velocity vector above 0.0003). The `engine` event's `speed`, `volume1`, `pitch1`, `volume2`,
+`pitch2` parameters follow the root speed over `vehicle_models.velocity` / `ship_models.velocity`;
+`update_vehicle_engine_sounds` rewrites them only when the ratio changes. The tractor's pack has only `run` (so it is
+silent when parked), the speedcar's only `engine` (its `speed_car/run` event is the one with those parameters). Native
+stops the `run`/`yaw`/`pitch` handles in damage state 5 (dying) or 6 (dead) and does not update the `engine` handle
+there (it is not explicitly stopped). The Bevy client has no dying state yet (PR #69), so it gates on `Dead` (state 6)
+and removes both sounds there; a resurrection restores the engine. A muted run has no `SoundBook`/`Packs`, so nothing
+is resolved.
+
 ## Checks (muted engine unless `--sound`)
 
 ```

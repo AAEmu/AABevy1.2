@@ -583,6 +583,7 @@ pub(crate) fn leave_deck(
             speed: local_velocity.length(),
             local_dir: local_velocity.normalize_or_zero(),
             airborne: true,
+            climb: None,
         }
     };
     *input_state = PlayerInput {
@@ -653,6 +654,7 @@ pub fn board_deck(
             Has<DismountMove>,
             Option<&Rider>,
             Option<&DeckRide>,
+            Has<super::super::ladder::Ladder>,
         ),
         With<LocalPlayer>,
     >,
@@ -667,11 +669,14 @@ pub fn board_deck(
         return;
     }
     let Some(db) = db.as_deref() else { return };
-    let Ok((entity, local, mover, dead, skill_move, seated, dismounting, riding_rider, deck)) =
+    let Ok((entity, local, mover, dead, skill_move, seated, dismounting, riding_rider, deck, on_ladder)) =
         locals.single()
     else {
         return;
     };
+    if on_ladder {
+        return;
+    }
     // the server's death event marks the stats before combat adds `Dead` (as on foot)
     let dead = dead || stats_dead(stats.as_deref(), local.obj_id);
     // a get-off clip playing over the hull may already stand on the deck: the
@@ -1101,6 +1106,7 @@ pub fn deck_control(
         },
         local_dir,
         airborne: deck.airborne,
+        climb: None,
     };
     // the same jump/walk/Dash facts the on-foot controller writes for the clips
     let jump_now = LocalJump {
