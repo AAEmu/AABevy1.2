@@ -42,6 +42,7 @@ pub(super) fn fixture() -> (App, super::super::api::Shared) {
         .init_resource::<aa_net::state::Buffs>()
         .init_resource::<aa_net::Appellations>()
         .init_resource::<aa_net::state::Target>()
+        .init_resource::<crate::ingame::units::Views>()
         .insert_resource(Player { spawn: Some(spawn) })
         .insert_resource(units)
         .insert_non_send(HudBridge(bridge.clone()))

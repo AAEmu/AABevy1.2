@@ -324,6 +324,69 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+### Engine idle and engine sound (`VehicleIdle`, `start_vehicle_idle`, `VehicleSound`)
+
+1.2 starts the prefab body's loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init and refresh
+(`FUN_390e69d0`): it plays `fist_ba_relaxed_idle` whenever the model has an animation id, with no driver, speed or
+ownership condition. Its callers skip it while the model's prefab damage state (`model+0x1f0`, `param_1[0x7c]`) is
+5 (dying) or 6 (dead): `FUN_390e69d0` (DEC 184925, init/apply), `FUN_390eb7d0` (DEC 187546,
+`PrefabUnitModel::Update`), `FUN_390ebaa0` (DEC 187601, `VehicleUnitModel::Update`) and the interaction "opened" path
+`FUN_390d64a0` (DEC 173191).
+5 and 6 are damage states, not model kinds (the kind is the template's `+0x30`); the idle resumes when a revive puts
+the state back to 1..4. The Farm Wagon's `transfers_trailer_a_body.cal` lists only that idle and `dead_01`; the idle's 21
+tracks bind to 19 of the body's 29 bones, including `Bone_engine01..03` (`clipinfo`). Measured on 2026-11-01: a bare
+`vehicle::spawn` and a live GM-spawned slave 60 both loop the clip and `Bone_engine01` rotates about 2.4 rad/s of wall
+time, so the clip, the controller ids and the `Animator` tick are sound.
+
+`vehicle::spawn` owns that rule (an ownership move: the generic creature spawn had looped it implicitly):
+a rigged prefab part gets a [`VehicleIdle`] with the idle bound from its `.cal`, and the `VehiclePlugin` system starts
+it (looping) whenever the body's `Animator` has no clip, the Bevy analogue of the 1.2 init/refresh.
+`creature::spawn_with_idle(..., play_idle = false)` keeps the generic creature idle from starting a vehicle body first.
+The exclusion is inherent: the driver only runs on prefab vehicle/ship bodies, and a body in damage state 5 or 6 keeps
+the loop stopped. The Bevy client has no dying state yet (PR #69 adds vehicle damage), so it gates on `Dead`
+(state 6) only. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
+`1277 tower_cannon`, `1293 hwang_ferrari`, `1323/1371/1406 speedcar1-3`, `1442 food_truck`, `1444 speedcar_decal`,
+`1460/1461/1462 speedcar_*_ucc`, `1464 tractor_b`, `1465 sigetank`, `1526 siegetank_prologue`, `1553 tractor_c`,
+`2 trebuchet`, `5 siege_tower`, `8000009 small_tractor`, `892/898/899 siegetank_a-c`, `990 siege_catapult_a`); three
+ships do (`1360/1383/1384 fishboat_1-3`). All of them go through the same path.
+
+Engine sound: `X2::VehicleUnitModel::UpdateSound` (`FUN_390c6780`, called from `FUN_390ebaa0` at DEC 187611, outside
+its 5/6 gate) resolves four items of the model's sound pack by CRC key: `run` (model+0x400), `yaw` (0x404), `pitch`
+(0x408) and `engine` (0x40c). Each is a `SoundManager::PlaySound` (`FUN_393f4220`) at the model position, moved with
+`FUN_393f14a0`, stopped with `FUN_393f1bd0`:
+
+* While the prefab damage state is 1..4, `engine` starts on the first update and is never speed-gated; it gets event
+  parameters `speed`, `volume1`, `pitch1`, `volume2`, `pitch2` every frame.
+* `run` starts only while the model moves. The gate is the L1 norm of either of the model's two velocity vectors
+  (`vtable+0xa4` and `+0xa8`) against `0x399a3fbc = 0.0003`; below both it stops. `yaw` and `pitch` are started as
+  one-shots when the model flags at `+0x2d4`/`+0x2d5` are set; what raises those flags is outside `UpdateSound` and
+  was not decoded, so the vehicle path here does not start those items (capture-pending).
+* In state 5 or 6 the function stops the three non-engine handles (`run` +0x410, `yaw` +0x414, `pitch` +0x418) and
+  jumps to the end. The `engine` handle (+0x41c) is neither started nor updated there, but it is not explicitly
+  stopped: an engine already playing keeps its last parameters.
+* The `speed` parameter is `clamp(|v| / max(0.1, max speed), 0, 1) * 0.99` (`0x399a3fb8`); the max speed is the
+  physics block's `vtable+0x1e0 -> +0x34 -> +0x74`, the `vehicle_models.velocity` / `ship_models.velocity` column.
+  `pitch1`, `volume2` and `pitch2` are the same ratio; `volume1` is the ratio times `throttle * 0.8 + 0.2`
+  (`DAT_399a1d94`, `_DAT_3999dd34`), clamped and scaled by 0.99. The client's `VehicleMotion` has no throttle, so the
+  speed ratio stands in for it (capture-pending). The exact meaning of the second velocity vector is also not decoded;
+  the root velocity and yaw rate stand in for the two (capture-pending).
+
+The data matches the split: `sound_packs` 176 `run_tractor` has no `engine` item and `run` -> sound 950
+(`sounds/x2vehicles:trailer:run`); `run_speedcar` has `engine` -> 3553 (`sounds/x2vehicles:speed_car:run`, the only
+vehicle event with `speed`/`volume1`/`pitch1`/`volume2`/`pitch2`) and an empty `run` item. `sounds::vehicle_engine_sounds`
+resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_models.velocity`/`ship_models.velocity`
+are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
+for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
+parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
+state 5/6 and freezes the `engine` handle; the Bevy client has no dying state yet (PR #69), so it gates on `Dead`
+(state 6) and removes both sounds there - a deviation to revisit with #69. A resurrection puts the engine back and
+`vehicle::resume_vehicle_idle` starts the idle again.
+
+`VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
+`combat::ensure_corpses` only looks for an `Animator` on the root that carries `Dead`; a prefab body keeps its
+Animator on the child part, so `vehicle::stop_dead_vehicles` stops the idle there and plays the death clip. This is the
+pre-existing dead-01 gap for vehicle corpses, fixed on the vehicle path.
+
 ### Damage states (S15)
 
 The drawn body follows the unit's health. `vehicle::model_state` is `FUN_3989f8b0` (x2game.dll.c:1935601):
@@ -475,8 +538,9 @@ and explicit controls").
   2026-10-28 capture sent exactly `3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00`
   for cart bc 0x5f3c. The earlier claim that slaves never send 0x068 is **corrected** by that
   capture; the click does not send 0x031. While already bound to or seated on the clicked slave,
-  a right click sends only `CSChangeTarget` 0x02c (capture case e: four sweep points, no 0x068,
-  no 0x031, no message); this port did the same after 2026-10-28.
+  a right click sends only `CSChangeTarget` 0x02c (`captures/2026-10-28b/summary.txt:36`, case
+  e `bound`: 4 of 44 sweep points, no 0x068, no 0x031, no message); this port did the same after
+  2026-10-28.
 * **Boarding.** `SCNpcInteractionSkillList` 0x07b for a slave acts on the FIRST skill at once
   (`FUN_393be850` -> `FUN_393be280`). 12076 ("occupy") checks the interaction reach first
   (`FUN_393bf270` / `FUN_39093860`: `DAT_39ac79fc` 9.0, or `DAT_39ac7a00` 12.25 when the player
@@ -509,8 +573,57 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
+* **Clicking the model (2026-10-31).** A unit's 1.1 m pick sphere and a vehicle's drawn mesh box
+  are both candidates. Among sphere hits the nearest entry wins; among box hits the nearest entry
+  wins, except that an attached child (a cannon) wins over its parent when its entry is within
+  1.0 m of the parent's entry, so a stern cannon deep inside a bow-clicked hull does not win. A
+  sphere hit then beats the chosen box only while its entry is at or before the box's exit along
+  the ray: a player, NPC or passenger standing on a deck or in a wagon bed (inside the vehicle's
+  span) is picked from outside the vehicle, while a unit behind the vehicle loses to the nearer
+  box entry and cannot steal the click. A unit that is not a `UnitKind::Slave` has no box: a
+  character's draw tree has weapon, attachment and effect bounds but no body bounds, and the box
+  walk stops at a child unit, a parented doodad or an effect. A box that contains the camera is
+  ignored (a camera on deck is inside a ship's box, masts and sails included, and would otherwise
+  be picked on every click). The slave the player rides or is attached to gets no box at all, only
+  its sphere, so it does not block clicks past it; seated, a click only inside the ridden wagon's
+  loose box therefore does not target it (a documented deviation: 1.2's ridden pick is tight,
+  landing on 4 of 44 sweep points, `captures/2026-10-28b/summary.txt:36`; its exact shape is
+  capture-pending). Two consequences of the loose box remain until a capture gives 1.2's tighter
+  pick shape: the 1.0 m child rule mostly helps near-horizontal clicks at the hull side, because
+  from an elevated camera the ray enters the ship's box through the top or the yards, so a cannon
+  clicked outside its sphere goes to the ship; and a unit seen through the empty space between
+  masts or sails loses to the loose box. The box is measured in the drawn root's local frame and
+  composed with the root's current `Transform` chain on every read, so a wagon that drives or
+  turns is picked where it is now; the root and mesh `GlobalTransform`s come from the same
+  propagation (last frame's while a vehicle moves), so their relative box is still correct. Only a
+  fully built tree (every static mesh has its bounds) is cached, and the cache lasts until the root
+  or model changes; nothing is measured on the spawn frame, the frame a mesh is added, or while a
+  mesh's `GlobalTransform` is still the identity but its own `Transform` chain is not. Left click,
+  the right click, the Tab candidates and the talk distances use the
+  unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
+  parent-composed position, and `Tab` and the talk checks measure from the manned slave's world
+  position (`hud/slave.rs::player_centre`). The rule that an own vehicle may be targeted is
+  `captures/2026-10-28b/summary.txt:36`, case e `bound` (`CSChangeTarget` 0x02c); the native pick
+  landed on 4 of 44 sweep points there, so the port's union-of-meshes box is looser than 1.2's
+  (capture-pending: the exact pick shape).
 * **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
   an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
+
+* **Interact key and Grab Machine.** F on foot next to a slave is the dynamic action bar's
+  "Grab Machine" entry (`FUN_393bdad0` -> `FUN_393bbb80`), not NPC talk: every slave within
+  `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate and F sends `CSBindSlave` 0x031
+  (`FUN_393b1de0` -> `FUN_393be280`). The facing is only the ordering key, `gap - (1 + facing)`
+  (`FUN_393601a0`, `FUN_3902ed20`), so a slave behind or beside the player is still offered. The
+  units and the doodads share that one sorted set (`FUN_3902f010` adds the doodads), and
+  `hud/doodad.rs` arbitrates its two producers on the same key: the Farm Wagon's storage boxes
+  (doodads 3446 at attach points 9-12) are often nearer in centre terms but behind or beside the
+  player, and the wagon in front then keeps the prompt. A right-clicked doodad keeps its native
+  key against a slave (the preference ranks doodads only), and a key tie keeps the doodad: that
+  tie-break is `FUN_393bd9e0`, not decoded. While the player sits on a bonded seat
+  doodad (`player+0x3b94`, `FUN_393635e0` `BondLazyDoodad`) neither prompt is built. The
+  2026-10-28 capture with a cart targeted and an NPC at 1.24 m produced no packet; the 2026-11-01
+  owner capture shows the prompt and F taking the driver seat. NPC talk keeps the path it had when
+  the bar has nothing to claim.
 * **Bound state.** `SCSlaveBound` 0x064 (`FUN_391d4760` -> `FUN_39345d00`) with the local
   character as master stores the slave object; `hud/mounted.rs` keeps it with the slave's timeline
   from the loaded unit. `SCUnitAttached` 0x076 remains the authoritative seat state
@@ -528,12 +641,18 @@ and explicit controls").
   seat: `Player::apply` clears `attached_to` (`aa-net/src/state.rs`), and `hud/mounted.rs` clears
   the cached seat link and the bound fallback with it (no separate `SCUnitDetached` is needed).
 * **Leaving.** `X2SiegeWeapon:DiscardSiegeWeapon` (native `FUN_394aa090` -> `FUN_39345aa0`) sends
-  `SlaveCommand::Unbind` 0x032 for the timeline of the seated slave, else the SCSlaveBound one. While the slave's speed squared is above
-  `_DAT_3999f85c` 25.0 (5 m/s) it is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 instead. The
-  speed is the latest replicated `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s,
-  30/32767 m/s for a type-2 vehicle body), or the controller speed for the cart this client drives
-  (`cart::CartDrive`, which no `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2 value**); the native
-  getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+  `SlaveCommand::Unbind` 0x032 for the timeline SCSlaveBound stored at `this+0x14`, with the speed
+  check on that bound slave's object id (`this+0x18`): both use the BOUND slave, not the seat, so
+  a player seated on another slave still discards the bound one. The driver branch is keyed on
+  `this+0x14`, the slave SCSlaveBound named as the local player's master, not on the seat point.
+  With it the unbind is refused while the bound slave's speed squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170`
+  sends only from an attachment above point 1 (no speed check, 1500 ms throttle) and is silent for
+  a point-1 seat that is not the player's. The speed is the latest replicated
+  `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s, 30/32767 m/s for a type-2 vehicle
+  body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
+  `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
+  value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
   the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
@@ -546,29 +665,32 @@ and explicit controls").
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
   unverified.
-  The current UI has no mounted-HUD release action that calls `DiscardSiegeWeapon` (the original
-  scripts list it as unused), so the Lua entry point and the passenger walk-off are the two ways
-  a client action sends the unbind.
+  The mode bar's `unbind` function slot now calls the same `FUN_39345aa0` path (driver 0x67 above
+  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point and the passenger walk-off remain
+  the other two ways a client action sends the unbind.
 
 #### Pending live checks
 
 * `CSBindSlave` 0x031 body is exactly a `u16` timeline id (the decompile only shows a 32-bit
   setter; the 2026-10-28 capture never reached 0x031).
 * The pick suppression distance: 1.2 sent nothing for a cart picked at 4.57 m and 0x068 at
-  2.46 m; the exact check is unknown. The port keeps its view-ray pick (`PICK_RADIUS`) and adds no
-  range test.
+  2.46 m; the exact check is unknown. The port keeps its view-ray pick (the model box, or the
+  small-unit `PICK_RADIUS` sphere) and adds no range test.
 * The exact collision shapes behind the 3.0 / 3.5 / 4.0 m surface gaps are not recovered; the
   port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
   modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.
 * The 3.5 m and 4.5 m interaction picks could not be measured: the native pick never landed in
-  the 2026-10-28 capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
+  the 2026-10-28b capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
   binds are live evidence. A later capture must land the pick to check whether 1.2 acts at 3.5 m
   (shifted target flag) and refuses at 4.5 m.
 * `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
   `DAT_39ac796c`.
 * The auto-walk to a slave out of reach (`FUN_390a6af0`) and its re-entry into the interaction.
-* F / dynamic action bar 12076 path (`FUN_393b1de0`): the capture with a cart targeted and an NPC
-  at 1.24 m sent nothing; the port sends nothing for a cart on F.
+* The dynamic action bar's slave candidate (12076/13863) is decompile-backed: the native key
+  `gap - (1 + facing)` orders one unit/doodad set, but a live capture of a slave beside/behind the
+  player and of the wagon's storage-box arbitration was not taken. The `player+0x3b94` gate is
+  ported from the received bond (`FUN_393635e0`); the two `showSlaveInfo` gates remain
+  capture-pending.
 * 13863 (passenger) and 19165 (destroy) `CSStartSkill` targets and fields; the port ignores them.
 * Server side: the lane's `CSStartInteraction068` only answers NPCs/mates; a target server must
   answer a slave with `[12076]`.
@@ -875,6 +997,10 @@ interpolation, the delay, the clock offset, the hold, the rotation, the first-sa
 rendered path is broken:
 `cargo run -p aa-client --example remote_vehicle_motion -- --headless`.
 
+The replay uses a deterministic fixed step (`TimeUpdateStrategy::ManualDuration(1/60)`, game time);
+its `aa-dev: … clock=manual game_per_wall=… real_per_wall=…` line records the wall ratios. The checks
+are game-time durations and must not be read as wall-clock timings.
+
 ## What is drawn (the census)
 
 Units are spawned within `UNIT_RADIUS` (140 m) of the player, in a time budget per frame (models are prepared on the task pool,
@@ -1153,55 +1279,122 @@ the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not re
 
 * **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
   gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
-  slave is kind 7/8, the `vehicle_models` row parses to a non-zero turret range, and its `velocity`
-  is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database copy, so
-  `velocity == 0` is the substitute (S12-C6); the trebuchets/tanks (velocity 2.5-3.5) and the
-  cotton-field cart (4.0) stay drivable, and the all-zero rows (vehicle_models 37/40) are not
-  turrets. `turret_seat_model` is the gate; a real-data test walks every kind-7/8 `slaves` row. So
-  `player::control_player` locks walking, `cart::drive_cart` and the mate driver path do not run, and
-  the player follows the server-placed cannon (`mount::drive_mount`). The seat pose is the cannon's
-  `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` / `fist_ac_ballista_idle` /
-  `fist_ba_siegeweapon_idle`), already handled by the mount code.
-* **Aim.** `turret::local_aim` takes the orbit camera direction in the cannon root's frame
-  (`394322f0`'s camera direction), clamps pitch to the model's min/max and yaw to min/max (or wraps a
-  full-circle yaw, `39425580`), and sends `CSTurretState` 0x036 with the slave's object id through
-  `turret::TurretSend`: one global 200 ms timer (`DAT_3a169940`), a packet only when the model aim
-  changed, and a change inside the window is **dropped** (not queued; `FUN_39356990` returns without
-  sending). The state resets when the local player mounts a gunner seat, so the same clamped aim is
-  sent again. `turret::aim_turrets` moves
-  the drawn aim towards the target at `turret_yaw_angvel` / `turret_pitch_angvel` and writes
-  `bone_yaw` (`R_z(yaw)`) and `bone_pitch` (`R_x(pitch)`) after the animation pass
-  (`UpdateGunTurret` `FUN_390d14b0`).
+  slave is kind 7/8 and its `models.sub_type = 'VehicleModel'` row parses to a non-zero turret
+  range. That is the 1.2 controller type 3 (`FUN_390b3750` = `X2::VehicleUnitModel`, S12-C6). A
+  drivable catapult or tank is a turret seat too and keeps driving through the cart path; the
+  all-zero rows (vehicle_models 37/40) are not turrets. `turret_seat_model` is the gate; a
+  real-data test walks every kind-7/8 `slaves` row. The gunner's `player::control_player` locks
+  walking, and the player follows the server-placed cannon (`mount::drive_mount`). The seat pose
+  is the cannon's `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` /
+  `fist_ac_ballista_idle` / `fist_ba_siegeweapon_idle`), already handled by the mount code.
+* **Aim.** `turret::local_aim` runs the camera aim only for a slave with a `BallisticPos`
+  (target type 11) or `ArtilleryPos` (15) mount skill (`Db::has_cannon_skill`), the stand-in for
+  the native mode 8 that `FUN_394322f0` requires. A drivable `VehicleModel` with a turret block
+  but only cart skills (the cotton wagon 73, Honk horn 15622) therefore does not aim or send
+  `CSTurretState`. It uses the drawn game camera (`OrbitCamera`), never a prewarm or cinema
+  camera, and its screen-centre ray (`FUN_3917dd80` via `FUN_394281b0`, from the camera matrix
+  translation) runs over `max(300, skills.max_range)` (`FUN_394322f0` @ `0x3943238c`:
+  `comiss 300, range; ja keep 300`). The ray stops at terrain and
+  static brushes (`WorldCollision::raycast_mask`, the terrain height-march fallback outside the
+  built cells), the sea (`World::ocean_level`) and the drawn unit/ship bodies. A ship hull is an
+  oriented box: its hull-floor XY bounds turned by the unit yaw, with the
+  `ship_models.mass_center_z +/- mass_box_size_z / 2` keel-to-deck/rail height range. The old
+  hull bounding sphere reached about 10 m past the side, so a broadside `Position` landed short
+  of the server's hit area. A unit is still a bounding sphere. The hit is pulled
+  into the skill's horizontal angle cone (`FUN_393594c0`: half-angle `skills.target_angle / 2 - 1`
+  degrees around the slave's facing, keeping the height), so a gunner looking far off sends a point
+  inside the cone the server accepts instead of `OUTOF_ANGLE`. The arc is then solved from the
+  `item_hand_r` muzzle (the unit position `FUN_390b3850` when the bone is missing) at
+  `skills.effect_speed`: `t = 3-D distance / speed`, `vz = dz/t + g/2*t`, pitch `atan2(vz, len)`,
+  horizontal yaw in the model frame. It is traced in 0.1 s segments with the same world test
+  (`FUN_39429750`, mask 0x307; the first hit is the target, else the camera hit). A screen ray
+  that hits nothing is `NO_TARGET` (result 9, `FUN_394281b0` returns 0) and the click sends
+  nothing; a `BallisticPos` click with no published `Sight` (the camera or the cannon root is
+  not ready) is refused locally with the same `NO_TARGET` instead of falling back to a Unit
+  target the server reads as the caster's own position. The solved aim is clamped to the
+  model's min/max (or a full-circle yaw wraps) and sent
+  as `CSTurretState` 0x036 with the slave's object id through `turret::TurretSend`: one global
+  200 ms timer (`DAT_3a169940`), a packet only when the model aim changed, and a change inside
+  the window is **dropped** (not queued; `FUN_39356990` returns without sending). The state resets
+  when the local player mounts a gunner seat, so the same clamped aim is sent again. The turret is
+  turned only when the aim preview passes (the ray and the range check, `CanUse` flags 0x442) or
+  by the installed-turret keys; `local_aim` runs before `hud::api::sync_hud` /
+  `handle_requests` and `api::handle_requests` is ordered after it, so the state goes out before a
+  click's fire. `turret::aim_turrets` moves the drawn aim towards the target at
+  `turret_yaw_angvel` / `turret_pitch_angvel` and writes `bone_yaw` (`R_z(yaw)`) and `bone_pitch`
+  (`R_x(pitch)`) after the animation pass (`UpdateGunTurret` `FUN_390d14b0`).
+* **Key aim.** `FUN_39425580` runs only for `vehicle_models.installed_turret` models (8 rows):
+  actions 0/1 (`moveforward`/`moveback`) pitch and 4/5 (`turnleft`/`turnright`) yaw step the
+  persistent aim at `turret_pitch_angvel` / `turret_yaw_angvel`, then the same clamp (a full-circle
+  yaw wraps). The gate stays the `VehicleModel` (`models.sub_type`) with `installed_turret`, not
+  the cannon-skill gate: an installed model without a `BallisticPos`/`ArtilleryPos` skill still
+  turns and sends `CSTurretState` by keys but publishes no camera `Sight`. Key aim only turns the
+  turret; the click still sends the camera-arc point, so this client does not use the key aim as
+  the shot direction. The type-15 `ArtilleryPos` preview of `FUN_394332d0` (path B, the Lua
+  siege-weapon skill) is not reproduced. A cannon 77 is not installed, so it aims by camera only,
+  as in 1.2. Whether a tank's WASD driving and turret turning work together is **capture-pending**
+  (S12-C4).
 * **Remote.** Posture type 8 (both `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail) is
   decoded into `Posture.turret` / `Unit.turret`; `turret::remote_targets` and `aim_turrets` apply it
   to another player's cannon (a late viewer reads the `SCUnitState` snapshot).
-* **Fire.** A cannon's gunner bar is the point-1 `mount_attached_skills` skill (the real bar shows
+* **Bar.** A cannon's gunner bar is the point-1 `mount_attached_skills` skill (the real bar shows
   14372 for slave 10, 24501 for 133, 20161 for 100; `target_type_id` 0), while the slot casts the
-  linked `mount_skills.skill_id` (10473, 24500, 20160). `hud/mode_actions` builds that gunner bar and
+  linked `mount_skills.skill_id` (10473, 24500, 20160). The bar's turret gate is the old
+  `vehicle_models.velocity == 0` rule: a drivable cart with a turret block (the cotton wagon 73)
+  keeps its mount skills (15622 Honk horn), even though the engine still lets it drive. This is
+  deliberately narrower than `turret_seat_model` (the camera/key aim seat) and narrower than the
+  camera-aim cannon-skill gate. `hud/mode_actions` builds that gunner bar and
   `use_slot` sends the cast skill: when it has `skills.target_type_id` 11 (`BallisticPos`) and a
-  `Sight` for the same slave is published, the command is `UseMateSkillAt` (`CSStartSkill` with a
-  `Mount` caster and a `Position` target at the aimed ground point). The tower deployment skill
-  20160/20161 is not a shot and keeps the ordinary unit/no-target cast. The server's
+  `Sight` for the same slave is published, the command is `UseMateSkillAt` (`CSStartSkill` 0x052
+  with a `Mount` caster `{cannon slave, mount_skills.id}`, skill id `mount_skills.skill_id` and a
+  `Position` target `{x, y, z, rot 0, objId1/2 0}` at the arc impact point). The last byte is the
+  no-skill-object flag 0x00 (1.2 may also set 0x80; the server reads `flag & 15`). The tower
+  deployment skill 20160/20161 is not a shot and keeps the ordinary unit/no-target cast. A refused
+  mount cast now reaches `hud/alerts` (`SKILL_MSG` with the result, `COOLDOWN_TIME` detail 2 silent,
+  `FUN_39390900`; the decompile's other silent rule, `FUN_39182840` plus the skill's +0x19 flag, is
+  not reproduced because that flag is not recovered). The server's
   `ship_cannon_gunner_seat_skill_and_leaving` sends the same Position shape, and a real-data test
-  covers the bar -> cast mapping for slaves 10/133/100.
+  covers the bar -> cast mapping for slaves 10/133/100. `Db::cannon_skill` takes the first
+  `BallisticPos` `slave_mount_skills` row (the siege thrower, slave 1, has three ammo throws that
+  share the ballistic data); `Db::cannon_skill_for` can select a row when a caller knows the slot.
 
 Capture-pending (case ids; every one has a capture step):
 
-* **S12-C1** The fire aim point and the exact Position bytes: the client sends the clamped barrel
-  direction's straight terrain hit (max 120 m, the server test's skill 10473 range), not the 1.2
-  ballistic solve (`FUN_394281b0` / the `FUN_394322f0` march). Capture: record the CSStartSkill 0x052
-  body of a cannon shot and the aimpoint when the target is on a hill or behind cover.
+* **S12-C1** The exact `Position` bytes of a live shot: the solve is from the decompile, but the
+  `item_hand_r` muzzle (the open item in the handoff) and the 0x80 option flag are inferred. The
+  no-hit refusal is no longer open (`FUN_394281b0` returns 0 -> result 9). Capture: record the
+  CSStartSkill 0x052 body of a cannon shot and the aimpoint when the target is on a hill, behind
+  cover or over water.
 * **S12-C2** The `CSTurretState` unit id: the client sends the manned slave. Capture: compare the
   captured 0x036 object id with the cannon child, the gunner and the hull.
-* **S12-C3** The camera aim: the client uses the orbit camera's total yaw/pitch; 1.2 solves the
-  camera ray and may split the pitch past 50 degrees. Capture the drawn `bone_yaw`/`bone_pitch` per
-  frame while panning the mouse and compare with the orbit angles.
-* **S12-C4** Installed-turret key aim (`39425580`): the key indices and key rates are not captured;
-  this client uses the camera aim and the same rate limit for installed models (the trebuchet).
-* **S12-C6** The kind-7/8 gate for a turret seat: `vehicle_models.velocity == 0` substitutes for the
-  model controller type 3 (`FUN_390b3750`), which is not in the database copy. Capture the
-  controller type of a trebuchet and a tank and the attach point the original uses for a ground
-  cannon; if the controller type differs from velocity == 0, replace the gate.
+* **S12-C3** The camera aim: the client uses the drawn camera's screen-centre ray. The 1.2 camera
+  split above 50 degrees of pitch is not reproduced. Capture the drawn `bone_yaw`/`bone_pitch` per
+  frame while panning the mouse and compare with the camera ray.
+* **S12-C4** Installed-turret key aim (`39425580`): the actions (0/1 pitch, 4/5 yaw) and the rates
+  are from the decompile; the `FUN_39094500` / `+0x74` gate before it and the "+0x74 <= 0" test
+  are not reproduced. Capture a tower cannon's keys. **Capture-pending:** whether a tank's WASD
+  driving and camera/key turret turning work together in the original (the client keeps both paths
+  open). The local `CanUse` preview is the ray and the skill range; the decompile's `CanUse` reads
+  the current unit target (`local_170` / `DAT_3a5a4d70`) and its full check set is not recovered.
+* **S12-C6** The kind-7/8 gate for a turret seat: `models.sub_type = 'VehicleModel'` is the model
+  controller type 3 (`FUN_390b3750`), so a catapult or tank is a turret seat and keys turn its
+  installed turret. The camera-aim mode is narrower: a `BallisticPos`/`ArtilleryPos` mount skill
+  (`Db::has_cannon_skill`) stands in for the unrecovered mode-8 entry, so a drivable cart with a
+  turret block does not send `CSTurretState`. The bar uses the older `velocity == 0` rule. Capture
+  the attach point the original uses for a ground cannon and whether a drivable turret keeps the
+  cart controls at the same time (S12-C4).
 * **S12-C7** A non-identity `bone_yaw` / `bone_pitch` bind: the galleon cannon's bones are identity
   bind, so the direct `R_z` / `R_x` composition is proven only there. Capture a model whose turret
   bones carry a bind rotation and compare.
+* **S12-C8** The ray obstructions are approximate where the game's own collision is not loaded:
+  units are bounding spheres, a ship hull is an oriented box from the hull-floor XY bounds and
+  the `ship_models` mass box's keel-to-deck/rail height range (the old sphere stopped about 10 m
+  short of the side), and only the ocean plane is tested (inland water volumes are not).
+  Static/rigid brushes and terrain come from `WorldCollision`; outside its built cells the
+  terrain height-march is the fallback. The 1.2 entity flags (living 0x10, static/sleeping/rigid
+  7, water 0x200) are approximated by those volumes. Capture a shot through a ship, a unit and a
+  lake to check the stop points.
+
+TODO(#58 child units): when the `child-units` branch lands, `turret::local_aim` should read
+`units::current_transform` instead of the drawn `GlobalTransform`, so a cannon aboard a moving
+ship aims from its parent's transform (S12-C3). Until then it uses the replicated transform.

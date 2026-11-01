@@ -59,6 +59,7 @@ fn main() {
             aa_dev::DevPlugin,
             aa_cry::CryPlugin,
             aa_anim::AnimPlugin,
+            ingame::vehicle::VehiclePlugin,
             aa_world::pipelines::build,
         ))
         .insert_resource(GlobalAmbientLight { color: Color::WHITE, brightness: 300.0, ..default() })
