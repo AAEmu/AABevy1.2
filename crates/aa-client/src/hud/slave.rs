@@ -62,6 +62,10 @@ pub(super) const INTERACT_REACH: f32 = 3.0;
 pub(super) const MOUNTED_INTERACT_REACH: f32 = 3.5;
 /// `DAT_39ac7408` (16.0): `FUN_39346290`'s bind reach, sqrt(16.0) = 4.0 m.
 pub(super) const BIND_REACH: f32 = 4.0;
+/// `_DAT_399d3230` (6.25): the interaction indicator's candidate reach, sqrt(6.25) = 2.5 m.
+/// The native passes the squared value to `FUN_393601a0`, which compares the surface gap with
+/// `sqrt` of it (`FUN_39093860`).
+pub(super) const CANDIDATE_REACH: f32 = 2.5;
 /// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
 /// `_DAT_3a169948`: the passenger walk-off throttle.
@@ -195,6 +199,75 @@ impl SlaveSeat {
     }
 }
 
+/// The slave the interaction indicator would offer, and the skills the dynamic action bar shows.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Candidate {
+    pub obj_id: u32,
+    pub template: u32,
+    /// 12076 always; 13863 when the model has a free `$passenger0` point.
+    pub skills: Vec<u32>,
+    /// Centre distance, metres (the HUD's bar/ NPC-talk arbitration uses it).
+    pub dist: f32,
+}
+
+/// `InteractionIndicator::MakeCandidate` (`FUN_393bdad0`) for a slave (`FUN_393bbb80`): the
+/// nearest slave within `_DAT_399d3230` 6.25 -> 2.5 m surface gap, scored by
+/// `1 + facing dot toward - gap` (nearest-in-front wins). No candidate while riding a mate
+/// (`player+0x3c26`, the only writer of that byte is the mate mount path) and none for the slave
+/// already bound to or sat on (`FUN_3901be50` / `FUN_3901c5f0`); another slave is still offered.
+/// The native builder has no dead check, so neither does this.
+///
+/// The facing rule is the decompile's score, not a hard cone: this port leaves out a slave
+/// behind the player (the owner's tests ask for that), marked capture-pending.
+pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
+    if data.mounted.riding_mate() {
+        return None;
+    }
+    let game = data.game.get()?;
+    let forward = Vec2::new(-data.yaw.sin(), data.yaw.cos());
+    let seated = current_slave(data, units);
+    let mut best: Option<(f32, Candidate)> = None;
+    for unit in units.iter() {
+        let UnitKind::Slave { template_id, .. } = unit.kind else {
+            continue;
+        };
+        if seated == Some(unit.obj_id) {
+            continue;
+        }
+        let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        let toward = (at - data.pos).truncate().normalize_or_zero();
+        let facing = forward.dot(toward);
+        if facing <= 0.0 {
+            continue;
+        }
+        let gap = surface_gap(data.pos, data.player_radius, at, radius(data, unit));
+        if gap >= CANDIDATE_REACH {
+            continue;
+        }
+        let mut skills = vec![SKILL_OCCUPY];
+        if game.mode_actions.has_passenger_point(template_id)
+            && !units.iter().any(|u| {
+                u.attached_to
+                    .is_some_and(|a| a.obj_id == unit.obj_id && a.point == 2)
+            })
+        {
+            skills.push(SKILL_PASSENGER);
+        }
+        // `FUN_393601a0` stores `1 + facing dot toward - gap`; higher sorts first.
+        let score = 1.0 + facing - gap;
+        let candidate = Candidate {
+            obj_id: unit.obj_id,
+            template: template_id,
+            skills,
+            dist: data.pos.distance(at),
+        };
+        if best.as_ref().is_none_or(|(best, _)| score > *best) {
+            best = Some((score, candidate));
+        }
+    }
+    best.map(|(_, candidate)| candidate)
+}
+
 pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
@@ -234,7 +307,7 @@ pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
 /// this port keeps only the dead check. A right click while seated never reaches this path: it
 /// sends only `CSChangeTarget` (`interact`). Riding a mate only widens the interaction reach; the
 /// port does not refuse it (capture-pending S11-C5).
-fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+pub(super) fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
     if units.get(target).is_some_and(|unit| unit.dead) {
         return Outcome::Refused(MSG_SLAVE_CANNOT_BIND_WHILE_IS_DEAD);
     }
@@ -319,18 +392,30 @@ pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
     Outcome::Sent
 }
 
-/// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon`: `CSDiscardSlave` for the bound slave.
+/// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon` and the mode bar's `unbind` slot:
+/// `CSDiscardSlave` for the seated/bound slave. A driver (attach point 1, or the SCSlaveBound
+/// fallback) is refused above 5 m/s with 0x67. A passenger takes the native `FUN_39362170`
+/// branch: no speed check, one request per 1500 ms (`_DAT_3a169948`).
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
 
-fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
+pub(super) fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
     let Some((obj_id, tl_id)) = data.mounted.discard_slave() else {
         return Outcome::Silent;
     };
-    // No replicated movement, or one older than the staleness bound, means a standing slave.
-    if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
-        return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
+    let driver = data
+        .mounted
+        .player_attachment()
+        .is_none_or(|attachment| attachment.point <= 1);
+    if driver {
+        // No replicated movement, or one older than the staleness bound, means a standing slave.
+        if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
+            return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
+        }
+    } else if !data.mounted.walk_off_throttle(now) {
+        // Native FUN_39362170 returns silently inside the 1500 ms window.
+        return Outcome::Silent;
     }
     data.requests
         .push(Request::Slave(SlaveCommand::Unbind { tl_id }));

@@ -664,18 +664,56 @@ fn track(
     script.since += time.delta_secs();
     let mut d = bridge.0.borrow_mut();
     let focus = find_focus(&d, &doodads, &units);
-    // the bar
-    let wanted = focus.as_ref().and_then(|f| {
+    let slave = super::slave::candidate(&d, &units);
+    // the bar: the native candidate list holds units and doodads together, nearest first; the
+    // two producers here are arbitrated by centre distance the same way
+    let doodad_wanted = focus.as_ref().and_then(|f| {
         let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
         let generation = views.doodad_generation(f.obj_id)?;
-        Some(super::dynamic_actions::Shown {
-            source: super::dynamic_actions::Source::Doodad { obj_id: f.obj_id, phase, generation },
-            skills: f.skills.clone(),
-        })
+        Some((
+            super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Doodad {
+                    obj_id: f.obj_id,
+                    phase,
+                    generation,
+                },
+                skills: f.skills.clone(),
+            },
+            f.dist,
+        ))
     });
+    let slave_wanted = slave.as_ref().map(|candidate| {
+        (
+            super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Npc {
+                    obj_id: candidate.obj_id,
+                    template: candidate.template,
+                },
+                skills: candidate.skills.clone(),
+            },
+            candidate.dist,
+        )
+    });
+    let (wanted, key_dist) = match (doodad_wanted, slave_wanted) {
+        (Some((doodad, doodad_dist)), Some((slave, slave_dist))) => {
+            if slave_dist < doodad_dist {
+                (Some(slave), Some(slave_dist))
+            } else {
+                (Some(doodad), Some(doodad_dist))
+            }
+        }
+        (Some((doodad, dist)), None) => (Some(doodad), Some(dist)),
+        (None, Some((slave, dist))) => (Some(slave), Some(dist)),
+        (None, None) => (None, None),
+    };
     let directing = d.dialog.directing;
-    d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
-        !units.iter().any(|u| u.obj_id != own && !u.dead && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }) && d.pos.distance(to_vec(u.pos)) < f.dist)
+    d.doodad.claims_key = key_dist.is_some_and(|dist| {
+        !units.iter().any(|u| {
+            u.obj_id != own
+                && !u.dead
+                && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
+                && d.pos.distance(to_vec(u.pos)) < dist
+        })
     });
     d.doodad.focus = focus;
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
@@ -685,8 +723,14 @@ fn track(
                 info!("doodad: {obj_id} in reach, uses {skills:?}");
                 rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", *obj_id));
             }
+            Some(super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Npc { obj_id, .. },
+                skills,
+            }) => {
+                info!("slave: {obj_id} in reach, uses {skills:?}");
+                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("npc", *obj_id));
+            }
             None => rt.fire_event("DYNAMIC_ACTION_BAR_HIDE", ()),
-            Some(_) => unreachable!("the doodad producer publishes only doodad sources"),
         }
         d = bridge.0.borrow_mut();
     }
@@ -1026,10 +1070,16 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 
 /// The uses the bar, the keys and the list asked for become packets.
 #[allow(clippy::too_many_arguments)]
-fn execute(
-    bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
-    seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
-    mount: Option<Res<crate::ingame::LocalMount>>, views: Res<Views>, mut out: MessageWriter<NetCommand>,
+pub(super) fn execute(
+    bridge: NonSend<HudBridge>,
+    doodads: Res<Doodads>,
+    units: Res<Units>,
+    mut inventory: ResMut<Inventory>,
+    seats: Option<Res<crate::ingame::seating::Seats>>,
+    player: Option<Res<aa_net::state::Player>>,
+    mount: Option<Res<crate::ingame::LocalMount>>,
+    views: Res<Views>,
+    mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let mut d = bridge.0.borrow_mut();
@@ -1039,20 +1089,51 @@ fn execute(
         out.write(NetCommand(Command::Coffer(CofferCommand::Interact { obj_id, open: false })));
         inventory.coffer.close();
     }
-    let execute = if d.dynamic_actions.shown().is_some_and(|s| matches!(s.source, super::dynamic_actions::Source::Doodad { .. })) {
-        d.dynamic_actions.take_requested()
-    } else {
-        Vec::new()
+    let execute = match d.dynamic_actions.shown().map(|s| s.source) {
+        Some(super::dynamic_actions::Source::Doodad { .. })
+        | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
+        _ => Vec::new(),
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
     for pick in execute {
-        let super::dynamic_actions::Source::Doodad { obj_id, phase, generation } = pick.source else { continue };
-        let current = doodads.by_id.get(&obj_id).is_some_and(|o| o.func_group_id == phase)
-            && views.doodad_generation(obj_id) == Some(generation)
-            && d.doodad.focus.as_ref().is_some_and(|f| f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill));
-        if current {
-            commands.push((obj_id, Command::UseDoodadSkill { skill_id: pick.skill, doodad_obj_id: obj_id }));
+        match pick.source {
+            super::dynamic_actions::Source::Doodad {
+                obj_id,
+                phase,
+                generation,
+            } => {
+                let current = doodads
+                    .by_id
+                    .get(&obj_id)
+                    .is_some_and(|o| o.func_group_id == phase)
+                    && views.doodad_generation(obj_id) == Some(generation)
+                    && d.doodad.focus.as_ref().is_some_and(|f| {
+                        f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
+                    });
+                if current {
+                    commands.push((
+                        obj_id,
+                        Command::UseDoodadSkill {
+                            skill_id: pick.skill,
+                            doodad_obj_id: obj_id,
+                        },
+                    ));
+                }
+            }
+            super::dynamic_actions::Source::Npc { obj_id, .. } => {
+                // The take validated the revision and the shown skill: `FUN_393b1de0` ->
+                // `FUN_393be280`. 12076 is the driver bind (`CSBindSlave` 0x031); 13863 is the
+                // plain passenger `CSStartSkill`. Other interaction skills are not ported.
+                let outcome = match pick.skill {
+                    12076 => super::slave::bind(&mut d, &units, obj_id),
+                    13863 => super::slave::passenger(&mut d, &units, obj_id),
+                    _ => super::slave::Outcome::Silent,
+                };
+                if let super::slave::Outcome::Refused(code) = outcome {
+                    super::mode_actions::refuse(&mut d, code);
+                }
+            }
         }
     }
     if !chosen.is_empty()
@@ -1428,6 +1509,7 @@ mod tests {
         let mut app = App::new();
         app.insert_non_send(HudBridge(bridge))
             .insert_resource(doodads)
+            .insert_resource(Units::default())
             .insert_resource(inventory)
             .insert_resource(views)
             .add_message::<NetCommand>()
@@ -1937,5 +2019,67 @@ mod tests {
         assert!(w_held(&app), "the new walk holds W");
         assert!(app.world().resource::<Harness>().acted.is_empty());
         assert!(shared.borrow().doodad.chosen.is_empty());
+    }
+
+    /// F (`do_interaction_1`) on a slave prompt goes `FUN_393b1de0` -> `FUN_393be280` ->
+    /// `CSBindSlave` 0x031. The bar is published with the native `"npc"` source and its first
+    /// skill 12076; the request goes out through the real `handle_requests` packet path.
+    #[test]
+    fn a_slave_f_prompt_queues_cs_bind_slave() {
+        let bridge = Shared::default();
+        let mut units = Units::default();
+        let mut cart = crate::hud::expansion::fixture::spawn().unit;
+        cart.obj_id = 20;
+        cart.name = "Farm Wagon".into();
+        cart.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 60,
+            summoner_id: 100,
+        };
+        cart.pos = aa_net::Pos::new(0.0, 1.0, 0.0);
+        units.by_id.insert(20, cart);
+        {
+            let mut data = bridge.borrow_mut();
+            data.pos = Vec3::ZERO;
+            data.player_radius = 0.0;
+            data.dynamic_actions.replace(Some(Shown {
+                source: Source::Npc {
+                    obj_id: 20,
+                    template: 60,
+                },
+                skills: vec![12076],
+            }));
+            data.dynamic_actions.request(1);
+        }
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge))
+            .insert_resource(units)
+            .insert_resource(Doodads::default())
+            .insert_resource(Views::default())
+            .insert_resource(Inventory::default())
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Target>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::InFlight>()
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_systems(Update, (execute, crate::hud::api::handle_requests).chain());
+        app.update();
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            sent.as_slice(),
+            [Command::Slave(aa_net::slave_control::SlaveCommand::Bind {
+                tl_id: 8
+            })]
+        ));
     }
 }

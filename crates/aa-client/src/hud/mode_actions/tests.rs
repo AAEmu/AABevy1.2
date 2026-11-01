@@ -45,6 +45,39 @@ fn game() -> crate::hud::data::GameData {
     game
 }
 
+/// The buff/player skills of the shown bar (entries in order).
+fn players(entries: &[Entry]) -> Vec<u32> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Player(skill) => Some(*skill),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every skill id of the shown bar: the slave's and the player's, functions dropped.
+fn skill_ids(entries: &[Entry]) -> Vec<u32> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Player(skill) => Some(*skill),
+            Entry::Skill(skill) => Some(skill.skill),
+            Entry::Function(_) => None,
+        })
+        .collect()
+}
+
+fn functions(entries: &[Entry]) -> Vec<Function> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Function(function) => Some(*function),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A cannon's gunner bar: the point-1 attached skill is shown (14372), the slot casts the linked
 /// mount skill (10473, `target_type_id` 11). The two extra skills make the gate visible.
 fn cannon_game() -> crate::hud::data::GameData {
@@ -236,6 +269,23 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
         |r| r.get(0),
     )?;
     assert_eq!((cooldown, casting), (10_000, 5_000));
+    assert!(
+        !tables.has_passenger_point(60),
+        "the Farm Wagon model 1008 has no point 2"
+    );
+    assert!(
+        tables.has_passenger_point(146),
+        "the Red Farm Hauler has point 2"
+    );
+    assert_eq!(
+        tables.text(Function::Unbind),
+        "Disembark from current device."
+    );
+    assert_eq!(
+        tables.text(Function::ShowSlaveInfo),
+        "Check details on a summon."
+    );
+    assert_eq!(tables.text(Function::CommandUnmount), "Dismount");
     Ok(())
 }
 
@@ -260,7 +310,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
     own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
     crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
     assert_eq!(actions(&state.borrow()).len(), 8);
-    // a passenger seat keeps the normal bar
+    // a passenger seat gets the slave's bar: 1.2 appends `unbind` for any seat
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
@@ -278,7 +328,12 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         },
         None,
     );
-    assert_eq!(actions(&state.borrow()).len(), 8);
+    assert_eq!(actions(&state.borrow()).len(), 1);
+    assert_eq!(
+        functions(actions(&state.borrow())),
+        [Function::Unbind],
+        "a passenger gets only the unbind function slot"
+    );
     // the driver's seat switches to the slave's skills (the native window also appends two function
     // buttons, slots 6 and 7: not skills, not part of this list)
     crate::hud::enchant::dispatch(
@@ -306,15 +361,30 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         Some((20, 60)),
         "the mounted view sees the driver seat"
     );
+    let driver = state.borrow();
     assert_eq!(
-        actions(&state.borrow()),
-        [20704, 20291, 15622, 15450, 15546]
+        skill_ids(actions(&driver)),
+        [20704, 20291, 15622, 15450, 15546],
+        "the capture's five skill slots"
     );
+    assert_eq!(
+        functions(actions(&driver)),
+        [Function::Unbind, Function::ShowSlaveInfo],
+        "slots 6 and 7"
+    );
+    assert_eq!(super::function_at(&driver, 5), Some(Function::Unbind));
+    assert_eq!(
+        super::function_at(&driver, 6),
+        Some(Function::ShowSlaveInfo)
+    );
+    assert_eq!(super::function_at(&driver, 7), None);
+    assert_eq!(super::function_at(&driver, 0), None);
+    drop(driver);
     assert_eq!(
         rt.lua
             .load("return X2Unit:GetModeActionsCount()")
             .eval::<usize>()?,
-        5
+        7
     );
     // leaving the driver's seat returns to the buff skills
     crate::hud::enchant::dispatch(
@@ -345,7 +415,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         },
         None,
     );
-    assert_eq!(actions(&state.borrow()), [15622, 17000]);
+    assert_eq!(skill_ids(actions(&state.borrow())), [15622, 17000]);
     crate::hud::enchant::dispatch(
         Some(&rt),
         &state,
@@ -369,7 +439,7 @@ fn a_slave_driver_bar_replaces_the_buff_skills_and_leaving_restores_them()
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     rt.lua.load("SAVED=#OBS").exec()?;
@@ -416,7 +486,7 @@ fn a_driver_bar_slot_casts_the_slave_skill_with_the_mount_caster()
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
 
@@ -541,20 +611,23 @@ fn schema_unit(id: u32, kind: u32, template: u32, model: u32) -> aa_net::model::
 }
 
 fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
-    driver_skills(&state.borrow())
+    seat_bar(&state.borrow())
         .expect("driver bar")
         .iter()
-        .map(|skill| (skill.skill, skill.cast_skill()))
+        .filter_map(|entry| match entry {
+            Entry::Skill(skill) => Some((skill.skill, skill.cast_skill())),
+            _ => None,
+        })
         .collect()
 }
 
-/// `driver_skills` on the same rows the real data has: the cart 73 keeps its mount skills, the
+/// `seat_bar` on the same rows the real data has: the cart 73 keeps its mount skills, the
 /// cannon 10 shows the attached skill when the engine's seat flag names it or, before that flag
 /// arrives, when the template gate says it is a turret. A stale flag for another slave also
 /// falls back to the template gate.
 #[test]
-fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
--> Result<(), Box<dyn std::error::Error>> {
+fn seat_bar_uses_the_engine_seat_or_the_template_fallback() -> Result<(), Box<dyn std::error::Error>>
+{
     if std::env::var("AA_PAK").is_err() {
         eprintln!("skip: no client pak");
         return Ok(());
@@ -660,7 +733,7 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [14372],
         "the real gunner bar skill"
     );
@@ -747,7 +820,7 @@ fn driver_setup() -> Result<(UiRuntime, Shared, World), Box<dyn std::error::Erro
         None,
     );
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     let mut world = World::new();
@@ -1148,7 +1221,7 @@ fn a_seated_driver_ready_publishes_the_bar_once() -> Result<(), Box<dyn std::err
         super::ready(Some(&rt), &state);
     }
     assert_eq!(
-        actions(&state.borrow()),
+        skill_ids(actions(&state.borrow())),
         [20704, 20291, 15622, 15450, 15546]
     );
     let drawn: usize = rt.lua.load("return DRAWN").eval()?;
@@ -1169,16 +1242,24 @@ fn native_cap_follows_existing_actions_and_keeps_duplicates() {
     let mut checked = 0;
     if let Some(controls) = controls {
         for row in controls {
-            let mut actions = vec![9; row["base_actions"].as_u64().unwrap() as usize];
-            append(&mut actions, &[1, 1, 2, 3, 4, 5, 6, 7]);
+            let mut actions =
+                vec![Entry::Player(9); row["base_actions"].as_u64().unwrap() as usize];
+            let entries: Vec<Entry> = [1, 1, 2, 3, 4, 5, 6, 7]
+                .into_iter()
+                .map(Entry::Player)
+                .collect();
+            append(&mut actions, &entries);
             assert_eq!(actions.len(), row["total"].as_u64().unwrap() as usize);
             checked += 1;
         }
     }
     assert_eq!(checked, 5, "native cap controls must be present");
     let mut actions = vec![];
-    append(&mut actions, &[0, 1, 1, 0, 2]);
-    assert_eq!(actions, [1, 1, 2]);
+    append(&mut actions, &[0, 1, 1, 0, 2].map(Entry::Player));
+    assert_eq!(
+        actions,
+        [Entry::Player(1), Entry::Player(1), Entry::Player(2)]
+    );
 }
 
 #[test]
@@ -1230,7 +1311,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
             buff(1, 0, BuffKind::Good),
         ],
     );
-    assert_eq!(actions(&state.borrow()), [71, 72, 73]);
+    assert_eq!(players(actions(&state.borrow())), [71, 72, 73]);
     receipt(
         &rt,
         &state,
@@ -1240,7 +1321,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
         },
     );
     // Removal excludes7, so native row0 participates in this publication.
-    assert_eq!(actions(&state.borrow()), [71]);
+    assert_eq!(players(actions(&state.borrow())), [71]);
     assert_eq!(
         crate::hud::user_music::own_buffs(&state.borrow())
             .unwrap()
@@ -1249,7 +1330,7 @@ fn removal_excludes_all_colliding_instances_but_erases_only_first()
     );
     receipt(&rt, &state, created(5068, 9));
     assert_eq!(
-        actions(&state.borrow()),
+        players(actions(&state.borrow())),
         [
             20848, 20849, 20850, 20851, 20852, 20853, 20854, 20855, 72, 73
         ]
@@ -1292,7 +1373,7 @@ fn startup_replays_receipts_and_decode_loss_needs_snapshot_without_native_notifi
     let mut unit = crate::hud::expansion::fixture::spawn().unit;
     unit.buffs = vec![buff(6010, 11, BuffKind::Hidden)];
     receipt(&rt, &state, Event::OwnUnitSnapshot(Box::new(unit)));
-    assert_eq!(actions(&state.borrow()), [22213, 22214, 22217]);
+    assert_eq!(players(actions(&state.borrow())), [22213, 22214, 22217]);
     rt.lua.load("assert(#OBS==SAVED)").exec()?;
     Ok(())
 }
@@ -1721,4 +1802,190 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
             "slave {id}"
         );
     }
+}
+
+fn mate_unit(id: u32) -> aa_net::model::Unit {
+    let mut unit = crate::hud::expansion::fixture::spawn().unit;
+    unit.obj_id = id;
+    unit.kind = aa_net::model::UnitKind::Mate {
+        tl_id: 8,
+        template_id: 1,
+        owner_id: 100,
+    };
+    unit
+}
+
+/// `FUN_392045f0` puts the mate command 9 function slot before the buff skills; the slave could
+/// not supply one (no seat), so this is the only function slot on a mate's bar.
+#[test]
+fn a_mate_rider_gets_command_unmount_before_the_buff_skills()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(true)?;
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(mate_unit(40))),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 40,
+            point: 1,
+            reason: 0,
+        },
+        None,
+    );
+    assert!(state.borrow().mounted.riding_mate());
+    let bar = state.borrow();
+    assert_eq!(
+        functions(actions(&bar)),
+        [Function::CommandUnmount],
+        "mate command 9 is the first slot"
+    );
+    assert_eq!(
+        players(actions(&bar)),
+        (20848..=20855).collect::<Vec<_>>(),
+        "the buff skills follow it"
+    );
+    assert_eq!(actions(&bar).len(), 9);
+    drop(bar);
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        9
+    );
+    Ok(())
+}
+
+#[test]
+fn show_slave_info_queues_the_original_ui_event() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    rt.lua
+        .load(
+            r#"
+        INFO=0
+        local w=UIParent:CreateWidget('emptywidget','slaveInfoProbe','UIParent')
+        w:RegisterEvent('SHOW_SLAVE_INFO')
+        w:SetHandler('OnEvent',function() INFO=INFO+1 end)
+    "#,
+        )
+        .exec()?;
+    let outcome = super::run_function(
+        &mut state.borrow_mut(),
+        Function::ShowSlaveInfo,
+        web_time::Instant::now(),
+    );
+    assert_eq!(outcome, crate::hud::slave::Outcome::Sent);
+    super::ready(Some(&rt), &state);
+    assert_eq!(rt.lua.load("return INFO").eval::<i64>()?, 1);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    Ok(())
+}
+
+#[test]
+fn function_slots_carry_the_native_icons_and_ui_texts_keys() {
+    let mut tables = super::Tables::default();
+    tables.texts.insert(
+        (33, "unbind".into()),
+        "Disembark from current device.".into(),
+    );
+    tables.texts.insert(
+        (33, "showSlaveInfo".into()),
+        "Check details on a summon.".into(),
+    );
+    tables
+        .texts
+        .insert((19, "command_unmount".into()), "Dismount".into());
+    let unbind = function_slot(Some(&tables), Function::Unbind);
+    assert_eq!(unbind.kind, "function");
+    assert_eq!(unbind.icon, "ui/icon/icon_skill_vehicle03.dds");
+    assert_eq!(unbind.desc, "Disembark from current device.");
+    let info = function_slot(Some(&tables), Function::ShowSlaveInfo);
+    assert_eq!(info.icon, "ui/icon/icon_skill_info_view.dds");
+    assert_eq!(info.desc, "Check details on a summon.");
+    let mate = function_slot(Some(&tables), Function::CommandUnmount);
+    assert_eq!(mate.icon, "ui/icon/icon_skill_vehicle03.dds");
+    assert_eq!(mate.desc, "Dismount");
+    // without the text table the key is still the original key
+    assert_eq!(function_slot(None, Function::Unbind).desc, "unbind");
+}
+
+/// The stock Summon Info window (`slave_info.alb`) opens from the mode bar's `showSlaveInfo`
+/// slot: `SHOW_SLAVE_INFO` is the event `mode_action.alb` handles, and the window reads the
+/// already-installed `X2SiegeWeapon:GetMountedSiegeWeaponInfo`. Run with the original pak and
+/// database present; it lists what the client cannot fill in its own header (the window itself
+/// hides missing vehicle/speed rows).
+#[test]
+#[ignore = "original World UI, game pak and database: Summon Info window"]
+fn original_summon_info_window_opens_on_show_slave_info() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (rt, state, path) = crate::hud::breath::fixture::runtime(1280., 720.)?;
+    let own = crate::hud::expansion::fixture::spawn();
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::CharacterSelected(Box::new(own.state.clone())),
+        None,
+    );
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let mut cart = crate::hud::expansion::fixture::spawn().unit;
+    cart.obj_id = 20;
+    cart.name = "Farm Wagon".into();
+    cart.kind = aa_net::model::UnitKind::Slave {
+        id: 700,
+        tl_id: 8,
+        template_id: 60,
+        summoner_id: 100,
+    };
+    cart.model_id = 1008;
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::UnitSpawned(Box::new(cart)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    assert_eq!(
+        rt.lua
+            .load("return X2Unit:GetModeActionsCount()")
+            .eval::<usize>()?,
+        7
+    );
+    assert!(super::function_at(&state.borrow(), 6) == Some(Function::ShowSlaveInfo));
+    super::run_function(
+        &mut state.borrow_mut(),
+        Function::ShowSlaveInfo,
+        web_time::Instant::now(),
+    );
+    super::ready(Some(&rt), &state);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame, 'stock Summon Info frame')
+        assert(slaveInfoFrame:IsVisible(), 'SHOW_SLAVE_INFO opens it')
+        assert(slaveInfoFrame.unitId == '14', 'the received slave key in lowercase hex')
+        assert(slaveInfoFrame.name:GetText() == 'Farm Wagon')
+        assert(slaveInfoFrame.class:GetText() ~= '', 'the descriptor class')
+        assert(slaveInfoFrame.kind:GetText() ~= '', 'the mapped slave kind')
+    "#,
+        )
+        .exec()?;
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
 }

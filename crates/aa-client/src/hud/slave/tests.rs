@@ -1367,3 +1367,236 @@ fn the_driven_cart_uses_the_controller_speed() {
     state.borrow_mut().mounted.local_cart = Some((20, -4.0));
     assert_eq!(discard(&state), Outcome::Sent);
 }
+
+/// A slave in front of the player (north, the fixture's forward) is the interaction-indicator
+/// candidate; `_DAT_399d3230` 6.25 -> 2.5 m surface gap and the native `1 + facing dot toward - gap`
+/// score. Behind or past the reach, or while riding a mate, there is none.
+#[test]
+fn the_candidate_is_the_slave_in_front_within_2_5_metres() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 2.0, 0.0))]);
+    state
+        .borrow_mut()
+        .game
+        .0
+        .set(crate::hud::data::GameData::default())
+        .ok()
+        .unwrap();
+    let candidate = super::candidate(&state.borrow(), &units).expect("2 m in front");
+    assert_eq!(candidate.obj_id, 20);
+    assert_eq!(candidate.skills, vec![12076]);
+    assert_eq!(candidate.template, 60);
+
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 3.0, 0.0))]);
+    state
+        .borrow_mut()
+        .game
+        .0
+        .set(crate::hud::data::GameData::default())
+        .ok()
+        .unwrap();
+    assert_eq!(
+        super::candidate(&state.borrow(), &units),
+        None,
+        "3 m is past the 2.5 m candidate reach"
+    );
+
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, -2.0, 0.0))]);
+    state
+        .borrow_mut()
+        .game
+        .0
+        .set(crate::hud::data::GameData::default())
+        .ok()
+        .unwrap();
+    assert_eq!(
+        super::candidate(&state.borrow(), &units),
+        None,
+        "behind the player"
+    );
+}
+
+#[test]
+fn the_candidate_adds_the_passenger_seat_only_when_the_model_has_a_free_point_2() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 1.0, 0.0))]);
+    {
+        let data = state.borrow_mut();
+        let mut game = crate::hud::data::GameData::default();
+        game.mode_actions.fixture_passenger_point(60, 1008, true);
+        data.game.0.set(game).ok().unwrap();
+    }
+    assert_eq!(
+        super::candidate(&state.borrow(), &units).unwrap().skills,
+        vec![12076, 13863]
+    );
+    // another unit on point 2 makes the seat not free (`FUN_390c9f40(2) == 0`)
+    let mut passenger = crate::hud::fixture_spawn().unit;
+    passenger.obj_id = 30;
+    passenger.attached_to = Some(Attachment {
+        obj_id: 20,
+        point: 2,
+        reason: 0,
+    });
+    let mut units = units;
+    units.by_id.insert(30, passenger);
+    assert_eq!(
+        super::candidate(&state.borrow(), &units).unwrap().skills,
+        vec![12076]
+    );
+}
+
+#[test]
+fn no_candidate_while_riding_a_mate_or_bound_to_the_slave() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(0.0, 1.0, 0.0))]);
+    state
+        .borrow_mut()
+        .game
+        .0
+        .set(crate::hud::data::GameData::default())
+        .ok()
+        .unwrap();
+    let mut mate = crate::hud::fixture_spawn().unit;
+    mate.obj_id = 40;
+    mate.kind = UnitKind::Mate {
+        tl_id: 9,
+        template_id: 1,
+        owner_id: 100,
+    };
+    crate::hud::mounted::receive(&state, &Event::UnitSpawned(Box::new(mate)));
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 40,
+            point: 1,
+            reason: 0,
+        },
+    );
+    assert!(state.borrow().mounted.riding_mate());
+    assert_eq!(
+        super::candidate(&state.borrow(), &units),
+        None,
+        "riding a mate"
+    );
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+    );
+    bound(&state, 20);
+    assert_eq!(
+        super::candidate(&state.borrow(), &units),
+        None,
+        "bound to that slave"
+    );
+}
+
+#[test]
+fn the_unbind_function_slot_sends_cs_discard_slave() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+    );
+    let outcome = crate::hud::mode_actions::run_function(
+        &mut state.borrow_mut(),
+        crate::hud::mode_actions::Function::Unbind,
+        Instant::now(),
+    );
+    assert_eq!(outcome, Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+    assert!(matches!(
+        send(&state, &units).as_slice(),
+        [Command::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    ));
+}
+
+#[test]
+fn the_unbind_function_slot_refuses_above_five_metres_per_second_with_0x67() {
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    let rt = runtime();
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+    );
+    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+    movement.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    let outcome = crate::hud::mode_actions::run_function(
+        &mut state.borrow_mut(),
+        crate::hud::mode_actions::Function::Unbind,
+        Instant::now(),
+    );
+    assert_eq!(outcome, Outcome::Refused(0x67));
+    assert!(state.borrow().requests.is_empty());
+    crate::hud::mode_actions::ready(Some(&rt), &state);
+    rt.lua
+        .load("assert(sys[1]=='text:SLAVE_SHUT_OFF_TO_UNBIND')")
+        .exec()
+        .unwrap();
+}
+
+#[test]
+fn a_passenger_unbind_is_throttled_to_1500_ms_without_a_speed_check() {
+    let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+    );
+    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+    movement.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    let start = Instant::now();
+    let run = |at| {
+        crate::hud::mode_actions::run_function(
+            &mut state.borrow_mut(),
+            crate::hud::mode_actions::Function::Unbind,
+            at,
+        )
+    };
+    assert_eq!(run(start), Outcome::Sent, "no speed check in FUN_39362170");
+    assert_eq!(
+        run(start + Duration::from_millis(500)),
+        Outcome::Silent,
+        "inside the 1500 ms window"
+    );
+    assert_eq!(run(start + Duration::from_millis(1500)), Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![
+            Request::Slave(SlaveCommand::Unbind { tl_id: 8 }),
+            Request::Slave(SlaveCommand::Unbind { tl_id: 8 }),
+        ]
+    );
+}

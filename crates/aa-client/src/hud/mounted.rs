@@ -277,9 +277,27 @@ impl View {
         Some((link.obj_id, actor.slave_template?, actor.slave_kind?))
     }
 
-    /// Whether the player sits on a unit that is not a slave (a mate: riding a mount).
+    /// The slave seat the local player sits on, whichever attach point: `FUN_39345f10`
+    /// returns the slave for any seat and the point in `local_8` (1 = driver, 2.. = passenger).
+    /// The passenger's bar is built from the same seat (`FUN_39204500`).
+    pub(super) fn slave_seat(&self) -> Option<(u32, u32, u32, u8)> {
+        let link = self.player_attachment()?;
+        let actor = self.slave(link.obj_id)?;
+        Some((
+            link.obj_id,
+            actor.slave_template?,
+            actor.slave_kind?,
+            link.point,
+        ))
+    }
+
+    /// Whether the player sits on a loaded unit that is not a slave (a mate: riding a mount).
     pub(super) fn riding_mate(&self) -> bool {
-        self.player_attachment().is_some_and(|link| self.slave(link.obj_id).is_none())
+        self.player_attachment().is_some_and(|link| {
+            self.actors
+                .get(&link.obj_id)
+                .is_some_and(|actor| actor.slave_template.is_none())
+        })
     }
 
     /// The slave SCSlaveBound marked as the player's, with its timeline id.

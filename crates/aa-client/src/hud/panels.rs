@@ -683,7 +683,16 @@ pub fn action_keys(
             bridge.0.borrow_mut().requests.push(super::api::Request::UsePetAction { slot: slot as usize });
         }
     if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
-            let data = bridge.0.borrow();
+            let mut data = bridge.0.borrow_mut();
+            let index = slot as usize - 1;
+            if let Some(function) = super::mode_actions::function_at(&data, index) {
+                super::mode_actions::run_function(
+                    &mut data,
+                    function,
+                    web_time::Instant::now(),
+                );
+                continue;
+            }
             let env = Env::of(
                 &data,
                 Some(&skills),
@@ -692,7 +701,7 @@ pub fn action_keys(
             );
             super::mode_actions::use_slot(
                 &data,
-                slot as usize - 1,
+                index,
                 &env,
                 &mut flight,
                 &target,
