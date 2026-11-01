@@ -801,19 +801,20 @@ def walk_units(mem: Mem, base: int) -> list[tuple[int, int]]:
     return out
 
 
-def wait_stage(mcp: Mcp, pid: int, stage: int, timeout: float) -> None:
+def wait_stage(mcp: Mcp, pid: int, stage: int | tuple[int, ...], timeout: float) -> str:
+    wanted = {str(stage)} if isinstance(stage, int) else {str(value) for value in stage}
     end = time.monotonic() + timeout
     last = ""
     while time.monotonic() < end:
         try:
             last = mcp.text("client_lua", pid=pid, target="ui",
                             code="return X2LoginCharacter and X2LoginCharacter:GetCurrentStage()").strip()
-            if last == str(stage):
-                return
+            if last in wanted:
+                return last
         except Exception as error:
             last = str(error)
         time.sleep(0.5)
-    raise RuntimeError(f"stage {stage} not reached: {last}")
+    raise RuntimeError(f"stage {'/'.join(sorted(wanted))} not reached: {last}")
 
 
 def wait_player(mcp: Mcp, pid: int, timeout: float) -> str:
@@ -901,7 +902,13 @@ def ensure_world(mcp: Mcp, pid: int, character: str, ability: int,
     stage = current_stage(mcp, pid, timeout)
     if stage == "3":
         mcp.text("client_lua", pid=pid, target="ui", code="X2World:EnterWorld(1,0) return 1")
-        wait_stage(mcp, pid, 4, timeout)
+        # With no characters the client goes straight to stage 5 (create); with
+        # characters it goes to stage 4 (select).
+        stage = wait_stage(mcp, pid, (4, 5), timeout)
+    if stage == "5":
+        if not create:
+            raise RuntimeError("the account has no character; pass --create-character")
+        create_character(mcp, pid, character, ability)
         stage = "4"
     if stage == "4":
         lua = lambda code: mcp.text("client_lua", pid=pid, target="ui", code=code)
