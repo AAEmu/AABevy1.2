@@ -631,7 +631,8 @@ fn shipyard_hit(ray: &Ray3d, unit: &Unit, bounds: (Vec3, Vec3)) -> Option<f32> {
         lo - Vec3::splat(1.0),
         hi + Vec3::splat(1.0),
     )
-    .map(|t| t * scale)
+    // the local direction keeps the 1/scale length of the inverse, so `t` is already the world
+    // distance along the ray
 }
 
 /// The first distance at which the ray enters the axis-aligned box, if it does.
