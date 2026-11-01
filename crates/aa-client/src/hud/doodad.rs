@@ -66,8 +66,6 @@ const KEYS: usize = 4;
 /// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
 /// 4.5 m, so there is no extra slack.
 const BASE_REACH: f32 = 4.0;
-/// How much further away a doodad right behind the player may be than one in front of it and still be preferred, metres.
-const BEHIND: f32 = 3.0;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
 /// A press that moves more than this many pixels before it is released was a camera drag.
@@ -299,6 +297,9 @@ fn cstr(s: &str) -> &str {
 struct Focus {
     obj_id: u32,
     skills: Vec<u32>,
+    /// The native ordering key (see `slave::native_key`): lower sorts first.
+    key: f32,
+    /// Centre distance, metres (the HUD's NPC-talk priority uses it).
     dist: f32,
 }
 
@@ -312,6 +313,10 @@ struct Entry {
 #[derive(Default)]
 pub(super) struct View {
     focus: Option<Focus>,
+    /// The local player sits on a bonded seat doodad (`player+0x3b94`, `FUN_393635e0`
+    /// `BondLazyDoodad`): 1.2 builds no interaction indicator candidate then, so neither the
+    /// doodad bar nor the slave Grab Machine prompt is shown.
+    pub(super) seated: bool,
     /// F goes to the doodad (it is nearer than any NPC).
     claims_key: bool,
     /// The interaction list: the doodad and its rows.
@@ -431,29 +436,59 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
     Vec3::new(p.x, p.y, p.z)
 }
 
-/// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked, else the
-/// nearest, a doodad behind the player counting up to [`BEHIND`] metres further away than one in front (an inn's
-/// chairs around the Memory Tome). The capture's bar beside tome 851 (a chair 0.7 m away, the tome 4.9 m) was the
-/// chair's skill 15857, as here; beside tome 850 (the Mailbox 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's
-/// "Open Mailbox", which is not listed here yet (see the module doc). The tomes' own 14602 was not observed.
+/// The doodad in reach whose phase has a skill to use that the bar is about: the one last right clicked among
+/// doodads, else the lowest native interaction key (`slave::native_key`: surface gap minus `1 + facing`, the same
+/// key the slave producer uses and the one `FUN_3902ed20` orders the combined unit/doodad candidate set by).
+/// The right-click preference is a port behaviour that only ranks doodads: it must not force the doodad past a
+/// slave in [`arbitrate`], because 1.2 has one candidate set ordered by the native key. The capture's bar beside
+/// tome 851 (a chair 0.7 m away, the tome 4.9 m ahead) was the chair's skill 15857; beside tome 850 (the Mailbox
+/// 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see the
+/// module doc). The tomes' own 14602 was not observed. A doodad has no recovered collision shape, so its gap is
+/// the centre distance minus the player's radius; the doodad's own radius is 0 here.
 fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
+    if data.doodad.seated {
+        return None;
+    }
     let game = data.game.get()?;
-    let forward = Vec2::new(-data.yaw.sin(), data.yaw.cos());
-    let candidates = doodads.by_id.values().filter_map(|o| {
-        let uses = game.doodad.uses(o.func_group_id)?;
+    let world = super::slave::replicated_pose(units);
+    let from = super::slave::player_centre(data, &world);
+    let forward = super::slave::player_forward(data, &world);
+    let mut best: Option<(bool, f32, Focus)> = None;
+    for o in doodads.by_id.values() {
+        let Some(uses) = game.doodad.uses(o.func_group_id) else {
+            continue;
+        };
         if uses.skills.is_empty() {
-            return None;
+            continue;
         }
-        let pos = doodad_world(o, units)?;
-        let dist = data.pos.distance(pos);
+        let Some(pos) = doodad_world(o, units) else {
+            continue;
+        };
+        let dist = from.distance(pos);
         if dist > reach(data, uses) {
-            return None;
+            continue;
         }
-        let toward = (pos - data.pos).truncate().normalize_or_zero();
-        let score = if data.doodad.preferred == Some(o.obj_id) { f32::MIN } else { dist + BEHIND * 0.5 * (1.0 - forward.dot(toward)) };
-        Some((score, Focus { obj_id: o.obj_id, skills: uses.skills.clone(), dist }))
-    });
-    candidates.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, f)| f)
+        let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
+        let key = super::slave::native_key(from, forward, pos, gap);
+        let preferred = data.doodad.preferred == Some(o.obj_id);
+        let focus = Focus {
+            obj_id: o.obj_id,
+            skills: uses.skills.clone(),
+            key,
+            dist,
+        };
+        let better = best
+            .as_ref()
+            .is_none_or(|(best_preferred, best_key, _)| match preferred.cmp(best_preferred) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Equal => key < *best_key,
+            });
+        if better {
+            best = Some((preferred, key, focus));
+        }
+    }
+    best.map(|(_, _, focus)| focus)
 }
 
 pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
@@ -605,7 +640,14 @@ fn hit(ray: Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
 }
 
 /// The usable doodad the ray picks, unless an NPC is in front of it.
-fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) -> Option<u32> {
+fn pick(
+    ray: Ray3d,
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    own: u32,
+    world: &impl Fn(&aa_net::model::Unit) -> Option<Vec3>,
+) -> Option<u32> {
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
@@ -622,16 +664,59 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
         }
     }
     let (along, obj_id) = best?;
-    let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
-        hit(ray, to_vec(u.pos) + Vec3::Z * 0.9 * u.scale.max(0.5), 1.1 * u.scale.max(0.7)).is_some_and(|a| a < along)
-    });
-    (!npc_in_front).then_some(obj_id)
+    (!npc_in_front(&ray, along, units, own, world)).then_some(obj_id)
+}
+
+/// Whether an NPC's pick-sphere middle is nearer along the ray than the doodad's middle (`along`).
+/// Both are middles, so a vendor 0.5 m behind a stall does not hide it. `world` is the unit's
+/// drawn world pose, so an NPC attached to a ship is tested where it is drawn, not at its
+/// parent-local packet position.
+fn npc_in_front(
+    ray: &Ray3d,
+    along: f32,
+    units: &Units,
+    own: u32,
+    world: &impl Fn(&aa_net::model::Unit) -> Option<Vec3>,
+) -> bool {
+    units
+        .iter()
+        .filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }))
+        .any(|u| super::pick::unit_middle_hit(ray, u, world(u)).is_some_and(|a| a < along))
+}
+
+/// The bar the two interaction producers ask for: the one with the lower [`super::slave::native_key`]
+/// (`FUN_3902ed20` orders the native unit/doodad set by it). A tie keeps the doodad: the native
+/// tie-break is in `FUN_393bd9e0`, which is not decoded. The returned number is the chosen
+/// candidate's centre distance, which F's NPC-talk priority compares against.
+fn arbitrate(
+    doodad: Option<(super::dynamic_actions::Shown, f32, f32)>,
+    slave: Option<(super::dynamic_actions::Shown, f32, f32)>,
+) -> (Option<super::dynamic_actions::Shown>, Option<f32>) {
+    match (doodad, slave) {
+        (Some((doodad, doodad_key, doodad_dist)), Some((slave, slave_key, slave_dist))) => {
+            if slave_key < doodad_key {
+                (Some(slave), Some(slave_dist))
+            } else {
+                (Some(doodad), Some(doodad_dist))
+            }
+        }
+        (Some((doodad, _, dist)), None) => (Some(doodad), Some(dist)),
+        (None, Some((slave, _, dist))) => (Some(slave), Some(dist)),
+        (None, None) => (None, None),
+    }
 }
 
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
 /// target decal after it (it reads the `DoodadTargetDecal` this writes).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TrackDoodads;
+
+/// `player+0x3b94` (`FUN_393635e0` `BondLazyDoodad`): the local player sits on a bonded seat
+/// doodad. 1.2 then builds no interaction indicator candidate, so [`track`] gates both the doodad
+/// and the slave producer on [`View::seated`].
+fn sync_seated(bridge: NonSend<HudBridge>, seats: Option<Res<crate::ingame::seating::Seats>>) {
+    bridge.0.borrow_mut().doodad.seated = seats.as_ref().is_some_and(|seats| seats.own_seated());
+}
 
 /// Finds the doodad in reach, shows / hides the bar, reads the keys, the right click and the pointer.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -649,33 +734,73 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals, mut target_decal): (
+    (mut glows, names, views, poses, visuals, mut target_decal, ladder_claim): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
+        super::pick::UnitPoses,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
+        Option<Res<crate::ingame::ladder::LadderClaim>>,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
 ) {
     let Some(rt) = rt else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
+    let world = |u: &aa_net::model::Unit| poses.get(u, &units).map(|(pos, _)| pos);
     script.since += time.delta_secs();
     let mut d = bridge.0.borrow_mut();
     let focus = find_focus(&d, &doodads, &units);
-    // the bar
-    let wanted = focus.as_ref().and_then(|f| {
+    let slave = super::slave::candidate(&d, &units);
+    // The bar: 1.2 puts units (`FUN_393601a0`) and doodads (`FUN_3902f010`) in one set keyed by
+    // the same `native_key` (surface gap minus `1 + facing`, `FUN_3902ed20` orders it ascending).
+    // The two producers are arbitrated on that key, not on centre distance: a Farm Wagon's four
+    // storage boxes (doodads 3446 at attach points 9-12) are often nearer in centre terms but
+    // behind or beside the player, while the wagon is in front.
+    let doodad_wanted = focus.as_ref().and_then(|f| {
         let phase = doodads.by_id.get(&f.obj_id)?.func_group_id;
         let generation = views.doodad_generation(f.obj_id)?;
-        Some(super::dynamic_actions::Shown {
-            source: super::dynamic_actions::Source::Doodad { obj_id: f.obj_id, phase, generation },
-            skills: f.skills.clone(),
-        })
+        Some((
+            super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Doodad {
+                    obj_id: f.obj_id,
+                    phase,
+                    generation,
+                },
+                skills: f.skills.clone(),
+            },
+            f.key,
+            f.dist,
+        ))
     });
+    let slave_wanted = slave.as_ref().map(|candidate| {
+        (
+            super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Npc {
+                    obj_id: candidate.obj_id,
+                    template: candidate.template,
+                },
+                skills: candidate.skills.clone(),
+            },
+            candidate.key,
+            candidate.dist,
+        )
+    });
+    let (wanted, key_dist) = arbitrate(doodad_wanted, slave_wanted);
     let directing = d.dialog.directing;
-    d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
-        !units.iter().any(|u| u.obj_id != own && !u.dead && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }) && d.pos.distance(to_vec(u.pos)) < f.dist)
+    // The climb doodad owns F separately from the use bar: it blocks talk, loot and the bar
+    // (`claims_key` stays the bar's own "the doodad is nearer than any NPC" claim).
+    let ladder_owns_key = ladder_claim
+        .as_deref()
+        .is_some_and(|claim| claim.0.is_some());
+    d.doodad.claims_key = key_dist.is_some_and(|dist| {
+        !units.iter().any(|u| {
+            u.obj_id != own
+                && !u.dead
+                && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
+                && d.pos.distance(to_vec(u.pos)) < dist
+        })
     });
     d.doodad.focus = focus;
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
@@ -685,8 +810,14 @@ fn track(
                 info!("doodad: {obj_id} in reach, uses {skills:?}");
                 rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", *obj_id));
             }
+            Some(super::dynamic_actions::Shown {
+                source: super::dynamic_actions::Source::Npc { obj_id, .. },
+                skills,
+            }) => {
+                info!("slave: {obj_id} in reach, uses {skills:?}");
+                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("npc", *obj_id));
+            }
             None => rt.fire_event("DYNAMIC_ACTION_BAR_HIDE", ()),
-            Some(_) => unreachable!("the doodad producer publishes only doodad sources"),
         }
         d = bridge.0.borrow_mut();
     }
@@ -695,7 +826,13 @@ fn track(
     let moving = !typing && MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0));
     let loot = d.loot.nearest.is_some();
     for n in 1..=KEYS {
-        if !typing && !loot && !directing && d.doodad.claims_key && actions.just_pressed(&format!("do_interaction_{n}"), 0) {
+        if !typing
+            && !loot
+            && !directing
+            && !ladder_owns_key
+            && d.doodad.claims_key
+            && actions.just_pressed(&format!("do_interaction_{n}"), 0)
+        {
             d.dynamic_actions.request(n);
         }
     }
@@ -721,7 +858,7 @@ fn track(
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = pick(ray, &d, &doodads, &units, own);
+        clicked = pick(ray, &d, &doodads, &units, own, &world);
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
@@ -732,7 +869,7 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
+    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
@@ -1026,10 +1163,17 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 
 /// The uses the bar, the keys and the list asked for become packets.
 #[allow(clippy::too_many_arguments)]
-fn execute(
-    bridge: NonSend<HudBridge>, doodads: Res<Doodads>, mut inventory: ResMut<Inventory>,
-    seats: Option<Res<crate::ingame::seating::Seats>>, player: Option<Res<aa_net::state::Player>>,
-    mount: Option<Res<crate::ingame::LocalMount>>, views: Res<Views>, mut out: MessageWriter<NetCommand>,
+pub(super) fn execute(
+    bridge: NonSend<HudBridge>,
+    doodads: Res<Doodads>,
+    units: Res<Units>,
+    mut inventory: ResMut<Inventory>,
+    seats: Option<Res<crate::ingame::seating::Seats>>,
+    player: Option<Res<aa_net::state::Player>>,
+    mount: Option<Res<crate::ingame::LocalMount>>,
+    views: Res<Views>,
+    poses: super::pick::UnitPoses,
+    mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let mut d = bridge.0.borrow_mut();
@@ -1039,20 +1183,55 @@ fn execute(
         out.write(NetCommand(Command::Coffer(CofferCommand::Interact { obj_id, open: false })));
         inventory.coffer.close();
     }
-    let execute = if d.dynamic_actions.shown().is_some_and(|s| matches!(s.source, super::dynamic_actions::Source::Doodad { .. })) {
-        d.dynamic_actions.take_requested()
-    } else {
-        Vec::new()
+    let execute = match d.dynamic_actions.shown().map(|s| s.source) {
+        Some(super::dynamic_actions::Source::Doodad { .. })
+        | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
+        _ => Vec::new(),
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
     for pick in execute {
-        let super::dynamic_actions::Source::Doodad { obj_id, phase, generation } = pick.source else { continue };
-        let current = doodads.by_id.get(&obj_id).is_some_and(|o| o.func_group_id == phase)
-            && views.doodad_generation(obj_id) == Some(generation)
-            && d.doodad.focus.as_ref().is_some_and(|f| f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill));
-        if current {
-            commands.push((obj_id, Command::UseDoodadSkill { skill_id: pick.skill, doodad_obj_id: obj_id }));
+        match pick.source {
+            super::dynamic_actions::Source::Doodad {
+                obj_id,
+                phase,
+                generation,
+            } => {
+                let current = doodads
+                    .by_id
+                    .get(&obj_id)
+                    .is_some_and(|o| o.func_group_id == phase)
+                    && views.doodad_generation(obj_id) == Some(generation)
+                    && d.doodad.focus.as_ref().is_some_and(|f| {
+                        f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
+                    });
+                if current {
+                    commands.push((
+                        obj_id,
+                        Command::UseDoodadSkill {
+                            skill_id: pick.skill,
+                            doodad_obj_id: obj_id,
+                        },
+                    ));
+                }
+            }
+            super::dynamic_actions::Source::Npc { obj_id, .. } => {
+                // The take validated the revision and the shown skill: `FUN_393b1de0` ->
+                // `FUN_393be280`. 12076 is the driver bind (`CSBindSlave` 0x031); 13863 is the
+                // plain passenger `CSStartSkill`. Other interaction skills are not ported.
+                let outcome = match pick.skill {
+                    12076 => {
+                        // the bind range is measured from the drawn poses (a child slave on a ship)
+                        let world = |id: u32| units.get(id).and_then(|u| poses.get(u, &units));
+                        super::slave::bind(&mut d, &units, obj_id, &world)
+                    }
+                    13863 => super::slave::passenger(&mut d, &units, obj_id),
+                    _ => super::slave::Outcome::Silent,
+                };
+                if let super::slave::Outcome::Refused(code) = outcome {
+                    super::mode_actions::refuse(&mut d, code);
+                }
+            }
         }
     }
     if !chosen.is_empty()
@@ -1197,7 +1376,13 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
         .add_systems(
             Update,
-            (track.in_set(TrackDoodads), coffer_window, results, phase_messages)
+            (
+                sync_seated,
+                track.in_set(TrackDoodads),
+                coffer_window,
+                results,
+                phase_messages,
+            )
                 .chain()
                 .after(crate::ingame::seating::track)
                 .after(crate::ingame::units::sync_views)
@@ -1403,6 +1588,7 @@ mod tests {
             d.doodad.focus = Some(Focus {
                 obj_id: 2075,
                 skills: vec![13990],
+                key: -3.0,
                 dist: 3.0,
             });
             d.dynamic_actions.replace(Some(Shown {
@@ -1428,6 +1614,7 @@ mod tests {
         let mut app = App::new();
         app.insert_non_send(HudBridge(bridge))
             .insert_resource(doodads)
+            .insert_resource(Units::default())
             .insert_resource(inventory)
             .insert_resource(views)
             .add_message::<NetCommand>()
@@ -1590,6 +1777,85 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, 10.0, 0.5), 1.0).is_some_and(|a| (a - 10.0).abs() < 1e-3));
         assert!(hit(ray, Vec3::new(3.0, 10.0, 0.0), 1.0).is_none());
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
+    }
+
+    #[test]
+    fn a_vendor_half_a_metre_behind_the_stall_does_not_hide_it() {
+        // the ray runs along bevy -z from the origin; game (x, y, z) -> bevy (x, z, -y), and the
+        // pick middle is 0.9 m above the feet
+        let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
+        let npc = |along: f32| {
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = 21;
+            unit.kind = aa_net::model::UnitKind::Npc {
+                template_id: 1,
+                owner_id: 0,
+            };
+            unit.pos = aa_net::Pos::new(0.0, along, -0.4);
+            unit
+        };
+        let units = |along| {
+            let mut all = Units::default();
+            all.by_id.insert(21, npc(along));
+            all
+        };
+        let stall = 6.0;
+        let raw = |u: &aa_net::model::Unit| Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        // 0.5 m beyond the stall's middle: both are middles, so this is not "in front"
+        assert!(!npc_in_front(&ray, stall, &units(6.5), 0, &raw));
+        // 0.5 m before it: the vendor really is in front
+        assert!(npc_in_front(&ray, stall, &units(5.5), 0, &raw));
+    }
+
+    #[derive(Resource, Default)]
+    struct FrontOut(bool);
+
+    fn read_npc_in_front(
+        poses: crate::hud::pick::UnitPoses,
+        units: Res<Units>,
+        mut out: ResMut<FrontOut>,
+    ) {
+        let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
+        out.0 = npc_in_front(&ray, 6.0, &units, 0, &|u| {
+            poses.get(u, &units).map(|(pos, _)| pos)
+        });
+    }
+
+    #[test]
+    fn an_npc_attached_to_a_ship_is_tested_at_its_world_position() {
+        // the packet position is the parent-local (0, -5, 0), which puts the NPC behind the
+        // camera; its drawn root is a child of the ship at bevy (0, 0, -5), 5 m in front
+        let mut npc = crate::hud::fixture_spawn().unit;
+        npc.obj_id = 21;
+        npc.kind = aa_net::model::UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        };
+        npc.pos = aa_net::Pos::new(0.0, -5.0, 0.0);
+        let mut units = Units::default();
+        units.by_id.insert(21, npc);
+
+        let mut app = App::new();
+        app.init_resource::<Views>()
+            .insert_resource(units)
+            .init_resource::<FrontOut>()
+            .add_systems(Update, read_npc_in_front);
+        let ship = app.world_mut().spawn(Transform::default()).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
+                ChildOf(ship),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(21, root);
+        app.update();
+        assert!(
+            app.world().resource::<FrontOut>().0,
+            "the drawn NPC is in front of the stall even though its packet position is behind"
+        );
     }
 
     /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
@@ -1937,5 +2203,371 @@ mod tests {
         assert!(w_held(&app), "the new walk holds W");
         assert!(app.world().resource::<Harness>().acted.is_empty());
         assert!(shared.borrow().doodad.chosen.is_empty());
+    }
+
+    /// F (`do_interaction_1`) on a slave prompt goes `FUN_393b1de0` -> `FUN_393be280` ->
+    /// `CSBindSlave` 0x031. The bar is published with the native `"npc"` source and its first
+    /// skill 12076; the request goes out through the real `handle_requests` packet path.
+    #[test]
+    fn a_slave_f_prompt_queues_cs_bind_slave() {
+        let bridge = Shared::default();
+        let mut units = Units::default();
+        let mut cart = crate::hud::expansion::fixture::spawn().unit;
+        cart.obj_id = 20;
+        cart.name = "Farm Wagon".into();
+        cart.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 60,
+            summoner_id: 100,
+        };
+        cart.pos = aa_net::Pos::new(0.0, 1.0, 0.0);
+        units.by_id.insert(20, cart);
+        {
+            let mut data = bridge.borrow_mut();
+            data.pos = Vec3::ZERO;
+            data.player_radius = 0.0;
+            data.dynamic_actions.replace(Some(Shown {
+                source: Source::Npc {
+                    obj_id: 20,
+                    template: 60,
+                },
+                skills: vec![12076],
+            }));
+            data.dynamic_actions.request(1);
+        }
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge))
+            .insert_resource(units)
+            .insert_resource(Doodads::default())
+            .insert_resource(Views::default())
+            .insert_resource(Inventory::default())
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Target>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::InFlight>()
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_systems(Update, (execute, crate::hud::api::handle_requests).chain());
+        app.update();
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            sent.as_slice(),
+            [Command::Slave(aa_net::slave_control::SlaveCommand::Bind {
+                tl_id: 8
+            })]
+        ));
+    }
+
+    /// The Farm Wagon's storage box (a doodad at its rear) is nearer in centre terms but stands
+    /// behind or beside the player, while the wagon is in front: the native key (surface gap
+    /// minus `1 + facing`) picks the wagon, which is the Grab Machine prompt the owner sees.
+    /// Both producers are real (`find_focus` and `slave::candidate`), and the real `arbitrate`
+    /// decides between them.
+    #[test]
+    fn the_native_key_arbitrates_the_rear_storage_box_against_the_grab_machine() {
+        let mut game = GameData::default();
+        game.doodad.add(1, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let (mut data, doodads) = herb_field(game);
+        // The player stands at the rear of the wagon (10, 10) facing north (+y), 1 m behind it.
+        // The storage box is at (10, 8.6), 0.4 m behind the player: nearer, but behind.
+        data.pos = Vec3::new(10.0, 9.0, 0.0);
+        data.yaw = 0.0;
+        let box_doodad = world_doodad(3446, 850, 1, Vec3::new(10.0, 8.6, 0.0));
+        let mut doodads = doodads;
+        doodads.by_id.insert(3446, box_doodad);
+        let mut units = Units::default();
+        let mut wagon = crate::hud::expansion::fixture::spawn().unit;
+        wagon.obj_id = 20;
+        wagon.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 60,
+            summoner_id: 100,
+        };
+        wagon.model_id = 1008;
+        wagon.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
+        units.by_id.insert(20, wagon);
+        // A right click makes the box the preferred doodad; that must not force it past the
+        // wagon in the shared candidate set (1.2 orders units and doodads on the native key).
+        data.doodad.preferred = Some(3446);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the storage box in reach");
+        assert_eq!(focus.obj_id, 3446);
+        assert!(
+            (focus.dist - 0.4).abs() < 1e-4,
+            "the box is the nearer centre: {}",
+            focus.dist
+        );
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the wagon in reach");
+        assert_eq!(candidate.obj_id, 20);
+        assert_eq!(candidate.dist, 1.0);
+        assert!(
+            candidate.key < focus.key,
+            "wagon key {} vs box key {}",
+            candidate.key,
+            focus.key
+        );
+        let doodad = (
+            Shown {
+                source: Source::Doodad {
+                    obj_id: focus.obj_id,
+                    phase: 1,
+                    generation: 0,
+                },
+                skills: focus.skills,
+            },
+            focus.key,
+            focus.dist,
+        );
+        let slave = (
+            Shown {
+                source: Source::Npc {
+                    obj_id: candidate.obj_id,
+                    template: candidate.template,
+                },
+                skills: candidate.skills,
+            },
+            candidate.key,
+            candidate.dist,
+        );
+        let (wanted, dist) = arbitrate(Some(doodad), Some(slave));
+        let wanted = wanted.expect("a bar");
+        assert!(
+            matches!(
+                wanted.source,
+                Source::Npc {
+                    obj_id: 20,
+                    template: 60
+                }
+            ),
+            "the wagon wins over the nearer but behind storage box"
+        );
+        assert_eq!(dist, Some(1.0));
+    }
+
+    /// The right-click preference ranks doodads only. The preferred one keeps a native key, so a
+    /// slave in front can still win `arbitrate`; without the click the native key chooses among
+    /// the doodads.
+    #[test]
+    fn a_right_click_prefers_a_doodad_only_among_doodads() {
+        let mut tables = Tables::default();
+        tables.add(1, 13990, "DoodadFuncUse");
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        let _ = data.game.0.set(game);
+        data.pos = Vec3::ZERO;
+        data.yaw = 0.0;
+        let mut doodads = Doodads::default();
+        // id 1 is 2 m behind (key 2), id 2 is 2 m in front (key 0).
+        doodads
+            .by_id
+            .insert(1, world_doodad(1, 850, 1, Vec3::new(0.0, -2.0, 0.0)));
+        doodads
+            .by_id
+            .insert(2, world_doodad(2, 850, 1, Vec3::new(0.0, 2.0, 0.0)));
+        data.doodad.preferred = Some(1);
+        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        assert_eq!(
+            focus.obj_id, 1,
+            "the right-clicked doodad stays the bar's among doodads"
+        );
+        assert!(
+            focus.key > 0.0,
+            "its key is the native one, not f32::MIN: {}",
+            focus.key
+        );
+        data.doodad.preferred = None;
+        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        assert_eq!(
+            focus.obj_id, 2,
+            "without a click the native key picks the front one"
+        );
+    }
+
+    /// `player+0x3b94`: sitting on a bonded seat doodad shows no doodad bar either.
+    #[test]
+    fn no_doodad_bar_while_sitting_on_a_seat_doodad() {
+        let mut game = GameData::default();
+        game.doodad.add(4513, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let (mut data, doodads) = herb_field(game);
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
+        data.doodad.seated = true;
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), None);
+    }
+
+    /// One F press with a climbable doodad in reach: the ladder grabs it and the dynamic action
+    /// bar does not also use it (F3; the CSHang half is the ladder tests' grab test).
+    #[test]
+    fn a_ladder_claims_f_from_the_doodad_bar() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        use crate::ingame::DevOptions;
+        use crate::ingame::Motion;
+        use crate::ingame::data::Db;
+        use crate::ingame::doodad_model::LadderHelper;
+        use crate::ingame::ladder::{LadderClaim, control_ladder};
+        use crate::ingame::player::{LocalPlayer, Mover, PlayerInput, SendState};
+        use crate::ingame::units::{RemoteDoodad, Views};
+
+        let mut game = GameData::default();
+        game.doodad.add(15013, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let mut doodads = Doodads::default();
+        assert!(
+            doodads.apply(&aa_net::Event::DoodadsSpawned(vec![world_doodad(
+                77,
+                303,
+                15013,
+                Vec3::ZERO
+            )]))
+        );
+        let shared = Shared::default();
+        {
+            let mut d = shared.borrow_mut();
+            assert!(d.game.0.set(game).is_ok());
+            d.pos = Vec3::new(0.5, 0.0, 0.0);
+        }
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(crate::settings::Actions::default())
+            .insert_resource(super::super::HudKeyboardFocus::default())
+            .insert_resource(super::super::HudPointerOverUi::default())
+            .insert_resource(DevOptions::default())
+            .insert_resource(Db::ladder_fixture(15013, 1).expect("the ladder fixture"))
+            .insert_resource(doodads)
+            .insert_resource(Units::default())
+            .insert_resource(Views::default())
+            .insert_resource(aa_net::state::Player::default())
+            .insert_resource(Inventory::default())
+            .insert_resource(DoodadHighlights::default())
+            .insert_resource(DoodadTargetDecal::default())
+            .insert_resource(aa_net::CharacterNames::default())
+            .insert_resource(LadderClaim::default())
+            .insert_resource(SendState::default())
+            .insert_resource(PlayerInput::default())
+            .insert_resource(aa_anim::ClipLibrary::default())
+            .insert_resource(Scripted::default())
+            .add_message::<NetCommand>()
+            .add_message::<super::super::alerts::UseFailed>()
+            .add_systems(Update, (control_ladder, track, execute).chain());
+        app.insert_non_send(UiRuntime::new("en_us", 1280., 720.).expect("the UI runtime"));
+        app.insert_non_send(HudBridge(shared.clone()));
+        let doodad = app
+            .world_mut()
+            .spawn((
+                RemoteDoodad { obj_id: 77 },
+                DoodadVisual {
+                    path: String::new(),
+                    model: None,
+                    func_group_id: 15013,
+                    rendered_func_group_id: 15013,
+                    bond_helpers: Default::default(),
+                    ladder: Some(LadderHelper {
+                        bottom: Vec3::ZERO,
+                        top: Vec3::new(0.0, 5.0, 0.0),
+                        axis: Vec3::Y,
+                        forward: Vec3::NEG_Z,
+                    }),
+                    growth: None,
+                    remaining_ms: 0.0,
+                    total_ms: 0.0,
+                    base_scale: 1.0,
+                },
+                Transform::default(),
+                GlobalTransform::default(),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .fixture_doodad(77, doodad);
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::new(0.5, 0.0, 0.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::default(),
+            GlobalTransform::default(),
+            Motion::default(),
+        ));
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .tap_for_test("do_interaction_1");
+        app.update();
+        let commands: Vec<Command> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect();
+        assert!(
+            commands
+                .iter()
+                .any(|c| matches!(c, Command::Hang { target_obj_id: 77 })),
+            "the ladder grabbed: {commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, Command::UseDoodadSkill { .. })),
+            "the ladder owns F, the doodad bar does not use it: {commands:?}"
+        );
+        assert!(
+            shared.borrow().doodad.focus.is_some(),
+            "the doodad is in the bar's reach"
+        );
+        assert_eq!(app.world().resource::<LadderClaim>().0, Some(77));
+        let requested = shared.borrow_mut().dynamic_actions.take_requested();
+        assert!(
+            requested.is_empty(),
+            "F did not request the bar: {requested:?}"
+        );
     }
 }

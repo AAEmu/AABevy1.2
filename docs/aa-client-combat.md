@@ -7,6 +7,25 @@ bones, flying arrows, hit reactions, death. Code: `crates/aa-client/src/ingame/c
 The server only reports results (`aa_net::Event`, see `docs/aa-net.md`, "Combat events for visuals"); everything visible is derived
 from the 1.2 game database and the model's own animation data.
 
+> **Time base (2026-11-01, T0).** The only Bevy/1.2 combat side-by-side (2026-10-26, `tools/combat-side`) ran the Bevy
+> side with `--headless-fps 120` and `--feel-fps 60`, which pins `TimeUpdateStrategy::ManualDuration(1/60)`; 561ebd1b
+> records that as game time advancing 1.562x wall time. Its "10955 cast 2.37 s vs 1.50 s" is 1.52 s after dividing by
+> 1.562, so that cast mismatch was a time-base artefact (**suspect (time base)**, and the only one); the phase-2
+> side-by-side report (`docs/research/port-combat/side-by-side.md` in 1b0066d4) reran the Bevy side in real time
+> (`--feel-fps 0`) and measured 1.502 s against the original's 1.496 s. No raw run data is retained.
+> The "stance exit 10.017 s vs 0.861 s" is **not** a time-base artefact: the client holds `Drawn` for 10 s of game
+> time (6.41 s wall in that run), and `combat.rs` / `weapons.rs` never read `CombatChanged` (only the HUD does). The
+> 0.861 s is **not a native stance timer**: the original's flip follows its `SCCombatCleared` packet, and the
+> side-by-side source records it as packet/processing order, not a timer
+> (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4). The decompile rule is that `FUN_391d6a60`
+> (`OnCombatCleared`) clears the `+0x3bba` latch through vtable `+0x48` = `FUN_39355ec0`, and `FUN_39355ee0`
+> refreshes a 10 s deadline while the latch is set. The **open bug** is that Bevy ignores
+> `CombatChanged`/combat-cleared, so nothing ends the stance when the server reports the fight cleared; whether its
+> 10 s hold matches the 10 s engaged deadline needs a check, not a claim. The current client
+> reads wall clocks for server-facing timing (`hud/cast.rs` `Instant`, `aa-net` `Instant`, `hud/cooldown.rs`
+> `Time<Real>`); a comparison run must pass `--require-wall-clock` (judged every frame, see `docs/aa-dev.md`, Clock)
+> or divide by the logged `game_per_wall` ratio.
+
 ## How 1.2 data links a skill to its visuals
 
 ```
@@ -98,7 +117,7 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 | `UnitDamaged` (kind 0 / 1) | HIT effects (and HIT camera shakes: the player's own blows kick its camera) of the cast's group on the target at the moment the blow lands: `fired + delay_ms` for a flying shot, `fired + combat_sync` for a melee swing, at once for a plot step; then the target's hit reaction (0.5 s flinch, never interrupts an action or a run; critical hits use the critical clip); a miss only shows the clip |
 | `UnitDeath` | after the last scheduled hit on the unit: `dead_01` once, then it stays on the last frame (`Dead`: locomotion never takes the unit back) until the server removes it; a unit other than the player is also thrown away from its last attacker (`Thrown`, see Death) |
 | `Resurrected` | `Dead` / `Acting` removed, locomotion restarts |
-| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once and the unit turns to the target (the 1.2 `FUN_39390f80` -> `FUN_39360920` changes the weapon at the request; `+0x5fc5` / `+0x5fc6` refresh the combat idle). Nothing is timed locally: the clip and the damage play on the server's `SCSkillFired` / `SCUnitDamaged` as they arrive. A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
+| the player presses a skill that needs its weapon while it is sheathed (`request_skill`, `NetCommand::UseSkill`) | the weapon comes out and the shield onto the arm at once and the unit turns to the target (the 1.2 `FUN_39390f80` -> `FUN_39360920` changes the weapon at the request for the auto attack only; `+0x5fc5` refreshes the combat idle). For another skill the request-time draw is **inferred**: the decompile draws on the start when `can_active_weapon_without_anim` is set. Nothing is timed locally: the clip and the damage play on the server's `SCSkillFired` / `SCUnitDamaged` as they arrive. A refused skill (not `OUTOF_ANGLE`) puts the weapon back |
 | the player presses another skill during a cast time (`preempt_cast`) | the cast is cancelled (`CSStopCasting`, clip and held effects end) and the skill is asked for again 0.25 s later (the server answers `ON_CASTING` to it while the cast runs); the same skill again waits for its cast |
 | the local player enters the water (`Mover::swim` turns on, `cancel_in_water`) | the casts of skills with `source_not_swim` are cancelled the same way (36 skills of the data, none in the ten player trees: the other skills are cast swimming as on land, the server refuses a `source_not_swim` skill in water with `CANNOT_CAST_IN_SWIMMING`) |
 | the local player moves or jumps during a cast time (or turns, for `stop_casting_by_turn`), or moves during a `channeling_cancelable` channel (`cancel_on_move`) | `CSStopCasting` goes out and the clip and held effects end at once; the server's `SkillEnded` / `CastingStopped` / `PlotStopped` that follows ends nothing more |
@@ -139,7 +158,11 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   is `SkillVisual::fire_clip(two_handed, dual)`; plot weapon variants are chosen by the server per event id (nothing to do). The
   weapon comes out for the clip's prefix (`weapon_for_clip`: `bow_` the bow, `onehand_` / `twohand_` the main hand weapon (a two
   handed one hangs on `item_back_c` and goes to the right hand), `twoswords_` both swords, `music_` the instrument, which is hidden
-  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw).
+  while it is not played), and goes back 10 s after the last action (4 s for an instrument, see Weapon draw). **Open bug:**
+  this 10 s hold keeps the stance and the weapon out because `CombatChanged` is not read here; the original's stance flip
+  follows its `SCCombatCleared` (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4), so the 0.861 s between
+  packet and flip is packet/processing order, not a native timer. Whether the 10 s hold matches the decompiled 10 s
+  engaged deadline (`FUN_39355ee0`, refreshed while `+0x3bba` is set) needs a check.
 * **Controller and instrument clips**: a skill that has no clip of its own plays its `skill_controllers.start_anim_id` when its first
   step or fire comes (Charge, Overwhelm, Drop Back, Behind Enemy Lines, ...); a song plays `*_instrument_start_anim_id` (the cast loop) and
   `*_instrument_fire_anim_id` of the instrument held, else the skill's own clips.
@@ -172,7 +195,12 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
 * **Weapons** (`weapons.rs`): a character that fights takes the weapon out: the bow comes into the left hand (`item_hand_l`,
   turned 90 degrees about z so that the limbs stand upright) for the bow skills, a sword into the right hand for any other
   weapon clip (the two handed sword from the back, both swords for the dual wield clips, the lute / drum / pipe for the music
-  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). The shield is on the arm only while
+  clips), and all go back to their sheath bones 10 s after the last action (`Drawn { out }`, holster clip first). That 10 s is
+  game time (6.41 s wall in the skewed run) and is **inferred**: the decompile's deadline ends the combat idle, not the weapon.
+  The stance itself is separate and follows the packets: `combat.rs` reads `SCCombatEngaged`/`SCCombatCleared` and runs the
+  decompile's 10 s idle deadline (above). The native 0.861 s is not a stance timer: it is the packet/processing order after
+  `SCCombatCleared` (`docs/research/port-combat/side-by-side.md:52-68` in 1b0066d4); the decompile rule is a clear on
+  `OnCombatCleared` (`FUN_391d6a60` -> `FUN_39355ec0`) with a 10 s deadline refreshed while engaged (`FUN_39355ee0`). The shield is on the arm only while
   the sword is out (the real client shows none on a character at peace: it comes onto the arm with the sword, `Grip::Shield` in
   `weapons.rs`; with the bow or an instrument out it is away too). The `drawn_scale` of `item_weapons` applies in the hand.
 * **Moving casters** (`Acting::layered`): a unit whose speed is above 0.3 m/s plays a cast, fire or plot clip on its upper body
@@ -194,12 +222,14 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   combat idle. The rules below are the **decompile** (`x2game.dll.c`), not a timing read from our own server's replies:
   * `request_skill` reads the player's `UseSkill` (the key), finds the weapon the skill is played with (`skill_weapon`: the clips of
     its `SkillVisual`, the first plot step, the carried blade for the basic attack, which has no clip in the data) and, when it is not
-    out in that stance already, inserts `Drawn` **at once**. The client changes the weapon on the request path, for the local
-    player only: `FUN_39390f80` (742553; called from `FUN_393989e0`'s skill 2 branch, 748885, and the click attack
-    `FUN_393923c0`, 743692) calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610`
-    (skill 2, `+0x5fc5`). Both callers pass skill 2 (the click attack passes `DAT_39ac3874` = 2 at 140928), so the `+0x158` /
-    `+0x5fc6` branch for another skill is unreachable in 1.2: a `start_autoattack` self-buff such as Frenzy 10455 does not enter
-    the combat idle. `SCSkillStarted` starts no pulse and no stance. The server's events are **not** held: the clip starts on
+    out in that stance already, inserts `Drawn` **at once**. The client draws at the request only for the local player's auto
+    attack: `FUN_39390f80` (742553; called from `FUN_393989e0`'s skill 2 branch, 748885, and the click attack `FUN_393923c0`,
+    743692) calls `FUN_39360920` (the weapon byte `+0x3ba8`) and, for the 1000 ms idle pulse, `FUN_39354610` (skill 2,
+    `+0x5fc5`). Both callers pass skill 2 (the click attack passes `DAT_39ac3874` = 2 at 140928), so the `+0x158` / `+0x5fc6`
+    branch for another skill is unreachable in 1.2: a `start_autoattack` self-buff such as Frenzy 10455 does not enter the combat
+    idle. For every other skill the request-time draw is **inferred**: the decompile draws only on the start when
+    `can_active_weapon_without_anim` (`+0x38`) is set (`FUN_3939a810`, 750400-750401), when the server's `SCSkillStarted`
+    arrives. `SCSkillStarted` starts no pulse and no stance. The server's events are **not** held: the clip starts on
     `SCSkillFired` and the damage on `SCUnitDamaged` when they arrive. The older 0.6 s `DRAW_LEAD` and the K2 report's +280 ms
     are not client timers: the K2 first fire was our server's `start_auto_skill` (CONT), and a localhost reply lands in the same
     client frame (the audit's F2). A refused skill (`cancel_draw`) puts the weapon back.

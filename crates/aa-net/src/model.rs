@@ -1443,10 +1443,11 @@ impl Movement {
 
     /// Body after the object id: type byte and `MoveType.Write`.
     pub fn write(&self, w: &mut Writer) {
-        // The climb block is not modelled: never announce it. The supporting-object block is
-        // written exactly as the 2026-10-29 rowboat deck capture has it (`FUN_3961e2c0`):
-        // gcFlags, gcPartId, the auxiliary position, rotation x3, then the gcId.
-        let af = self.actor_flags & !actor_flags::HANGING_FROM_OBJECT;
+        // Both support blocks are written in `FUN_397c0470` order: the supporting-object block
+        // (`0x20`) as the 2026-10-29 rowboat deck capture has it (gcFlags, gcPartId, the
+        // auxiliary world position, rotation x3), then the gcId for either flag, then the climb
+        // data (`0x40`) of [`crate::climb`].
+        let af = self.actor_flags;
         w.u8(self.move_type).u32(self.time).u8(self.flags);
         if self.flags & move_flags::HAS_SC_TYPE_AND_PHASE != 0 {
             w.u32(0).u8(0);
@@ -2445,8 +2446,8 @@ mod tests {
         assert_eq!((back.alertness, back.fall_vel), (2, 0x1234));
         assert_eq!(back.actor_flags, 0x84);
 
-        // The standing block is written from `support`; the climb block is not modelled and its
-        // bit is never announced.
+        // The standing block is written from `support`; a climb bit with no support writes the
+        // gcId and a zero climbData.
         let mut m = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
         m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::STANDING_ON_SOLID;
         m.support = Some(MoveSupport {
@@ -2469,11 +2470,66 @@ mod tests {
 
         let mut hanging = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 5);
         hanging.actor_flags = actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING;
+        hanging.support = Some(MoveSupport { obj_id: 1, climb: Some(0x1234_5678), ..MoveSupport::default() });
         let mut w = Writer::new();
         hanging.write(&mut w);
         let bytes = w.finish();
-        assert_eq!(*bytes.last().unwrap(), actor_flags::JUMPING);
-        assert_eq!(Movement::read(&mut Reader::new(&bytes)).unwrap().fall_vel, 0);
+        assert_eq!(&bytes[bytes.len() - 8..], &[1, 0, 0, 0, 0x78, 0x56, 0x34, 0x12]);
+        let back = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(back.actor_flags, actor_flags::HANGING_FROM_OBJECT | actor_flags::JUMPING);
+        assert_eq!(back.support.unwrap().climb, Some(0x1234_5678));
+        assert_eq!(back.fall_vel, 0);
+    }
+
+    /// `MoveType.Write` after the actor flags: gcFlags/part/auxiliary frame for `0x20`, the gcId
+    /// for `0x60`, then the climb data for `0x40` (`FUN_397c0470`, `FUN_3909db50` read order).
+    #[test]
+    fn a_hanging_unit_writes_the_gc_id_and_climb_data_byte_exactly() {
+        let mut m = Movement::unit(Pos::new(10.0, 20.0, 30.0), 0.0, 5);
+        m.actor_flags = actor_flags::HANGING_FROM_OBJECT;
+        m.support = Some(MoveSupport { obj_id: 1, climb: Some(0x00ab_cdef), ..MoveSupport::default() });
+        let mut w = Writer::new();
+        m.write(&mut w);
+        let bytes = w.finish();
+        let mut expected = Writer::new();
+        expected
+            .u8(1)
+            .u32(5)
+            .u8(move_flags::MOVING)
+            .position(Pos::new(10.0, 20.0, 30.0))
+            .i16(0)
+            .i16(0)
+            .i16(0)
+            .i8(0)
+            .i8(0)
+            .i8(0)
+            .i8(0)
+            .i8(0)
+            .i8(0)
+            .u8(stance::RELAXED)
+            .u8(0)
+            .u8(actor_flags::HANGING_FROM_OBJECT)
+            .u32(1)
+            .u32(0x00ab_cdef);
+        assert_eq!(bytes, expected.finish());
+
+        // Both blocks on a moving hull: the auxiliary frame first, then the ship id, then climb.
+        m.actor_flags = actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT;
+        m.support = Some(MoveSupport {
+            obj_id: 0x0099_8877,
+            kind: 1,
+            part: 0x0123,
+            world: Some((Pos::new(1.0, 2.0, -100.0), [1, 2, 3])),
+            climb: Some(0x0102_0304),
+        });
+        let mut w = Writer::new();
+        m.write(&mut w);
+        let bytes = w.finish();
+        let back = Movement::read(&mut Reader::new(&bytes)).unwrap();
+        let support = back.support.unwrap();
+        assert_eq!((support.obj_id, support.kind, support.part), (0x0099_8877, 1, 0x0123));
+        assert_eq!(support.climb, Some(0x0102_0304));
+        assert_eq!(support.world, Some((Pos::new(1.0, 2.0, -100.0), [1, 2, 3])));
     }
 
     #[test]

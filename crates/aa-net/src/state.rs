@@ -46,6 +46,7 @@ pub use crate::slave::Slaves;
 pub use crate::trade::Trade;
 pub use crate::gimmick::Gimmicks;
 pub use crate::housing::Houses;
+pub use crate::shipyard::Shipyards;
 pub use crate::farm::Farms;
 pub use crate::radar::{FishRadar, ShipRadar, TransferRadar};
 pub use crate::ui_data::UiData;
@@ -489,6 +490,7 @@ pub struct WorldState {
     pub doodad_bonds: crate::DoodadBonds,
     pub gimmicks: Gimmicks,
     pub houses: Houses,
+    pub shipyards: Shipyards,
     pub farms: Farms,
     pub transfer_radar: TransferRadar,
     pub ship_radar: ShipRadar,
@@ -550,6 +552,7 @@ impl WorldState {
         self.doodad_bonds.apply(e);
         self.gimmicks.apply(e);
         self.houses.apply(e);
+        self.shipyards.apply(e);
         self.farms.apply(e);
         self.transfer_radar.apply(e);
         self.ship_radar.apply(e);

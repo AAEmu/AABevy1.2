@@ -88,6 +88,9 @@ fn reparent(lua: &Lua, id: Id, parent: Option<Id>) {
     } else {
         u.tree.top.push(id);
     }
+    // The parent chain carries the effective scale: a moved TextBox must refit at its new one.
+    u.animations.clear_widget_scale_cache();
+    super::super::widget::textbox::all_scales_changed(&mut u);
 }
 
 fn detach(lua: &Lua, owner: Id, button: Id) -> Option<(ChatTab, usize, i64)> {

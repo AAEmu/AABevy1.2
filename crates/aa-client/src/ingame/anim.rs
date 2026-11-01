@@ -76,7 +76,7 @@ fn files() -> &'static std::sync::Mutex<std::collections::HashMap<usize, Arc<str
     FILES.get_or_init(Default::default)
 }
 
-fn remember_file(clip: &BoundClip, path: &str) {
+pub(super) fn remember_file(clip: &BoundClip, path: &str) {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase();
     files().lock().unwrap_or_else(|e| e.into_inner()).entry(Arc::as_ptr(&clip.clip) as usize).or_insert_with(|| Arc::from(name.as_str()));
 }
@@ -108,6 +108,8 @@ pub struct ClipSet {
     walk_clip_speed: f32,
     /// The combat stances, bound when a unit first fights in one.
     stances: Arc<[OnceLock<Arc<StanceClips>>; 5]>,
+    /// The climb clips of [`super::ladder::LadderClips`], bound on the first hang.
+    climb: Arc<OnceLock<Option<Arc<super::ladder::LadderClips>>>>,
 }
 
 /// The stance a unit fights in, from the weapon it holds: its idle and run clips are `<prefix>_ba_combat_idle` and
@@ -247,7 +249,20 @@ impl ClipSet {
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let sprint = SprintClips::load(rig, &cal, clips, "fist_mo_normal_run");
-        let set = ClipSet { cal, idle, upper: BoneMask::upper_body(rig), run, walk, sprint, jump, jumps: Default::default(), run_clip_speed, walk_clip_speed, stances: Default::default() };
+        let set = ClipSet {
+            cal,
+            idle,
+            upper: BoneMask::upper_body(rig),
+            run,
+            walk,
+            sprint,
+            jump,
+            jumps: Default::default(),
+            run_clip_speed,
+            walk_clip_speed,
+            stances: Default::default(),
+            climb: Default::default(),
+        };
         // a jump's clips are bound before the first jump: binding loads the file, and a take-off is shorter than a hitch
         if set.jump.is_some() {
             for kind in [JumpKind::Relaxed, JumpKind::Walk, JumpKind::Sprint] {
@@ -277,6 +292,12 @@ impl ClipSet {
 
     pub fn can_move(&self) -> bool {
         self.run[0].is_some() || self.walk[0].is_some()
+    }
+
+    /// The climb clips of the model, bound the first time a unit of it hangs (the `.cal` names only
+    /// the exit clips, so they are bound by path; see [`super::ladder::LadderClips`]).
+    pub(super) fn climb_clips(&self, rig: &Rig, clips: &ClipLibrary) -> Option<Arc<super::ladder::LadderClips>> {
+        self.climb.get_or_init(|| super::ladder::LadderClips::load(rig, &self.cal, clips).map(Arc::new)).clone()
     }
 }
 
@@ -310,6 +331,26 @@ fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
     if clip.clip.duration > 0.0 { travelled / clip.clip.duration } else { 0.0 }
 }
 
+/// A unit hanging on a ladder, rope or net, as the animation needs it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClimbPose {
+    /// `doodad_func_climbs.climb_type_id`; 0 when a remote unit's target is not known (ladder clips).
+    pub kind: u8,
+    /// Metres per second along the climb, positive up.
+    pub up: f32,
+    /// The top/bottom exit clip is playing (no more climbing).
+    pub exiting: bool,
+    /// The ladder's angle from vertical, degrees (`acos(axis.z) * 57.2958`); chooses the top
+    /// exit clip of kinds 1 and 6.
+    pub angle_deg: f32,
+}
+
+impl Default for ClimbPose {
+    fn default() -> Self {
+        Self { kind: 0, up: 0.0, exiting: false, angle_deg: 0.0 }
+    }
+}
+
 /// What a unit is doing, as far as the animation cares. Written by whatever moves the unit.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Motion {
@@ -319,6 +360,8 @@ pub struct Motion {
     /// zero when standing).
     pub local_dir: Vec2,
     pub airborne: bool,
+    /// Hanging on a ladder, rope or net; [`super::ladder::drive_climb`] owns the clip.
+    pub climb: Option<ClimbPose>,
 }
 
 /// The clips of a model and what it is currently playing.
@@ -330,11 +373,13 @@ pub struct Locomotion {
     jump: JumpTrack,
     /// The combat stance the playing clip belongs to (`None`: the peaceful clips).
     stance: Option<Stance>,
+    /// A climb clip is playing; leaving the ladder invalidates the state once.
+    pub(super) on_climb: bool,
 }
 
 impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
-        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None }
+        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false }
     }
 
     /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
@@ -412,6 +457,11 @@ pub fn drive_locomotion(
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();
     for (mut animator, mut loco, motion, acting, drawn, wield, local, fighting) in &mut units {
         if !animator.starts_enabled() { continue; }
+        // a ladder owns the clip; `drive_climb` plays it
+        if motion.climb.is_some() {
+            loco.jump = JumpTrack::default();
+            continue;
+        }
         // an action on the whole body owns the clip; one on the upper body leaves the legs to locomotion
         if acting.is_some_and(|a| !a.layered) {
             // the action owns the body: the jump's phase is over when it ends

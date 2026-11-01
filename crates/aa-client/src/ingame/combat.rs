@@ -76,28 +76,30 @@ pub struct Acting {
 }
 
 /// The client's battle flag (`X2Unit + 0x3bba`): set by `SCCombatEngaged` (`OnCombatEngaged`, `FUN_391d69a0` -> `FUN_390b36f0`)
-/// and by a blow dealt or taken (the damage handler's `FUN_39391670`), and cleared only by `SCCombatCleared` (`OnCombatCleared`,
-/// `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`). It has no timer of its own.
+/// and by a real blow dealt or taken (the damage handler's `FUN_39391670`: a caster, a hit, both units alive), and cleared only
+/// by `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`). It
+/// has no timer of its own.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CombatStance;
 
 /// Seconds the model keeps its combat idle after the last combat activity: `FUN_39355ee0` compares the current time with
 /// `+0x5fc0` against `DAT_39ac7424` (10000 ms, read at `x2game_unpacked.dll` file offset `0xad5a24`).
 const COMBAT_IDLE_SECS: f64 = 10.0;
-/// The skill-use pulse of `FUN_39355ee0`: `+0x5fc5` / `+0x5fc6` refresh `+0x5fc0` for 1000 ms after the skill request.
+/// The skill-use pulse of `FUN_39355ee0`: `+0x5fc5` refreshes `+0x5fc0` for 1000 ms after the local player's auto attack
+/// request (the `+0x5fc6` branch for another skill is unreachable in 1.2; see `request_skill`).
 const SKILL_PULSE_SECS: f64 = 1.0;
 
 /// The model's "recent combat" flag (`X2Unit + 0x5fc4`, derived from the `+0x5fc0` deadline in `FUN_39355ee0`): it drives the
 /// combat idle (`[model + 0x14] + 0x428`). It is refreshed every update while [`CombatStance`] is set (the deadline never clears
-/// the stance byte), for 1000 ms after a skill request (`+0x5fc5` auto attack / `+0x5fc6` other skill), and when a skill is used
-/// while it is already set (`FUN_393545e0`). It falls 10 s after the last refresh; `FUN_39355ee0` then writes `false` to the model
+/// the stance byte), for 1000 ms after the local player's auto attack request (`+0x5fc5`), and when a skill is used while it is
+/// already set (`FUN_393545e0`). It falls 10 s after the last refresh; `FUN_39355ee0` then writes `false` to the model
 /// and zeroes `+0x5fc0`. Putting the weapon away zeroes `+0x5fc0` too (`FUN_39360920` with weapon 0, `FUN_39362690` on the
 /// resurrect reset, `FUN_39362c70`), so the idle ends with the weapon; the stance byte is separate.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct CombatIdle {
     /// `+0x5fc0`: the last activity time the 10 s is counted from.
     pub last: f64,
-    /// `+0x5fc5` / `+0x5fc6`: a skill request refreshes `last` until this moment.
+    /// `+0x5fc5`: the auto attack request refreshes `last` until this moment.
     pub pulse_until: f64,
 }
 
@@ -831,7 +833,8 @@ impl Stage<'_, '_> {
             None => self
                 .net_units
                 .get(obj)
-                .map(|u| cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z)))
+                .and_then(|u| super::units::unit_world_pose_in(u, &self.net_units))
+                .map(|(pos, _)| cry_to_bevy(pos))
                 .or_else(|| {
                     self.net_doodads
                         .by_id
@@ -1817,12 +1820,14 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
     })
 }
 
-/// The player presses a skill that needs its weapon while it is away: the weapon comes out and the shield comes onto the arm now
-/// (the 1.2 client changes the weapon at the request, `FUN_39390f80` -> `FUN_39360920`) and the character turns to the target.
-/// The combat idle pulse (`+0x5fc5`) is on this request path too, and only for the local player's auto attack: both callers of
-/// `FUN_39390f80` pass skill 2 (`FUN_393989e0`'s `param_2 == DAT_39ac769c` branch, 748866-748885, and `FUN_393923c0`, 743728,
-/// called with `DAT_39ac3874` = 2 at 140928), so the `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2. The
-/// clip is not timed here: it plays when the server's `SCSkillFired` arrives.
+/// The player presses a skill that needs its weapon while it is away: Bevy draws the weapon and the shield now and turns the
+/// character to the target. The decompile draws at the request only for the auto attack: `FUN_39390f80` (called for skill 2 only)
+/// -> `FUN_39360920`, with the 1000 ms `+0x5fc5` pulse (`FUN_39354610`). Both of its callers pass skill 2 (`FUN_393989e0`'s
+/// `param_2 == DAT_39ac769c` branch, 748866-748885, and `FUN_393923c0`, 743728, called with `DAT_39ac3874` = 2 at 140928), so
+/// its `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2. For every other skill the request-time draw is
+/// **inferred**: the decompile's start-skill path draws only when `skills.can_active_weapon_without_anim` (`+0x38`) is set, when
+/// the server's `SCSkillStarted` arrives (`FUN_3939a810`, 750400-750401). The clip is not timed here: it plays when the server's
+/// `SCSkillFired` arrives.
 fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut st: Stage, mut combat: ResMut<Combat>, mut shot: Option<ResMut<DevShot>>) {
     let now = time.elapsed_secs_f64();
     for NetCommand(cmd) in requests.read() {
