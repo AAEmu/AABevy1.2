@@ -1,0 +1,87 @@
+# Auto-attack lifecycle at fixed capture points.  The setup mirrors the K2
+# capture: a GM-spawned rat_brown (template 6409), skill 2 (Melee Attack) on
+# action slot 3.  The server repeats the swings; the client sends one
+# CSStartSkill 2 per press.  Written for the first live run; not run offline.
+name: auto_attack
+version: 1
+description: target a mob, auto-attack, snapshots at fixed points, re-press, walk away
+tags: [combat, auto-attack]
+
+steps:
+  - id: reset_cooldowns
+    gm: "/resetcd"
+  - id: wait_reset
+    wait: 500
+  - id: heal
+    gm: "/heal"
+  - id: wait_heal
+    wait: 500
+  - id: safe_spot
+    move-to: [15578.2, 15450.0, 126.245]
+  - id: wait_move
+    wait: 2500
+  - id: bind_auto_attack
+    set-slots:
+      page: 1
+      slots:
+        3: 2
+    note: Melee Attack (skill 2) on action slot 3, as in the K2 capture
+  - id: wait_bind
+    wait: 300
+  - id: spawn_rat
+    gm: "/spawn npc 6409"
+  - id: wait_spawn
+    wait: 2000
+  - id: target_rat
+    target:
+      nearest: true
+      name: "rat_brown "
+      template: 6409
+      timeout_ms: 8000
+  - id: targeted
+    snapshot: targeted
+  - id: auto_attack
+    use-skill:
+      id: 2
+      slot: 3
+    note: Melee Attack (auto-attack) on action slot 3
+  - id: wait_first_clip
+    wait: 300
+  - id: first_clip
+    snapshot: first_clip
+    server_tag: server
+  - id: wait_repeat_1
+    wait: 1700
+  - id: repeat_1
+    snapshot: repeat_1
+    server_tag: server
+  - id: wait_repeat_2
+    wait: 2000
+  - id: repeat_2
+    snapshot: repeat_2
+    server_tag: server
+  - id: re_press
+    use-skill:
+      id: 2
+      slot: 3
+    note: a re-press sends another CSStartSkill 2; our server decides the stop
+  - id: wait_after_repress
+    wait: 1000
+  - id: after_repress
+    snapshot: after_repress
+    server_tag: server
+  - id: walk_away
+    key: s
+    hold_ms: 1500
+  - id: wait_walk
+    wait: 1000
+  - id: walked_away
+    snapshot: walked_away
+    server_tag: server
+  - id: wait_settle
+    wait: 2000
+  - id: settled
+    snapshot: settled
+    server_tag: server
+  - id: auto_attack_done
+    mark: auto_attack_done
