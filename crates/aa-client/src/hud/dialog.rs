@@ -733,7 +733,15 @@ pub fn talk_input(
     let pressed = |action: &str, index: u32, c: char| scripted_key == Some(c) || (!typing && actions.just_pressed(action, index));
     // a pick the script runner made (`interact`) takes the place of the ray cast, everything after it is the same
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = right_click_pick(&pointer, &units, own, &mut pressed_at, blocked);
+    // a climb doodad under the cursor takes the click: the right click grabs it, not the ship or
+    // NPC behind the rungs (`cursor_climb` is this frame's doodad pick)
+    let over_climb = bridge.0.borrow().doodad.cursor_climb();
+    let picked = if over_climb {
+        pressed_at.take();
+        None
+    } else {
+        right_click_pick(&pointer, &units, own, &mut pressed_at, blocked)
+    };
     let scripted_pick = script_pick.take_right();
     let picked = (!blocked).then_some(scripted_pick).flatten().or(picked);
 

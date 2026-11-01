@@ -140,9 +140,15 @@ Ships (merged after the checkpoint was written):
   (kind 1/6 ladder, 2 rope, 3 wood, 4 net, 5 horizontal rope, 7 mast, 8 guardrail, 9 45-degree ladder,
   10 tree) and whose model has an exact `$ladder` helper; the climb segment is the box of the mesh chunk
   that helper names (`FUN_393aaad0`), not the whole model. F grabs the nearest one within the 1.5 m use
-  reach and the body is placed before the server answers (`CSHang` 0x0cb). The grab is refused on a
-  seat, glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its seat `+0x3af4`,
-  `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck does not refuse it,
+  reach and the body is placed before the server answers (`CSHang` 0x0cb); a right click on a ladder
+  is the same use-target grab (the only native `CSHang` sender is `FUN_393b8f40`; no separate
+  proximity path was found). The body stands on the `$ladder` helper's front (+Y) side in the
+  doodad's world frame, so a ladder parented to a hull uses the hull transform and a grab from the
+  deck puts the body outside the wall, not between the rungs and the deck. A picked ladder lights
+  up (`use_target_highlight`) and does not fall through to the ship or NPC behind it. The grab is
+  refused on a seat, glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its
+  seat `+0x3af4`, `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck
+  does not refuse it,
   and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates accept
   claims F over NPC talk and loot-all. W/S climb with the clip's root speed scaled by the buffs'
   `ladder_speed_mul`, and every hanging `CSMoveUnit` carries actor flag `0x40`, gcId 1 and the grab's
@@ -166,9 +172,9 @@ Ships (merged after the checkpoint was written):
   inferred, since the only native 1 sender is `FUN_39134930` during a running top exit. Remote
   hangers use the `SCHung` target's kind and the climb data; a hull hanger rides the drawn hull.
   Covered by `examples/ladder_climb`, byte-exact climb tests in `aa-net/src/climb.rs`, the
-  start/stop/top/bottom/jump/moving-hull/rotated-hull/gate/water/death/F-claim tests in
-  `ingame/ladder` and `hud/doodad`, the clip mapping test against the player graph, and remote
-  hanger tests in `ingame/units`. Open (capture-pending): which input produces modes 3/6/8/9, the
+  start/stop/top/bottom/jump/moving-hull/rotated-hull/ship-ladder/front-side/right-click/gate/water/
+  death/F-claim tests in `ingame/ladder`, the ladder pick test in `hud/doodad`, the clip mapping
+  test against the player graph, and remote hanger tests in `ingame/units`. Open (capture-pending): which input produces modes 3/6/8/9, the
   exact climb `deltaMovement`/velocity, net/guardrail lateral `y`, top-step distance, camera pitch
   clamp, and the remote client's own hanger animation consumer. Mount-start while already hanging
   is not gated by this client and not released (the native has no such release); capture-pending.

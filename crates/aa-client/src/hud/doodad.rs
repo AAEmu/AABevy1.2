@@ -40,8 +40,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::ingame::data::Db;
 use crate::ingame::doodad_affordance::{DoodadDecal, DoodadTargetDecal};
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
+use crate::ingame::ladder::LadderGrab;
 use crate::ingame::units::{Views, doodad_world};
 use aa_net::interaction::Interact;
 use aa_net::CofferCommand;
@@ -320,6 +322,9 @@ pub(super) struct View {
     chosen: Vec<i64>,
     /// The doodad under the pointer (its name tooltip is up).
     hover: Option<u32>,
+    /// The pointer is over a climb doodad: a right click grabs it and must not fall through to a
+    /// ship or NPC behind the rungs.
+    cursor_climb: bool,
     /// What the doodad tooltip shows now.
     tip: Option<Tip>,
     /// The doodad last right clicked: the bar is about it while it is in reach.
@@ -396,6 +401,10 @@ impl View {
     /// F (`do_interaction_1`) uses the doodad in reach instead of talking to an NPC.
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
+    }
+    /// The pointer is over a climb doodad: a right click grabs it, not the ship or NPC behind it.
+    pub(super) fn cursor_climb(&self) -> bool {
+        self.cursor_climb
     }
 }
 
@@ -628,6 +637,39 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
     (!npc_in_front).then_some(obj_id)
 }
 
+/// The climb doodad under the ray, tested along the whole `$ladder` segment. A ship ladder's
+/// packet origin can be below the waterline while its rungs are at deck height, so a sphere at
+/// the origin would never light it up. `segments` holds the drawn `(obj_id, bottom, top)` in
+/// Bevy world space.
+fn pick_climb(
+    ray: Ray3d,
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    segments: &[(u32, Vec3, Vec3)],
+) -> Option<u32> {
+    let mut best: Option<(f32, u32)> = None;
+    for &(obj_id, a, b) in segments {
+        let Some(pos) = doodads.by_id.get(&obj_id).and_then(|o| doodad_world(o, units)) else {
+            continue;
+        };
+        if data.pos.distance(pos) > PICK_DISTANCE {
+            continue;
+        }
+        let steps = ((a.distance(b) / 0.4).ceil() as usize).clamp(2, 24);
+        for i in 0..=steps {
+            let p = a.lerp(b, i as f32 / steps as f32);
+            if let Some(along) = hit(ray, aa_world::bevy_to_cry(p), 0.45)
+                && best.is_none_or(|(x, _)| along < x)
+            {
+                best = Some((along, obj_id));
+                break;
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
 /// target decal after it (it reads the `DoodadTargetDecal` this writes).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -649,13 +691,26 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals, mut target_decal, ladder_claim): (
+    (
+        mut glows,
+        names,
+        views,
+        visuals,
+        mut target_decal,
+        ladder_claim,
+        db,
+        mut grab,
+        ladder_visuals,
+    ): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
         Option<Res<crate::ingame::ladder::LadderClaim>>,
+        Option<Res<Db>>,
+        Option<ResMut<LadderGrab>>,
+        Query<(&DoodadVisual, &GlobalTransform)>,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
@@ -733,24 +788,57 @@ fn track(
     if !blocked && pointer.mouse.just_pressed(MouseButton::Right) {
         *pressed_at = if pointer.over_ui.0 { None } else { cursor };
     }
+    let ladder_segments: Vec<(u32, Vec3, Vec3)> = db.as_deref().map_or_else(Vec::new, |db| {
+        doodads
+            .by_id
+            .values()
+            .filter(|o| db.ladder_kind(o.func_group_id).is_some())
+            .filter_map(|o| {
+                let entity = views.doodad_entity(o.obj_id)?;
+                let (visual, global) = ladder_visuals.get(entity).ok()?;
+                let helper = visual.ladder?;
+                Some((
+                    o.obj_id,
+                    global.transform_point(helper.bottom),
+                    global.transform_point(helper.top),
+                ))
+            })
+            .collect()
+    });
+    let climb = ray.and_then(|r| pick_climb(r, &d, &doodads, &units, &ladder_segments));
     let mut clicked = None;
     if !blocked && pointer.mouse.just_released(MouseButton::Right)
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = pick(ray, &d, &doodads, &units, own);
+        clicked = climb.or_else(|| pick(ray, &d, &doodads, &units, own));
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
         clicked = (!blocked).then(|| nearest_usable(&d, &doodads, &units)).flatten();
         info!("doodad: --doodad-rclick on {clicked:?}");
     }
+    // A right click on a climb doodad is its use: the native use-target path (`FUN_393b8f40`)
+    // is the only CSHang sender. Hand it to the ladder controller instead of the skill bar.
+    if let Some(id) = clicked
+        && let Some(o) = doodads.by_id.get(&id)
+        && db.as_deref().is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
+    {
+        if let Some(grab) = grab.as_mut() {
+            grab.0 = Some(id);
+        }
+        info!("doodad: {id} is a climb doodad: grab request");
+        clicked = None;
+    }
     if script.hovers.last().is_some_and(|t| script.since >= *t) {
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
+    let hover = climb
+        .or_else(|| ray.and_then(|r| pick(r, &d, &doodads, &units, own)))
+        .or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
+    d.doodad.cursor_climb = climb.is_some();
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
@@ -1968,7 +2056,7 @@ mod tests {
         use crate::ingame::Motion;
         use crate::ingame::data::Db;
         use crate::ingame::doodad_model::LadderHelper;
-        use crate::ingame::ladder::{LadderClaim, control_ladder};
+        use crate::ingame::ladder::{LadderClaim, LadderGrab, control_ladder};
         use crate::ingame::player::{LocalPlayer, Mover, PlayerInput, SendState};
         use crate::ingame::units::{RemoteDoodad, Views};
 
@@ -2013,6 +2101,7 @@ mod tests {
             .insert_resource(DoodadTargetDecal::default())
             .insert_resource(aa_net::CharacterNames::default())
             .insert_resource(LadderClaim::default())
+            .insert_resource(LadderGrab::default())
             .insert_resource(SendState::default())
             .insert_resource(PlayerInput::default())
             .insert_resource(aa_anim::ClipLibrary::default())
@@ -2096,6 +2185,33 @@ mod tests {
         assert!(
             requested.is_empty(),
             "F did not request the bar: {requested:?}"
+        );
+    }
+
+    /// A climb doodad has no use skills, but its template sets `use_target_highlight`; the pick
+    /// must still resolve it. A ship ladder's packet origin is below the waterline while its
+    /// rungs are at deck height, so the pick follows the whole `$ladder` segment.
+    #[test]
+    fn a_climb_doodad_is_picked_for_the_highlight() {
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(77, world_doodad(77, 1187, 15013, Vec3::new(0.0, 0.0, 0.0)));
+        let data = HudData {
+            pos: Vec3::new(0.0, -5.0, 0.0),
+            ..Default::default()
+        };
+        // the ray crosses the rung at 3 m up (the packet origin is at the foot, z 0)
+        let ray = Ray3d::new(
+            aa_world::cry_to_bevy(Vec3::new(0.0, -5.0, 3.0)),
+            bevy::math::Dir3::new(aa_world::cry_to_bevy(Vec3::new(0.0, 1.0, 0.0))).unwrap(),
+        );
+        // the drawn segment: the `$ladder` helper in the doodad root at the origin
+        let segments = [(77, Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0))];
+        assert_eq!(
+            pick_climb(ray, &data, &doodads, &Units::default(), &segments),
+            Some(77),
+            "the visible rungs are picked"
         );
     }
 }

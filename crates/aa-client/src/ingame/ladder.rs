@@ -13,8 +13,13 @@
 //!   phase and the frame from the model's `$ladder` element (`Db::ladder_kind`,
 //!   [`super::doodad_model::LadderHelper`]);
 //! * F (`do_interaction_1`) grabs the nearest climbable doodad within 1.5 m (the reach
-//!   `FUN_390c1130` uses without an actor-model reach block); the local body is placed at once,
-//!   before the server answers, and `CSHang` is sent (`FUN_39363410`);
+//!   `FUN_390c1130` uses without an actor-model reach block); a right click on a ladder is the
+//!   same use-target grab (the native `FUN_393b8f40` is the only `CSHang` sender, so there is no
+//!   separate proximity grab). The local body is placed at once, before the server answers, and
+//!   `CSHang` is sent (`FUN_39363410`). The body stands on the `$ladder` helper's front (+Y)
+//!   side, computed in the doodad's world frame: a ship ladder includes the hull transform, so
+//!   grabbing from the deck still puts the body outside the wall. A picked ladder lights up
+//!   (`use_target_highlight`) and does not fall through to the ship or NPC behind it;
 //! * W/S move along the ladder. 1.2 has no climb-speed constant: the vertical motion is the
 //!   clip's root motion, scaled by the buffs' `ladder_speed_mul` (unit attribute 93 [0x5d]). The
 //!   clip's root speed is the fallback when the model has no climb clips (1.5 m/s,
@@ -104,7 +109,13 @@ pub struct LadderWorld<'w> {
     pub hull_poses: Option<Res<'w, DeckHullPoses>>,
     pub sprint: Option<Res<'w, super::sprint::Sprint>>,
     pub claim: ResMut<'w, LadderClaim>,
+    pub grab: ResMut<'w, LadderGrab>,
 }
+
+/// A HUD request to grab the climb doodad `obj_id` (a right click on it). [`control_ladder`]
+/// consumes it; a request for a doodad out of reach or not climbable does nothing.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LadderGrab(pub Option<u32>);
 
 /// The ladder the local player hangs on.
 #[derive(Component, Clone, Debug)]
@@ -587,10 +598,14 @@ fn nearest_ladder(
     doodads: &Doodads,
     db: Option<&Db>,
     pos: Vec3,
+    want: Option<u32>,
 ) -> Option<LadderHit> {
     let db = db?;
     let mut best: Option<(f32, LadderHit)> = None;
     for (doodad, visual, entity) in ladders {
+        if want.is_some_and(|id| id != doodad.obj_id) {
+            continue;
+        }
         let Some(helper) = visual.ladder else {
             continue;
         };
@@ -613,7 +628,7 @@ fn nearest_ladder(
         if dist > REACH {
             continue;
         }
-        if best.as_ref().is_none_or(|b| dist < b.0) {
+        if want.is_some() || best.as_ref().is_none_or(|b| dist < b.0) {
             best = Some((
                 dist,
                 LadderHit {
@@ -630,6 +645,9 @@ fn nearest_ladder(
                     length,
                 },
             ));
+            if want.is_some() {
+                break;
+            }
         }
     }
     best.map(|(_, hit)| hit)
@@ -802,12 +820,16 @@ pub fn control_ladder(
     let Some(ladder) = ladder else {
         // a teleport or a mount took the ladder away without `release`: drop the climb pose
         motion.climb = None;
+        // a right click on a ladder is a use of it (the native use-target path `FUN_393b8f40`
+        // is the only CSHang sender); it names the doodad, so the nearest is not enough
+        let requested = world.grab.0.take();
         let found = nearest_ladder(
             &ladders,
             &transforms,
             &doodads,
             world.db.as_deref(),
             mover.pos,
+            requested,
         );
         // the native grab gate 1.4(b) (`FUN_393b8f40`): a unit BOUND to a vehicle (`+0x3af0`,
         // its seat at `+0x3af4`), on a seat, in a skill move or flying does not hang; a swimmer
@@ -825,7 +847,7 @@ pub fn control_ladder(
         } else {
             found.as_ref().map(|hit| hit.obj_id)
         };
-        if !used || blocked {
+        if (!used && requested.is_none()) || blocked {
             return;
         }
         let Some(LadderHit {
@@ -845,16 +867,16 @@ pub fn control_ladder(
             return;
         };
         let helper_forward_game = bevy_to_cry(root_rotation * helper.forward).normalize_or_zero();
-        let mut normal = Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0);
-        if normal.length_squared() < 1e-6 {
-            normal = helper_forward_game;
-            normal.z = 0.0;
-        }
+        // The body stands on the ladder's own front side (its `$ladder` helper +Y, the native
+        // frame's outward direction), not on the side the player came from. A ship ladder is used
+        // from the deck, inside the hull: a player-relative normal would put the body inside the
+        // wall and send the jump further in.
+        let mut normal = helper_forward_game;
+        normal.z = 0.0;
         normal = normal.normalize_or_zero();
         if normal == Vec3::ZERO {
-            // Straight below a vertical ladder: face its helper's side.
-            normal = helper_forward_game;
-            normal.z = 0.0;
+            // A helper without a horizontal forward: face the player's side.
+            normal = Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0);
             normal = normal.normalize_or_zero();
         }
         let facing = facing_of_normal(normal);
@@ -927,6 +949,7 @@ pub fn control_ladder(
         return;
     };
     world.claim.0 = Some(ladder.obj_id);
+    world.grab.0 = None;
 
     let mut ladder = ladder.clone();
     // No posture change releases the ladder: the only native 0xb site is the death check above.
@@ -1310,6 +1333,7 @@ pub fn drive_climb(
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LadderClaim>()
+        .init_resource::<LadderGrab>()
         .add_systems(
             Update,
             control_ladder
