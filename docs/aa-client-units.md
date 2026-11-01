@@ -324,6 +324,69 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+### Engine idle and engine sound (`VehicleIdle`, `start_vehicle_idle`, `VehicleSound`)
+
+1.2 starts the prefab body's loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init and refresh
+(`FUN_390e69d0`): it plays `fist_ba_relaxed_idle` whenever the model has an animation id, with no driver, speed or
+ownership condition. Its callers skip it while the model's prefab damage state (`model+0x1f0`, `param_1[0x7c]`) is
+5 (dying) or 6 (dead): `FUN_390e69d0` (DEC 184925, init/apply), `FUN_390eb7d0` (DEC 187546,
+`PrefabUnitModel::Update`), `FUN_390ebaa0` (DEC 187601, `VehicleUnitModel::Update`) and the interaction "opened" path
+`FUN_390d64a0` (DEC 173191).
+5 and 6 are damage states, not model kinds (the kind is the template's `+0x30`); the idle resumes when a revive puts
+the state back to 1..4. The Farm Wagon's `transfers_trailer_a_body.cal` lists only that idle and `dead_01`; the idle's 21
+tracks bind to 19 of the body's 29 bones, including `Bone_engine01..03` (`clipinfo`). Measured on 2026-11-01: a bare
+`vehicle::spawn` and a live GM-spawned slave 60 both loop the clip and `Bone_engine01` rotates about 2.4 rad/s of wall
+time, so the clip, the controller ids and the `Animator` tick are sound.
+
+`vehicle::spawn` owns that rule (an ownership move: the generic creature spawn had looped it implicitly):
+a rigged prefab part gets a [`VehicleIdle`] with the idle bound from its `.cal`, and the `VehiclePlugin` system starts
+it (looping) whenever the body's `Animator` has no clip, the Bevy analogue of the 1.2 init/refresh.
+`creature::spawn_with_idle(..., play_idle = false)` keeps the generic creature idle from starting a vehicle body first.
+The exclusion is inherent: the driver only runs on prefab vehicle/ship bodies, and a body in damage state 5 or 6 keeps
+the loop stopped. The Bevy client has no dying state yet (PR #69 adds vehicle damage), so it gates on `Dead`
+(state 6) only. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
+`1277 tower_cannon`, `1293 hwang_ferrari`, `1323/1371/1406 speedcar1-3`, `1442 food_truck`, `1444 speedcar_decal`,
+`1460/1461/1462 speedcar_*_ucc`, `1464 tractor_b`, `1465 sigetank`, `1526 siegetank_prologue`, `1553 tractor_c`,
+`2 trebuchet`, `5 siege_tower`, `8000009 small_tractor`, `892/898/899 siegetank_a-c`, `990 siege_catapult_a`); three
+ships do (`1360/1383/1384 fishboat_1-3`). All of them go through the same path.
+
+Engine sound: `X2::VehicleUnitModel::UpdateSound` (`FUN_390c6780`, called from `FUN_390ebaa0` at DEC 187611, outside
+its 5/6 gate) resolves four items of the model's sound pack by CRC key: `run` (model+0x400), `yaw` (0x404), `pitch`
+(0x408) and `engine` (0x40c). Each is a `SoundManager::PlaySound` (`FUN_393f4220`) at the model position, moved with
+`FUN_393f14a0`, stopped with `FUN_393f1bd0`:
+
+* While the prefab damage state is 1..4, `engine` starts on the first update and is never speed-gated; it gets event
+  parameters `speed`, `volume1`, `pitch1`, `volume2`, `pitch2` every frame.
+* `run` starts only while the model moves. The gate is the L1 norm of either of the model's two velocity vectors
+  (`vtable+0xa4` and `+0xa8`) against `0x399a3fbc = 0.0003`; below both it stops. `yaw` and `pitch` are started as
+  one-shots when the model flags at `+0x2d4`/`+0x2d5` are set; what raises those flags is outside `UpdateSound` and
+  was not decoded, so the vehicle path here does not start those items (capture-pending).
+* In state 5 or 6 the function stops the three non-engine handles (`run` +0x410, `yaw` +0x414, `pitch` +0x418) and
+  jumps to the end. The `engine` handle (+0x41c) is neither started nor updated there, but it is not explicitly
+  stopped: an engine already playing keeps its last parameters.
+* The `speed` parameter is `clamp(|v| / max(0.1, max speed), 0, 1) * 0.99` (`0x399a3fb8`); the max speed is the
+  physics block's `vtable+0x1e0 -> +0x34 -> +0x74`, the `vehicle_models.velocity` / `ship_models.velocity` column.
+  `pitch1`, `volume2` and `pitch2` are the same ratio; `volume1` is the ratio times `throttle * 0.8 + 0.2`
+  (`DAT_399a1d94`, `_DAT_3999dd34`), clamped and scaled by 0.99. The client's `VehicleMotion` has no throttle, so the
+  speed ratio stands in for it (capture-pending). The exact meaning of the second velocity vector is also not decoded;
+  the root velocity and yaw rate stand in for the two (capture-pending).
+
+The data matches the split: `sound_packs` 176 `run_tractor` has no `engine` item and `run` -> sound 950
+(`sounds/x2vehicles:trailer:run`); `run_speedcar` has `engine` -> 3553 (`sounds/x2vehicles:speed_car:run`, the only
+vehicle event with `speed`/`volume1`/`pitch1`/`volume2`/`pitch2`) and an empty `run` item. `sounds::vehicle_engine_sounds`
+resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_models.velocity`/`ship_models.velocity`
+are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
+for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
+parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
+state 5/6 and freezes the `engine` handle; the Bevy client has no dying state yet (PR #69), so it gates on `Dead`
+(state 6) and removes both sounds there - a deviation to revisit with #69. A resurrection puts the engine back and
+`vehicle::resume_vehicle_idle` starts the idle again.
+
+`VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
+`combat::ensure_corpses` only looks for an `Animator` on the root that carries `Dead`; a prefab body keeps its
+Animator on the child part, so `vehicle::stop_dead_vehicles` stops the idle there and plays the death clip. This is the
+pre-existing dead-01 gap for vehicle corpses, fixed on the vehicle path.
+
 ### Vehicle and creature seats
 
 Riders resolve their seat through `model_attach_point_strings` (`Db::attach_point_strings`) by attach point, not by a
@@ -393,8 +456,9 @@ and explicit controls").
   2026-10-28 capture sent exactly `3c 5f 00 00 00 00 01 00 00 00 00 00 00 00 03 00 00 00 00`
   for cart bc 0x5f3c. The earlier claim that slaves never send 0x068 is **corrected** by that
   capture; the click does not send 0x031. While already bound to or seated on the clicked slave,
-  a right click sends only `CSChangeTarget` 0x02c (capture case e: four sweep points, no 0x068,
-  no 0x031, no message); this port did the same after 2026-10-28.
+  a right click sends only `CSChangeTarget` 0x02c (`captures/2026-10-28b/summary.txt:36`, case
+  e `bound`: 4 of 44 sweep points, no 0x068, no 0x031, no message); this port did the same after
+  2026-10-28.
 * **Boarding.** `SCNpcInteractionSkillList` 0x07b for a slave acts on the FIRST skill at once
   (`FUN_393be850` -> `FUN_393be280`). 12076 ("occupy") checks the interaction reach first
   (`FUN_393bf270` / `FUN_39093860`: `DAT_39ac79fc` 9.0, or `DAT_39ac7a00` 12.25 when the player
@@ -427,6 +491,42 @@ and explicit controls").
   `drive_mount` moves the cart from the stale `Mover`, and a cart has no `Animator` for
   `pose_local_rider`). The 2026-10-28 replay refused a while-bound click from that stale point
   ~7 m away; the fix is `hud/slave.rs::player_centre`.
+* **Clicking the model (2026-10-31).** A unit's 1.1 m pick sphere and a vehicle's drawn mesh box
+  are both candidates. Among sphere hits the nearest entry wins; among box hits the nearest entry
+  wins, except that an attached child (a cannon) wins over its parent when its entry is within
+  1.0 m of the parent's entry, so a stern cannon deep inside a bow-clicked hull does not win. A
+  sphere hit then beats the chosen box only while its entry is at or before the box's exit along
+  the ray: a player, NPC or passenger standing on a deck or in a wagon bed (inside the vehicle's
+  span) is picked from outside the vehicle, while a unit behind the vehicle loses to the nearer
+  box entry and cannot steal the click. A unit that is not a `UnitKind::Slave` has no box: a
+  character's draw tree has weapon, attachment and effect bounds but no body bounds, and the box
+  walk stops at a child unit, a parented doodad or an effect. A box that contains the camera is
+  ignored (a camera on deck is inside a ship's box, masts and sails included, and would otherwise
+  be picked on every click). The slave the player rides or is attached to gets no box at all, only
+  its sphere, so it does not block clicks past it; seated, a click only inside the ridden wagon's
+  loose box therefore does not target it (a documented deviation: 1.2's ridden pick is tight,
+  landing on 4 of 44 sweep points, `captures/2026-10-28b/summary.txt:36`; its exact shape is
+  capture-pending). Two consequences of the loose box remain until a capture gives 1.2's tighter
+  pick shape: the 1.0 m child rule mostly helps near-horizontal clicks at the hull side, because
+  from an elevated camera the ray enters the ship's box through the top or the yards, so a cannon
+  clicked outside its sphere goes to the ship; and a unit seen through the empty space between
+  masts or sails loses to the loose box. The box is measured in the drawn root's local frame and
+  composed with the root's current `Transform` chain on every read, so a wagon that drives or
+  turns is picked where it is now; the root and mesh `GlobalTransform`s come from the same
+  propagation (last frame's while a vehicle moves), so their relative box is still correct. Only a
+  fully built tree (every static mesh has its bounds) is cached, and the cache lasts until the root
+  or model changes; nothing is measured on the spawn frame, the frame a mesh is added, or while a
+  mesh's `GlobalTransform` is still the identity but its own `Transform` chain is not. Left click,
+  the right click, the Tab candidates and the talk distances use the
+  unit's current world pose (`unit_world_pose`), so an attached cannon is measured at its
+  parent-composed position, and `Tab` and the talk checks measure from the manned slave's world
+  position (`hud/slave.rs::player_centre`). The rule that an own vehicle may be targeted is
+  `captures/2026-10-28b/summary.txt:36`, case e `bound` (`CSChangeTarget` 0x02c); the native pick
+  landed on 4 of 44 sweep points there, so the port's union-of-meshes box is looser than 1.2's
+  (capture-pending: the exact pick shape).
+* **Interact key.** F sends nothing for a cart (the 2026-10-28 capture with a cart targeted and
+  an NPC at 1.24 m produced no packet); NPC talk keeps the path it had.
+
 * **Interact key and Grab Machine.** F on foot next to a slave is the dynamic action bar's
   "Grab Machine" entry (`FUN_393bdad0` -> `FUN_393bbb80`), not NPC talk: every slave within
   `_DAT_399d3230` 6.25 -> 2.5 m surface gap is a candidate and F sends `CSBindSlave` 0x031
@@ -492,13 +592,13 @@ and explicit controls").
 * `CSBindSlave` 0x031 body is exactly a `u16` timeline id (the decompile only shows a 32-bit
   setter; the 2026-10-28 capture never reached 0x031).
 * The pick suppression distance: 1.2 sent nothing for a cart picked at 4.57 m and 0x068 at
-  2.46 m; the exact check is unknown. The port keeps its view-ray pick (`PICK_RADIUS`) and adds no
-  range test.
+  2.46 m; the exact check is unknown. The port keeps its view-ray pick (the model box, or the
+  small-unit `PICK_RADIUS` sphere) and adds no range test.
 * The exact collision shapes behind the 3.0 / 3.5 / 4.0 m surface gaps are not recovered; the
   port's per-unit scaled actor-model radii are an approximation. The mounted 3.5 m variant is
   modelled from the attachment, but the native +0x3c26 byte needs a live mounted pick to confirm.
 * The 3.5 m and 4.5 m interaction picks could not be measured: the native pick never landed in
-  the 2026-10-28 capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
+  the 2026-10-28b capture (44 sweep points, no 0x02c/0x068), so only the 3.1022 m and 2.9008 m
   binds are live evidence. A later capture must land the pick to check whether 1.2 acts at 3.5 m
   (shifted target flag) and refuses at 4.5 m.
 * `FUN_393bf270` skips the reach check when `param_4 == 0` or the skill is `DAT_39ac7978` /
@@ -814,6 +914,10 @@ check uses the decompile's 300 ms literal, not the code constant. It fails non-z
 interpolation, the delay, the clock offset, the hold, the rotation, the first-sample seed or the
 rendered path is broken:
 `cargo run -p aa-client --example remote_vehicle_motion -- --headless`.
+
+The replay uses a deterministic fixed step (`TimeUpdateStrategy::ManualDuration(1/60)`, game time);
+its `aa-dev: … clock=manual game_per_wall=… real_per_wall=…` line records the wall ratios. The checks
+are game-time durations and must not be read as wall-clock timings.
 
 ## What is drawn (the census)
 

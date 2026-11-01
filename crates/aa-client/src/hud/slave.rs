@@ -135,25 +135,33 @@ fn radius(data: &HudData, unit: &Unit) -> f32 {
 /// point-1 seat marks the cart `Driven`, so the client drives the cart from the stale mover
 /// instead of following it, and a cart has no `Animator` for the seat pose. Use the attached
 /// unit's replicated position then.
-pub(super) fn player_centre(data: &HudData, units: &Units) -> Vec3 {
+pub(super) fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
     data.mounted
         .player_attachment()
-        .and_then(|attachment| units.get(attachment.obj_id))
-        .map_or(data.pos, |unit| {
-            Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)
-        })
+        .and_then(|attachment| world(attachment.obj_id))
+        .map_or(data.pos, |(pos, _)| pos)
 }
 
 /// The facing the candidate checks use. While seated the HUD yaw can stay at the boarding
-/// point (the same staleness as [`player_centre`]), so use the attached unit's replicated yaw
-/// (`Unit::rotation[2]`, yaw 0 faces +y).
-pub(super) fn player_forward(data: &HudData, units: &Units) -> Vec2 {
+/// point (the same staleness as [`player_centre`]), so use the attached unit's world yaw (yaw 0
+/// faces +y).
+pub(super) fn player_forward(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec2 {
     let yaw = data
         .mounted
         .player_attachment()
-        .and_then(|attachment| units.get(attachment.obj_id))
-        .map_or(data.yaw, |unit| unit.rotation[2]);
+        .and_then(|attachment| world(attachment.obj_id))
+        .map_or(data.yaw, |(_, yaw)| yaw);
     Vec2::new(-yaw.sin(), yaw.cos())
+}
+
+/// A unit's world pose from the packets alone (a child slave composed through its parent), for
+/// the callers that have no drawn transforms at hand.
+pub(super) fn replicated_pose(units: &Units) -> impl Fn(u32) -> Option<(Vec3, f32)> + '_ {
+    move |id| {
+        units
+            .get(id)
+            .and_then(|unit| crate::ingame::units::unit_world_pose_in(unit, units))
+    }
 }
 
 /// `FUN_393bf270`: the interaction reach in metres (3.5 on a mount). Only riding a mate counts as
@@ -255,8 +263,9 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
         return None;
     }
     let game = data.game.get()?;
-    let from = player_centre(data, units);
-    let forward = player_forward(data, units);
+    let world = replicated_pose(units);
+    let from = player_centre(data, &world);
+    let forward = player_forward(data, &world);
     let seated = current_slave(data, units);
     let mut best: Option<(f32, Candidate)> = None;
     for unit in units.iter() {
@@ -266,7 +275,7 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
         if seated == Some(unit.obj_id) {
             continue;
         }
-        let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
         let gap = surface_gap(from, data.player_radius, at, radius(data, unit));
         if gap >= CANDIDATE_REACH {
             continue;
@@ -295,7 +304,12 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
     best.map(|(_, candidate)| candidate)
 }
 
-pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outcome {
+pub(crate) fn receive(
+    data: &mut HudData,
+    units: &Units,
+    event: &Event,
+    world: &impl Fn(u32) -> Option<(Vec3, f32)>,
+) -> Outcome {
     let Event::Interaction(InteractEvent::SkillList {
         npc_obj_id, skills, ..
     }) = event
@@ -311,9 +325,9 @@ pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
     if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
-    let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
     let gap = surface_gap(
-        player_centre(data, units),
+        player_centre(data, world),
         data.player_radius,
         at,
         radius(data, unit),
@@ -322,7 +336,7 @@ pub(crate) fn receive(data: &mut HudData, units: &Units, event: &Event) -> Outco
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
     match seat {
-        SlaveSeat::Driver => bind(data, units, *npc_obj_id),
+        SlaveSeat::Driver => bind(data, units, *npc_obj_id, world),
         SlaveSeat::Passenger => passenger(data, units, *npc_obj_id),
     }
 }
@@ -350,10 +364,22 @@ pub(super) fn track(
     mut events: MessageReader<NetEvent>,
     bridge: NonSend<HudBridge>,
     units: Res<Units>,
+    views: Option<Res<crate::ingame::units::Views>>,
+    transforms: Query<&Transform>,
+    parents: Query<&ChildOf>,
     rt: Option<NonSend<UiRuntime>>,
 ) {
+    let world = |id: u32| {
+        let unit = units.get(id)?;
+        match views.as_deref() {
+            Some(views) => {
+                crate::ingame::units::unit_world_pose(unit, &units, views, &transforms, &parents)
+            }
+            None => crate::ingame::units::unit_world_pose_in(unit, &units),
+        }
+    };
     for NetEvent(event) in events.read() {
-        let outcome = receive(&mut bridge.0.borrow_mut(), &units, event);
+        let outcome = receive(&mut bridge.0.borrow_mut(), &units, event, &world);
         if let Outcome::Refused(code) = outcome
             && let Some(rt) = rt.as_deref()
         {
@@ -375,7 +401,12 @@ fn current_slave(data: &HudData, units: &Units) -> Option<u32> {
 }
 
 /// `FUN_39346290` / `FUN_393464a0`: the client's checks before `CSBindSlave`.
-pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+pub(super) fn bind(
+    data: &mut HudData,
+    units: &Units,
+    target: u32,
+    world: &impl Fn(u32) -> Option<(Vec3, f32)>,
+) -> Outcome {
     let Some(unit) = units.get(target) else {
         return Outcome::Silent;
     };
@@ -399,9 +430,9 @@ pub(super) fn bind(data: &mut HudData, units: &Units, target: u32) -> Outcome {
     if data.mounted.bind_pending(Instant::now()) {
         return Outcome::Refused(MSG_ALREADY_REQUESTED);
     }
-    let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
     let gap = surface_gap(
-        player_centre(data, units),
+        player_centre(data, world),
         data.player_radius,
         at,
         radius(data, unit),

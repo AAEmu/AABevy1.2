@@ -450,8 +450,9 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
         return None;
     }
     let game = data.game.get()?;
-    let from = super::slave::player_centre(data, units);
-    let forward = super::slave::player_forward(data, units);
+    let world = super::slave::replicated_pose(units);
+    let from = super::slave::player_centre(data, &world);
+    let forward = super::slave::player_forward(data, &world);
     let mut best: Option<(bool, f32, Focus)> = None;
     for o in doodads.by_id.values() {
         let Some(uses) = game.doodad.uses(o.func_group_id) else {
@@ -639,7 +640,14 @@ fn hit(ray: Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
 }
 
 /// The usable doodad the ray picks, unless an NPC is in front of it.
-fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) -> Option<u32> {
+fn pick(
+    ray: Ray3d,
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    own: u32,
+    world: &impl Fn(&aa_net::model::Unit) -> Option<Vec3>,
+) -> Option<u32> {
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
@@ -656,10 +664,24 @@ fn pick(ray: Ray3d, data: &HudData, doodads: &Doodads, units: &Units, own: u32) 
         }
     }
     let (along, obj_id) = best?;
-    let npc_in_front = units.iter().filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })).any(|u| {
-        hit(ray, to_vec(u.pos) + Vec3::Z * 0.9 * u.scale.max(0.5), 1.1 * u.scale.max(0.7)).is_some_and(|a| a < along)
-    });
-    (!npc_in_front).then_some(obj_id)
+    (!npc_in_front(&ray, along, units, own, world)).then_some(obj_id)
+}
+
+/// Whether an NPC's pick-sphere middle is nearer along the ray than the doodad's middle (`along`).
+/// Both are middles, so a vendor 0.5 m behind a stall does not hide it. `world` is the unit's
+/// drawn world pose, so an NPC attached to a ship is tested where it is drawn, not at its
+/// parent-local packet position.
+fn npc_in_front(
+    ray: &Ray3d,
+    along: f32,
+    units: &Units,
+    own: u32,
+    world: &impl Fn(&aa_net::model::Unit) -> Option<Vec3>,
+) -> bool {
+    units
+        .iter()
+        .filter(|u| u.obj_id != own && matches!(u.kind, aa_net::model::UnitKind::Npc { .. }))
+        .any(|u| super::pick::unit_middle_hit(ray, u, world(u)).is_some_and(|a| a < along))
 }
 
 /// The bar the two interaction producers ask for: the one with the lower [`super::slave::native_key`]
@@ -712,10 +734,11 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, visuals, mut target_decal): (
+    (mut glows, names, views, poses, visuals, mut target_decal): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
+        super::pick::UnitPoses,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
     ),
@@ -724,6 +747,7 @@ fn track(
 ) {
     let Some(rt) = rt else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
+    let world = |u: &aa_net::model::Unit| poses.get(u, &units).map(|(pos, _)| pos);
     script.since += time.delta_secs();
     let mut d = bridge.0.borrow_mut();
     let focus = find_focus(&d, &doodads, &units);
@@ -822,7 +846,7 @@ fn track(
         && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = pick(ray, &d, &doodads, &units, own);
+        clicked = pick(ray, &d, &doodads, &units, own, &world);
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
@@ -833,7 +857,7 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
+    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     d.doodad.pointer_pick = clicked;
@@ -1136,6 +1160,7 @@ pub(super) fn execute(
     player: Option<Res<aa_net::state::Player>>,
     mount: Option<Res<crate::ingame::LocalMount>>,
     views: Res<Views>,
+    poses: super::pick::UnitPoses,
     mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
 ) {
@@ -1183,7 +1208,11 @@ pub(super) fn execute(
                 // `FUN_393be280`. 12076 is the driver bind (`CSBindSlave` 0x031); 13863 is the
                 // plain passenger `CSStartSkill`. Other interaction skills are not ported.
                 let outcome = match pick.skill {
-                    12076 => super::slave::bind(&mut d, &units, obj_id),
+                    12076 => {
+                        // the bind range is measured from the drawn poses (a child slave on a ship)
+                        let world = |id: u32| units.get(id).and_then(|u| poses.get(u, &units));
+                        super::slave::bind(&mut d, &units, obj_id, &world)
+                    }
                     13863 => super::slave::passenger(&mut d, &units, obj_id),
                     _ => super::slave::Outcome::Silent,
                 };
@@ -1736,6 +1765,85 @@ mod tests {
         assert!(hit(ray, Vec3::new(0.0, 10.0, 0.5), 1.0).is_some_and(|a| (a - 10.0).abs() < 1e-3));
         assert!(hit(ray, Vec3::new(3.0, 10.0, 0.0), 1.0).is_none());
         assert!(hit(ray, Vec3::new(0.0, -10.0, 0.0), 1.0).is_none(), "behind the camera");
+    }
+
+    #[test]
+    fn a_vendor_half_a_metre_behind_the_stall_does_not_hide_it() {
+        // the ray runs along bevy -z from the origin; game (x, y, z) -> bevy (x, z, -y), and the
+        // pick middle is 0.9 m above the feet
+        let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
+        let npc = |along: f32| {
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = 21;
+            unit.kind = aa_net::model::UnitKind::Npc {
+                template_id: 1,
+                owner_id: 0,
+            };
+            unit.pos = aa_net::Pos::new(0.0, along, -0.4);
+            unit
+        };
+        let units = |along| {
+            let mut all = Units::default();
+            all.by_id.insert(21, npc(along));
+            all
+        };
+        let stall = 6.0;
+        let raw = |u: &aa_net::model::Unit| Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        // 0.5 m beyond the stall's middle: both are middles, so this is not "in front"
+        assert!(!npc_in_front(&ray, stall, &units(6.5), 0, &raw));
+        // 0.5 m before it: the vendor really is in front
+        assert!(npc_in_front(&ray, stall, &units(5.5), 0, &raw));
+    }
+
+    #[derive(Resource, Default)]
+    struct FrontOut(bool);
+
+    fn read_npc_in_front(
+        poses: crate::hud::pick::UnitPoses,
+        units: Res<Units>,
+        mut out: ResMut<FrontOut>,
+    ) {
+        let ray = Ray3d::new(Vec3::ZERO, Dir3::NEG_Z);
+        out.0 = npc_in_front(&ray, 6.0, &units, 0, &|u| {
+            poses.get(u, &units).map(|(pos, _)| pos)
+        });
+    }
+
+    #[test]
+    fn an_npc_attached_to_a_ship_is_tested_at_its_world_position() {
+        // the packet position is the parent-local (0, -5, 0), which puts the NPC behind the
+        // camera; its drawn root is a child of the ship at bevy (0, 0, -5), 5 m in front
+        let mut npc = crate::hud::fixture_spawn().unit;
+        npc.obj_id = 21;
+        npc.kind = aa_net::model::UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        };
+        npc.pos = aa_net::Pos::new(0.0, -5.0, 0.0);
+        let mut units = Units::default();
+        units.by_id.insert(21, npc);
+
+        let mut app = App::new();
+        app.init_resource::<Views>()
+            .insert_resource(units)
+            .init_resource::<FrontOut>()
+            .add_systems(Update, read_npc_in_front);
+        let ship = app.world_mut().spawn(Transform::default()).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
+                ChildOf(ship),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .track_unit_entity(21, root);
+        app.update();
+        assert!(
+            app.world().resource::<FrontOut>().0,
+            "the drawn NPC is in front of the stall even though its packet position is behind"
+        );
     }
 
     /// The server database at `AA_DB` (else `compact.sqlite3` in the working directory), read-only;
