@@ -1957,7 +1957,9 @@ mod tests {
     /// is the `skills.target_type_id` (11 `BallisticPos`, 15 `ArtilleryPos`, 0 a cart skill).
     struct FixtureDb {
         path: std::path::PathBuf,
-        db: Db,
+        // an `Option` so `drop` can close the connection before deleting the file (Windows
+        // refuses to delete an open SQLite file)
+        db: Option<Db>,
     }
 
     impl FixtureDb {
@@ -1993,12 +1995,17 @@ mod tests {
             }
             let db =
                 Db::open_path(path.to_str().expect("utf-8 temp path")).expect("fixture database");
-            Self { path, db }
+            Self { path, db: Some(db) }
+        }
+
+        fn db(&self) -> &Db {
+            self.db.as_ref().expect("fixture database")
         }
     }
 
     impl Drop for FixtureDb {
         fn drop(&mut self) {
+            drop(self.db.take());
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -2208,7 +2215,7 @@ mod tests {
     fn a_drivable_cart_does_not_aim_or_send_turret_state() {
         let fixture = FixtureDb::new(73, 1008, 0, 4.0, false);
         let wagon = cannon_unit(73, 73, 1008);
-        let (mut app, _) = aim_app(&fixture.db, &wagon, true);
+        let (mut app, _) = aim_app(fixture.db(), &wagon, true);
         app.update();
         assert!(
             app.world().get_resource::<Sight>().is_none(),
@@ -2226,7 +2233,7 @@ mod tests {
     fn an_artillery_pos_skill_runs_the_camera_aim() {
         let fixture = FixtureDb::new(53, 892, 15, 3.5, true);
         let tank = cannon_unit(53, 53, 892);
-        let (mut app, _) = aim_app(&fixture.db, &tank, true);
+        let (mut app, _) = aim_app(fixture.db(), &tank, true);
         app.update();
         assert!(
             app.world().get_resource::<Sight>().is_some(),
@@ -2243,7 +2250,7 @@ mod tests {
     fn only_the_orbiting_game_camera_aims_the_cannon() {
         let fixture = FixtureDb::new(77, 117, 11, 0.0, false);
         let cannon = cannon_unit(77, 77, 117);
-        let (mut app, camera) = aim_app(&fixture.db, &cannon, false);
+        let (mut app, camera) = aim_app(fixture.db(), &cannon, false);
         app.update();
         assert!(
             app.world().get_resource::<Sight>().is_none(),
@@ -2265,7 +2272,7 @@ mod tests {
     fn an_installed_turret_without_a_cannon_skill_still_key_aims() {
         let fixture = FixtureDb::new(2, 2, 0, 2.5, true);
         let turret = cannon_unit(2, 2, 2);
-        let (mut app, _) = aim_app(&fixture.db, &turret, true);
+        let (mut app, _) = aim_app(fixture.db(), &turret, true);
         app.world_mut()
             .resource_mut::<crate::settings::Actions>()
             .hold_for_test("moveforward");

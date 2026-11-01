@@ -1460,7 +1460,7 @@ pub fn track_local_mount(
         send.send_now();
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
-    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && !s.turret).and_then(|s| views.unit_entity(s.mount))
+    if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && (s.cart || !s.turret)).and_then(|s| views.unit_entity(s.mount))
         && units.get(e).is_ok_and(|(_, driven)| !driven)
     {
         commands.entity(e).insert(Driven);
