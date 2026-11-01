@@ -67,6 +67,8 @@ struct Inner {
     world: String,
     capacity: usize,
     cache: Mutex<Cache>,
+    /// No heightmap is loaded (a test query without the game pak).
+    no_data: bool,
 }
 
 #[derive(Default)]
@@ -94,7 +96,24 @@ impl TerrainQuery {
     /// Like [`TerrainQuery::new`] with at most `cells` (at least 1) parsed cells in memory.
     pub fn with_capacity(world: &str, cells: usize) -> TerrainQuery {
         TerrainQuery {
-            inner: Arc::new(Inner { world: world.to_string(), capacity: cells.max(1), cache: Mutex::default() }),
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                capacity: cells.max(1),
+                cache: Mutex::default(),
+                no_data: false,
+            }),
+        }
+    }
+
+    /// An empty query (no heightmap, no pak): every position is outside the map.
+    pub fn fixture(world: &str) -> TerrainQuery {
+        TerrainQuery {
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                capacity: 1,
+                cache: Mutex::default(),
+                no_data: true,
+            }),
         }
     }
 
@@ -105,7 +124,7 @@ impl TerrainQuery {
     /// The parsed heightmap of cell `(cx, cy)` (loaded on first use); `None` when the cell does not exist or
     /// cannot be read.
     pub fn cell(&self, cx: i32, cy: i32) -> Option<Arc<CellHeights>> {
-        if cx < 0 || cy < 0 {
+        if self.inner.no_data || cx < 0 || cy < 0 {
             return None;
         }
         let slot = {

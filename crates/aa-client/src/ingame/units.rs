@@ -48,7 +48,7 @@ const SPAWN_MAX_WAIT: f32 = 0.2;
 /// Unit and doodad preparations on the workers at once; the nearest are started first.
 const MAX_JOBS: usize = 16;
 /// The server's own cap for a transform parent chain (`aaemu-game` `world/mod.rs:50`).
-const MAX_PARENT_DEPTH: usize = 16;
+pub(crate) const MAX_PARENT_DEPTH: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;

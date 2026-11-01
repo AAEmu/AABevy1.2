@@ -1315,6 +1315,19 @@ impl Drawn<'_, '_> {
     }
 }
 
+/// The ship at the root of `unit`'s parent chain: a cannon mounted on a hull is not itself a ship,
+/// but a get-off from it lands on the hull's deck. `None` when no ancestor is a `ShipModel`.
+fn root_ship(unit: &aa_net::model::Unit, units: &Units, db: &Db) -> Option<u32> {
+    let mut current = unit;
+    for _ in 0..super::units::MAX_PARENT_DEPTH {
+        if db.is_ship(current.model_id) {
+            return Some(current.obj_id);
+        }
+        current = units.by_id.get(&super::units::unit_parent(current)?)?;
+    }
+    None
+}
+
 /// Follows the local player's attachment (`SCUnitAttached` / `SCUnitDetached`): seats it on the mount and puts its mover where
 /// the mount is; when it gets off it walks on from there (the server puts it where the mount stood too).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1388,8 +1401,9 @@ pub fn track_local_mount(
                 });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
             // A slave attached to another slave (a cannon on a ship) carries parent-local packet
-            // positions: `cart::drive_cart` would move the player to that offset as if it were world.
-            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret && !parented, ship, turret, speed, lift: 0.0 }
+            // positions: it must never drive as a mount. A cannon is a turret; any other parented
+            // slave is a passenger here (`cart::drive_cart` also refuses one).
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point) && !parented, cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1474,14 +1488,15 @@ pub fn track_local_mount(
                             mount + Vec3::Z * lift
                         }
                     });
-                let ship_landing = old.filter(|s| s.ship).and_then(|seat| {
-                    db.as_deref().and_then(|db| {
-                        let drawn = drawn.views
-                            .unit_entity(seat.mount)
-                            .and_then(|entity| units.get(entity).ok())
-                            .map(|(hull, _)| (hull.pos, hull.game_rotation()));
-                        deck_landing(db, &net, seat.mount, from, mover.facing, drawn)
-                    })
+                let ship_landing = db.as_deref().and_then(|db| {
+                    let ship = old
+                        .and_then(|s| net.by_id.get(&s.mount))
+                        .and_then(|unit| root_ship(unit, &net, db))?;
+                    let drawn = drawn.views
+                        .unit_entity(ship)
+                        .and_then(|entity| units.get(entity).ok())
+                        .map(|(hull, _)| (hull.pos, hull.game_rotation()));
+                    deck_landing(db, &net, ship, from, mover.facing, drawn)
                 });
                 if let Some((ride, landing)) = ship_landing {
                     // a get-off over a hull lands on its deck: the ride starts at the landing
@@ -3207,6 +3222,7 @@ mod child_seat_tests {
     use aa_world::WaterQuery;
     use bevy::input::mouse::AccumulatedMouseMotion;
     use crate::ingame::anim::LocalJump;
+    use crate::ingame::cart::{CartDrive, drive_cart};
     use crate::ingame::player::{PlayerInput, control_player};
     use crate::ingame::sprint::Sprint;
     use crate::ingame::swim::ActorParams;
@@ -3357,9 +3373,9 @@ mod child_seat_tests {
             .insert_resource(Player::default())
             .insert_resource(Views::default())
             .insert_resource(Units::default())
-            .insert_resource(TerrainQuery::new("test"))
-            .insert_resource(WorldCollision::new("test", TerrainQuery::new("test")))
-            .insert_resource(WaterQuery::new("test"))
+            .insert_resource(TerrainQuery::fixture("test"))
+            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture("test")))
+            .insert_resource(WaterQuery::fixture("test"))
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
             .add_systems(Update, track_local_mount);
@@ -3452,10 +3468,6 @@ mod child_seat_tests {
 
     #[test]
     fn a_gunner_leaving_a_ship_cannon_keeps_the_world_seat() {
-        if !aa_cry::pak_available() {
-            eprintln!("child seat: skipped, no game pak");
-            return;
-        }
         let (mut app, player, expected, local) = detach_app(true);
         tick(&mut app, 0.1);
         let mover = app.world().get::<Mover>(player).unwrap().pos;
@@ -3478,10 +3490,6 @@ mod child_seat_tests {
 
     #[test]
     fn a_rider_leaving_a_plain_slave_keeps_the_world_seat() {
-        if !aa_cry::pak_available() {
-            eprintln!("child seat: skipped, no game pak");
-            return;
-        }
         let (mut app, player, expected, local) = detach_app(false);
         tick(&mut app, 0.1);
         let mover = app.world().get::<Mover>(player).unwrap().pos;
@@ -3591,6 +3599,241 @@ mod child_seat_tests {
             expected,
             "the walk restarted from the cannon's local offset"
         );
+    }
+
+    /// The real `track_local_mount` classification of a server cannon: `UnitKind::Slave.id` is
+    /// the persisted slave id, while the 1.2 client reads the slave kind from the template id
+    /// (the `slaves.id` the unit state carries). `deck` injects a synthetic hull floor.
+    fn classified_cannon_app(deck: bool) -> Option<(App, Entity, Vec3, Vec3)> {
+        use aa_net::session::PlayerSpawn;
+        use aa_net::state::Player;
+        use bevy::input::mouse::AccumulatedMouseMotion;
+
+        const SHIP: u32 = 60;
+        const CANNON: u32 = 7;
+        const PLAYER: u32 = 1;
+        let ship_at = Vec3::new(12008.8, 9022.7, 105.1);
+        let ship_yaw = 0.63;
+        let local = Vec3::new(-4.5703, -3.6836, 4.8404);
+        let seat = Vec3::new(0.0, -0.8, 0.0);
+        let mut db = Db::open()?;
+        if deck {
+            let quad = |z: f32| {
+                [
+                    [Vec3::new(-8.0, -15.0, z), Vec3::new(8.0, -15.0, z), Vec3::new(8.0, 15.0, z)],
+                    [Vec3::new(-8.0, -15.0, z), Vec3::new(8.0, 15.0, z), Vec3::new(-8.0, 15.0, z)],
+                ]
+            };
+            db.insert_ship_floor_fixture(
+                393,
+                std::sync::Arc::new(crate::ingame::ship::floor::ShipFloor::new(quad(4.8))),
+            );
+        }
+        let mut ship_unit = slave(SHIP, ship_at, None);
+        ship_unit.model_id = 393;
+        let mut cannon = slave(CANNON, local, Some(SHIP));
+        cannon.model_id = 117;
+        cannon.kind = UnitKind::Slave {
+            // the server's persisted id, not the template id
+            id: 424242,
+            tl_id: 3,
+            template_id: 10,
+            summoner_id: 42,
+        };
+        cannon.rotation = [0.0, 0.0, 0.35];
+        let mount_transform = placement(ship_at, ship_yaw, 1.0)
+            .mul_transform(unit_local_transform(&cannon, 1.0));
+        let expected = bevy_to_cry(mount_transform.transform_point(cry_to_bevy(seat)));
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<crate::settings::Actions>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PlayerInput>()
+            .init_resource::<SendState>()
+            .init_resource::<Sprint>()
+            .init_resource::<LocalJump>()
+            .init_resource::<crate::ingame::DevOptions>()
+            .init_resource::<ClipLibrary>()
+            .init_resource::<MountReason>()
+            .init_resource::<CartDrive>()
+            .init_resource::<LocalMount>()
+            .insert_resource(Player::default())
+            .insert_resource(Views::default())
+            .insert_resource(Units::default())
+            .insert_resource(db)
+            .insert_resource(TerrainQuery::fixture("test"))
+            .insert_resource(WorldCollision::new("test", TerrainQuery::fixture("test")))
+            .insert_resource(WaterQuery::fixture("test"))
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .add_systems(Update, (track_local_mount, drive_cart, drive_mount).chain());
+        let ship_entity = app
+            .world_mut()
+            .spawn(placement(ship_at, ship_yaw, 1.0))
+            .id();
+        let cannon_entity = app
+            .world_mut()
+            .spawn((unit_local_transform(&cannon, 1.0), ChildOf(ship_entity)))
+            .id();
+        let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        helpers
+            .0
+            .insert("driver".into(), bevy::math::Affine3A::from_translation(seat));
+        app.world_mut().entity_mut(cannon_entity).insert(helpers);
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.fixture_actor(&ship_unit, Some(ship_entity));
+            views.fixture_actor(&cannon, Some(cannon_entity));
+        }
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            units.by_id.insert(SHIP, ship_unit);
+            units.by_id.insert(CANNON, cannon.clone());
+        }
+        let mut player_unit = crate::ingame::seating::fixture_unit(PLAYER, 42, None);
+        player_unit.pos = aa_net::Pos::new(local.x, local.y, local.z);
+        player_unit.attached_to = Some(Attachment {
+            obj_id: CANNON,
+            point: 1,
+            reason: 5,
+        });
+        app.world_mut().resource_mut::<Player>().spawn = Some(PlayerSpawn {
+            obj_id: PLAYER,
+            state: Default::default(),
+            unit: player_unit,
+        });
+        let (mut rider, animator) = super::tests::stepped_rider(super::tests::riding());
+        rider.unit = PLAYER;
+        rider.mount = CANNON;
+        rider.point = 1;
+        rider.seat = Seat::Helper("driver".into());
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: PLAYER },
+                Mover {
+                    pos: local,
+                    facing: ship_yaw,
+                    vz: 0.0,
+                    grounded: true,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                Motion::default(),
+                ActorParams::default(),
+                rider,
+                animator,
+            ))
+            .id();
+        app.world_mut().resource_mut::<SendState>().settle_for_test();
+        app.world_mut().spawn(OrbitCamera::default());
+        Some((app, player, expected, local))
+    }
+
+    #[test]
+    fn a_server_cannon_with_a_persisted_id_is_classified_by_its_template() {
+        let Some((mut app, _player, _expected, _local)) = classified_cannon_app(false) else {
+            eprintln!("child seat: skipped, no game database");
+            return;
+        };
+        tick(&mut app, 0.1);
+        let seat = app.world().resource::<LocalMount>().0.expect("a seat");
+        assert_eq!(
+            (seat.turret, seat.cart, seat.drives),
+            (true, false, false),
+            "a ship cannon (slaves.id 10, kind 8) was not recognised as a turret"
+        );
+        let cannon = app
+            .world()
+            .resource::<Views>()
+            .unit_entity(7)
+            .expect("the cannon root");
+        assert!(
+            app.world().get::<Driven>(cannon).is_none(),
+            "a parented cannon was marked as a driven mount"
+        );
+        let moves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter(|event| matches!(&event.0, aa_net::Command::MoveVehicle(_)))
+            .collect();
+        assert!(moves.is_empty(), "the cannon was driven as a cart");
+    }
+
+    #[test]
+    fn a_deck_landing_from_a_cannon_uses_the_root_ship_hull() {
+        let Some((mut app, player, expected, _local)) = classified_cannon_app(true) else {
+            eprintln!("child seat: skipped, no game database");
+            return;
+        };
+        tick(&mut app, 0.1);
+        app.world_mut()
+            .resource_mut::<aa_net::state::Player>()
+            .spawn
+            .as_mut()
+            .unwrap()
+            .unit
+            .attached_to = None;
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitDetached {
+                obj_id: 1,
+                reason: 5,
+            }));
+        tick(&mut app, 0.1);
+        assert!(
+            app.world().get::<crate::ingame::ship::DeckRide>(player).is_some(),
+            "leaving the cannon did not put the player on the hull"
+        );
+        assert!(
+            app.world().get::<DismountMove>(player).is_none(),
+            "a placement ran instead of the deck ride"
+        );
+        let mover = app.world().get::<Mover>(player).unwrap().pos;
+        let landing = Vec3::new(expected.x, expected.y, 105.1 + 4.8);
+        assert!(
+            mover.distance(landing) < 0.1,
+            "the cannon's get-off landed at {mover:?}, not the deck {landing:?}"
+        );
+    }
+
+    #[test]
+    fn a_classified_cannon_detach_sends_the_world_seat() {
+        let Some((mut app, player, expected, local)) = classified_cannon_app(false) else {
+            eprintln!("child seat: skipped, no game database");
+            return;
+        };
+        tick(&mut app, 0.1);
+        app.world_mut()
+            .resource_mut::<aa_net::state::Player>()
+            .spawn
+            .as_mut()
+            .unwrap()
+            .unit
+            .attached_to = None;
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitDetached {
+                obj_id: 1,
+                reason: 5,
+            }));
+        tick(&mut app, 0.1);
+        let mover = app.world().get::<Mover>(player).unwrap().pos;
+        assert!(
+            mover.distance(expected) < 0.1,
+            "the get-off starts at {mover:?}, not the world seat {expected:?}"
+        );
+        app.add_systems(Update, (step_dismounts, control_player).chain());
+        let first = first_move(&mut app).expect("the first CSMoveUnit");
+        let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
+        assert!(
+            pos.truncate().distance(expected.truncate()) < 0.1,
+            "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
+        );
+        assert!(pos.distance(local) > 1000.0, "the local offset was sent");
     }
 }
 

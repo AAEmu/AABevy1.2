@@ -43,6 +43,8 @@ struct Lookups {
     /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
     attach_anims: HashMap<(u32, u8), Option<u32>>,
     ships: HashMap<u32, bool>,
+    /// `slaves.id` (the template id from the unit state) -> `slaves.slave_kind_id`.
+    slave_kinds: HashMap<u32, Option<u32>>,
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
@@ -267,6 +269,7 @@ impl Lookups {
             attach_points: HashMap::new(),
             attach_anims: HashMap::new(),
             ships: HashMap::new(),
+            slave_kinds: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
             ship_floors: HashMap::new(),
@@ -398,6 +401,40 @@ impl Db {
 
     /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
     /// steers it with a CSMoveUnit type-4 request instead of the land-vehicle type 2.
+    /// The slave kind (`slaves.slave_kind_id`) of a slave by the template id the unit state
+    /// carries (the 1.2 client's `Unit+0x420` lookup, `x2game.dll.c:1937685`,
+    /// `FUN_39345ea0:677836`, `FUN_39696380:1427233`). Cached; `None` for an unknown row.
+    pub fn slave_kind(&self, template_id: u32) -> Option<u32> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(kind) = l.slave_kinds.get(&template_id) {
+            return *kind;
+        }
+        let kind = l
+            .conn
+            .query_row(
+                "SELECT slave_kind_id FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| r.get::<_, Option<u32>>(0),
+            )
+            .ok()
+            .flatten();
+        l.slave_kinds.insert(template_id, kind);
+        kind
+    }
+
+    /// A synthetic deck floor for a test: the same cache entries [`Db::ship_floor`] fills from
+    /// the pak, without the hull prefab.
+    #[cfg(test)]
+    pub(crate) fn insert_ship_floor_fixture(
+        &self,
+        model_id: u32,
+        floor: Arc<super::ship::floor::ShipFloor>,
+    ) {
+        let mut l = self.lookups.lock().unwrap();
+        l.ship_bounds.insert(model_id, floor.bounds());
+        l.ship_floors.insert(model_id, Some(floor));
+    }
+
     pub fn is_ship(&self, model_id: u32) -> bool {
         let mut l = self.lookups.lock().unwrap();
         if let Some(ship) = l.ships.get(&model_id) {

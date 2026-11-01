@@ -114,7 +114,10 @@ impl TurretLimits {
 /// `vehicle_models` turret block. A bad data row (a text value in an angle column) gives `None`,
 /// so a cart is never mistaken for a turret.
 pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
-    if !matches!(unit.kind, UnitKind::Slave { id: 7 | 8, .. }) {
+    let UnitKind::Slave { template_id, .. } = unit.kind else {
+        return None;
+    };
+    if !matches!(db.slave_kind(template_id), Some(7 | 8)) {
         return None;
     }
     db.turret_limits(unit.model_id)
@@ -126,10 +129,16 @@ pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
 /// carry; `vehicle_models.velocity == 0` is the substitute (S12-C6). A trebuchet or tank
 /// (velocity > 0) stays a vehicle the player drives; an all-zero turret block is not a turret.
 pub fn turret_seat(unit: &Unit, db: &Db) -> bool {
-    let UnitKind::Slave { id, .. } = unit.kind else {
+    let UnitKind::Slave { template_id, .. } = unit.kind else {
         return false;
     };
-    turret_seat_model(id, unit.model_id, db)
+    // `UnitKind::Slave.id` is the server's persisted slave id; the unit state's `template_id`
+    // is the `slaves.id` the 1.2 client looks the kind up by (see `Db::slave_kind`).
+    turret_seat_model(
+        db.slave_kind(template_id).unwrap_or(0),
+        unit.model_id,
+        db,
+    )
 }
 
 /// [`turret_seat`] from the two ids the slave unit carries. The real-data test iterates the
