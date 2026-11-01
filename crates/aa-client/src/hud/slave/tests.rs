@@ -59,6 +59,21 @@ fn wheeled_car(obj_id: u32, tl_id: u16, at: Vec3) -> Unit {
     unit
 }
 
+/// A ship: slave template 15 (rowboat, kind 4), model 129 (`ship_models` 4). A `ShipModel`
+/// keeps its 0x198-byte ship object pointer in the +0x2a0 slot (`FUN_390bdf70`), so its driver
+/// is gated too (inferred: a ship dismount at speed is capture-pending).
+fn ship(obj_id: u32, tl_id: u16, at: Vec3) -> Unit {
+    let mut unit = slave(obj_id, tl_id, at);
+    unit.kind = UnitKind::Slave {
+        id: 4,
+        tl_id,
+        template_id: 15,
+        summoner_id: 100,
+    };
+    unit.model_id = 129;
+    unit
+}
+
 /// The HUD's game data with actor-model radii only (no database).
 fn game_with_radii(radii: &[(u32, f32)]) -> crate::hud::data::GameData {
     let mut game = crate::hud::data::GameData::default();
@@ -66,10 +81,11 @@ fn game_with_radii(radii: &[(u32, f32)]) -> crate::hud::data::GameData {
     game
 }
 
-/// The HUD's game data with the `vehicle_models.use_wheeled_vehicle_simulation` flags.
-fn game_with_wheeled(models: &[(u32, bool)]) -> crate::hud::data::GameData {
+/// The HUD's game data with the model +0x2a0 gate (`use_wheeled_vehicle_simulation` or a
+/// `ShipModel`).
+fn game_with_speed_gate(models: &[(u32, bool)]) -> crate::hud::data::GameData {
     let mut game = crate::hud::data::GameData::default();
-    game.wheeled_sim.extend(models.iter().copied());
+    game.unbind_speed_gated.extend(models.iter().copied());
     game
 }
 
@@ -743,9 +759,10 @@ fn the_captured_farm_wagon_reaches_pass_with_the_real_model_radii()
 }
 
 /// The 2026-11-01 capture and the data behind it: the Red Farm Hauler (slave 146, model 1553,
-/// `vehicle_models` 65) is not a wheeled simulation and leaves at ~6.7 m/s; a speed car (slave
-/// 105, model 1293, `vehicle_models` 45) is and refuses above 5 m/s. `X2::VehicleUnitModel::Init`
-/// copies this flag to the model (+0x2a0), and `FUN_39345aa0` only then checks the speed.
+/// `vehicle_models` 65) is not gated and leaves at ~6.7 m/s; a speed car (slave 105, model 1293,
+/// `vehicle_models` 45) is and refuses above 5 m/s. `X2::VehicleUnitModel::Init` copies the
+/// wheeled flag to the model (+0x2a0), a `ShipModel` keeps its 0x198-byte ship object there
+/// (`FUN_390bdf70`, inferred), and `FUN_39345aa0` only then checks the speed.
 #[test]
 #[ignore = "requires the game pak and the game database (AA_PAK, AA_DB)"]
 fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn std::error::Error>> {
@@ -757,13 +774,14 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
     }
     let game = crate::hud::data::GameData::load(&path)?;
     assert!(
-        !game.wheeled_vehicle_simulation(1553),
+        !game.unbind_speed_gated(1553),
         "slave 146's vehicle model 65"
     );
     assert!(
-        game.wheeled_vehicle_simulation(1293),
+        game.unbind_speed_gated(1293),
         "slave 105's vehicle model 45"
     );
+    assert!(game.unbind_speed_gated(129), "slave 15's ship model");
 
     let (state, _units) = setup(&[hauler(146, 0x5e, Vec3::new(1.0, 0.0, 0.0))]);
     state.borrow().game.0.set(game).ok().expect("game data");
@@ -794,6 +812,26 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
         &state,
         &Event::UnitMoved {
             obj_id: 105,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+
+    let (state, _units) = setup(&[ship(15, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(crate::hud::data::GameData::load(&path)?)
+        .ok()
+        .expect("game data");
+    bound(&state, 15);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
+    movement.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 15,
             movement,
         },
     );
@@ -977,7 +1015,7 @@ fn the_captured_land_dismount_at_six_point_seven_mps_sends_the_unbind() {
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1553, false)]))
+        .set(game_with_speed_gate(&[(1553, false)]))
         .ok()
         .expect("game data");
     bound(&state, 146);
@@ -1010,7 +1048,7 @@ fn discard_is_refused_while_a_wheeled_simulation_slave_moves_faster_than_five() 
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1293, true)]))
+        .set(game_with_speed_gate(&[(1293, true)]))
         .ok()
         .expect("game data");
     bound(&state, 20);
@@ -1027,6 +1065,49 @@ fn discard_is_refused_while_a_wheeled_simulation_slave_moves_faster_than_five() 
     assert!(state.borrow().requests.is_empty());
 
     let mut movement = Movement::unit(Pos::default(), 0.0, 1);
+    movement.velocity = [5 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+}
+
+#[test]
+fn a_ship_driver_above_five_mps_is_refused() {
+    // `FUN_390bdf70` (ship base vtable 0x399a56d0 slot 0x50) puts a 0x198-byte ship object in
+    // `param_1[0xa6]` (subobject +0x298 = full model +0x2a0), so the pointer byte the native
+    // `FUN_39345aa0` tests is non-zero and the ship's speed check runs. Inferred from the
+    // decompile; a ship dismount at speed is capture-pending.
+    let (state, _units) = setup(&[ship(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_speed_gate(&[(129, true)]))
+        .ok()
+        .expect("game data");
+    bound(&state, 20);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
+    movement.velocity = [6 * 1024, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+    assert!(state.borrow().requests.is_empty());
+
+    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
     movement.velocity = [5 * 1024, 0, 0];
     crate::hud::mounted::receive(
         &state,
@@ -1173,7 +1254,7 @@ fn a_stale_replicated_speed_no_longer_refuses_the_unbind() {
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1293, true)]))
+        .set(game_with_speed_gate(&[(1293, true)]))
         .ok()
         .expect("game data");
     bound(&state, 20);
@@ -1223,7 +1304,7 @@ fn fast_slave_unbind_refusal_shows_sysmsg_through_the_lua_wrapper()
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1293, true)]))
+        .set(game_with_speed_gate(&[(1293, true)]))
         .ok()
         .expect("game data");
     bound(&state, 20);
@@ -1258,7 +1339,7 @@ fn the_captured_land_dismount_at_speed_shows_no_0x67_through_the_lua_wrapper()
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1553, false)]))
+        .set(game_with_speed_gate(&[(1553, false)]))
         .ok()
         .expect("game data");
     bound(&state, 146);
@@ -1552,7 +1633,7 @@ fn the_driven_wheeled_vehicle_uses_the_controller_speed() {
         .borrow()
         .game
         .0
-        .set(game_with_wheeled(&[(1293, true)]))
+        .set(game_with_speed_gate(&[(1293, true)]))
         .ok()
         .expect("game data");
     bound(&state, 20);

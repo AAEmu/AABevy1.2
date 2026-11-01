@@ -100,8 +100,9 @@ struct Actor {
     slave_tl: Option<u16>,
     /// `UnitKind::Slave.id`: 7 siege weapon, 8 ship cannon/equipment. A cart is 6.
     slave_kind: Option<u32>,
-    /// `Unit.model_id`: the model whose `vehicle_models.use_wheeled_vehicle_simulation` gates the
-    /// driver's 0x67 unbind refusal (`hud/slave.rs`).
+    /// `Unit.model_id`: the model whose +0x2a0 slot gates the driver's 0x67 unbind refusal (a
+    /// wheeled-simulation vehicle flag or a ship's 0x198-byte ship object pointer,
+    /// `hud/slave.rs`).
     model_id: u32,
     /// Latest replicated unit-movement velocity, in (m/s)^2, and when it arrived. The native
     /// unbind check reads the model's entity velocity (`vtable+0xa4`, `FUN_39345970`); for a
