@@ -309,10 +309,11 @@ and for leaving `LeavePending`, `LeftWorld`, `Disconnected`. Failures: `LoginFai
 `PlayerSpawn` carries `obj_id`, the full `CharacterState` (id, name, race, gender, level, zone id,
 instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experience ...) and the player's own `Unit`
 (position, model id, equipment templates, appearance). A teleport is reported as `Teleported`; the session
-does **not** answer it. The 1.2 client sends `CSTeleportEnded` only once the destination is loaded
-(`FUN_391a4e00`; owner capture 2026-11-01: a 5 m GM move answered at once, cross-map jumps 2 s and 12 s
-later), so the application sends `Command::TeleportEnded { pos }` and then
-`Command::NotifyInGameCompleted` at the end of its load.
+does **not** answer it. The native handler `FUN_391d6ed0` either calls `FUN_3930c9e0` directly or parks
+the packet (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); `FUN_391a4e00` is the
+`CSTeleportEnded` builder. No end-of-load callback is proven; the owner capture 2026-11-01 answered a 5 m GM
+move at once and cross-map jumps 2 s / 12 s later. The application sends
+`Command::TeleportEnded { pos }` and then `Command::NotifyInGameCompleted` at the end of its load.
 
 ### State tables (`state`)
 

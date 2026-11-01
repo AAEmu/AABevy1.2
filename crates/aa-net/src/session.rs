@@ -390,8 +390,10 @@ pub enum Command {
     /// The portal book and portals: record, rename, open, delete, enter, the visited sub zone ([`crate::portal`]).
     Portal(crate::portal::PortalCommand),
     /// `CSTeleportEnded` at `pos`: the destination of an `SCTeleportUnit` is loaded and the server accepts
-    /// movement again. The 1.2 client sends it from the end-of-load path (`FUN_391a4e00`) and not on receipt
-    /// (owner capture 2026-11-01: a 5 m hop at once, a cross-map jump 2 s / 12 s later).
+    /// movement again. The native handler (`FUN_391d6ed0`) calls `FUN_3930c9e0` directly or parks the packet
+    /// (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); `FUN_391a4e00` is the `CSTeleportEnded`
+    /// builder (x2game.dll.c:320775). The owner capture 2026-11-01 answered a 5 m hop at once, a cross-map
+    /// jump after 2 s and the far one after 12 s; the app sends this when its own load is down.
     TeleportEnded { pos: Pos },
     /// `CSNotifyInGameCompleted`: the 1.2 client sends it again after a teleport's load (owner capture
     /// 2026-11-01: 13:44:02 after the 13:44:00 `CSTeleportEnded`; 14:17:16 after 14:17:14).
@@ -2362,8 +2364,8 @@ impl Session {
             M::Appellation(e) => self.emit(Event::Appellation(e)),
             M::Portal(e) => {
                 // `SCNaviTeleport` (a navi doodad): the 1.2 client moves as for `SCTeleportUnit`
-                // (`FUN_391dc8c0` calls `FUN_3930c9e0`, reason 0, yaw 0) and sends `CSTeleportEnded`
-                // only once the destination is loaded; the app owns that wait.
+                // (`FUN_391dc8c0` calls `FUN_3930c9e0`, reason 0, yaw 0); the app owns the
+                // `CSTeleportEnded` answer like `SCTeleportUnit`.
                 if let crate::portal::PortalEvent::NaviTeleport { pos } = e {
                     self.emit(Event::Teleported { pos, yaw: 0.0, reason: 0 });
                 }
@@ -2449,10 +2451,10 @@ impl Session {
             M::LunagemSocketingResult { raw_result, item_id, template_id, raw_install } => self.emit(Event::LunagemSocketingResult { raw_result, item_id, template_id, raw_install }),
             M::LunastoneSocketingResult { raw_result, item_id, template_id } => self.emit(Event::LunastoneSocketingResult { raw_result, item_id, template_id }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
-            // `SCTeleportUnit`: the 1.2 client moves the player, waits for the destination's load and
-            // only then sends `CSTeleportEnded` (`FUN_391a4e00`; the owner capture 2026-11-01 answered a
-            // 5 m hop at once and a cross-map jump 2 s / 12 s later). The app owns that wait; the
-            // session must not unlock the server at once.
+            // `SCTeleportUnit`: the native handler (`FUN_391d6ed0`) either calls `FUN_3930c9e0` or
+            // defers the packet (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); it does not
+            // answer on receipt. The owner capture 2026-11-01 answered a 5 m hop at once and cross-map
+            // jumps 2 s / 12 s later. The app owns the answer (`Command::TeleportEnded`).
             M::Teleport { pos, yaw, reason, .. } => self.emit(Event::Teleported { pos, yaw, reason }),
             M::DoodadsCreated(v) => self.emit(Event::DoodadsSpawned(v)),
             M::DoodadsRemoved(v) => self.emit(Event::DoodadsRemoved(v)),
@@ -5392,7 +5394,7 @@ mod tests {
         assert!(matches!(events.try_recv(), Ok(Event::Teleported { pos: p, yaw, reason: 14 }) if p == pos && yaw == 0.5));
         assert!(
             tokio::time::timeout(Duration::from_millis(50), peer.read_u8()).await.is_err(),
-            "the 1.2 client answers SCTeleportUnit after the load, not on receipt (FUN_391a4e00)"
+            "the native handler does not answer SCTeleportUnit on receipt (FUN_3930c9e0 starts the load)"
         );
         session.command(Command::TeleportEnded { pos }).await;
         assert_eq!(frame(&mut peer).await, game::ClientMsg::TeleportEnded { pos }.encode(0));

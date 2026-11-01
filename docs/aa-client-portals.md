@@ -78,17 +78,24 @@ unit T s after the world is entered (`p2_use_57.png`: the real constant, nothing
 ## Teleports
 
 `SCTeleportUnit` carries the yaw at the destination (radians), `player::follow_server` uses it. aa-net does not answer
-`CSTeleportEnded`; the 1.2 client sends it from the end-of-load path (`FUN_391a4e00`), not from the handler
-(`FUN_391d6ed0` -> `FUN_3930c9e0` starts the load), which is why the owner capture of 2026-11-01 answered a 5 m GM
-move at once, a cross-map move 2 s later and the far one 12 s later. A jump of more than 300 m (`FAR`) or any
-`SCLoadInstance` (recall, world gates) shows the loading screen: the HUD stage is put aside (`hud::suspend`), the
-original loading UI is built (`login::loading::build`), streaming is boosted, input is off, the gauge follows the
-destination (terrain within 400 m, then objects, models, units), then the curtain (`login::curtain`) holds the last frame
-while the HUD comes back (`hud::resume`). At that point `ingame::teleport::acknowledge` sends `CSTeleportEnded`, then
-`CSNotifyInGameCompleted` (capture 2026-11-01: 13:44:02 after the 13:44:00 answer; 14:17:16 after 14:17:14), and a
-standing `CSMoveUnit` from the destination, so input and the server agree again. After an `SCLoadInstance`,
-`CSInstanceLoaded` is sent first, at the same point. With `--enter-world` (no login plugin, no curtain) the loading UI
-goes away without the curtain. A short hop is answered and reported at once.
+`CSTeleportEnded`; the native handler `FUN_391d6ed0` (x2game.dll.c:365756) either calls `FUN_3930c9e0` directly or
+parks the packet (`FUN_3901b980`) and retries it after >= 500 ms (`FUN_3901bc30`, 27004). `FUN_3930c9e0` starts the
+load (`FUN_39171800(3)`, 630938-630947); `FUN_391a4e00` (320775) is the `CSTeleportEnded` builder (opcode `0xb4`,
+clears the latch at 320815) and is called once from the fallback branch at 630948. No end-of-load callback is proven:
+the owner capture of 2026-11-01 (a 5 m GM move answered in the same second, a cross-map move 2 s later and the far one
+12 s later) likely reflects the deferred path and the native main thread blocking during the load. We send the answer
+when our load is down. A jump of more than 300 m (`FAR`, **inferred**: neither native handler checks distance, and the
+capture only shows that the far jump showed the screen) or any `SCLoadInstance` (recall, world gates) shows the loading
+screen: the HUD stage is put aside (`hud::suspend`, which also releases the held UI keys: the Enter that sent `/move`
+from the chat gets its key-up while the loading stage owns the keyboard, and without the release the restored HUD
+would keep that key owned and `control_player` would ignore movement forever), the original loading UI is built
+(`login::loading::build`), streaming is boosted, input is off, the gauge follows the destination (terrain within
+400 m, then objects, models, units), then the curtain (`login::curtain`) holds the last frame while the HUD comes back
+(`hud::resume`). At that point `ingame::teleport::acknowledge` sends `CSTeleportEnded`, then `CSNotifyInGameCompleted`
+(capture 2026-11-01: 13:44:02 after the 13:44:00 answer; 14:17:16 after 14:17:14), and a standing `CSMoveUnit` from the
+destination, so input and the server agree again. After an `SCLoadInstance`, `CSInstanceLoaded` is sent first, at the
+same point. With `--enter-world` (no login plugin, no curtain) the loading UI goes away without the curtain. A short
+hop is answered and reported at once.
 
 ## Dev flags
 

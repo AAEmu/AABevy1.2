@@ -46,7 +46,7 @@ pub(crate) mod cameras;
 mod cast;
 pub(crate) mod cinema;
 mod cinema_flow;
-mod chat;
+pub(crate) mod chat;
 mod combat;
 mod cooldown;
 mod crafting;
@@ -70,7 +70,7 @@ mod family;
 mod expedition;
 mod territory;
 mod friends;
-mod input;
+pub(crate) mod input;
 mod itemlinks;
 mod item_effects;
 mod items;
@@ -690,6 +690,9 @@ pub(crate) fn suspend(world: &mut World) -> bool {
         return false;
     }
     let Some(rt) = world.remove_non_send::<UiRuntime>() else { return false };
+    // the key-up edges will reach the loading stage: a held Enter would otherwise keep this stage
+    // capturing the keyboard after it comes back (`keyboard::suspend`)
+    aa_ui::lua::keyboard::suspend(&rt.lua);
     world.insert_non_send(SuspendedStage(rt));
     world.resource_mut::<HudBuilt>().up = false;
     world.resource_mut::<HudSuspended>().0 = true;
