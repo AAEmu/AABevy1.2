@@ -213,6 +213,27 @@ fn skill_slot_of(game: Option<&GameData>, skill: u32, cooldown: Option<(u64, u32
     }
 }
 
+/// An action-bar skill slot: a linked skill (`FUN_393925c0`) shows the converted skill's cooldown, and with no matching
+/// item it is dark (`FUN_3943fa10` sets `skillUsable=0`, which `refresh` applies through [`Env::slot_blocked`]). The name
+/// and icon stay the pressed skill's.
+fn action_skill_slot(
+    game: Option<&GameData>,
+    skills: Option<&Skills>,
+    inventory: Option<&Inventory>,
+    skill: u32,
+    start: Instant,
+) -> SlotSnap {
+    let effective = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
+        crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => skill,
+        _ => skill,
+    };
+    let cooldown = game.and_then(|g| {
+        let skills = skills?;
+        cooldown_slot(super::cooldown::display_at(g, skills, effective, Instant::now()), start)
+    });
+    skill_slot_of(game, skill, cooldown)
+}
+
 pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
     // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
     // ignore it waits for it), whichever ends later
@@ -311,7 +332,9 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
                     return None;
                 }
                 match slot.kind {
-                    ActionKind::Spell | ActionKind::RidePetSpell => Some(skill_slot(game, skills, slot.id as u32, start)),
+                    ActionKind::Spell | ActionKind::RidePetSpell => {
+                        Some(action_skill_slot(game, skills, inventory, slot.id as u32, start))
+                    }
                     ActionKind::ItemType | ActionKind::ItemId => {
                         let inv = inventory?;
                         let (template, grade) = match slot.item_template_id() {
@@ -388,7 +411,15 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             abilities: u.active_abilities.iter().copied().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
             buffs: world.get_resource::<Buffs>().map(|b| unit_buff_lists(game, b, u.obj_id, start)).unwrap_or_default(),
         });
-        target_pos = Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
+        target_pos = world
+            .get_resource::<crate::ingame::units::Views>()
+            .and_then(|views| {
+                let drawn = views
+                    .unit_entity(u.obj_id)
+                    .and_then(|e| crate::ingame::units::current_pose_world(world, e));
+                drawn.or_else(|| crate::ingame::units::unit_world_pose_in(u, units))
+            })
+            .map(|(pos, _)| pos);
         target_radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
     }
     // the dark slots: what the original's `CanUseSkill` says about each (mana, range, target, state ...)
@@ -683,7 +714,16 @@ pub fn action_keys(
             bridge.0.borrow_mut().requests.push(super::api::Request::UsePetAction { slot: slot as usize });
         }
     if !button && action == "mode_action_bar_button" && (1..=15).contains(&slot) {
-            let data = bridge.0.borrow();
+            let mut data = bridge.0.borrow_mut();
+            let index = slot as usize - 1;
+            if let Some(function) = super::mode_actions::function_at(&data, index) {
+                super::mode_actions::run_function(
+                    &mut data,
+                    function,
+                    web_time::Instant::now(),
+                );
+                continue;
+            }
             let env = Env::of(
                 &data,
                 Some(&skills),
@@ -692,7 +732,7 @@ pub fn action_keys(
             );
             super::mode_actions::use_slot(
                 &data,
-                slot as usize - 1,
+                index,
                 &env,
                 &mut flight,
                 &target,
@@ -821,6 +861,71 @@ mod tests {
         assert!(lua.load("return HUD.actions[1] ~= nil and HUD.actions[49] ~= nil and HUD.actions[0] == nil").eval::<bool>().unwrap());
     }
 
+    /// F3: a linked action slot shows the converted skill's cooldown and is dark when the item is not equipped. This
+    /// drives `refresh`, whose `Env::slot_blocked` pass is the path that sets `SlotSnap::blocked` for the bar.
+    #[test]
+    fn a_linked_action_slot_shows_the_converted_cooldown_and_goes_dark_without_the_item() {
+        use aa_net::items::{ActionKind, ActionSlot};
+
+        let mut game = GameData::default();
+        game.skills.insert(
+            14900,
+            super::super::data::SkillInfo {
+                named: super::super::data::Named { name: "Use Instrument".into(), ..Default::default() },
+                ..Default::default()
+            },
+        );
+        game.skills.insert(11951, super::super::data::SkillInfo { cooldown_ms: 45_000, ..Default::default() });
+        game.skill_links.insert(
+            14900,
+            crate::ingame::data::SkillLink { slot: aa_net::model::slot::MUSICAL, backpack_type: 1 },
+        );
+        game.items.insert(20480, super::super::data::ItemInfo { use_skill: 11951, ..Default::default() });
+        let mut slots = vec![ActionSlot::default(); aa_net::items::ACTION_SLOTS];
+        slots[1] = ActionSlot {
+            kind: ActionKind::Spell,
+            id: 14900,
+        };
+        let bar = ActionBar {
+            slots,
+            ..Default::default()
+        };
+        let mut skills = Skills::default();
+        skills
+            .last_used
+            .insert(11951, Instant::now() - std::time::Duration::from_secs(1));
+        let mut inventory = Inventory::default();
+        inventory.equipment.slots[aa_net::model::slot::MUSICAL] =
+            Some(aa_net::model::Item { id: 5, template_id: 20480, ..Default::default() });
+        let start = Instant::now();
+        let me = super::super::data::Snapshot::default();
+        let world = |inventory| {
+            let mut world = World::new();
+            world.insert_resource(bar.clone());
+            world.insert_resource(skills.clone());
+            world.insert_resource(inventory);
+            world
+        };
+        let (panels, _, _) = refresh(&world(inventory), Some(&game), 0, 0, start, &me, Vec3::ZERO);
+        let slot = panels.actions[1].as_ref().expect("the 14900 slot");
+        assert_eq!(slot.cooldown.map(|(_, total)| total), Some(45_000));
+        assert_eq!(slot.name, "Use Instrument");
+        assert_eq!(slot.blocked, None);
+        let (bare, _, _) = refresh(
+            &world(Inventory::default()),
+            Some(&game),
+            0,
+            0,
+            start,
+            &me,
+            Vec3::ZERO,
+        );
+        assert_eq!(
+            bare.actions[1].as_ref().and_then(|s| s.blocked),
+            Some(super::super::usable::code::URK_EQUIP_ITEM)
+        );
+    }
+
     #[test]
     fn skill_sweep_keeps_the_winning_received_duration_including_zero() {
         let mut game = GameData::default();
@@ -846,5 +951,87 @@ mod tests {
         skills.last_used.clear();
         skills.native_tag_cooldowns[0].reset = true;
         assert!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.is_none());
+    }
+}
+
+#[cfg(test)]
+mod attached_target_tests {
+    use super::*;
+    use aa_net::model::{UnitKind, UnitStateAttachments};
+    use crate::ingame::units::Views;
+
+    fn slave(id: u32, pos: Vec3, parent: Option<u32>) -> aa_net::model::Unit {
+        let mut unit = crate::hud::fixture_spawn().unit;
+        unit.obj_id = id;
+        unit.kind = UnitKind::Slave {
+            id: 1,
+            tl_id: 1,
+            template_id: 1,
+            summoner_id: 0,
+        };
+        unit.pos = aa_net::Pos::new(pos.x, pos.y, pos.z);
+        if let Some(parent) = parent {
+            unit.state_attachments = Some(UnitStateAttachments {
+                first_point: 3,
+                first_obj_id: Some(parent),
+                bonding_obj_id: None,
+            });
+        }
+        unit
+    }
+
+    #[test]
+    fn an_attached_child_target_pos_is_its_world_point() {
+        let ship = Vec3::new(12000.0, 9000.0, 0.0);
+        let local = Vec3::new(2.0, 3.0, 1.0);
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin)
+            .init_resource::<Units>()
+            .init_resource::<Views>()
+            .init_resource::<Target>();
+        let ship_unit = slave(60, ship, None);
+        let child_unit = slave(7, local, Some(60));
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(60, ship_unit.clone());
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(7, child_unit.clone());
+        let ship_entity = app
+            .world_mut()
+            .spawn(Transform::from_translation(aa_world::cry_to_bevy(ship)))
+            .id();
+        let child_entity = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(aa_world::cry_to_bevy(local)),
+                ChildOf(ship_entity),
+            ))
+            .id();
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.fixture_actor(&ship_unit, Some(ship_entity));
+            views.fixture_actor(&child_unit, Some(child_entity));
+        }
+        app.world_mut().resource_mut::<Target>().obj_id = Some(7);
+        app.update();
+        let (_, target_pos, _) = refresh(
+            app.world(),
+            None,
+            0,
+            1,
+            Instant::now(),
+            &Snapshot::default(),
+            Vec3::ZERO,
+        );
+        let expected = ship + local;
+        let target_pos = target_pos.expect("the target is in view");
+        assert!(
+            target_pos.distance(expected) < 1e-3,
+            "target_pos {target_pos:?} != {expected:?} (local {local:?})"
+        );
+        assert!(target_pos.distance(local) > 1.0, "the local offset was used");
     }
 }
