@@ -218,7 +218,7 @@ fn receipt(rt: &UiRuntime, state: &Shared, event: Event) {
 fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
 -> Result<(), Box<dyn std::error::Error>> {
     let Ok(db) = Connection::open_with_flags(
-        aa_anim::db::DEFAULT_DB,
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) else {
         eprintln!("skip: no client database");
@@ -241,7 +241,7 @@ fn native_sql_order_duplicates_and_missing_descriptors_are_preserved()
 fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dyn std::error::Error>>
 {
     let Ok(db) = Connection::open_with_flags(
-        aa_anim::db::DEFAULT_DB,
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     ) else {
         eprintln!("skip: no client database");
@@ -309,7 +309,7 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
 #[test]
 fn the_real_tank_46_bars_follow_the_seat_point() {
     let Some(conn) = Connection::open_with_flags(
-        aa_anim::db::DEFAULT_DB,
+        std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string()),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .ok() else {

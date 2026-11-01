@@ -575,14 +575,19 @@ fn queue(data: &mut HudData, next: Option<Vec<u32>>, notify: bool, source: Sourc
 pub(super) fn reduce(data: &mut HudData, event: &Event, removed: Option<u32>) {
     let own = super::user_music::own_identity(data).map(|(_, actor)| actor);
     // a slave seat's bar replaces the buff skills; a seat change (or leaving) republishes it
+    let game = data.game.get().is_some();
+    // Kept only once the catalog is loaded: a seat or mate taken before it would otherwise look
+    // unchanged on the next receipt and its bar would never be queued.
     let seat = seat_bar(data);
-    let seat_changed = data.mode_actions.vehicle != seat;
+    let seat_changed = game && data.mode_actions.vehicle != seat;
     if seat_changed {
         data.mode_actions.vehicle = seat;
     }
     let mate = data.mounted.mate_unmount();
-    let mate_changed = data.mode_actions.mate != mate;
-    data.mode_actions.mate = mate;
+    let mate_changed = game && data.mode_actions.mate != mate;
+    if mate_changed {
+        data.mode_actions.mate = mate;
+    }
     let snapshot = matches!(event, Event::PlayerSpawn(_));
     let created = matches!(event, Event::BuffCreated { obj_id, buff }
         if Some(*obj_id) == own && data.game.get().is_some_and(|g| g.mode_actions.has(buff.buff_id))
@@ -602,7 +607,6 @@ pub(super) fn reduce(data: &mut HudData, event: &Event, removed: Option<u32>) {
     ) || matches!(event, Event::UnitsRemoved(ids) if data.mode_actions.context.is_some_and(|(_, actor)| ids.contains(&actor)));
     let lost =
         data.mode_actions.buff_skills.is_some() && super::user_music::own_buffs(data).is_none();
-    let game = data.game.get().is_some();
     // Buff state changes on its own, whether or not a seat bar is shown; this keeps `buff_skills`
     // current for the restore on leaving and for the `lost` check (which must not repeat once it
     // has cleared).
