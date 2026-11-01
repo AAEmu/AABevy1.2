@@ -29,8 +29,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-MYSQL = Path(r"C:\Program Files\MySQL\MySQL Server 8.4\bin\mysql.exe")
-MYSQL_PORT = "3317"
+# The mysql client on PATH unless AA_MYSQL names it. The port and user come from
+# the lane's env file (MYSQL_PORT / MYSQL_USER) or the command line.
+MYSQL = Path(os.environ.get("AA_MYSQL", "mysql"))
 
 
 def read_lane(path: Path) -> dict[str, str]:
@@ -44,8 +45,12 @@ def read_lane(path: Path) -> dict[str, str]:
     return values
 
 
+MYSQL_PORT = "3306"
+MYSQL_USER = "root"
+
+
 def mysql(mysql_exe: Path, sql: str, database: str) -> list[list[str]]:
-    command = [str(mysql_exe), "--host=127.0.0.1", f"--port={MYSQL_PORT}", "--user=root",
+    command = [str(mysql_exe), "--host=127.0.0.1", f"--port={MYSQL_PORT}", f"--user={MYSQL_USER}",
                "--protocol=TCP", "--default-character-set=utf8mb4", "--batch", "--raw",
                "--skip-column-names", database, "-e", sql]
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
@@ -66,9 +71,14 @@ def main() -> int:
     parser.add_argument("--password-file", type=Path, required=True)
     parser.add_argument("--access-level", type=int, default=100)
     parser.add_argument("--mysql", type=Path, default=MYSQL)
+    parser.add_argument("--mysql-port", help="default: the lane's MYSQL_PORT, else 3306")
+    parser.add_argument("--mysql-user", help="default: the lane's MYSQL_USER, else root")
     args = parser.parse_args()
 
     lane = read_lane(args.lane_env)
+    global MYSQL_PORT, MYSQL_USER
+    MYSQL_PORT = args.mysql_port or lane.get("MYSQL_PORT", MYSQL_PORT)
+    MYSQL_USER = args.mysql_user or lane.get("MYSQL_USER", MYSQL_USER)
     login_db = lane.get("DB_LOGIN")
     game_db = lane.get("DB_GAME")
     if not login_db or not game_db:

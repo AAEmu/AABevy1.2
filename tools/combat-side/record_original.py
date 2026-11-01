@@ -77,7 +77,7 @@ MEMORY_UI_ASSUMPTION = (
     "cadence and any real 1.2 ordering, so after the shift the GCD-rise-vs-"
     "cast-start difference is zero by construction and is not 1.2 evidence")
 DUMP_BASE = 0x38FF0000
-G_CONNECTION = 0x39B02294       # local player global (docs/research/port-combat/structs.md)
+G_CONNECTION = 0x39B02294       # local player global (<re-notes>/port-combat/structs.md)
 UNIT_MAP = 0x3A169998           # tree used by FUN_39360020
 UNIT_CD = 0x2C48                # CooldownManager, inline in Unit
 GCD_REMAINING = UNIT_CD + 0x08  # FUN_3989a290 reads manager+8 / +0xc

@@ -193,7 +193,7 @@ The manager is inline in the unit at `+0x2c48`; the global pair is at `+0x08`
   `FUN_39899e50` — subtracts elapsed ms from `+8` with a zero floor.  These
   prove `+8` is remaining and `+0xc` is total.
 
-`docs/research/port-combat/structs.md` §3 (`CooldownManager`) records the same
+`<re-notes>/port-combat/structs.md` §3 (`CooldownManager`) records the same
 layout and the owning unit offset.
 
 ## Animation lists
@@ -335,7 +335,7 @@ and a null actor that must enter recovery instead of writing stale rows.
 
 The stance rule is decompile-proven (client): `FUN_391d6a60` (`OnCombatCleared`) clears the `+0x3bba` latch
 through vtable `+0x48` = `FUN_39355ec0`, and `FUN_39355ee0` refreshes a 10 s deadline while the latch is set
-(`1b0066d4:docs/research/port-combat/side-by-side.md:52-68`). The captured stance drop is timed by our server's
+(`<re-notes>/port-combat/side-by-side.md:52-68`). The captured stance drop is timed by our server's
 `SCCombatCleared`, not by a client timer.
 
 ## Limits

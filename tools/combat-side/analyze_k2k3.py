@@ -241,7 +241,7 @@ def main() -> int:
                                "SCCombatCleared; it is not a client timer. Decompile rule: FUN_391d6a60 "
                                "(OnCombatCleared) clears the +0x3bba latch through vtable +0x48 = "
                                "FUN_39355ec0, and FUN_39355ee0 refreshes a 10 s deadline while the latch is "
-                               "set (1b0066d4:docs/research/port-combat/side-by-side.md:52-68)"),
+                               "set (<re-notes>/port-combat/side-by-side.md:52-68)"),
                     "repress": ("the re-press sent another CSStartSkill 2 (server_slice.log:24360); no "
                                 "CSStopCasting; our server stopped the damage"),
                     "walk": ("the client sent no packet while walking; our server's auto_attack_tick skips "
@@ -281,7 +281,7 @@ def main() -> int:
                              "FUN_391d6a60 (OnCombatCleared) clears "
                              "the +0x3bba latch through vtable +0x48 = FUN_39355ec0, and FUN_39355ee0 "
                              "refreshes a 10 s deadline while the latch is set "
-                             "(1b0066d4:docs/research/port-combat/side-by-side.md:52-68)"),
+                             "(<re-notes>/port-combat/side-by-side.md:52-68)"),
                 },
                 "battle_start_end": {
                     "evidence_class": "server-dependent",
