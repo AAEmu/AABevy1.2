@@ -1,7 +1,8 @@
 //! Static housing and public-farm tables from `compact.sqlite3`.
 //!
 //! Loaded once with the rest of [`super::GameData`]: `housings`, `item_housings`,
-//! `housing_build_steps`, `housing_decorations`, `item_housing_decorations`,
+//! `housing_build_steps`, `housing_binding_doodads`, `housing_decorations`,
+//! `item_housing_decorations`, `housing_deco_limit_elems`, `deco_actability_groups`,
 //! `housing_areas`, `housing_groups`, `item_spawn_doodads`, `farm_groups`,
 //! `farm_group_doodads` and `common_farms`. The loaders mirror the AAEmu server
 //! (`systems/housing/data.rs`, `systems/npcs/public_farm.rs`): orphan build steps and
@@ -45,6 +46,15 @@ pub struct HousingBuildStep {
     pub num_actions: i32,
 }
 
+/// One `housing_deco_limit_elems` row: a furniture actability group's cap for a deco limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DecoLimitElem {
+    pub id: u32,
+    pub housing_deco_limit_id: u32,
+    pub deco_actability_group_id: u32,
+    pub count: u32,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HousingTemplate {
     pub id: u32,
@@ -63,6 +73,9 @@ pub struct HousingTemplate {
     pub deco_limit: u32,
     pub absolute_deco_limit: u32,
     pub housing_deco_limit_id: u32,
+    /// `housing_binding_doodads` rows with `owner_type='Housing'`: the furniture that comes with the
+    /// design and is not counted against its decoration limits.
+    pub binding_doodads: u32,
     pub is_sellable: bool,
     pub heavy_tax: bool,
     pub always_public: bool,
@@ -141,6 +154,10 @@ pub struct Tables {
     pub decoration_design_by_item: HashMap<u32, u32>,
     pub housing_areas: HashMap<u32, HousingArea>,
     pub housing_groups: HashMap<u32, HousingGroup>,
+    /// `housing_deco_limit_elems` in row order.
+    pub deco_limit_elems: Vec<DecoLimitElem>,
+    /// `deco_actability_groups.id` -> localized name.
+    pub deco_actability_groups: HashMap<u32, String>,
     pub farm_groups: HashMap<u32, FarmGroup>,
     pub farm_group_doodads: Vec<FarmGroupDoodad>,
     pub common_farms: Vec<CommonFarm>,
@@ -197,12 +214,28 @@ impl Tables {
                         deco_limit: any_int(r, 22)?.max(0) as u32,
                         absolute_deco_limit: any_int(r, 24)?.max(0) as u32,
                         housing_deco_limit_id: any_int(r, 25)?.max(0) as u32,
+                        binding_doodads: 0,
                         is_sellable: any_flag(r, 26)?,
                         heavy_tax: any_flag(r, 27)?,
                         always_public: any_flag(r, 28)?,
                         build_steps: Vec::new(),
                     },
                 );
+            }
+        }
+
+        {
+            let mut q = conn.prepare("SELECT owner_id, owner_type FROM housing_binding_doodads")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let owner_type: Option<String> = r.get(1)?;
+                if !owner_type.is_some_and(|t| t.eq_ignore_ascii_case("Housing")) {
+                    continue;
+                }
+                let owner_id = any_int(r, 0)?.max(0) as u32;
+                if let Some(template) = t.housings.get_mut(&owner_id) {
+                    template.binding_doodads += 1;
+                }
             }
         }
 
@@ -317,6 +350,38 @@ impl Tables {
         }
 
         {
+            let mut names: HashMap<u32, String> = HashMap::new();
+            let mut q = conn.prepare(
+                "SELECT idx, en_us FROM localized_texts \
+                 WHERE tbl_name = 'deco_actability_groups' AND tbl_column_name = 'name' AND en_us IS NOT NULL AND en_us <> ''",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                names.insert(r.get(0)?, r.get(1)?);
+            }
+            let mut q = conn.prepare("SELECT id, name FROM deco_actability_groups")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id = any_int(r, 0)?.max(0) as u32;
+                let raw: String = r.get::<_, Option<String>>(1)?.unwrap_or_default();
+                t.deco_actability_groups.insert(id, names.get(&id).cloned().unwrap_or(raw));
+            }
+        }
+
+        {
+            let mut q = conn.prepare("SELECT * FROM housing_deco_limit_elems")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.deco_limit_elems.push(DecoLimitElem {
+                    id: any_int(r, 0)?.max(0) as u32,
+                    housing_deco_limit_id: any_int(r, 1)?.max(0) as u32,
+                    deco_actability_group_id: any_int(r, 2)?.max(0) as u32,
+                    count: any_int(r, 3)?.max(0) as u32,
+                });
+            }
+        }
+
+        {
             let mut q = conn.prepare("SELECT * FROM farm_groups")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -400,6 +465,13 @@ impl Tables {
             .get(&housing_id)
             .map_or(0, |h| h.build_steps.iter().map(|s| s.num_actions).sum())
     }
+
+    /// The `housing_deco_limit_elems` rows of a `housings.housing_deco_limit_id`, in row order.
+    pub fn deco_limit_elems(&self, housing_deco_limit_id: u32) -> impl Iterator<Item = &DecoLimitElem> + '_ {
+        self.deco_limit_elems
+            .iter()
+            .filter(move |e| e.housing_deco_limit_id == housing_deco_limit_id)
+    }
 }
 
 #[cfg(test)]
@@ -420,6 +492,9 @@ mod tests {
                 absolute_deco_limit INT, housing_deco_limit_id INT, is_sellable NUM, heavy_tax NUM,
                 always_public NUM, demolish_refund_item_id INT);
             CREATE TABLE housing_build_steps (id INT, housing_id INT, step INT, model_id INT, skill_id INT, num_actions INT);
+            CREATE TABLE housing_binding_doodads (id INT, owner_id INT, owner_type TEXT, attach_point_id INT, doodad_id INT);
+            CREATE TABLE deco_actability_groups (id INT, name TEXT);
+            CREATE TABLE housing_deco_limit_elems (id INT, housing_deco_limit_id INT, deco_actability_group_id INT, count INT);
             CREATE TABLE item_housings (id INT, item_id INT, design_id INT);
             CREATE TABLE housing_decorations (id INT, name TEXT, allow_on_floor NUM, allow_on_wall NUM,
                 allow_on_ceiling NUM, doodad_id INT, allow_pivot_on_garden NUM, actability_group_id INT,
@@ -434,6 +509,7 @@ mod tests {
             CREATE TABLE common_farms (id INT, name TEXT, guard_time INT, farm_group_id INT, comments TEXT);
             INSERT INTO taxations VALUES (3, 150000, 'small', 't');
             INSERT INTO localized_texts VALUES ('housings', 100, 'name', 'Rose Villa');
+            INSERT INTO localized_texts VALUES ('deco_actability_groups', 1, 'name', 'Specialty furniture');
             INSERT INTO housings VALUES (100, 'Korean', 1, 737, NULL, NULL, 't', 't', 1600, 10, 0.0, 'f',
                 3, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 40, 60, NULL, 61, 0, 'f', 't', 'f', 0);
             INSERT INTO housings VALUES (101, 'Second', 1, 921, 0, 0, 'f', 'f', 4000, 10, 0.0, 'f',
@@ -441,6 +517,15 @@ mod tests {
             INSERT INTO housing_build_steps VALUES (1, 100, 0, 733, 11026, 1);
             INSERT INTO housing_build_steps VALUES (2, 100, 1, 734, 11026, 2);
             INSERT INTO housing_build_steps VALUES (3, 999, 0, 1, 2, 3);
+            INSERT INTO housing_binding_doodads VALUES (1, 100, 'Housing', 1, 4566);
+            INSERT INTO housing_binding_doodads VALUES (2, 100, 'Housing', 2, 4278);
+            INSERT INTO housing_binding_doodads VALUES (3, 101, 'Housing', 1, 4322);
+            INSERT INTO housing_binding_doodads VALUES (4, 100, 'Slave', 1, 1);
+            INSERT INTO deco_actability_groups VALUES (1, 'Korean specialty');
+            INSERT INTO deco_actability_groups VALUES (5, 'Storage');
+            INSERT INTO housing_deco_limit_elems VALUES (8, 61, 1, 3);
+            INSERT INTO housing_deco_limit_elems VALUES (15, 61, 5, 3);
+            INSERT INTO housing_deco_limit_elems VALUES (16, 62, 1, 9);
             INSERT INTO item_housings VALUES (47, 14805, 100);
             INSERT INTO housing_decorations VALUES (10, 'Pot', '1', '0', '0', 5461, 't', 0, 0, 0, 'f');
             INSERT INTO item_housing_decorations VALUES (20, 107, 10, 't');
@@ -472,7 +557,16 @@ mod tests {
         assert_eq!((house.main_model_id, house.hp, house.tax), (737, 1600, 150000));
         assert!(house.heavy_tax && !house.is_sellable && !house.always_public);
         assert_eq!(house.build_steps.len(), 2);
+        assert_eq!(house.binding_doodads, 2, "only owner_type Housing counts");
+        assert_eq!(t.housings[&101].binding_doodads, 1);
         assert_eq!(t.housings[&101].name, "Second");
+        assert_eq!(t.deco_actability_groups[&1], "Specialty furniture", "localized name wins");
+        assert_eq!(t.deco_actability_groups[&5], "Storage");
+        let limits: Vec<_> = t
+            .deco_limit_elems(61)
+            .map(|e| (e.id, e.deco_actability_group_id, e.count))
+            .collect();
+        assert_eq!(limits, vec![(8, 1, 3), (15, 5, 3)]);
         assert_eq!(t.all_actions(100), 3, "orphan build step 3 is not counted");
         assert_eq!(t.housing_design_for_item(14805), Some(100));
         assert_eq!(t.decorations[&10].doodad_id, 5461);
@@ -510,6 +604,18 @@ mod tests {
         assert_eq!(t.item_housings.len(), count("item_housings"));
         assert_eq!(t.item_housing_decorations.len(), count("item_housing_decorations"));
         assert_eq!(t.item_spawn_doodads.len(), count("item_spawn_doodads"));
+        assert_eq!(t.deco_limit_elems.len(), count("housing_deco_limit_elems"));
+        assert_eq!(t.deco_actability_groups.len(), count("deco_actability_groups"));
+        let bound: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM housing_binding_doodads WHERE owner_type='Housing' \
+                 AND owner_id IN (SELECT id FROM housings)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let loaded: u32 = t.housings.values().map(|h| h.binding_doodads).sum();
+        assert_eq!(loaded as i64, bound, "only attached Housing bindings count");
         assert_eq!(t.housing_areas.len(), count("housing_areas"));
         assert_eq!(t.housing_groups.len(), count("housing_groups"));
         assert_eq!(t.farm_groups.len(), count("farm_groups"));

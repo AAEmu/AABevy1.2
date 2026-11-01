@@ -205,6 +205,16 @@ impl Seats {
             && (self.history.own().is_none() || self.actors[&self.own].locally_detached)
     }
 
+    /// The local player sits on a bonded doodad (`player+0x3b94`, `FUN_393635e0`
+    /// `BondLazyDoodad`): received own bond, not locally detached. 1.2 then builds no interaction
+    /// indicator candidate, so neither the doodad nor the slave prompt is shown.
+    pub(crate) fn own_seated(&self) -> bool {
+        self.history.own_known()
+            && self.actors.contains_key(&self.own)
+            && self.history.own().is_some()
+            && !self.actors[&self.own].locally_detached
+    }
+
     pub(super) fn capture_unbond(&mut self) -> Option<UnbondDoodadRequest> {
         if self.pending.is_some() || !self.history.own_known() {
             return None;

@@ -242,6 +242,7 @@ mod tests {
             func_group_id,
             rendered_func_group_id,
             bond_helpers: HashMap::new(),
+            ladder: None,
             growth: None,
             remaining_ms: 0.0,
             total_ms: 0.0,

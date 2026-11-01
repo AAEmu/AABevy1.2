@@ -20,6 +20,13 @@ pub(super) struct View {
     invitation: invitation::View,
 }
 
+impl View {
+    /// The family the player is in (0: none).
+    pub(super) fn own_id(&self) -> u32 {
+        self.state.family
+    }
+}
+
 fn reset_actor(view: &mut View) {
     let changes = view.changes;
     let invitation = invitation::cleared(std::mem::take(&mut view.invitation));
@@ -180,7 +187,7 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     invitation::install(lua, bridge)
 }
 
-fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
+pub(super) fn dispatch(rt: Option<&UiRuntime>, bridge: &Shared, event: &Event) {
     if let Event::Family(aa_net::family::FamilyEvent::Invitation(invite)) = event {
         invitation::received(rt, bridge, invite);
         return;
