@@ -99,7 +99,8 @@ def main() -> int:
         raise SystemExit(f"the replay script does not use skill {args.skill_id}")
 
     offset = server_log.stat().st_size
-    command = [str(client), "--headless", "--mute", "--account", args.account, "--login", args.login,
+    command = [str(client), "--headless", "--mute", "--require-wall-clock",
+               "--account", args.account, "--login", args.login,
                "--password-file", str(password_file), "--character", args.character, "--script", str(script)]
     log("running", " ".join(command))
     started = time.time()

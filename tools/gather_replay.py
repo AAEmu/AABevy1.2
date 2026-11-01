@@ -578,7 +578,8 @@ def main() -> int:
     raw.mkdir(parents=True, exist_ok=True)
     offset = start_offset(args.server_log)
 
-    command = [args.client, "--headless", "--mute", "--account", args.account, "--login", args.login,
+    command = [args.client, "--headless", "--mute", "--require-wall-clock",
+               "--account", args.account, "--login", args.login,
                "--character", args.character, "--script", str(script)]
     if args.password_file:
         command += ["--password-file", args.password_file]

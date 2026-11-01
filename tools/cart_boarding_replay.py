@@ -418,7 +418,8 @@ def main() -> int:
     if args.pak:
         env["AA_PAK"] = args.pak
     command = [
-        str(client), "--headless", "--mute", "--account", args.account, "--login", args.login,
+        str(client), "--headless", "--mute", "--require-wall-clock",
+        "--account", args.account, "--login", args.login,
         "--password-file", str(password_file), "--character", args.character, "--script", str(script),
     ]
     started = time.monotonic()
