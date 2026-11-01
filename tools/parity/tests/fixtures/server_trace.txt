@@ -1,0 +1,4 @@
+10:00:00 [TRACE] fields - C->S level=1 opcode=0x089 CSMoveUnitPacket len=33 body=a6 21 00 01 40 42 0f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+10:00:00 [TRACE] fields - C->S level=2 opcode=0x012 PingPacket len=20 body=00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 40 42 0f 00
+10:00:01 [TRACE] fields - C->S level=1 opcode=0x052 CSStartSkillPacket len=13 body=02 00 00 00 00 a6 21 00 00 0e 22 00 00
+10:00:01 [DEBUG] connection - GamePacket: S->C type 086 SCCombatClearedPacket (9 bytes)
