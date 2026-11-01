@@ -1389,6 +1389,64 @@ mod tests {
         assert!(!is_speed_emitter("airship_smoke"));
     }
 
+    /// The Red Farm Hauler (slave 146, model 1553, `vehicle_models` 65) is the owner's destroyed vehicle:
+    /// dying carries the fire particle and dead carries the burning smoke and the explosion. Both must be
+    /// spawned as `aa_fx::Effect` entities, not just the mesh swap.
+    #[test]
+    fn the_red_farm_haulers_dying_and_dead_states_spawn_their_effects() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1553) else {
+            return;
+        };
+        let max_hp = db
+            .slave_max_hp(146, 50)
+            .expect("Red Farm Hauler template 146's MaxHealth");
+        assert_eq!(max_hp, 7_296);
+        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(&db, look.clone(), unit, 1, look.normal, max_hp, true);
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+
+        set_dying_time(&mut app, 60.0);
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(dying.variant.ends_with("tractor_body_dying"));
+        let names = effect_names(&mut app, root);
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "x2_effects.housing_test.housing_fire_b"),
+            "the dying fire: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name.starts_with("x2_sounds.")),
+            "the sound particle is filtered: {names:?}"
+        );
+
+        end_dying_window_in(&mut app, 0.2);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(dead.variant.ends_with("tractor_body_dead"));
+        let names = effect_names(&mut app, root);
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "x2_effects.fire_smoke.burning_smoke_01"),
+            "the dead smoke: {names:?}"
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+            "the dead explosion: {names:?}"
+        );
+    }
+
     /// A slave first announced already damaged is built in its state's prefab with the same attribute-6
     /// maximum the per-frame check will use, including a template with no `unit_modifiers` row.
     #[test]
@@ -1561,6 +1619,15 @@ mod tests {
             .iter(app.world())
             .filter(|(_, parent, _)| parent.parent() == root)
             .map(|(entity, _, _)| entity)
+            .collect()
+    }
+
+    fn effect_names(app: &mut App, root: Entity) -> Vec<String> {
+        app.world_mut()
+            .query::<(&ChildOf, &aa_fx::Effect, &VehicleEffect)>()
+            .iter(app.world())
+            .filter(|(parent, _, _)| parent.parent() == root)
+            .map(|(_, effect, _)| effect.name.to_ascii_lowercase())
             .collect()
     }
 
