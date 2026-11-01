@@ -110,6 +110,9 @@ const SEND_INTERVAL: f32 = 0.1;
 /// one idle movement at this period; the on-foot controller has no equivalent and uses
 /// [`SEND_INTERVAL`] while active.
 const LADDER_KEEP_ALIVE: f32 = 3.0;
+/// The native minimum between movement packets (`DAT_3a59f84c`, 100 ms): the stop packet waits for
+/// it after the last moving one.
+const LADDER_MIN_INTERVAL: f32 = 0.1;
 
 /// Unit vectors of a game yaw: forward (north at 0, counter-clockwise) and right.
 pub fn forward(yaw: f32) -> Vec2 {
@@ -875,13 +878,16 @@ impl SendState {
         self.since_sent += dt;
     }
 
-    /// A hanging movement packet is due: every [`SEND_INTERVAL`] while climbing, one at once when
-    /// the climb stops (the `moving: false` stop packet), then the native [`LADDER_KEEP_ALIVE`].
+    /// A hanging movement packet is due: every [`SEND_INTERVAL`] while climbing, one stop packet
+    /// once [`LADDER_MIN_INTERVAL`] has passed since the last moving one (the native 100 ms
+    /// minimum), then the native [`LADDER_KEEP_ALIVE`].
     pub(super) fn ladder_due(&self, moving: bool) -> bool {
         if moving {
             self.since_sent >= SEND_INTERVAL
+        } else if self.ladder_moving {
+            self.since_sent >= LADDER_MIN_INTERVAL
         } else {
-            self.ladder_moving || self.since_sent >= LADDER_KEEP_ALIVE
+            self.since_sent >= LADDER_KEEP_ALIVE
         }
     }
 

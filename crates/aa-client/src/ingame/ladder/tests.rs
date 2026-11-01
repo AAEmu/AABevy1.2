@@ -1,4 +1,5 @@
-//! Unit tests for the settled ladder rules; the wired controller is covered by `examples/ladder_climb`.
+//! Ladder tests: the settled rules and the wired controller (a minimal fixture with no game
+//! database); `examples/ladder_climb` runs the drawn path.
 use super::*;
 use aa_world::coords::cry_rot_to_bevy;
 
@@ -431,19 +432,45 @@ fn stopping_sends_one_moving_false_packet_then_the_native_keep_alive() {
 }
 
 #[test]
+fn the_stop_packet_waits_for_the_native_minimum() {
+    // `DAT_3a59f84c` (100 ms) is the least time between hanging packets: a climb that stops
+    // right after a moving packet does not send the stop before it.
+    let mut state = SendState::default();
+    state.ladder_sent(true);
+    state.ladder_clock(0.05);
+    assert!(!state.ladder_due(false), "no stop inside 100 ms");
+    state.ladder_clock(0.05);
+    assert!(state.ladder_due(false), "the stop is due at 100 ms");
+}
+
+#[test]
 fn a_moving_hull_ladder_keeps_the_primary_point_hull_local() {
     let mut app = app(0x1234);
     let mut hull = DeckHullPoses::default();
     hull.0
         .insert(0x1234, (Vec3::new(10.0, 0.0, 0.0), Quat::IDENTITY, 0.0));
     app.insert_resource(hull);
+    // The hull is a parent entity and only its Transform moves; the GlobalTransforms stay stale
+    // (MinimalPlugins does not propagate them), so a reader of GlobalTransform would place the
+    // doodad at the origin and refuse the grab.
+    let hull_entity = app
+        .world_mut()
+        .spawn((
+            Transform::from_translation(aa_world::cry_to_bevy(Vec3::new(10.0, 0.0, 0.0))),
+            GlobalTransform::default(),
+        ))
+        .id();
     {
-        let mut q = app
+        let doodad = app
             .world_mut()
-            .query_filtered::<(&mut Transform, &mut GlobalTransform), With<RemoteDoodad>>();
-        let (mut t, mut g) = q.single_mut(app.world_mut()).unwrap();
-        *t = Transform::from_translation(aa_world::cry_to_bevy(Vec3::new(10.0, 0.0, 0.0)));
-        *g = GlobalTransform::from(*t);
+            .query_filtered::<Entity, With<RemoteDoodad>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(doodad).insert((
+            ChildOf(hull_entity),
+            Transform::default(),
+            GlobalTransform::default(),
+        ));
     }
     {
         let mut q = app.world_mut().query::<&mut Mover>();
@@ -451,7 +478,7 @@ fn a_moving_hull_ladder_keeps_the_primary_point_hull_local() {
     }
     tap(&mut app, "do_interaction_1");
     app.update();
-    let ladder = ladder_of(&mut app).expect("grabbed");
+    let ladder = ladder_of(&mut app).expect("grabbed through this frame's ChildOf chain");
     assert_eq!(ladder.parent, 0x1234);
     let first_commands = sent(&mut app);
     let first = moves(&first_commands)
@@ -471,14 +498,11 @@ fn a_moving_hull_ladder_keeps_the_primary_point_hull_local() {
         .resource_mut::<DeckHullPoses>()
         .0
         .insert(0x1234, (Vec3::new(20.0, 0.0, 0.0), Quat::IDENTITY, 0.0));
-    {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<(&mut Transform, &mut GlobalTransform), With<RemoteDoodad>>();
-        let (mut t, mut g) = q.single_mut(app.world_mut()).unwrap();
-        *t = Transform::from_translation(aa_world::cry_to_bevy(Vec3::new(20.0, 0.0, 0.0)));
-        *g = GlobalTransform::from(*t);
-    }
+    app.world_mut()
+        .entity_mut(hull_entity)
+        .insert(Transform::from_translation(aa_world::cry_to_bevy(
+            Vec3::new(20.0, 0.0, 0.0),
+        )));
     clear_taps(&mut app);
     hold(&mut app, "moveforward");
     app.update();
@@ -551,7 +575,7 @@ fn a_rotated_hull_sends_the_hull_relative_facing() {
 }
 
 #[test]
-fn a_mount_seat_glider_skill_or_deck_refuses_the_grab() {
+fn a_mount_seat_glider_or_skill_refuses_the_grab() {
     // riding a mount
     let mut mounted = app(0);
     mounted.insert_resource(super::super::mount::LocalMount(Some(
@@ -577,8 +601,8 @@ fn a_mount_seat_glider_skill_or_deck_refuses_the_grab() {
     );
     assert_eq!(
         mounted.world().resource::<LadderClaim>().0,
-        Some(77),
-        "the ladder still claims F"
+        None,
+        "a refused grab does not take F from talk or loot"
     );
 
     // seated
@@ -591,6 +615,11 @@ fn a_mount_seat_glider_skill_or_deck_refuses_the_grab() {
     tap(&mut seated, "do_interaction_1");
     seated.update();
     assert!(ladder_of(&mut seated).is_none(), "seated");
+    assert_eq!(
+        seated.world().resource::<LadderClaim>().0,
+        None,
+        "seated: no claim"
+    );
 
     // a skill moves the body
     let mut skilled = app(0);
@@ -602,25 +631,6 @@ fn a_mount_seat_glider_skill_or_deck_refuses_the_grab() {
     tap(&mut skilled, "do_interaction_1");
     skilled.update();
     assert!(ladder_of(&mut skilled).is_none(), "skill move");
-
-    // on a ship deck (a vehicle)
-    let mut decked = app(0);
-    let entity = player_entity(&mut decked);
-    decked
-        .world_mut()
-        .entity_mut(entity)
-        .insert(super::super::ship::DeckRide::fixture(
-            9,
-            Vec3::ZERO,
-            0.0,
-            0.0,
-            false,
-            0.0,
-            0.0,
-        ));
-    tap(&mut decked, "do_interaction_1");
-    decked.update();
-    assert!(ladder_of(&mut decked).is_none(), "on a deck");
 
     // gliding
     let mut gliding = app(0);
@@ -640,6 +650,41 @@ fn a_mount_seat_glider_skill_or_deck_refuses_the_grab() {
     tap(&mut gliding, "do_interaction_1");
     gliding.update();
     assert!(ladder_of(&mut gliding).is_none(), "gliding");
+}
+
+#[test]
+fn a_deck_walker_grabs_a_mast() {
+    // A deck walker has no vehicle binding (`+0x3af0` is null: it sends its own deck moves), so
+    // the native grab gate accepts the ladder and the body leaves the deck.
+    let mut app = app_with(7, 0);
+    let entity = player_entity(&mut app);
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(super::super::ship::DeckRide::fixture(
+            9,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            false,
+            0.0,
+            0.0,
+        ));
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    let ladder = ladder_of(&mut app).expect("a deck walker grabs the mast");
+    assert_eq!(ladder.kind, 7);
+    assert!(
+        app.world()
+            .get::<super::super::ship::DeckRide>(entity)
+            .is_none(),
+        "the grab takes the body off the deck"
+    );
+    assert_eq!(app.world().resource::<LadderClaim>().0, Some(77));
+    assert!(
+        sent(&mut app)
+            .iter()
+            .any(|c| matches!(c, Command::Hang { target_obj_id: 77 }))
+    );
 }
 
 #[test]
@@ -668,14 +713,41 @@ fn swimming_allows_the_grab() {
 }
 
 #[test]
-fn mounting_a_skill_or_a_stance_change_leaves_the_ladder_with_reason_0xb() {
-    // mounting
-    let mut mounted = app(0);
-    tap(&mut mounted, "do_interaction_1");
-    mounted.update();
-    assert!(ladder_of(&mut mounted).is_some());
-    sent(&mut mounted);
-    mounted.insert_resource(super::super::mount::LocalMount(Some(
+fn a_stance_timeout_or_a_mount_mid_climb_does_not_release() {
+    // The only native 0xb site is death: a weapon stance that runs out, a mount starting or a
+    // moving skill does not leave the ladder.
+    let mut stanced = app(0);
+    let entity = player_entity(&mut stanced);
+    // The stance is active at the grab and times out during the climb.
+    stanced
+        .world_mut()
+        .entity_mut(entity)
+        .insert(super::super::weapons::Drawn {
+            until: 0.3,
+            out: super::super::weapons::Out::Blade { dual: false },
+            sheathing: false,
+        });
+    tap(&mut stanced, "do_interaction_1");
+    stanced.update();
+    sent(&mut stanced);
+    clear_taps(&mut stanced);
+    for _ in 0..3 {
+        stanced.update();
+    }
+    assert!(
+        ladder_of(&mut stanced).is_some(),
+        "a stance timeout keeps the hang"
+    );
+    assert!(
+        !sent(&mut stanced)
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { .. })),
+        "no unhang on a stance timeout"
+    );
+
+    // A mount resource appearing while hanging (our client has no gate on that path) also keeps
+    // the hang: the native has no release on mount.
+    stanced.insert_resource(super::super::mount::LocalMount(Some(
         super::super::mount::LocalSeat {
             mount: 5,
             point: 1,
@@ -687,23 +759,23 @@ fn mounting_a_skill_or_a_stance_change_leaves_the_ladder_with_reason_0xb() {
             lift: 0.0,
         },
     )));
-    mounted.update();
+    stanced.update();
     assert!(
-        ladder_of(&mut mounted).is_none(),
-        "mounting leaves the ladder"
+        ladder_of(&mut stanced).is_some(),
+        "a mount starting while hanging does not release"
     );
     assert!(
-        sent(&mut mounted)
+        !sent(&mut stanced)
             .iter()
-            .any(|c| matches!(c, Command::Unhang { reason: 0xb })),
-        "CSUnhang 0xb"
+            .any(|c| matches!(c, Command::Unhang { .. })),
+        "no unhang on a mount"
     );
 
-    // a moving skill
     let mut skilled = app(0);
     tap(&mut skilled, "do_interaction_1");
     skilled.update();
     sent(&mut skilled);
+    clear_taps(&mut skilled);
     let entity = player_entity(&mut skilled);
     skilled
         .world_mut()
@@ -711,38 +783,62 @@ fn mounting_a_skill_or_a_stance_change_leaves_the_ladder_with_reason_0xb() {
         .insert(super::super::skill_motion::SkillMove::fixture());
     skilled.update();
     assert!(
-        ladder_of(&mut skilled).is_none(),
-        "a skill leaves the ladder"
+        ladder_of(&mut skilled).is_some(),
+        "a moving skill keeps the hang"
     );
     assert!(
-        sent(&mut skilled)
+        !sent(&mut skilled)
             .iter()
-            .any(|c| matches!(c, Command::Unhang { reason: 0xb }))
+            .any(|c| matches!(c, Command::Unhang { .. })),
+        "no unhang on a skill"
     );
+}
 
-    // the weapon stance changes (no Drawn at the grab, drawn afterwards)
-    let mut stanced = app(0);
-    tap(&mut stanced, "do_interaction_1");
-    stanced.update();
-    sent(&mut stanced);
-    let entity = player_entity(&mut stanced);
-    stanced
-        .world_mut()
+#[test]
+fn no_player_entity_clears_the_ladder_claim() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(crate::settings::Actions::default())
+        .insert_resource(aa_anim::ClipLibrary::default())
+        .insert_resource(Doodads::default())
+        .insert_resource(Units::default())
+        .insert_resource(LadderClaim(Some(77)))
+        .insert_resource(SendState::default())
+        .insert_resource(PlayerInput::default())
+        .add_message::<NetCommand>()
+        .add_systems(Update, control_ladder);
+    app.update();
+    assert_eq!(
+        app.world().resource::<LadderClaim>().0,
+        None,
+        "without a local player nothing may keep F"
+    );
+}
+
+#[test]
+fn death_sends_unhang_0xb_and_no_release_movement() {
+    let mut app = app(0);
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    assert!(ladder_of(&mut app).is_some());
+    sent(&mut app);
+    let entity = player_entity(&mut app);
+    app.world_mut()
         .entity_mut(entity)
-        .insert(super::super::weapons::Drawn {
-            until: 100.0,
-            out: super::super::weapons::Out::Blade { dual: false },
-            sheathing: false,
-        });
-    stanced.update();
+        .insert(super::super::combat::Dead { at: 0.0 });
+    app.update();
+    assert!(ladder_of(&mut app).is_none(), "death leaves the ladder");
+    assert_eq!(app.world().resource::<LadderClaim>().0, None);
+    let commands = sent(&mut app);
     assert!(
-        ladder_of(&mut stanced).is_none(),
-        "a stance change leaves the ladder"
+        commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 0xb })),
+        "CSUnhang 0xb: {commands:?}"
     );
     assert!(
-        sent(&mut stanced)
-            .iter()
-            .any(|c| matches!(c, Command::Unhang { reason: 0xb }))
+        moves(&commands).is_empty(),
+        "the native death callback sends only the unhang: {commands:?}"
     );
 }
 
@@ -768,7 +864,7 @@ fn the_bottom_falls_when_no_ground_is_known_instead_of_standing_in_the_air() {
 }
 
 #[test]
-fn a_horizontal_rope_does_not_step_over_the_top() {
+fn kinds_without_a_top_exit_do_not_step_over() {
     fn exit_step(top: bool, kind: u8) -> Vec3 {
         let mut app = App::new();
         app.add_message::<NetCommand>();
@@ -819,11 +915,14 @@ fn a_horizontal_rope_does_not_step_over_the_top() {
         ladder_top.distance(Vec3::new(1.0, 2.6, 3.05)) < 1e-5,
         "a ladder steps over the top: {ladder_top:?}"
     );
-    let rope_top = exit_step(true, 5);
-    assert!(
-        rope_top.distance(Vec3::new(1.0, 2.0, 3.0)) < 1e-5,
-        "a horizontal rope ends at its point: {rope_top:?}"
-    );
+    // the horizontal rope (5), wood wall (3), mast (7) and big tree (10) have no top-exit clip
+    for kind in [3u8, 5, 7, 10] {
+        let top = exit_step(true, kind);
+        assert!(
+            top.distance(Vec3::new(1.0, 2.0, 3.0)) < 1e-5,
+            "kind {kind} ends at its point: {top:?}"
+        );
+    }
 }
 
 #[test]

@@ -24,8 +24,9 @@
 //!   `0x20` block with the hull id, the hull-local primary position and the world backup;
 //! * reaching the top starts the exit (local reason 2, no climb bit for its duration; after 0.5 s
 //!   the body steps onto the platform and `CSUnhang` 1 is sent), the bottom stands again
-//!   (`CSUnhang` 1), F lets go (1), Space jumps forward (6, the mode-6 velocities) and a vanished
-//!   ladder releases with reason 0 (the 1.2 "my ladder is missing" path).
+//!   (`CSUnhang` 1), F lets go (1), Space jumps forward (6, the mode-6 velocities), a vanished
+//!   ladder releases with reason 0 (the 1.2 "my ladder is missing" path) and death releases with
+//!   reason 0xb (`FUN_39137320`, the only native 0xb site).
 //!
 //! Capture-pending (not settled by the decompile): which key produces each of the exit modes
 //! 3-9; the exact `deltaMovement` and velocity while climbing; the lateral `y` of the climb data
@@ -38,7 +39,7 @@ use aa_net::climb;
 use aa_net::model::{MoveSupport, radians_to_direction, stance};
 use aa_net::state::{Doodads, Units};
 use aa_net::{Command, MoveCommand, MoveState, NetCommand, Pos};
-use aa_world::{TerrainQuery, WaterKind, WaterQuery, bevy_to_cry};
+use aa_world::{TerrainQuery, WaterKind, WaterQuery, WorldCollision, bevy_to_cry};
 use bevy::prelude::*;
 
 use super::anim::{ClimbPose, Locomotion, Motion};
@@ -68,8 +69,9 @@ const BOTTOM_SNAP: f32 = 0.6;
 
 const EPS: f32 = 0.01;
 
-/// F is claimed for the ladder in reach (or the one being climbed), so NPC talk and loot-all
-/// do not fire on the same press. `Some(doodad)` names the ladder.
+/// F is claimed for a ladder in reach that the grab gate accepts (or the one being climbed), so
+/// NPC talk, loot-all and the doodad bar do not fire on the same press. `Some(doodad)` names the
+/// ladder.
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LadderClaim(pub Option<u32>);
 
@@ -80,6 +82,7 @@ pub struct LadderWorld<'w> {
     pub mount: Option<Res<'w, super::mount::LocalMount>>,
     pub gliding: Option<Res<'w, super::glide::Gliding>>,
     pub terrain: Option<Res<'w, TerrainQuery>>,
+    pub collision: Option<Res<'w, WorldCollision>>,
     pub water: Option<Res<'w, WaterQuery>>,
     pub db: Option<Res<'w, Db>>,
     pub views: Option<Res<'w, Views>>,
@@ -111,8 +114,6 @@ pub struct Ladder {
     pub angle_deg: f32,
     /// Metres per second along the ladder (the clip's root speed times `ladder_speed_mul`).
     pub speed: f32,
-    /// The weapon stance at the grab: a change while hanging leaves the ladder (`0xb`).
-    pub stance: bool,
     /// A top or bottom exit is playing.
     pub exiting: Option<Exit>,
 }
@@ -133,7 +134,9 @@ pub mod reason {
     pub const RELEASE: i32 = 1;
     /// The forward jump off (`FUN_39135570` mode 6).
     pub const FORWARD_JUMP: i32 = 6;
-    /// The posture/stance changed while hanging (`FUN_39137320`, `param_3 == 0`): "ladder lost".
+    /// The unit died while hanging: the value-change callback (`FUN_39137320`) leaves with 0xb
+    /// when the value reaches 0. It is the only native 0xb site (no release on mount, skill,
+    /// glide or stance).
     pub const LADDER_LOST: i32 = 0xb;
 }
 
@@ -282,7 +285,8 @@ impl LadderClips {
     /// degrees `exit_ladder_top`, below 35 `exit_70_ladder_top`, below 50 `exit_45_ladder_top`;
     /// kind 9 `exit_45_ladder_top`; nets `climb_net` below 1 degree and `climb_net_80` below 20
     /// (both play `fist_mo_ladder_end[_80]`); the rope uses `fist_mo_rope_end`; the guardrail's
-    /// `exist_guardrail_top` state plays `fist_mo_climb_up`; masts and the big tree have none.
+    /// `exist_guardrail_top` state plays `fist_mo_climb_up`; the wood wall, masts and the big tree
+    /// have none.
     pub fn exit(&self, kind: u8, angle_deg: f32) -> Option<&aa_anim::pose::BoundClip> {
         match kind {
             9 => self.exit_45.as_ref().or(self.exit_ladder.as_ref()),
@@ -603,18 +607,24 @@ fn bottom_rest(at: Vec3, ground: Option<f32>, wet: Option<Wet>, enter: f32) -> R
     }
 }
 
-/// The bottom exit: stand on the ground under the feet, swim when the water is deep enough, or
-/// fall when neither is close. Never reports `grounded` at a point above the ground or in water.
+/// The bottom exit: stand on the ground (the terrain or a brush such as a dock or a lower deck,
+/// through the same support query movement uses), swim when the water is deep enough, or fall when
+/// neither is close. Never reports `grounded` at a point above the ground or in water.
 fn land_after_climb(
     mover: &mut Mover,
     terrain: Option<&TerrainQuery>,
+    collision: Option<&WorldCollision>,
     water: Option<&WaterQuery>,
     actor: ActorParams,
 ) {
     let at = mover.pos;
-    let ground = terrain
-        .and_then(|t| t.ground_at(at.x, at.y))
-        .map(|g| g.height);
+    let ground = match (terrain, collision) {
+        (Some(terrain), Some(collision)) => {
+            player::support_at(terrain, collision, at, player::STEP_UP)
+        }
+        (Some(terrain), None) => terrain.ground_at(at.x, at.y).map(|g| g.height),
+        _ => None,
+    };
     let wet = water
         .and_then(|w| w.water_at(at))
         .map(|(surface, kind)| Wet {
@@ -667,8 +677,6 @@ pub fn control_ladder(
         Option<&super::skill_motion::SkillMove>,
         Has<super::seating::Seated>,
         Has<super::mount::Rider>,
-        Has<super::ship::DeckRide>,
-        Option<&super::weapons::Drawn>,
         Option<&ActorParams>,
     )>,
     doodads: Res<Doodads>,
@@ -693,17 +701,15 @@ pub fn control_ladder(
         skill_moving,
         seated,
         rider,
-        deck,
-        drawn,
         actor,
     )) = player.single_mut()
     else {
+        // no local player: nothing may keep F claimed
+        world.claim.0 = None;
         return;
     };
     let typing = typing.is_some_and(|f| f.0);
     let dt = time.delta_secs().min(0.1);
-    let now = time.elapsed_secs_f64();
-    let stance = drawn.is_some_and(|d| d.stance(now).is_some());
     let used = !typing && actions.just_pressed("do_interaction_1", 0);
     let jump = !typing && actions.just_pressed("jump", 0);
     let up = if typing {
@@ -716,9 +722,14 @@ pub fn control_ladder(
     if dead {
         world.claim.0 = None;
         if ladder.is_some() {
+            // The native value-change callback (`FUN_39137320`) leaves a hanging local unit with
+            // 0xb when its value reaches 0, and sends only the unhang (no release movement).
             commands.entity(entity).remove::<Ladder>();
             motion.climb = None;
             state.after_ladder();
+            out.write(NetCommand(Command::Unhang {
+                reason: reason::LADDER_LOST,
+            }));
         }
         return;
     }
@@ -733,20 +744,23 @@ pub fn control_ladder(
             world.db.as_deref(),
             mover.pos,
         );
-        world.claim.0 = found.as_ref().map(|hit| hit.obj_id);
-        if !used {
-            return;
-        }
-        // the native grab gate 1.4(b) (`FUN_393b8f40`): a unit on a vehicle (`+0x3af0`), on a
-        // seat, in a skill move or flying does not hang; a swimmer does (there is no swim gate in
-        // `FUN_393630e0`)
+        // the native grab gate 1.4(b) (`FUN_393b8f40`): a unit BOUND to a vehicle (`+0x3af0`,
+        // its seat at `+0x3af4`), on a seat, in a skill move or flying does not hang; a swimmer
+        // does (there is no swim gate in `FUN_393630e0`). A deck walker sends its own moves with
+        // `+0x3af0` null (`FUN_394045f0`), so a deck is not a vehicle binding.
         let blocked = world.mount.as_ref().is_some_and(|m| m.0.is_some())
             || rider
             || seated
-            || deck
             || skill_moving.is_some()
             || world.gliding.as_ref().is_some_and(|g| g.flying());
-        if blocked {
+        // F belongs to the ladder only when the grab would be accepted (a refused grab must not
+        // take talk or loot).
+        world.claim.0 = if blocked {
+            None
+        } else {
+            found.as_ref().map(|hit| hit.obj_id)
+        };
+        if !used || blocked {
             return;
         }
         let Some(LadderHit {
@@ -807,7 +821,6 @@ pub fn control_ladder(
             climb_data,
             angle_deg: axis.z.clamp(-1.0, 1.0).acos().to_degrees(),
             speed,
-            stance,
             exiting: None,
         };
         let world_point = body_point(bottom, axis, normal, length, fraction);
@@ -851,27 +864,9 @@ pub fn control_ladder(
     world.claim.0 = Some(ladder.obj_id);
 
     let mut ladder = ladder.clone();
-    // A posture change while hanging leaves the ladder with reason 0xb (`FUN_39137320`): mounting,
-    // a moving skill or a weapon stance change. Only the top exit (1) and this reason pass while
-    // the exit runs.
-    let left = world.mount.as_ref().is_some_and(|m| m.0.is_some())
-        || rider
-        || skill_moving.is_some()
-        || world.gliding.as_ref().is_some_and(|g| g.flying())
-        || stance != ladder.stance;
-    if left {
-        release(
-            &mut commands,
-            entity,
-            &mut mover,
-            &mut motion,
-            &mut state,
-            &mut out,
-            reason::LADDER_LOST,
-        );
-        return;
-    }
-
+    // No posture change releases the ladder: the only native 0xb site is the death check above.
+    // Mounting or a moving skill while already hanging keeps the hang (the grab gate keeps a
+    // mounted or skill-moving unit from grabbing in the first place).
     if let Some(exit) = ladder.exiting {
         let left = exit.left - dt;
         if left > 0.0 {
@@ -1010,6 +1005,7 @@ pub fn control_ladder(
         land_after_climb(
             &mut mover,
             world.terrain.as_deref(),
+            world.collision.as_deref(),
             world.water.as_deref(),
             actor.copied().unwrap_or_default(),
         );
@@ -1147,6 +1143,13 @@ fn release(
     out.write(NetCommand(Command::Move(cmd)));
 }
 
+/// The kinds whose state table has no top-exit clip: the wood wall (3), the mast (7) and the big
+/// tree (10) (`LadderClips::exit` returns `None` for them), so reaching their top leaves the
+/// ladder in place instead of stepping over it. A horizontal rope (5) also ends at its point.
+fn steps_over_top(kind: u8) -> bool {
+    !matches!(kind, 3 | 5 | 7 | 10)
+}
+
 /// The top exit finished: step over the ladder onto the platform, or stand at the bottom.
 fn finish_exit(
     commands: &mut Commands,
@@ -1160,8 +1163,7 @@ fn finish_exit(
     kind: u8,
 ) {
     if top {
-        // a horizontal rope (kind 5) has no "over the top" step: it ends at an arbitrary point
-        if kind != 5 {
+        if steps_over_top(kind) {
             let f = player::forward(mover.facing);
             mover.pos += Vec3::new(f.x, f.y, 0.0) * TOP_STEP;
             mover.pos.z += 0.05;

@@ -675,18 +675,19 @@ fn track(
         })
     });
     let directing = d.dialog.directing;
-    // a climb doodad in reach (or the ladder being climbed) owns F over NPC talk and loot
-    d.doodad.claims_key = ladder_claim
+    // The climb doodad owns F separately from the use bar: it blocks talk, loot and the bar
+    // (`claims_key` stays the bar's own "the doodad is nearer than any NPC" claim).
+    let ladder_owns_key = ladder_claim
         .as_deref()
-        .is_some_and(|claim| claim.0.is_some())
-        || focus.as_ref().is_some_and(|f| {
-            !units.iter().any(|u| {
-                u.obj_id != own
-                    && !u.dead
-                    && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
-                    && d.pos.distance(to_vec(u.pos)) < f.dist
-            })
-        });
+        .is_some_and(|claim| claim.0.is_some());
+    d.doodad.claims_key = focus.as_ref().is_some_and(|f| {
+        !units.iter().any(|u| {
+            u.obj_id != own
+                && !u.dead
+                && matches!(u.kind, aa_net::model::UnitKind::Npc { .. })
+                && d.pos.distance(to_vec(u.pos)) < f.dist
+        })
+    });
     d.doodad.focus = focus;
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
         drop(d);
@@ -705,7 +706,13 @@ fn track(
     let moving = !typing && MOVE_ACTIONS.iter().any(|a| actions.pressed(a, 0));
     let loot = d.loot.nearest.is_some();
     for n in 1..=KEYS {
-        if !typing && !loot && !directing && d.doodad.claims_key && actions.just_pressed(&format!("do_interaction_{n}"), 0) {
+        if !typing
+            && !loot
+            && !directing
+            && !ladder_owns_key
+            && d.doodad.claims_key
+            && actions.just_pressed(&format!("do_interaction_{n}"), 0)
+        {
             d.dynamic_actions.request(n);
         }
     }
@@ -1947,5 +1954,148 @@ mod tests {
         assert!(w_held(&app), "the new walk holds W");
         assert!(app.world().resource::<Harness>().acted.is_empty());
         assert!(shared.borrow().doodad.chosen.is_empty());
+    }
+
+    /// One F press with a climbable doodad in reach: the ladder grabs it and the dynamic action
+    /// bar does not also use it (F3; the CSHang half is the ladder tests' grab test).
+    #[test]
+    fn a_ladder_claims_f_from_the_doodad_bar() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        use crate::ingame::DevOptions;
+        use crate::ingame::Motion;
+        use crate::ingame::data::Db;
+        use crate::ingame::doodad_model::LadderHelper;
+        use crate::ingame::ladder::{LadderClaim, control_ladder};
+        use crate::ingame::player::{LocalPlayer, Mover, PlayerInput, SendState};
+        use crate::ingame::units::{RemoteDoodad, Views};
+
+        let mut game = GameData::default();
+        game.doodad.add(15013, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        let mut doodads = Doodads::default();
+        assert!(
+            doodads.apply(&aa_net::Event::DoodadsSpawned(vec![world_doodad(
+                77,
+                303,
+                15013,
+                Vec3::ZERO
+            )]))
+        );
+        let shared = Shared::default();
+        {
+            let mut d = shared.borrow_mut();
+            assert!(d.game.0.set(game).is_ok());
+            d.pos = Vec3::new(0.5, 0.0, 0.0);
+        }
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(crate::settings::Actions::default())
+            .insert_resource(super::super::HudKeyboardFocus::default())
+            .insert_resource(super::super::HudPointerOverUi::default())
+            .insert_resource(DevOptions::default())
+            .insert_resource(Db::ladder_fixture(15013, 1).expect("the ladder fixture"))
+            .insert_resource(doodads)
+            .insert_resource(Units::default())
+            .insert_resource(Views::default())
+            .insert_resource(aa_net::state::Player::default())
+            .insert_resource(Inventory::default())
+            .insert_resource(DoodadHighlights::default())
+            .insert_resource(DoodadTargetDecal::default())
+            .insert_resource(aa_net::CharacterNames::default())
+            .insert_resource(LadderClaim::default())
+            .insert_resource(SendState::default())
+            .insert_resource(PlayerInput::default())
+            .insert_resource(aa_anim::ClipLibrary::default())
+            .insert_resource(Scripted::default())
+            .add_message::<NetCommand>()
+            .add_message::<super::super::alerts::UseFailed>()
+            .add_systems(Update, (control_ladder, track, execute).chain());
+        app.insert_non_send(UiRuntime::new("en_us", 1280., 720.).expect("the UI runtime"));
+        app.insert_non_send(HudBridge(shared.clone()));
+        let doodad = app
+            .world_mut()
+            .spawn((
+                RemoteDoodad { obj_id: 77 },
+                DoodadVisual {
+                    path: String::new(),
+                    model: None,
+                    func_group_id: 15013,
+                    rendered_func_group_id: 15013,
+                    bond_helpers: Default::default(),
+                    ladder: Some(LadderHelper {
+                        bottom: Vec3::ZERO,
+                        top: Vec3::new(0.0, 5.0, 0.0),
+                        axis: Vec3::Y,
+                        forward: Vec3::NEG_Z,
+                    }),
+                    growth: None,
+                    remaining_ms: 0.0,
+                    total_ms: 0.0,
+                    base_scale: 1.0,
+                },
+                Transform::default(),
+                GlobalTransform::default(),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .fixture_doodad(77, doodad);
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::new(0.5, 0.0, 0.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::default(),
+            GlobalTransform::default(),
+            Motion::default(),
+        ));
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .tap_for_test("do_interaction_1");
+        app.update();
+        let commands: Vec<Command> = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect();
+        assert!(
+            commands
+                .iter()
+                .any(|c| matches!(c, Command::Hang { target_obj_id: 77 })),
+            "the ladder grabbed: {commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|c| matches!(c, Command::UseDoodadSkill { .. })),
+            "the ladder owns F, the doodad bar does not use it: {commands:?}"
+        );
+        assert!(
+            shared.borrow().doodad.focus.is_some(),
+            "the doodad is in the bar's reach"
+        );
+        assert_eq!(app.world().resource::<LadderClaim>().0, Some(77));
+        let requested = shared.borrow_mut().dynamic_actions.take_requested();
+        assert!(
+            requested.is_empty(),
+            "F did not request the bar: {requested:?}"
+        );
     }
 }
