@@ -1,0 +1,36 @@
+name: verbs
+version: 1
+description: exercise the portable verbs against the fixture
+steps:
+  - id: move
+    move-to: [1, 2, 3]
+  - id: find
+    target:
+      nearest: true
+      name: "Target"
+      template: 6409
+      timeout_ms: 1000
+  - id: scan_skill
+    use-skill:
+      id: 2
+      slot: 3
+  - id: mode_slot
+    use-skill:
+      slot: 6
+      bar: mode
+  - id: click
+    click-ui: "testWindow"
+  - id: interact
+    interact:
+      key: f
+      hold_ms: 50
+  - id: mount_pet
+    mount:
+      kind: pet
+  - id: unmount
+    dismount: true
+  - id: slots
+    set-slots:
+      page: 1
+      slots:
+        3: 2

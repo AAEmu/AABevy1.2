@@ -1,0 +1,75 @@
+# Farm Wagon driver bar: board, snapshot the bar, use slot 6 (unbind), then
+# take the F prompt back into the driver seat.  Written for the first live run;
+# not run in the offline step.
+#
+# Setup: the character is a GM with "Farm Wagon" access, the lane server is
+# started with the field trace, and the wagon spawns from /slave spawn 60.
+name: wagon_bar
+version: 1
+description: Farm Wagon board, driver bar, slot 6 unbind and F prompt re-board
+tags: [vehicle, wagon, mode-bar]
+
+steps:
+  - id: reset_cooldowns
+    gm: "/resetcd"
+  - id: wait_reset
+    wait: 500
+  - id: heal
+    gm: "/heal"
+  - id: wait_heal
+    wait: 500
+  - id: safe_spot
+    move-to: [15578.2, 15450.0, 126.245]
+  - id: wait_move
+    wait: 2500
+  - id: spawn_wagon
+    gm: "/slave spawn 60"
+  - id: wait_spawn
+    wait: 2500
+  - id: target_wagon
+    target:
+      nearest: true
+      name: "Farm Wagon"
+      timeout_ms: 8000
+    note: right-click pick of the spawned slave
+  - id: wagon_targeted
+    snapshot: wagon_targeted
+  - id: take_driver_seat
+    mount:
+      kind: vehicle
+      timeout_ms: 8000
+    note: the F interaction prompt
+  - id: wait_driver
+    wait:
+      until: "vehicle.mounted == true"
+      timeout_ms: 8000
+      source: server
+  - id: wagon_bar
+    snapshot: wagon_bar
+    note: the driver bar (slots 1-5 skills, 6 unbind, 7 summon info)
+  - id: use_slot_6
+    use-skill:
+      slot: 6
+      bar: mode
+    note: "slot 6 is the function slot 'unbind'"
+  - id: wait_unbound
+    wait:
+      until: "vehicle.mounted == false"
+      timeout_ms: 8000
+      source: server
+  - id: after_slot_6
+    snapshot: after_slot_6
+  - id: f_prompt
+    interact:
+      key: f
+      hold_ms: 150
+    note: the F prompt takes the driver seat again
+  - id: wait_reboard
+    wait:
+      until: "vehicle.mounted == true"
+      timeout_ms: 8000
+      source: server
+  - id: after_f
+    snapshot: after_f
+  - id: wagon_done
+    mark: wagon_done

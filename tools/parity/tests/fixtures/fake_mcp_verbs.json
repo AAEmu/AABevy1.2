@@ -1,0 +1,343 @@
+{
+ "rules": [
+  {
+   "tool": "client_attach",
+   "reply": {
+    "text": "attached"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_window",
+   "reply": {
+    "text": "hidden=1"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_status",
+   "reply": {
+    "text": "driver=1 hidden=1 stage=0"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "return X2LoginCharacter and X2LoginCharacter:GetCurrentStage()",
+   "reply": {
+    "text": "0"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetCurrentStage(), X2Unit",
+   "reply": {
+    "text": "0\tMini"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "__ref = __ref or {}",
+   "reply": {
+    "text": "1"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "local R = __ref",
+   "reply": {
+    "text": "{\"meta\": {\"screen_width\": 1920, \"screen_height\": 1080, \"stage\": 0}, \"widgets\": [{\"class\": \"window\", \"paths\": [\"testWindow\"], \"eoffset\": [10, 20], \"eextent\": [100, 50], \"visible\": true, \"enabled\": true, \"alpha\": 1.0, \"text\": \"Test\"}], \"hidden_named_widgets\": [], \"hidden_named_total\": 0}"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "System.GetCurrTime",
+   "reply": {
+    "text": "1000.0"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "X2Time:GetUiMsec",
+   "reply": {
+    "text": "1000500"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetCurrentAnimationState",
+   "reply": {
+    "text": "{\"player\": {\"state\": \"idle\"}, \"target\": {\"state\": null}, \"player_pos\": \"10,20,30\", \"target_pos\": null}"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "UnitCombatState",
+   "reply": {
+    "text": "false\tfalse"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "table.concat(o.chat",
+   "reply": {
+    "text": "BcId: 8718\tTarget"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "chat_hooked",
+   "reply": {
+    "text": "hooked"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetUnitWorldPosition",
+   "reply": {
+    "text": "10,20,30"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "SetActionSpell",
+   "reply": {
+    "text": "3:Spell:Melee Attack:true"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetActionTooltipText",
+   "reply": {
+    "text": "1:Spell:|2:Spell:2|3:Spell:2#3"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetEffectiveOffset",
+   "reply": {
+    "text": "10,20,100,50"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "GetUnitInfoById",
+   "reply": {
+    "text": "Target"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "X2Mate:MountMate",
+   "reply": {
+    "text": "1"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "X2Mate:UnMountMate",
+   "reply": {
+    "text": "1"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "SetActionSpell",
+   "reply": {
+    "text": "3:Spell:Melee Attack:true"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_target",
+   "reply": {
+    "json": {
+     "present": true,
+     "name": "Target",
+     "health": 50,
+     "max_health": 50,
+     "distance": 2.0,
+     "unit_id": "220E",
+     "buffs": {},
+     "debuffs": {},
+     "buff_count": 0,
+     "debuff_count": 0,
+     "submitted": true,
+     "target_id": "220E"
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_pointer",
+   "reply": {
+    "text": "mouse_click 60 45"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_action",
+   "reply": {
+    "text": "{\"action\":\"do_interaction_1\",\"submitted\":true}"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_lua",
+   "code_contains": "__parity",
+   "reply": {
+    "text": "removed"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_chat",
+   "message_contains": "/findobject",
+   "reply": {
+    "text": "{\"submitted\":true}"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_chat",
+   "reply": {
+    "text": "{\"submitted\":true}"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_input",
+   "reply": {
+    "text": "pressed (automatic release scheduled)"
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_unit_state",
+   "target": "player",
+   "reply": {
+    "json": {
+     "present": true,
+     "name": "Mini",
+     "health": 100,
+     "max_health": 100,
+     "unit_id": "1",
+     "buffs": {},
+     "debuffs": {},
+     "buff_count": 0,
+     "debuff_count": 0
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_unit_state",
+   "target": "target",
+   "reply": {
+    "json": {
+     "present": true,
+     "name": "Target",
+     "health": 50,
+     "max_health": 50,
+     "distance": 2.0,
+     "unit_id": "2",
+     "buffs": {},
+     "debuffs": {},
+     "buff_count": 0,
+     "debuff_count": 0
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_vehicle",
+   "reply": {
+    "json": {
+     "has_vehicle": true,
+     "mounted": false,
+     "driver": false,
+     "speed": 0,
+     "turn_speed": 0,
+     "vehicle": ""
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_mode_actions",
+   "reply": {
+    "json": {
+     "count": 7,
+     "slots": {
+      "6": {
+       "slot": 6,
+       "binded_type": "function",
+       "bounds": {
+        "x": 100,
+        "y": 200,
+        "width": 40,
+        "height": 40
+       },
+       "can_use": true
+      }
+     }
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_entities",
+   "reply": {
+    "json": {
+     "entities": {
+      "123": {
+       "name": "Target",
+       "class": "npc",
+       "position": {
+        "x": 10,
+        "y": 20,
+        "z": 30
+       },
+       "angles": [
+        0,
+        0,
+        0
+       ],
+       "velocity": [
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     "count": 1
+    }
+   },
+   "consume": false
+  },
+  {
+   "tool": "client_screenshot",
+   "reply": {
+    "png_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+   },
+   "consume": false
+  }
+ ]
+}
