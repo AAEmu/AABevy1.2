@@ -17,6 +17,11 @@
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
 //!
+//! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) plays its
+//! `slaves.portal_spawn_fx_id` portal at the unit root, scaled by `portal_scale`, for `portal_time`
+//! ([`track_summon_portals`] / [`spawn_summon_portals`], `FUN_39349600`). A vehicle that merely streams into view
+//! later has no creation packet, so it plays none.
+//!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
 //! bone (`super::attachments`) go away with the old parts on a swap: re-anchoring them by bone name is
@@ -31,6 +36,8 @@ use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_cry::workers::Workers;
 use aa_cry::{CryLoader, PreparedModel};
 use aa_net::state::Units;
+use aa_net::slave::SlaveEvent;
+use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
 use bevy::math::Affine3A;
@@ -108,6 +115,125 @@ pub struct VehiclePart;
 /// A particle entity spawned with a damage variant: replaced when the state changes.
 #[derive(Component)]
 pub struct VehicleEffect;
+
+/// The slave object ids whose summon portal is still to play. `OnSlaveCreated` (`SCSlaveCreatedPacket`) pushes the
+/// slave's id into `SlaveManager`'s pending list unless `hideSpawnEffect` is set (`FUN_3934a6c0` ->
+/// `FUN_3934a530`); `FUN_39349600` plays the portal as soon as the unit exists. A vehicle that only streams into
+/// view later was never announced as created near this client, so it has no entry and plays none.
+#[derive(Resource, Default)]
+pub struct SummonPortals(Vec<u32>);
+
+/// Most slave ids kept waiting for their unit root: 1.2 keeps its pending list until the unit can be found, but a
+/// unit that is never drawn (created out of range) must not grow this list for the whole session.
+pub const SUMMON_PORTALS_MAX: usize = 64;
+
+impl SummonPortals {
+    fn announce(&mut self, obj_id: u32) {
+        if self.0.contains(&obj_id) {
+            return;
+        }
+        if self.0.len() >= SUMMON_PORTALS_MAX {
+            self.0.remove(0);
+        }
+        self.0.push(obj_id);
+    }
+}
+
+/// A summon portal effect of a newly created slave (`slaves.portal_spawn_fx_id`), removed when `portal_time` is over.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SummonPortalEffect {
+    /// The `Time::elapsed_secs_f64` at which the portal ends.
+    pub until: f64,
+}
+
+/// Remembers the slaves `SCSlaveCreatedPacket` announced without `hideSpawnEffect` (see [`SummonPortals`]).
+pub fn track_summon_portals(events: Option<MessageReader<NetEvent>>, mut portals: ResMut<SummonPortals>) {
+    let Some(mut events) = events else {
+        return;
+    };
+    for NetEvent(event) in events.read() {
+        if let Event::Slave(SlaveEvent::Created(created)) = event
+            && !created.hide_spawn_effect
+        {
+            portals.announce(created.obj_id);
+        }
+    }
+}
+
+/// Plays the summon portal of every waiting slave whose unit is drawn: the `fx_groups` items of
+/// `slaves.portal_spawn_fx_id` at the unit's root, scaled by `portal_scale`, for `portal_time` seconds. The original
+/// `FUN_39349600` (x2game.dll.c:680653) waits for the object of the pending id (`FUN_3935e3f0`), reads the slave
+/// row's `+0x58` (spawn fx group), `+0x54` (scale) and `+0x5c` (time), and calls the world's effect slot with them.
+pub fn spawn_summon_portals(
+    mut commands: Commands,
+    db: Option<Res<Db>>,
+    book: Option<Res<super::combat::skills::SkillBook>>,
+    units: Option<Res<Units>>,
+    mut portals: ResMut<SummonPortals>,
+    time: Res<Time>,
+    roots: Query<(Entity, &RemoteUnit)>,
+) {
+    let (Some(db), Some(book), Some(units)) = (db, book, units) else {
+        return;
+    };
+    if portals.0.is_empty() {
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    portals.0.retain(|obj_id| {
+        let Some(root) = roots
+            .iter()
+            .find(|(_, remote)| remote.obj_id == *obj_id)
+            .map(|(entity, _)| entity)
+        else {
+            return true;
+        };
+        let Some(unit) = units.by_id.get(obj_id) else {
+            return true;
+        };
+        let Some(portal) = db.slave_summon_portal(unit.kind.template_id()) else {
+            return false;
+        };
+        for item in book.fx_group(portal.fx_group).iter() {
+            // the group's FxSound item has no effect name; 1.2 plays it with the portal, this slice draws the particles
+            if item.effect.is_empty() {
+                continue;
+            }
+            commands.spawn((
+                aa_fx::Effect {
+                    scale: portal.scale * item.scale,
+                    prime: false,
+                    item: true,
+                    no_body: true,
+                    ..aa_fx::Effect::new(item.effect.clone())
+                },
+                Transform {
+                    translation: cry_to_bevy(item.offset),
+                    ..default()
+                },
+                ChildOf(root),
+                SummonPortalEffect {
+                    until: now + f64::from(portal.time),
+                },
+            ));
+        }
+        false
+    });
+}
+
+/// Ends the summon portals that have outlived `slaves.portal_time`.
+pub fn despawn_summon_portals(
+    time: Res<Time>,
+    mut commands: Commands,
+    portals: Query<(Entity, &SummonPortalEffect)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, portal) in &portals {
+        if now >= portal.until {
+            commands.entity(entity).try_despawn();
+        }
+    }
+}
 
 /// A body prefab being read on the workers for [`VehicleDamage::requested`].
 struct VehicleSwapBuilt {
@@ -614,15 +740,26 @@ pub(crate) struct VehiclePlugin;
 
 impl Plugin for VehiclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (stop_dead_vehicles, stop_dead_new_bodies, resume_vehicle_idle, start_vehicle_idle).chain(),
-        )
-        // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
-        .add_systems(
-            PostUpdate,
-            steer_spindles.after(AnimSet).before(TransformSystems::Propagate),
-        );
+        app.init_resource::<SummonPortals>()
+            .add_systems(
+                Update,
+                (stop_dead_vehicles, stop_dead_new_bodies, resume_vehicle_idle, start_vehicle_idle).chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    track_summon_portals,
+                    // the portal waits for the frame `units::sync_views` draws the slave's root
+                    spawn_summon_portals.after(super::units::sync_views),
+                    despawn_summon_portals,
+                )
+                    .chain(),
+            )
+            // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
+            .add_systems(
+                PostUpdate,
+                steer_spindles.after(AnimSet).before(TransformSystems::Propagate),
+            );
     }
 }
 
@@ -1300,6 +1437,162 @@ mod tests {
         state.apply(app.world_mut());
         app.update();
         Some((app, root))
+    }
+
+    /// A Red Farm Hauler (slave template 146, model 1553) drawn at the origin and announced in `Units`, with the
+    /// summon portal systems ticking. The tests send the `SCSlaveCreatedPacket` themselves.
+    fn hauler() -> Option<(App, Db, Entity)> {
+        use bevy::time::TimeUpdateStrategy;
+        if !aa_cry::pak_available() {
+            return None;
+        }
+        let db = Db::open()?;
+        let book = super::super::combat::skills::SkillBook::open()?;
+        let look = db.vehicle_look(1553).expect("the Red Farm Hauler's look");
+        let max_hp = db.slave_max_hp(146, 50).expect("the Red Farm Hauler's MaxHealth");
+        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            aa_cry::CryPlugin,
+            aa_anim::AnimPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>()
+        .insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(1.0 / 30.0)))
+        .insert_resource(db.clone())
+        .insert_resource(book)
+        .insert_resource(units)
+        .init_resource::<SummonPortals>()
+        .add_message::<NetEvent>();
+        app.add_systems(
+            Update,
+            (track_summon_portals, spawn_summon_portals, despawn_summon_portals).chain(),
+        );
+        let mut state = SystemState::<(Commands, CryAssets, Res<ClipLibrary>)>::new(app.world_mut());
+        let pieces = {
+            let (_, mut cry, _) = state.get_mut(app.world_mut()).unwrap();
+            prepare(&cry.loader(), &look)
+        };
+        let root = {
+            let (mut commands, mut cry, clips) = state.get_mut(app.world_mut()).unwrap();
+            let root = spawn(&mut commands, &mut cry, &clips, pieces, Transform::default());
+            commands.entity(root).insert((
+                RemoteUnit::announced(&unit),
+                VehicleDamage {
+                    state: 1,
+                    variant: look.normal.clone(),
+                    max_hp,
+                    requested: None,
+                    dying_start: None,
+                    dying_time: 0.0,
+                    death_seen: false,
+                    dead_effect_played: false,
+                },
+            ));
+            root
+        };
+        state.apply(app.world_mut());
+        Some((app, db, root))
+    }
+
+    fn portal_effects(app: &mut App) -> Vec<(String, bool, f32)> {
+        app.world_mut()
+            .query::<(&aa_fx::Effect, &SummonPortalEffect)>()
+            .iter(app.world())
+            .map(|(effect, _)| (effect.name.clone(), effect.prime, effect.scale))
+            .collect()
+    }
+
+    /// `SCSlaveCreatedPacket` without `hideSpawnEffect` on slave 146 (Red Farm Hauler) plays the `slaves` row's
+    /// `portal_spawn_fx_id` 1263 (`portal_tank_spawn`) at the cart once, for `portal_time` 1.0 s.
+    #[test]
+    fn a_created_vehicle_plays_its_summon_portal_once() {
+        let Some((mut app, db, _root)) = hauler() else { return };
+        let portal = db.slave_summon_portal(146).expect("the Red Farm Hauler's summon portal");
+        assert_eq!(portal, super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 });
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let items: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter(|item| !item.effect.is_empty())
+            .map(|item| item.effect.clone())
+            .collect();
+        assert_eq!(items.len(), 2, "{items:?}");
+        assert!(items.iter().any(|name| name.ends_with("portal_tank_main")), "{items:?}");
+        assert!(items.iter().any(|name| name.ends_with("portal_tank_main_start")), "{items:?}");
+        assert!(
+            book.fx_group(portal.fx_group).iter().any(|item| item.effect.is_empty() && item.sound.is_some()),
+            "the group's FxSound item"
+        );
+
+        app.world_mut()
+            .write_message(NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
+                owner_obj_id: 1,
+                tl_id: 1,
+                obj_id: 7,
+                hide_spawn_effect: false,
+                raw_id: 0,
+                creator_name: "owner".into(),
+            }))));
+        app.update();
+        let effects = portal_effects(&mut app);
+        assert_eq!(effects.len(), 2, "{effects:?}");
+        for (name, primed, scale) in &effects {
+            assert!(items.iter().any(|item| item == name), "{name}");
+            assert!(!primed, "a summon portal must not start primed");
+            assert!((*scale - 3.0).abs() < 1e-6, "{name} scale {scale}");
+        }
+        // the pending id was consumed: later frames play it once
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(portal_effects(&mut app).len(), 2, "the portal plays once");
+        // `portal_time` is 1.0 s
+        for _ in 0..40 {
+            app.update();
+        }
+        assert!(portal_effects(&mut app).is_empty(), "the portal outlives portal_time");
+    }
+
+    /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
+    /// (`SCUnitState` with no `SCSlaveCreatedPacket`) plays none, and `hideSpawnEffect` suppresses it.
+    #[test]
+    fn a_vehicle_streamed_in_later_plays_no_summon_portal() {
+        let Some((mut app, _db, _root)) = hauler() else { return };
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(portal_effects(&mut app).is_empty(), "a streamed-in vehicle has no creation packet");
+        app.world_mut()
+            .write_message(NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
+                owner_obj_id: 1,
+                tl_id: 1,
+                obj_id: 7,
+                hide_spawn_effect: true,
+                raw_id: 0,
+                creator_name: "owner".into(),
+            }))));
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(portal_effects(&mut app).is_empty(), "hideSpawnEffect suppresses the portal");
+    }
+
+    /// The `slaves` row of the owner test's `/slave spawn 146`, and a slave without a portal (the rowboat, 15).
+    #[test]
+    fn slave_146_has_the_portal_tank_spawn_group() {
+        let Some(db) = Db::open() else { return };
+        assert_eq!(
+            db.slave_summon_portal(146),
+            Some(super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 })
+        );
+        assert_eq!(db.slave_summon_portal(15), None);
     }
 
     /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine

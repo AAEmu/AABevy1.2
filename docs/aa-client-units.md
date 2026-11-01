@@ -387,6 +387,32 @@ state 5/6 and freezes the `engine` handle; the Bevy client has no dying state ye
 Animator on the child part, so `vehicle::stop_dead_vehicles` stops the idle there and plays the death clip. This is the
 pre-existing dead-01 gap for vehicle corpses, fixed on the vehicle path.
 
+### Summon portal (`SummonPortals`, `spawn_summon_portals`)
+
+The 1.2 client shows a portal around a slave when it is **created**, not when it is first drawn. The server broadcasts
+`SCSlaveCreatedPacket` (SC061, `OnSlaveCreated` `FUN_391d45d0`) around the owner before the unit state. Its
+`hideSpawnEffect` flag is read by `FUN_3934a6c0` (x2game.dll.c:681528): when the flag is clear it pushes the slave's
+object id into `SlaveManager`'s pending list (`FUN_3934a530`); `X2::GameClient::SlaveManager::Update`
+(`FUN_39349cb0`) then calls `FUN_39349600` (x2game.dll.c:680653), which waits until that object exists
+(`FUN_3935e3f0`), reads the slave's `slaves` row (`FUN_396d2570`) and calls the world's effect slot with
+`portal_spawn_fx_id` (+0x58), `portal_scale` (+0x54) and `portal_time` (+0x5c).
+
+The ids are `fx_groups` rows, not `effects` rows: slave 146 (Red Farm Hauler, model 1553) is group 1263
+`portal_tank_spawn`, scale 3.0, time 1.0 s. Group 1263 holds the `FxParticle` items
+`abillity_skill_table_m.system_skill.portal_tank_main` and `..._main_start` and the `FxSound`
+`Sounds/x2eventsounds:portal:portal_tank` (`fx_items` 1742 / 1744 / 1760). 67 of the 140 `slaves` rows carry a spawn
+portal and every one is a `VehicleModel` or `ShipModel`; slave 15 (the rowboat) has none. The tractor body's `.cal` has
+no spawn clip (only `fist_ba_relaxed_idle` and `dead_01`), so the portal is the summon visual.
+
+`vehicle::track_summon_portals` keeps the SC061 ids whose `hideSpawnEffect` is false in [`SummonPortals`] (until the
+unit root exists, like the 1.2 pending list, capped at 64 so an id that never draws cannot grow it all session).
+`spawn_summon_portals` then plays the group's particle items at the unit root, with `portal_scale` times each item's
+own scale, unprimed (a fresh burst); `despawn_summon_portals` removes them after `portal_time`. A vehicle that merely
+streams into view later was never announced by SC061 near the client, so it has no entry and plays none; a creation
+with `hideSpawnEffect` plays none either. Both controls are in `examples/slave_summon.rs` and the unit tests.
+The group's `FxSound` item is not played yet (the particle portal is); the pending list survives visibility loss like
+the 1.2 list.
+
 ### Damage states (S15)
 
 The drawn body follows the unit's health. `vehicle::model_state` is `FUN_3989f8b0` (x2game.dll.c:1935601):
