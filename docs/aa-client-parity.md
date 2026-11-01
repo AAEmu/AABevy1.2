@@ -259,6 +259,31 @@ Ships (merged after the checkpoint was written):
   passengers and leaving (`examples/passenger_seats`, `hud/slave/tests.rs`, `mount.rs`). Open: the exact row-less
   passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
+- **S11a vehicle picking.** The 1.1 m pick sphere and the drawn mesh box are both candidates, in the unit's
+  turned frame. Among spheres the nearest entry wins; among boxes the nearest entry wins, except that an attached
+  child (a cannon) wins over its parent when its entry is within 1.0 m of the parent's entry, so a stern cannon
+  deep inside a bow-clicked hull does not win. A sphere hit beats the chosen box only while its entry is at or
+  before the box's exit: a player, NPC or passenger on a deck or in a wagon bed (inside the vehicle's span) is
+  picked from outside the vehicle, while a unit behind the vehicle loses to the nearer box entry. Only vehicles
+  get a box: a character's draw tree has weapon, attachment and effect bounds but no body bounds, and the walk
+  stops at child units, parented doodads and effects. A box that contains the camera is ignored - a camera on
+  deck is inside a ship's box (masts and sails), which would otherwise be picked on every click. The slave the
+  player rides or is attached to gets no box, only its sphere. Boxes are measured in the drawn root's local frame
+  and composed with its current `Transform` chain on every read, so a moving or turning vehicle is picked where it
+  is now (the root and mesh globals come from the same propagation, last frame's while it moves); only a fully
+  built tree is cached, until its root or model changes, and nothing is measured on the spawn frame, the frame a
+  mesh is added, or while a mesh global is still unpropagated. The loose box still sends a cannon click from an
+  elevated camera (the ray enters through the top or the yards) and a unit seen between masts or sails to the
+  ship. Left click, the right click's
+  NPC/vehicle pick and `Tab` and the talk checks measure from the unit's current world pose (`unit_world_pose`),
+  so an attached cannon uses its parent-composed position. 1.2's own vehicle targeting is
+  `captures/2026-10-28b/summary.txt:36`, case e `bound`: a right click on the slave you ride sends
+  `CSChangeTarget` 0x02c (native landed on 4 of 44 sweep points). The Farm Wagon (slave template 60, model 1008)
+  is picked at independently chosen front/middle/rear points, not from inside its box (`examples/slave_pick`,
+  `hud/pick.rs` tests). Deviation: seated, a click only inside the ridden wagon's loose box does not target it;
+  the sphere still does. 1.2's ridden pick is tight (4 of 44 sweep points); its exact shape is capture-pending.
+  Open: the exact 1.2 pick shape (the box is the union of all hull, mast and sail bounds; 4 of 44 suggests a
+  tighter pick) and the unmeasured pick suppression distance, as in [units](aa-client-units.md).
 
 - **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim
   clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState`, the drawn

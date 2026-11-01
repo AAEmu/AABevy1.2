@@ -73,6 +73,9 @@ fn tuning() -> (bool, f32) {
 #[derive(Component, Clone)]
 pub struct RemoteUnit {
     pub obj_id: u32,
+    /// The model (`Unit::model_id`) the drawn tree was built from; a change invalidates a cached
+    /// pick box.
+    pub model_id: u32,
     /// The buffered reports and the playback clock.
     track: Track,
     /// The 1.2 vehicle / ship controller, once a type-2 or type-3 movement arrived.
@@ -131,7 +134,7 @@ impl RemoteUnit {
         let parent = unit_parent(unit);
         let game_rotation = if parent.is_some() { unit_game_rotation(unit) } else { Quat::from_rotation_z(unit.yaw()) };
         let rotation = if parent.is_some() { cry_rot_to_bevy(game_rotation) } else { Quat::from_rotation_y(unit.yaw()) };
-        Self { obj_id: unit.obj_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
+        Self { obj_id: unit.obj_id, model_id: unit.model_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
             rotation, game_rotation, deck: None, parent,
             scale: unit_scale(unit), character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
     }
@@ -196,7 +199,7 @@ impl RemoteUnit {
     pub(super) fn speed(&self) -> f32 { self.speed }
     #[cfg(test)]
     pub(super) fn fixture(obj_id: u32, pos: Vec3) -> Self {
-        Self { obj_id, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
+        Self { obj_id, model_id: 0, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
             rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None, parent: None,
             scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
     }
@@ -1809,7 +1812,7 @@ mod lifecycle_tests {
         let pos = Vec3::new(3.0, 4.0, 5.0);
         let mut track = Track::new(pos, 1.0);
         track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
-        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, track, vehicle: None, pos, facing: 1.0,
+        let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, model_id: 0, track, vehicle: None, pos, facing: 1.0,
             rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None, parent: None,
             scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });

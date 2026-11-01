@@ -116,7 +116,7 @@ fn radius(data: &HudData, unit: &Unit) -> f32 {
 /// point-1 seat marks the cart `Driven`, so the client drives the cart from the stale mover
 /// instead of following it, and a cart has no `Animator` for the seat pose. Use the attached
 /// unit's replicated position then.
-fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
+pub(super) fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
     data.mounted
         .player_attachment()
         .and_then(|attachment| world(attachment.obj_id))
