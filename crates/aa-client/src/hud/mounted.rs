@@ -114,16 +114,12 @@ struct Actor {
 }
 
 pub(super) fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
+    // `Movement::velocity_mps` owns the codec: 30/32767 for type-2 land vehicles and type-3
+    // ships, 50/32767 for a type-5 transfer, 1/1024 for unit movements. Reading type 3 at
+    // 1/1024 would make a real 4.8 m/s ship read 5.12 and falsely refuse the unbind.
     movement.map_or(0.0, |m| {
-        // Type 2 (land vehicle) velocities use the 30/32767 codec (the codec's VEL_SCALE_VEHICLE
-        // is the writer's 1/30); unit movements use 1/1024.
-        let scale = if m.move_type == 2 {
-            aa_net::vehicle::VEL_VEHICLE / 32767.0
-        } else {
-            1.0 / 1024.0
-        };
-        let [x, y, z] = m.velocity;
-        (f32::from(x).powi(2) + f32::from(y).powi(2) + f32::from(z).powi(2)) * scale * scale
+        let [x, y, z] = m.velocity_mps();
+        x * x + y * y + z * z
     })
 }
 

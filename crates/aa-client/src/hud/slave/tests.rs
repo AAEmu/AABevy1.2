@@ -786,7 +786,8 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
     let (state, _units) = setup(&[hauler(146, 0x5e, Vec3::new(1.0, 0.0, 0.0))]);
     state.borrow().game.0.set(game).ok().expect("game data");
     bound(&state, 146);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 2;
     movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
     crate::hud::mounted::receive(
         &state,
@@ -806,8 +807,9 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
         .ok()
         .expect("game data");
     bound(&state, 105);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 1);
-    movement.velocity = [6 * 1024, 0, 0];
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 2;
+    movement.velocity = [6554, 0, 0];
     crate::hud::mounted::receive(
         &state,
         &Event::UnitMoved {
@@ -826,8 +828,9 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
         .ok()
         .expect("game data");
     bound(&state, 15);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
-    movement.velocity = [6 * 1024, 0, 0];
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 3;
+    movement.velocity = [6554, 0, 0];
     crate::hud::mounted::receive(
         &state,
         &Event::UnitMoved {
@@ -1019,7 +1022,8 @@ fn the_captured_land_dismount_at_six_point_seven_mps_sends_the_unbind() {
         .ok()
         .expect("game data");
     bound(&state, 146);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 2;
     movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
     crate::hud::mounted::receive(
         &state,
@@ -1095,8 +1099,9 @@ fn a_ship_driver_above_five_mps_is_refused() {
         .ok()
         .expect("game data");
     bound(&state, 20);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
-    movement.velocity = [6 * 1024, 0, 0];
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 3;
+    movement.velocity = [6554, 0, 0];
     crate::hud::mounted::receive(
         &state,
         &Event::UnitMoved {
@@ -1107,8 +1112,9 @@ fn a_ship_driver_above_five_mps_is_refused() {
     assert_eq!(discard(&state), Outcome::Refused(0x67));
     assert!(state.borrow().requests.is_empty());
 
-    let mut movement = Movement::unit(Pos::default(), 0.0, 4);
-    movement.velocity = [5 * 1024, 0, 0];
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 3;
+    movement.velocity = [5461, 0, 0];
     crate::hud::mounted::receive(
         &state,
         &Event::UnitMoved {
@@ -1172,6 +1178,54 @@ fn a_real_type_2_body_uses_the_vehicle_velocity_scale() {
         },
     );
     assert_eq!(discard(&state), Outcome::Sent);
+}
+
+#[test]
+fn a_real_type_3_ship_body_uses_the_vehicle_velocity_scale() {
+    // A ship body is type 3 and uses the same 30/32767 codec as type 2 (`Movement::velocity_mps`).
+    // 5243 wire units are 4.80 m/s; reading type 3 at 1/1024 gave 5.12 m/s and falsely refused a
+    // ship leaving below 5 m/s.
+    let (state, _units) = setup(&[ship(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    state
+        .borrow()
+        .game
+        .0
+        .set(game_with_speed_gate(&[(129, true)]))
+        .ok()
+        .expect("game data");
+    bound(&state, 20);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 3;
+    movement.velocity = [5243, 0, 0];
+    let squared = crate::hud::mounted::movement_speed_squared(Some(&movement));
+    let expected = (5243.0 * 30.0 / 32767.0f32).powi(2);
+    assert!((squared - expected).abs() < 1e-3, "{squared} vs {expected}");
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Sent);
+    assert_eq!(
+        state.borrow().requests,
+        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
+    );
+
+    // 6 m/s (6554 wire units) is above the bound.
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 3;
+    movement.velocity = [6554, 0, 0];
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitMoved {
+            obj_id: 20,
+            movement,
+        },
+    );
+    assert_eq!(discard(&state), Outcome::Refused(0x67));
+    assert_eq!(state.borrow().requests.len(), 1, "the refusal adds no request");
 }
 
 #[test]
@@ -1343,7 +1397,8 @@ fn the_captured_land_dismount_at_speed_shows_no_0x67_through_the_lua_wrapper()
         .ok()
         .expect("game data");
     bound(&state, 146);
-    let mut movement = Movement::unit(Pos::default(), 0.0, 2);
+    let mut movement = Movement::unit(Pos::default(), 0.0, 0);
+    movement.move_type = 2;
     movement.velocity = [(6.7 * 32767.0 / aa_net::vehicle::VEL_VEHICLE) as i16, 0, 0];
     crate::hud::mounted::receive(
         &state,
