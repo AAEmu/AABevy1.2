@@ -795,6 +795,12 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
                     });
                     return Ok(());
                 }
+                // The native gates above have no price check (the form's button keeps the price
+                // in range); a script call outside the 32-bit money range is dropped silently
+                // rather than wrapped into a huge price.
+                if !(0..=i64::from(i32::MAX)).contains(&price) {
+                    return Ok(());
+                }
                 v.commands.push(Command::House(HouseCommand::Sell {
                     tl,
                     money_amount: price as u32,
@@ -1247,6 +1253,14 @@ pub(crate) fn sync(
 
     // the server
     let open = v.current.as_ref().map(|c| (c.obj_id, c.tl_id));
+    // A pending sale request belongs to the house it was sent for: once another house (or none)
+    // is open, a later refusal must not raise that house's fail event in the new window.
+    if v
+        .pending
+        .is_some_and(|(_, tl)| open.is_none_or(|(_, open_tl)| open_tl != tl))
+    {
+        v.pending = None;
+    }
     for NetEvent(event) in events.read() {
         if let Event::ServerError { code } = event {
             // A sale request the server refuses raises the fail event the scripts listen to
