@@ -46,6 +46,10 @@ struct Lookups {
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
+    /// `models.id` -> the normal and per-state prefab refs of a vehicle or ship.
+    vehicle_variants: HashMap<u32, Option<VehicleVariants>>,
+    /// `slaves.id` -> the unit attribute 6 (`MaxHealth`) sum of its `unit_modifiers` rows.
+    slave_max_hp: HashMap<u32, Option<i32>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
@@ -269,6 +273,8 @@ impl Lookups {
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
+            vehicle_variants: HashMap::new(),
+            slave_max_hp: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
         }
@@ -551,6 +557,84 @@ impl Db {
         let normal = normal.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())?;
         let file = |w: Option<String>| w.as_deref().and_then(model_file);
         Some(VehicleLook { normal, wheels: [file(wheel), file(wheel2)] })
+    }
+
+    /// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`):
+    /// state 2 is `damaged25`, 3 `damaged50`, 4 `damaged75`, 6 `dead` ([`VehicleVariants::for_state`]).
+    pub fn vehicle_variants(&self, model_id: u32) -> Option<VehicleVariants> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(variants) = l.vehicle_variants.get(&model_id) {
+            return variants.clone();
+        }
+        let variants = l
+            .conn
+            .query_row(
+                "SELECT COALESCE(v.normal, s.normal), v.damaged25, s.damaged25, v.damaged50, s.damaged50,
+                        v.damaged75, s.damaged75, v.dead, s.dead
+                 FROM models m
+                 LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+                 LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
+                 WHERE m.id = ?1",
+                params![model_id],
+                |r| {
+                    let text = |index: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(r.get::<_, Option<String>>(index)?
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()))
+                    };
+                    let variant = |vehicle: usize, ship: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(text(vehicle)?.or(text(ship)?))
+                    };
+                    Ok(VehicleVariants {
+                        normal: text(0)?.unwrap_or_default(),
+                        damaged25: variant(1, 2)?,
+                        damaged50: variant(3, 4)?,
+                        damaged75: variant(5, 6)?,
+                        dead: variant(7, 8)?,
+                    })
+                },
+            )
+            .ok()
+            .filter(|v: &VehicleVariants| !v.normal.is_empty());
+        l.vehicle_variants.insert(model_id, variants.clone());
+        variants
+    }
+
+    /// The maximum health of a slave template from its `unit_modifiers` rows of unit attribute 6 (`MaxHealth`).
+    /// The 1.2 client's `FUN_390b4a70` reads that attribute (not a maximum on the wire); all 104 Slave rows of the
+    /// catalog are flat values, and the percent rows (none today) are applied in row order like the attribute getter.
+    /// `None` when the template has no row (40 slave templates; the caller then keeps the unit's last known maximum).
+    pub fn slave_max_hp(&self, template_id: u32) -> Option<i32> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(hp) = l.slave_max_hp.get(&template_id) {
+            return *hp;
+        }
+        let mut res = 0i32;
+        let mut any = false;
+        {
+            let row = l.conn.prepare(
+                "SELECT unit_modifier_type_id, value FROM unit_modifiers
+                 WHERE owner_type = 'Slave' AND owner_id = ?1 AND unit_attribute_id = 6 ORDER BY id",
+            );
+            if let Ok(mut stmt) = row
+                && let Ok(rows) = stmt.query_map(params![template_id], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                })
+            {
+                for row in rows.flatten() {
+                    any = true;
+                    let value = i32::try_from(row.1).unwrap_or(0);
+                    res = if row.0 == 1 {
+                        res.wrapping_add((res as f32 * value as f32 / 100.0) as i32)
+                    } else {
+                        res.wrapping_add(value)
+                    };
+                }
+            }
+        }
+        let hp = any.then_some(res.max(0));
+        l.slave_max_hp.insert(template_id, hp);
+        hp
     }
 
     /// The clip (`.cal` entry name, lower case) of an animation action (`anim_actions.anim_name`): the idle pose of an NPC.
@@ -1014,16 +1098,26 @@ impl Db {
     }
 }
 
-/// The `ParticleEffect` entities (the `<export>` list) of a prefab element path.
-fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+/// The named `ParticleEffect` entities (the `<Objects>` list) of a prefab element path; inactive ones are kept
+/// (a vehicle's `_spawn_effect` elements are authored `bActive="0"` and played on a state change).
+pub(crate) fn prefab_effects_named(path: &str) -> Vec<aa_world::placement::NamedEffect> {
     let Some((file, name)) = path.strip_prefix("prefab://").and_then(|r| r.rsplit_once('/')) else { return Vec::new() };
     let Ok(xml) = aa_pak::Pak::global().read_string(&norm(file)) else { return Vec::new() };
     let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
     let tail = &xml[from..];
     let prefab = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
-    let Some(start) = prefab.find("<export>") else { return Vec::new() };
-    let export = &prefab[start..prefab[start..].find("</export>").map_or(prefab.len(), |e| start + e + "</export>".len())];
-    aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
+    // the `<Objects>` list carries every entity's Pos (the `<export>` list omits a zero one)
+    let Some(start) = prefab.find("<Objects>") else { return Vec::new() };
+    let objects = &prefab[start..prefab[start..].find("</Objects>").map_or(prefab.len(), |e| start + e + "</Objects>".len())];
+    aa_world::placement::parse_named_effect_entities(objects)
+        .into_iter()
+        .filter(|e| !e.effect.effect.to_ascii_lowercase().starts_with("x2_sounds."))
+        .collect()
+}
+
+/// The active `ParticleEffect` entities (the `<Objects>` list) of a prefab element path.
+fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+    prefab_effects_named(path).into_iter().filter(|e| e.active).map(|e| e.effect).collect()
 }
 
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
@@ -1060,6 +1154,44 @@ pub struct VehicleLook {
     pub normal: String,
     /// The wheel models (pak paths): `wheel` for the `wheelN` mounts, `wheel2` for the `wheel_type2N` ones.
     pub wheels: [Option<String>; 2],
+}
+
+/// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VehicleVariants {
+    pub normal: String,
+    pub damaged25: Option<String>,
+    pub damaged50: Option<String>,
+    pub damaged75: Option<String>,
+    pub dead: Option<String>,
+}
+
+impl VehicleVariants {
+    /// The model ref for a model state, walking down to the next lower non-empty row as `FUN_397a7810` does:
+    /// state 6 tries `dead`, `damaged75`, `damaged50`, `damaged25`, `normal`; 4 and 5 try `damaged75` down.
+    /// The `dying` column is not read: `FUN_3989f8b0` never returns 5 and no code writes 5 to the state.
+    pub fn for_state(&self, state: u8) -> &str {
+        let wanted = match state {
+            0 | 1 => 1,
+            2 => 2,
+            3 => 3,
+            4 | 5 => 4,
+            _ => 6,
+        };
+        for step in (1..=wanted).rev() {
+            let variant = match step {
+                2 => self.damaged25.as_deref(),
+                3 => self.damaged50.as_deref(),
+                4 => self.damaged75.as_deref(),
+                6 => self.dead.as_deref(),
+                _ => None,
+            };
+            if let Some(variant) = variant {
+                return variant;
+            }
+        }
+        &self.normal
+    }
 }
 
 /// Lower case with `/` separators, as the pak wants paths.
@@ -1146,6 +1278,65 @@ mod tests {
             Arc::ptr_eq(&floor, &again),
             "the cache keeps the loaded floor"
         );
+    }
+
+    /// `FUN_397a7810`: a state with no row uses the next lower one; the `dying` column is never read.
+    #[test]
+    fn a_variant_falls_back_to_the_next_lower_state() {
+        let all = VehicleVariants {
+            normal: "normal".into(),
+            damaged25: None,
+            damaged50: Some("damaged50".into()),
+            damaged75: Some("damaged75".into()),
+            dead: None,
+        };
+        assert_eq!(all.for_state(1), "normal");
+        assert_eq!(all.for_state(2), "normal", "no damaged25 row");
+        assert_eq!(all.for_state(3), "damaged50");
+        assert_eq!(all.for_state(4), "damaged75");
+        assert_eq!(all.for_state(5), "damaged75", "state 5 is never produced");
+        assert_eq!(all.for_state(6), "damaged75", "no dead row");
+        let none = VehicleVariants { normal: "normal".into(), ..VehicleVariants::default() };
+        for state in 0..=6 {
+            assert_eq!(none.for_state(state), "normal", "state {state}");
+        }
+    }
+
+    /// The 1.2 Eznan Cutter, the Farm Wagon and the airship as the real catalog has them.
+    #[test]
+    fn the_database_holds_the_vehicle_variants() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let galleon = db.vehicle_variants(393).expect("the Eznan Cutter");
+        assert!(galleon.for_state(1).ends_with("galleon.step_10galleon_normal"), "{}", galleon.for_state(1));
+        assert!(galleon.for_state(2).ends_with("galleon.damaged25"), "{}", galleon.for_state(2));
+        assert!(galleon.for_state(3).ends_with("galleon.damaged25"), "{}", galleon.for_state(3));
+        assert!(galleon.for_state(4).ends_with("galleon.damaged75"), "{}", galleon.for_state(4));
+        assert!(galleon.for_state(6).ends_with("galleon.dead"), "{}", galleon.for_state(6));
+
+        let tractor = db.vehicle_variants(1008).expect("the Farm Wagon");
+        assert!(tractor.for_state(4).ends_with("vehicle_tractor.tractor_body_damage75"));
+        assert!(tractor.for_state(6).ends_with("vehicle_tractor.tractor_body_dead"));
+
+        // the airship has only `normal`, so every state keeps it
+        let airship = db.vehicle_variants(657).expect("the airship");
+        assert_eq!(airship.for_state(1), airship.normal);
+        assert_eq!(airship.for_state(6), airship.normal);
+        assert_eq!(db.vehicle_variants(139), None, "a mount is no vehicle");
+    }
+
+    /// Unit attribute 6 from `unit_modifiers`: the galleon template (21) and the Farm Wagon template (60).
+    #[test]
+    fn slave_max_health_comes_from_the_unit_modifiers() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        assert_eq!(db.slave_max_hp(21), Some(47_420), "Eznan Cutter template 21");
+        assert_eq!(db.slave_max_hp(60), Some(2_500), "Farm Wagon template 60");
+        assert_eq!(db.slave_max_hp(105), None, "a slave template with no MaxHealth attribute row");
     }
 
     #[test]

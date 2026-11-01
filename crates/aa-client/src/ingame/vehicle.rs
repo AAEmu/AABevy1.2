@@ -6,21 +6,30 @@
 //! The wheels spin about their axle from the cart's forward speed (`FUN_390d6b10`) and the body's
 //! `Bone_spindle` turns the front axle (`FUN_390cffd0`); see [`spin_wheels`] and [`steer_spindles`].
 //!
-//! Left out: the damaged and dead looks, the prefabs' particle effects, propeller spin, turrets.
+//! Damage states ([`model_state`] / [`update_damage`]) swap the whole body prefab to the state's
+//! `vehicle_models` / `ship_models` row (`damaged25` / `damaged50` / `damaged75` / `dead`, falling
+//! down to the next lower non-empty row). The variant prefab's active particle entities (the fire
+//! and smoke of the damaged and dead looks) are drawn with it, and a state that worsens plays the
+//! new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]).
+//!
+//! Left out: the speed-driven exhaust and splash emitters, propeller spin, turrets, the sound and
+//! idle changes of the other branch (`vehicle-idle-anim`).
 
 use std::collections::HashMap;
 
 use aa_anim::{Animator, ClipLibrary};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_cry::{CryLoader, PreparedModel};
+use aa_net::state::{Slaves, Units};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
 use bevy::math::Affine3A;
 use bevy::prelude::*;
 
 use super::cart::{YAW_RATE_PER_STEER, wrap_angle};
-use super::data::{VehicleLook, model_file};
+use super::data::{Db, VehicleLook, model_file};
 use super::housing::prefab::{self, Part};
+use super::units::RemoteUnit;
 
 /// `_DAT_399a440c` (0x399a440c = 0.52359879): the largest spindle angle, 30 degrees.
 pub const SPINDLE_MAX_ANGLE: f32 = std::f32::consts::FRAC_PI_6;
@@ -33,6 +42,65 @@ pub const SPINDLE_LERP: f32 = 0.1;
 /// runtime from the vehicle data, so the value cannot be read from the unpacked dll; the captured
 /// full-lock rate [`YAW_RATE_PER_STEER`] stands in for it.
 pub const SPINDLE_YAW_LIMIT: f32 = YAW_RATE_PER_STEER;
+
+/// The prefab-unit model state of `FUN_3989f8b0`: 1 normal, 2 `damaged25`, 3 `damaged50`, 4 `damaged75`,
+/// 6 dead. 5 (dying) is never returned. The percentage is C integer division, so it truncates: 7599/10000
+/// is 75 (state 2), 7600/10000 is 76 (state 1). `hp == 0` or `max_hp == 0` is dead before the divide.
+pub fn model_state(hp: i32, max_hp: i32) -> u8 {
+    if hp == 0 || max_hp == 0 {
+        return 6;
+    }
+    let pct = hp * 100 / max_hp;
+    if pct > 75 {
+        1
+    } else if pct > 50 {
+        2
+    } else if pct < 26 {
+        4
+    } else {
+        3
+    }
+}
+
+/// The damage state a vehicle is drawn in and the model ref it was built from.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct VehicleDamage {
+    pub state: u8,
+    /// The variant ref, so a state change that keeps the same model does not rebuild or fire effects
+    /// (`FUN_390e7910` logs "same model" and returns before the effect trigger).
+    pub variant: String,
+}
+
+/// A body part root spawned by [`spawn`]: replaced when the damage state changes.
+#[derive(Component)]
+pub struct VehiclePart;
+
+/// A particle entity spawned with a damage variant: replaced when the state changes.
+#[derive(Component)]
+pub struct VehicleEffect;
+
+/// The maximum health of a slave vehicle from its template's unit attribute 6 (`unit_modifiers`); the
+/// unit's last known maximum when the template has no row. `Slaves::position.max_hp` overrides it for
+/// the owned slave in [`damage_state`].
+pub fn slave_max_hp(db: &Db, unit: &aa_net::model::Unit) -> i32 {
+    db.slave_max_hp(unit.kind.template_id())
+        .filter(|hp| *hp > 0)
+        .unwrap_or(unit.max_hp)
+        .max(0)
+}
+
+/// The damage state of unit `obj_id` from its current health (`SCUnitPoints` / `SCUnitState`) and the
+/// maximum the client derives: the owned slave's `SCMySlave.max_hp` when it is the latest matching report,
+/// else the template's `unit_modifiers` maximum. `None` when the unit is not in view.
+pub fn damage_state(units: &Units, slaves: Option<&Slaves>, db: &Db, obj_id: u32) -> Option<u8> {
+    let unit = units.by_id.get(&obj_id)?;
+    let own = slaves
+        .and_then(|slaves| slaves.position.as_ref())
+        .filter(|info| info.obj_id == obj_id && info.max_hp > 0)
+        .map(|info| info.max_hp);
+    let max_hp = own.unwrap_or_else(|| slave_max_hp(db, unit));
+    Some(model_state(unit.hp, max_hp))
+}
 
 /// The wheel model slot of a mount name: `wheel0`, `wheel12` take `wheel` (0), `wheel_type2`, `wheel_type21` take
 /// `wheel2` (1). Other names (`bone_steeringwheel`, `wheel_l`) are not mounts.
@@ -456,6 +524,14 @@ pub fn spawn(
             VehicleMotion::at(&transform),
         ))
         .id();
+    add_parts(commands, cry, clips, pieces, root);
+    root
+}
+
+/// Spawns the prepared parts as children of `root` and installs the seat helpers and spindle they define.
+/// Used for the initial look and for every damage-state body swap; the caller removes the old `Spindle`
+/// and the old [`VehiclePart`] children first.
+pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, pieces: Vec<Piece>, root: Entity) {
     let mut helpers = HashMap::new();
     for Piece {
         part,
@@ -504,11 +580,122 @@ pub fn spawn(
             }
         };
         if let Some(e) = entity {
-            commands.entity(e).insert(ChildOf(root));
+            commands.entity(e).insert((ChildOf(root), VehiclePart));
         }
     }
     commands.entity(root).insert(SeatHelpers(helpers));
-    root
+}
+
+/// The prefab's speed-driven water emitters (`exhaust`, `splash_*`, `bubble`): 1.2 scales them from
+/// the ship's speed and angular velocity (`FUN_390c78d0`), which this slice does not draw, so a state
+/// swap leaves them out instead of showing a wake at a standstill.
+fn is_speed_emitter(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("exhaust") || name.contains("splash") || name.contains("bubble")
+}
+
+fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placement::PlacedEffect, one_shot: bool) -> Entity {
+    let mut command = commands.spawn((
+        aa_fx::Effect {
+            scale: effect.scale,
+            speed_scale: effect.speed_scale,
+            count_scale: effect.count_scale,
+            prime: if one_shot { false } else { effect.prime },
+            despawn_when_finished: one_shot,
+            no_body: true,
+            ..aa_fx::Effect::new(effect.effect.clone())
+        },
+        Transform {
+            translation: cry_to_bevy(effect.pos),
+            rotation: cry_rot_to_bevy(effect.rot),
+            ..default()
+        },
+        VehicleEffect,
+    ));
+    let entity = command.id();
+    command.insert(ChildOf(root));
+    entity
+}
+
+/// Spawns the particle entities of a damage variant: its active standing effects (damaged fire, dead
+/// smoke) and, when the state worsens, its `_spawn_effect*` elements once (`FUN_39109120`). The
+/// `_despawn_effect` trigger has no traced call site and is left out.
+pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str, worsening: bool) {
+    if !variant.to_ascii_lowercase().starts_with("prefab://") {
+        return;
+    }
+    for named in super::data::prefab_effects_named(variant) {
+        let name = named.name.to_ascii_lowercase();
+        if name.starts_with("_spawn_effect") {
+            if worsening {
+                spawn_effect(commands, root, &named.effect, true);
+            }
+            continue;
+        }
+        if name.starts_with("_despawn_effect") || !named.active || is_speed_emitter(&name) {
+            continue;
+        }
+        spawn_effect(commands, root, &named.effect, false);
+    }
+}
+
+/// Swaps a vehicle's body prefab when its health crosses a state threshold (`FUN_390eb610` ->
+/// `FUN_390e7b20` -> `FUN_390e7910`): the parts and effects of the old variant are removed, the parts
+/// of the new one prepared and attached, and a worsening state plays the new prefab's
+/// `_spawn_effect*` elements. The entity, motion and deck pose stay.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn update_damage(
+    mut commands: Commands,
+    db: Option<Res<Db>>,
+    units: Option<Res<Units>>,
+    slaves: Option<Res<Slaves>>,
+    mut cry: CryAssets,
+    clips: Res<ClipLibrary>,
+    mut roots: Query<(Entity, &RemoteUnit, &mut VehicleDamage)>,
+    stale: Query<(Entity, &ChildOf), Or<(With<VehiclePart>, With<VehicleEffect>)>>,
+) {
+    let (Some(db), Some(units)) = (db, units) else { return };
+    for (root, remote, mut damage) in &mut roots {
+        let Some(state) = damage_state(&units, slaves.as_deref(), &db, remote.obj_id) else { continue };
+        if state == damage.state {
+            continue;
+        }
+        let old = damage.state;
+        let Some(look) = db.vehicle_look(remote_model(&units, remote.obj_id)) else {
+            damage.state = state;
+            continue;
+        };
+        let Some(variants) = db.vehicle_variants(remote_model(&units, remote.obj_id)) else {
+            damage.state = state;
+            continue;
+        };
+        let variant = variants.for_state(state).to_string();
+        damage.state = state;
+        // `FUN_390e7910` returns before the brush swap and the effect trigger when the model is the same
+        if variant == damage.variant {
+            continue;
+        }
+        debug!("vehicle {}: state {old} -> {state} ({variant})", remote.obj_id);
+        damage.variant = variant.clone();
+        for (entity, parent) in &stale {
+            if parent.parent() == root {
+                commands.entity(entity).try_despawn();
+            }
+        }
+        commands.entity(root).remove::<Spindle>();
+        let look = VehicleLook {
+            normal: variant.clone(),
+            wheels: look.wheels,
+        };
+        let loader = cry.loader();
+        let pieces = prepare(&loader, &look);
+        add_parts(&mut commands, &mut cry, &clips, pieces, root);
+        spawn_state_effects(&mut commands, root, &variant, state > old);
+    }
+}
+
+fn remote_model(units: &Units, obj_id: u32) -> u32 {
+    units.by_id.get(&obj_id).map_or(0, |unit| unit.model_id)
 }
 
 /// Measures each vehicle's motion from its root transform: the position and yaw change since the
@@ -798,5 +985,159 @@ mod tests {
             angle = spindle_step(angle, 1.0, 0.1);
         }
         assert!((angle - 1.0).abs() < 1e-4, "converges: {angle}");
+    }
+
+    /// `FUN_3989f8b0`: 100/76 -> 1, 75/51 -> 2, 50/26 -> 3, 25 and the truncated 0 -> 4, hp 0 or max 0 -> 6.
+    #[test]
+    fn the_damage_state_follows_the_decompiled_thresholds() {
+        for (hp, max_hp, state) in [
+            (100, 100, 1),
+            (76, 100, 1),
+            (75, 100, 2),
+            (51, 100, 2),
+            (50, 100, 3),
+            (26, 100, 3),
+            (25, 100, 4),
+            (9, 1000, 4),
+            (0, 100, 6),
+            (0, 0, 6),
+            (100, 0, 6),
+        ] {
+            assert_eq!(model_state(hp, max_hp), state, "{hp}/{max_hp}");
+        }
+        // C integer division truncates: 7599 * 100 / 10000 is 75, not 76
+        assert_eq!(model_state(7599, 10000), 2);
+        assert_eq!(model_state(7600, 10000), 1);
+        assert_eq!(model_state(5099, 10000), 3);
+        assert_eq!(model_state(5100, 10000), 2);
+        assert_eq!(model_state(2599, 10000), 4);
+        assert_eq!(model_state(2600, 10000), 3);
+    }
+
+    fn slave_unit(obj_id: u32, template_id: u32, model_id: u32, hp: i32) -> aa_net::model::Unit {
+        aa_net::model::Unit {
+            obj_id,
+            name: format!("slave {obj_id}"),
+            kind: aa_net::model::UnitKind::Slave {
+                id: template_id,
+                tl_id: 1,
+                template_id,
+                summoner_id: 1,
+            },
+            owner_name: String::new(),
+            pos: aa_net::Pos::new(0.0, 0.0, 0.0),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 50,
+            model_id,
+            equipment: aa_net::model::Equipment::default(),
+            model_params: aa_net::model::ModelParams::default(),
+            hp,
+            mp: 0,
+            max_hp: hp,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            skills: Vec::new(),
+            passive_buffs: Vec::new(),
+            ability_exp: Vec::new(),
+            active_abilities: Vec::new(),
+            buffs: Vec::new(),
+            anim_action: 0,
+            house_posture: None,
+            turret: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    /// The state of a real slave template on the `SCUnitPoints` path (`Units::apply`), max from attribute 6.
+    #[test]
+    fn an_hp_update_changes_the_state_of_a_real_slave_template() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let max_hp = db.slave_max_hp(21).expect("Eznan Cutter template 21's MaxHealth");
+        assert_eq!(max_hp, 47_420);
+        let unit = slave_unit(7, 21, 393, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit)));
+        assert_eq!(damage_state(&units, None, &db, 7), Some(1));
+
+        let update = |units: &mut Units, hp: i32| {
+            units.apply(&aa_net::Event::UnitPoints { obj_id: 7, hp, mp: 0 });
+        };
+        update(&mut units, max_hp * 3 / 4); // 75 %
+        assert_eq!(damage_state(&units, None, &db, 7), Some(2));
+        update(&mut units, max_hp / 2); // 50 %
+        assert_eq!(damage_state(&units, None, &db, 7), Some(3));
+        update(&mut units, max_hp / 4); // 25 %
+        assert_eq!(damage_state(&units, None, &db, 7), Some(4));
+        update(&mut units, 0);
+        assert_eq!(damage_state(&units, None, &db, 7), Some(6), "dead");
+        assert_eq!(damage_state(&units, None, &db, 99), None, "not in view");
+    }
+
+    /// The owned slave's `SCMySlave.max_hp` is the server's exact maximum and overrides the template row.
+    #[test]
+    fn the_owned_slaves_report_overrides_the_template_maximum() {
+        let Some(db) = Db::open() else { return };
+        let unit = slave_unit(7, 21, 393, 500);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit)));
+        let mut slaves = Slaves::default();
+        slaves.position = Some(aa_net::SlavePositionInfo {
+            obj_id: 7,
+            tl_id: 1,
+            name: "ship".into(),
+            template_id: 21,
+            hp: 500,
+            max_hp: 1000,
+            x: 0,
+            y: 0,
+            z: 0.0,
+        });
+        assert_eq!(damage_state(&units, Some(&slaves), &db, 7), Some(3), "50 % of 1000");
+        assert_eq!(damage_state(&units, None, &db, 7), Some(4), "1 % of 47420");
+    }
+
+    /// The damaged and dead tractor prefabs carry the `_spawn_effect*` trigger and the standing fire / smoke.
+    #[test]
+    fn the_damage_prefabs_name_their_effects() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let damaged = super::super::data::prefab_effects_named(
+            "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body_damage75",
+        );
+        assert!(
+            damaged
+                .iter()
+                .any(|e| e.name.eq_ignore_ascii_case("_spawn_effect_dmg") && !e.active),
+            "the damage trigger"
+        );
+        assert!(
+            damaged.iter().any(|e| e.name == "_spawn" && e.active),
+            "the standing fire"
+        );
+        let dead = super::super::data::prefab_effects_named(
+            "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor.tractor_body_dead",
+        );
+        assert!(dead.iter().any(|e| e.name == "_spawn" && e.active), "the burning smoke");
+        assert!(dead.iter().any(|e| e.name == "_dead_effect" && e.active));
+        assert!(is_speed_emitter("exhaust"));
+        assert!(is_speed_emitter("splash_l"));
+        assert!(!is_speed_emitter("_spawn"));
     }
 }

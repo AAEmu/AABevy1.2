@@ -43,8 +43,12 @@ pub enum UnitBuild {
     },
     /// A monster / NPC model of its own (`.cdf`, `.chr`, `.cgf`).
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>>, models: Vec<PreparedModel> },
-    /// A vehicle or ship: its body parts and wheels ([`super::vehicle`]).
-    Vehicle(Vec<super::vehicle::Piece>),
+    /// A vehicle or ship in its damage state: its body parts and wheels ([`super::vehicle`]).
+    Vehicle {
+        pieces: Vec<super::vehicle::Piece>,
+        state: u8,
+        variant: String,
+    },
     /// Particle effects only (a prefab model without a model, the summoned portal gates), positions relative to the unit.
     Effects(Vec<aa_world::placement::PlacedEffect>),
     /// Nothing we can draw, and why (logged once by [`super::units`]).
@@ -74,11 +78,17 @@ pub fn humanoid_of_file(file: &str) -> Option<(Race, Gender)> {
     (it.next()? == "nude").then_some((race, gender))
 }
 
+/// A vehicle or ship look selected for the unit's current damage state.
+pub struct VehiclePlan {
+    pub look: super::data::VehicleLook,
+    pub state: u8,
+}
+
 /// What a unit is made of, decided from the database before any model is read ([`plan_unit`]).
 pub enum UnitPlan {
     Character(Box<CharacterAssets>),
     Creature { file: String, cdf: Option<Box<aa_anim::Cdf>> },
-    Vehicle(super::data::VehicleLook),
+    Vehicle(VehiclePlan),
     /// Nothing to load.
     Done(UnitBuild),
 }
@@ -86,7 +96,20 @@ pub enum UnitPlan {
 /// What `unit` is made of, from the database; [`build_unit`] then reads the models. Callable from any thread.
 pub fn plan_unit(db: &Db, unit: &Unit) -> UnitPlan {
     if let Some(look) = db.vehicle_look(unit.model_id) {
-        return UnitPlan::Vehicle(look);
+        // a damaged slave that comes into view is built in its state's prefab at once (`FUN_390e8b30` /
+        // `FUN_390f0510`), not in the normal one and then swapped
+        let (state, normal) = db
+            .vehicle_variants(unit.model_id)
+            .map(|variants| {
+                let max_hp = super::vehicle::slave_max_hp(db, unit);
+                let state = super::vehicle::model_state(unit.hp, max_hp);
+                (state, variants.for_state(state).to_string())
+            })
+            .unwrap_or((1, look.normal.clone()));
+        return UnitPlan::Vehicle(VehiclePlan {
+            look: super::data::VehicleLook { normal, wheels: look.wheels },
+            state,
+        });
     }
     let file = db.actor_model_file(unit.model_id);
     let humanoid = match unit.kind {
@@ -139,7 +162,7 @@ impl UnitPlan {
                 }
             }
             UnitPlan::Creature { file, cdf } => models.extend(creature::model_files(file, cdf.as_deref())),
-            UnitPlan::Vehicle(look) => models.extend(super::vehicle::model_files(look)),
+            UnitPlan::Vehicle(plan) => models.extend(super::vehicle::model_files(&plan.look)),
             UnitPlan::Done(_) => {}
         }
         let mut files: Vec<String> = models.iter().flat_map(|(p, m)| aa_cry::deps::model_files(p, m.as_deref())).collect();
@@ -156,13 +179,20 @@ pub fn build_unit(db: &Db, loader: &CryLoader, clips: &ClipLibrary, unit: &Unit,
         UnitPlan::Done(build) => build,
         UnitPlan::Character(assets) => build_character(db, loader, clips, unit, assets),
         UnitPlan::Creature { file, cdf } => build_creature(loader, unit, file, cdf),
-        UnitPlan::Vehicle(look) => {
+        UnitPlan::Vehicle(plan) => {
             // Warm the deck floor and its bounds on this worker so `board_deck`
             // never loads a hull mesh in the frame.
             db.ship_floor(unit.model_id);
-            match super::vehicle::prepare(loader, &look) {
-                pieces if pieces.is_empty() => UnitBuild::None(format!("no part of vehicle {} could be loaded (model {})", look.normal, unit.model_id)),
-                pieces => UnitBuild::Vehicle(pieces),
+            match super::vehicle::prepare(loader, &plan.look) {
+                pieces if pieces.is_empty() => UnitBuild::None(format!(
+                    "no part of vehicle {} could be loaded (model {})",
+                    plan.look.normal, unit.model_id
+                )),
+                pieces => UnitBuild::Vehicle {
+                    pieces,
+                    state: plan.state,
+                    variant: plan.look.normal,
+                },
             }
         }
     }

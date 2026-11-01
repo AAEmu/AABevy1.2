@@ -136,9 +136,19 @@ Ships (merged after the checkpoint was written):
   `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
   (`docs/aa-client-units.md`, S12).
 
-Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
-the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
-to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
+- **S15 vehicle damage states.** A vehicle or ship is drawn in its HP state's prefab: `FUN_3989f8b0`'s
+  truncating percentage (100-76 % normal, 75-51 `damaged25`, 50-26 `damaged50`, 25-0 `damaged75`, hp 0
+  or max 0 `dead`; `dying` is never produced), max HP from the template's `unit_modifiers` attribute 6
+  (`SCMySlave.max_hp` for the owned slave), and the state row walked down to the next non-empty one.
+  `SCUnitPoints` / `SCUnitState` / `SCUnitDeath` drive `vehicle::update_damage`, which swaps the body,
+  wheels, spindle and `$` helpers, spawns the new prefab's active damage fire/smoke, and on a worsening
+  state plays its `_spawn_effect*` particles once (`FUN_39109120`). Dead hulls render: `aa-cry` now keeps
+  meshes under a plain-named helper container in LOD 0 (the `*_dead.cgf` files). Covered by
+  `examples/vehicle_damage`, the threshold/max-HP/variant unit tests and the `aa-cry` dead-hull test.
+
+Still open across these slices: hanging (S13), the speed-driven exhaust / splash scales and the engine sound of S15,
+auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders
+(S14) landed with their own captures, and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
 [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.

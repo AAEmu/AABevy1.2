@@ -303,17 +303,23 @@ pub struct PlacedEffect {
     pub prime: bool,
 }
 
-/// The `ParticleEffect` entities of an `entities.xml` (positions are cell-local).
-pub fn parse_effect_entities(xml: &str) -> Vec<PlacedEffect> {
+/// A `ParticleEffect` entity with the object name it was authored with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NamedEffect {
+    pub name: String,
+    /// `bActive` was not `0`: the prefab starts this one on its own.
+    pub active: bool,
+    pub effect: PlacedEffect,
+}
+
+/// The `ParticleEffect` entities of an `entities.xml` or a prefab's `<Objects>` with their names (positions are local).
+pub fn parse_named_effect_entities(xml: &str) -> Vec<NamedEffect> {
     let Ok(doc) = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}')) else { return Vec::new() };
     let floats = |s: Option<&str>| -> Vec<f32> { s.map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect()).unwrap_or_default() };
     let mut out = Vec::new();
-    for e in doc.descendants().filter(|n| n.has_tag_name("Entity") && n.attribute("EntityClass") == Some("ParticleEffect")) {
+    for e in doc.descendants().filter(|n| (n.has_tag_name("Entity") || n.has_tag_name("Object")) && n.attribute("EntityClass") == Some("ParticleEffect")) {
         let Some(props) = e.children().find(|c| c.has_tag_name("Properties")) else { continue };
         let Some(effect) = props.attribute("ParticleEffect").map(str::trim).filter(|n| !n.is_empty()) else { continue };
-        if props.attribute("bActive").map(str::trim) == Some("0") {
-            continue;
-        }
         let p = floats(e.attribute("Pos"));
         if p.len() < 3 {
             continue;
@@ -324,17 +330,30 @@ pub fn parse_effect_entities(xml: &str) -> Vec<PlacedEffect> {
         };
         let entity_scale = floats(e.attribute("Scale")).first().copied().unwrap_or(1.0);
         let prop = |name: &str| props.attribute(name).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0);
-        out.push(PlacedEffect {
-            effect: effect.to_string(),
-            pos: Vec3::new(p[0], p[1], p[2]),
-            rot,
-            scale: entity_scale * prop("Scale"),
-            speed_scale: prop("SpeedScale"),
-            count_scale: prop("CountScale"),
-            prime: props.attribute("bPrime").map(str::trim) != Some("0"),
+        out.push(NamedEffect {
+            name: e.attribute("Name").unwrap_or("").trim().to_string(),
+            active: props.attribute("bActive").map(str::trim) != Some("0"),
+            effect: PlacedEffect {
+                effect: effect.to_string(),
+                pos: Vec3::new(p[0], p[1], p[2]),
+                rot,
+                scale: entity_scale * prop("Scale"),
+                speed_scale: prop("SpeedScale"),
+                count_scale: prop("CountScale"),
+                prime: props.attribute("bPrime").map(str::trim) != Some("0"),
+            },
         });
     }
     out
+}
+
+/// The active `ParticleEffect` entities of an `entities.xml` (positions are cell-local).
+pub fn parse_effect_entities(xml: &str) -> Vec<PlacedEffect> {
+    parse_named_effect_entities(xml)
+        .into_iter()
+        .filter(|e| e.active)
+        .map(|e| e.effect)
+        .collect()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -768,6 +787,14 @@ mod tests {
         assert_eq!(fx[0].speed_scale, 0.5);
         assert_eq!(fx[0].count_scale, 1.0);
         assert!(fx[0].prime);
+        // the named form keeps the inactive trigger elements a prefab starts on a state change
+        let named = parse_named_effect_entities(xml);
+        assert_eq!(named.len(), 2);
+        assert_eq!(named[0].name, "a");
+        assert!(named[0].active);
+        assert_eq!(named[1].name, "b");
+        assert!(!named[1].active);
+        assert_eq!(named[1].effect.effect, "x.y.z");
     }
 
     #[test]

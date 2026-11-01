@@ -275,15 +275,19 @@ impl Model {
         m
     }
 
-    /// Whether a node is part of LOD 0 (neither it nor an ancestor is a LOD / helper / proxy).
+    /// Whether a node is part of LOD 0 (neither it nor an ancestor is a LOD / `$` helper / proxy).
+    /// A plain-named helper is a transform container in some assets (the dead ship hulls place their
+    /// meshes under `smallboat_body_dead` / `galleon_dead`), so its mesh children stay in LOD 0.
     pub fn is_lod0_render_node(&self, node: usize) -> bool {
         let mut i = Some(node);
         let mut guard = 0;
         while let Some(n) = i {
-            if self.nodes[n].kind != NodeKind::Mesh {
+            let current = &self.nodes[n];
+            let container = current.kind == NodeKind::Helper && !current.name.to_ascii_lowercase().starts_with('$');
+            if current.kind != NodeKind::Mesh && !container {
                 return false;
             }
-            i = self.nodes[n].parent;
+            i = current.parent;
             guard += 1;
             if guard > self.nodes.len() {
                 break;
@@ -838,6 +842,23 @@ mod tests {
         let names: Vec<&str> = skin.joints[0][..3].iter().map(|&j| s.bones[j as usize].name.as_str()).collect();
         assert_eq!(names, ["Bip01 Spine1", "Bip01 Spine2", "Bip01 Pelvis"]);
         assert!(skin.joints.iter().flatten().all(|&j| (j as usize) < s.len()));
+    }
+
+    /// The dead ship hulls place their meshes under a plain-named helper container. They are LOD 0.
+    #[test]
+    fn a_dead_vehicle_hull_is_drawn_under_its_helper_container() {
+        if !crate::pak_available() {
+            return;
+        }
+        for path in [
+            "objects/env/06_unit/01_ship/smallboat/smallboat_body_dead.cgf",
+            "objects/env/06_unit/01_ship/galleon/galleon_dead.cgf",
+        ] {
+            let m = Model::load(path).unwrap();
+            assert!(m.bounds().is_some(), "{path} has no LOD 0 geometry");
+            assert!(m.lod_nodes(0).len() >= 2, "{path} keeps its mesh children");
+            assert!(m.nodes.iter().any(|n| n.kind == NodeKind::Helper && !n.name.starts_with('$')));
+        }
     }
 
     /// Legacy uncompiled skinned part (Mesh 0x744 + BoneAnim / BoneNameList / BoneInitialPos).

@@ -148,7 +148,9 @@ rot[4], scl[3]; i32 ctrl[3]; i32 propLen; char props[]`. Transforms are parent-r
 apply to static geometry; skinned (`.chr`) vertices are already in model space and the node
 transform is ignored (e.g. a 1.05 scale on costume nodes). Kinds: `$lodN ...`/`$LODn_...` = LOD
 of the parent (drawn in the parent's frame); other `$...` (`$picking`, `$occlusion`, ...) and
-helper chunks = helpers; `proxy*`, `$collision`, `PhysicsProxy` = physics, never drawn.
+helper chunks = helpers; `proxy*`, `$collision`, `PhysicsProxy` = physics, never drawn. A
+plain-named helper (no `$`) is a transform container: the dead ship hulls (`smallboat_body_dead`,
+`galleon_dead`) put their meshes under one, and those meshes are LOD 0 (S15).
 Compiled CGFs often have a `Merged` node with the merged geometry; the source nodes keep
 hierarchy and helpers but their meshes have no indices.
 

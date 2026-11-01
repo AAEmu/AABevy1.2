@@ -231,6 +231,9 @@ impl Plugin for InGamePlugin {
                         .chain()
                         .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units, glide::track_remote_gliders).chain(),
+                    vehicle::update_damage
+                        .after(units::sync_views)
+                        .after(units::move_units),
                     vehicle::track_motion
                         .after(units::move_units)
                         .after(cart::drive_cart),

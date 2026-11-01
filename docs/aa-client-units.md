@@ -324,6 +324,43 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+### Damage states (S15)
+
+The drawn body follows the unit's health. `vehicle::model_state` is `FUN_3989f8b0` (x2game.dll.c:1935601):
+`hp == 0` or `max_hp == 0` -> 6 (dead); otherwise `pct = hp * 100 / max_hp` in C integer division
+(truncating), `pct > 75` -> 1, `pct > 50` -> 2, `pct >= 26` -> 3, else 4. State 5 (dying) is never
+produced: the `dying` prefab column is dead data in 1.2. Table: 100/76 -> 1, 75/51 -> 2, 50/26 -> 3,
+25/0 % -> 4, hp 0 -> 6 (`examples/vehicle_damage` checks 5/50/75 with the truncation).
+
+* **Maximum HP.** The client gets no maximum on the wire: `FUN_390b4a70` (x2game.dll.c:149223) reads
+  unit attribute 6 (`FUN_398a0bc0`). The remake sums the template's `unit_modifiers`
+  (`owner_type='Slave'`, `unit_attribute_id=6`) through `Db::slave_max_hp`; all 104 rows are flat
+  values (template 21 / the Eznan Cutter 47 420, template 60 / the Farm Wagon 2 500). `SCMySlave.max_hp`
+  overrides it for the owned slave (`Slaves::position`).
+* **Variant.** `FUN_397a7810` / `FUN_397a7980` walk down from the state to 1 and take the first non-empty
+  `vehicle_models` / `ship_models` row: state 2 `damaged25`, 3 `damaged50`, 4 `damaged75`, 6 `dead`,
+  else `normal` (`VehicleVariants::for_state`). A slave that comes into view already damaged is built in
+  its state's prefab at once (`FUN_390e8b30` / `FUN_390f0510` -> `prepare::plan_unit`). The rowboat
+  (129) has distinct `damege50` / `damege75` / `dead` hulls; the airship has only `normal`.
+* **Swap.** `vehicle::update_damage` runs after `units::sync_views`: `FUN_390eb610` (`UpdateModelChange`)
+  recomputes the state, `FUN_390e7b20` stores it and `FUN_390e7910` rebuilds the body. The old parts,
+  wheels, spindle and effects are despawned; the new variant's parts and `$` helpers replace them. A
+  state change that keeps the same prefab does nothing (`FUN_390e7910`'s "same model" return).
+* **Effects.** The new prefab's active `ParticleEffect` entities are spawned with it (damaged fire,
+  dead smoke). On a worsening state (`old < new`, also 1 -> 6) the prefab's `_spawn_effect*` entities
+  are played once (`FUN_39109120`, x2game.dll.c:206810). `_despawn_effect` has no traced caller and is
+  left out. `exhaust`, `splash_*` and `bubble` are skipped here: 1.2 scales them from the ship's speed
+  and angular velocity (`FUN_390c78d0`), which this slice does not draw.
+* **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
+  their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule now accepts that (the mesh
+  is still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). The ship
+  entity, motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle
+  gate at states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
+
+Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the dying state
+(5), the ship deck floor of a dead hull (the deck still uses `ship_models.normal`), and the engine
+sound (`FUN_390c6780`, needed only once the idle branch lands).
+
 ### Vehicle and creature seats
 
 Riders resolve their seat through `model_attach_point_strings` (`Db::attach_point_strings`) by attach point, not by a
