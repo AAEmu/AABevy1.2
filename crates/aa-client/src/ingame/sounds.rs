@@ -893,11 +893,42 @@ fn init(mut commands: Commands, engine: Option<Res<Engine>>) {
     }
 }
 
+/// Marks a vehicle whose engine loop sound was started.
+#[derive(Component)]
+pub struct VehicleEngine;
+
+/// `VehicleUnitModel::UpdateSound`: a vehicle's sound pack `run` item loops while the vehicle exists
+/// (`sound_packs` 176 `run_tractor` -> sound 950, `sounds/x2vehicles:trailer:run`). Keyed from the data:
+/// only models whose pack has a `run` sound get one (`run_speedcar` has none). The [`Sound`] follows
+/// the vehicle root; a muted run has no [`Packs`] and starts nothing.
+fn vehicle_engine_sounds(
+    mut commands: Commands,
+    units: Option<Res<Units>>,
+    book: Option<Res<SoundBook>>,
+    packs: Option<Res<Packs>>,
+    vehicles: Query<(Entity, &RemoteUnit), Without<VehicleEngine>>,
+) {
+    let (Some(units), Some(book), Some(packs)) = (units, book, packs) else { return };
+    let Some(packs) = packs.get() else { return };
+    for (entity, remote) in &vehicles {
+        let Some(unit) = units.by_id.get(&remote.obj_id) else { continue };
+        let Some(pack) = book.pack_of_model(unit.model_id) else { continue };
+        let Some(path) = packs.path(&pack, "run") else { continue };
+        commands.entity(entity).insert(VehicleEngine);
+        commands.spawn((ChildOf(entity), Transform::default(), Sound::event(path.to_string())));
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.add_systems(Startup, init)
         .add_systems(
             Update,
-            (anim_sounds.run_if(resource_exists::<TerrainQuery>), layer_sounds.run_if(resource_exists::<TerrainQuery>), log_counts.run_if(log_enabled))
+            (
+                anim_sounds.run_if(resource_exists::<TerrainQuery>),
+                layer_sounds.run_if(resource_exists::<TerrainQuery>),
+                vehicle_engine_sounds,
+                log_counts.run_if(log_enabled),
+            )
                 .run_if(resource_exists::<SoundBook>)
                 .run_if(in_state(Screen::InGame)),
         );
@@ -1042,5 +1073,14 @@ mod tests {
         // the surface of the dirt material
         let mtl = aa_cry::read("materials/aa_terrain/field/tr_field_dirt_001c.mtl").unwrap();
         assert_eq!(material_surface(&String::from_utf8_lossy(&mtl)).as_deref(), Some("mat_dirt"));
+    }
+
+    /// The Farm Wagon's pack (`sound_packs` 176 `run_tractor`), item `run`: the engine loop
+    /// `VehicleUnitModel::UpdateSound` plays (`sound 950`, `sounds/x2vehicles:trailer:run`).
+    #[test]
+    fn the_tractor_pack_names_the_engine_loop() {
+        let Ok(db) = std::env::var("AA_DB") else { return };
+        let Ok(packs) = aa_audio::SoundPacks::open(db) else { return };
+        assert_eq!(packs.path("run_tractor", "run"), Some("sounds/x2vehicles:trailer:run"));
     }
 }

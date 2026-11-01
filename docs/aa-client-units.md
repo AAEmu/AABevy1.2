@@ -324,6 +324,32 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+### Engine idle (`VehicleIdle`, `start_vehicle_idle`)
+
+1.2 starts the prefab body's loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init and refresh
+(`FUN_390e69d0`, the refresh near 187547): it plays `fist_ba_relaxed_idle` whenever the model has an animation id, with
+no driver, speed or ownership condition. Every unit-model kind except 5 and 6 (Mate and Shipyard) calls it; vehicles and
+ships are kinds 1-4. The Farm Wagon's `transfers_trailer_a_body.cal` lists only that idle and `dead_01`; the idle's 21
+tracks bind to 19 of the body's 29 bones, including `Bone_engine01..03` (`clipinfo`). Measured on 2026-11-01: a bare
+`vehicle::spawn` and a live GM-spawned slave 60 both loop the clip and `Bone_engine01` rotates about 2.4 rad/s of wall
+time, so the clip, the controller ids and the `Animator` tick are sound.
+
+`vehicle::spawn` now owns that rule: a rigged prefab part gets a [`VehicleIdle`] with the idle bound from its `.cal`,
+and the `VehiclePlugin` system starts it (looping) whenever the body's `Animator` has no clip, the Bevy analogue of the
+1.2 init/refresh. `creature::spawn_with_idle(..., play_idle = false)` keeps the generic creature idle from starting a
+vehicle body first. The exclusion is inherent: the driver only runs on prefab vehicle/ship bodies, and Mate (5) and
+Shipyard (6) units never take this path. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle
+(`1008 tractor`, `1277 tower_cannon`, `1293 hwang_ferrari`, `1323/1371/1406 speedcar1-3`, `1442 food_truck`,
+`1444 speedcar_decal`, `1460/1461/1462 speedcar_*_ucc`, `1464 tractor_b`, `1465 sigetank`, `1526 siegetank_prologue`,
+`1553 tractor_c`, `2 trebuchet`, `5 siege_tower`, `8000009 small_tractor`, `892/898/899 siegetank_a-c`,
+`990 siege_catapult_a`); three ships do (`1360/1383/1384 fishboat_1-3`). All of them go through the same path.
+
+Engine sound: `VehicleUnitModel::UpdateSound` plays the `run` item of the model's sound pack; the Farm Wagon's
+`sound_packs` 176 `run_tractor` maps `run` -> sound 950 (`sounds/x2vehicles:trailer:run`). `sounds::vehicle_engine_sounds`
+starts that event as a looping [`Sound`] under every vehicle whose pack has a `run` path (the speedcars' pack has the
+item with no sound, so they stay silent); it follows the root and despawns with it, and a muted run loads no packs and
+starts nothing. How 1.2 changes the loop with speed is not read (capture-pending).
+
 ### Vehicle and creature seats
 
 Riders resolve their seat through `model_attach_point_strings` (`Db::attach_point_strings`) by attach point, not by a

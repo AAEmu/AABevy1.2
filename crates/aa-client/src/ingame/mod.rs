@@ -177,6 +177,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
             .add_plugins(sounds::plugin)
+            .add_plugins(vehicle::VehiclePlugin)
             .add_plugins(stealth::plugin)
             .add_plugins(tools::plugin)
             .add_plugins(flow::plugin)

@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use aa_anim::{Animator, ClipLibrary};
+use aa_anim::{Animator, ClipLibrary, pose::BoundClip};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
 use aa_cry::{CryLoader, PreparedModel};
 use aa_world::coords::cry_rot_to_bevy;
@@ -370,6 +370,34 @@ pub struct Spindle {
     pub joint: Option<(Entity, Quat)>,
 }
 
+/// The looping idle of a prefab body (`X2::PrefabUnitModel::UpdateIdleAnim`, `FUN_390d6690`): the
+/// body's `fist_ba_relaxed_idle` runs for as long as the vehicle exists, whatever its driver or speed.
+/// On the body's Animator; [`start_vehicle_idle`] starts it whenever the model has no clip.
+#[derive(Component, Clone, Debug)]
+pub struct VehicleIdle {
+    pub clip: BoundClip,
+}
+
+/// Starts the prefab body's idle when the model has no clip, as 1.2 does on model init and refresh.
+/// `UpdateIdleAnim` runs for every unit-model kind except 5 and 6 (Mate and Shipyard), which never take
+/// this prefab-vehicle path; ships and land vehicles are kinds 1-4 and get the loop.
+pub fn start_vehicle_idle(mut bodies: Query<(&VehicleIdle, &mut Animator)>) {
+    for (idle, mut animator) in &mut bodies {
+        if animator.starts_enabled() && animator.current.is_none() {
+            animator.play(idle.clip.clone(), true, 0.0);
+        }
+    }
+}
+
+/// Registers the vehicle systems. Add once.
+pub(crate) struct VehiclePlugin;
+
+impl Plugin for VehiclePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, start_vehicle_idle);
+    }
+}
+
 /// The motion of a vehicle root, measured from its transform every frame: the wheel and spindle
 /// inputs for a driven cart and for remote carts whose position is played back.
 #[derive(Component, Clone, Copy, Debug)]
@@ -500,7 +528,14 @@ pub fn spawn(
                 for m in models {
                     cry.finish_model(m);
                 }
-                super::creature::spawn(commands, cry, clips, &part.model, None, placed)
+                // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn
+                let spawned = super::creature::spawn_with_idle(commands, cry, clips, &part.model, None, placed, false);
+                if let Some(bodies) = &spawned
+                    && let Some(idle) = &bodies.idle
+                {
+                    commands.entity(bodies.root).insert(VehicleIdle { clip: idle.clone() });
+                }
+                spawned.map(|spawned| spawned.root)
             }
         };
         if let Some(e) = entity {
@@ -611,6 +646,7 @@ pub fn steer_spindles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::SystemState;
 
     #[test]
     fn vehicle_parts_request_full_illum_shading() {
@@ -735,6 +771,68 @@ mod tests {
         let rear = aa_cry::mesh::Model::load(wheel2).unwrap();
         assert!((wheel_radius(&front).unwrap() - 0.518).abs() < 0.01);
         assert!((wheel_radius(&rear).unwrap() - 0.885).abs() < 0.01);
+    }
+
+    /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine
+    /// bones move while the cart stands still. The vehicle idle owns the loop (no generic creature idle).
+    #[test]
+    fn the_wagon_body_idles_its_engine() {
+        use bevy::time::TimeUpdateStrategy;
+        if !aa_cry::pak_available() {
+            return; // no client pak
+        }
+        let Some(db) = super::super::data::Db::open() else { return };
+        let look = db.vehicle_look(1008).expect("the Farm Wagon's look");
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            aa_cry::CryPlugin,
+            aa_anim::AnimPlugin,
+            VehiclePlugin,
+        ));
+        app.init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>()
+            .insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(1.0 / 30.0)));
+        let mut state = SystemState::<(Commands, CryAssets, Res<ClipLibrary>)>::new(app.world_mut());
+        let pieces = {
+            let (_, mut cry, _) = state.get_mut(app.world_mut()).unwrap();
+            prepare(&cry.loader(), &look)
+        };
+        {
+            let (mut commands, mut cry, clips) = state.get_mut(app.world_mut()).unwrap();
+            spawn(&mut commands, &mut cry, &clips, pieces, Transform::default());
+        }
+        state.apply(app.world_mut());
+        app.update();
+
+        let body = app
+            .world_mut()
+            .query_filtered::<Entity, With<VehicleIdle>>()
+            .iter(app.world())
+            .next()
+            .expect("the wagon body carries its idle");
+        let animator = app.world().get::<aa_anim::Animator>(body).expect("the body's animator");
+        let playing = animator.current.as_ref().expect("the idle is playing");
+        assert!(
+            playing.clip.source.as_deref().is_some_and(|s| s.contains("fist_ba_relaxed_idle")),
+            "the body plays its .cal idle: {:?}",
+            playing.clip.source
+        );
+        let bone = find_named(app.world_mut(), "Bone_engine01").expect("the body's Bone_engine01");
+        let first = app.world().get::<Transform>(bone).expect("the engine bone transform").rotation;
+        for _ in 0..20 {
+            app.update();
+        }
+        let second = app.world().get::<Transform>(bone).expect("the engine bone transform").rotation;
+        assert!(first.angle_between(second) > 0.02, "the engine bone moved from {first:?} to {second:?}");
+    }
+
+    fn find_named(world: &mut World, name: &str) -> Option<Entity> {
+        let mut query = world.query::<(&Name, Entity)>();
+        query.iter(world).find(|(n, _)| n.as_str() == name).map(|(_, e)| e)
     }
 
     #[test]

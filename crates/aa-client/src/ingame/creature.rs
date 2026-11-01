@@ -1,7 +1,7 @@
 //! NPC and monster models that are not player characters: a `.cdf` (skeleton model plus skin
 //! attachments) or a `.chr`, rigged and animated through aa-anim, or a static `.cgf`.
 
-use aa_anim::{Animator, Cdf, ClipLibrary, spawn_bones};
+use aa_anim::{Animator, Cdf, ClipLibrary, pose::BoundClip, spawn_bones};
 use aa_cry::scene::{CryAssets, ModelOptions, SkeletonBinding, spawn_loaded};
 use aa_cry::CRY_TO_BEVY;
 use bevy::prelude::*;
@@ -64,11 +64,23 @@ pub(crate) fn configured_cdf(db: &aa_anim::GameDb, file: &str, model: u32, equip
     Ok(cdf)
 }
 
+/// A spawned rigged model: its root and the idle clip its `.cal` declares (the loop a caller may own).
+pub(crate) struct Spawned {
+    pub root: Entity,
+    pub idle: Option<BoundClip>,
+}
+
 /// Spawns the model at `file` (`.cdf`, `.chr` or `.cgf`, pak path). Returns the root entity with
 /// `transform` (feet at the origin, facing Bevy -Z at identity rotation like game north), or `None`
 /// when the file cannot be loaded.
 /// `definition` is the same effective CDF used by the worker's model prewarm.
 pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, file: &str, definition: Option<&Cdf>, transform: Transform) -> Option<Entity> {
+    spawn_with_idle(commands, cry, clips, file, definition, transform, true).map(|spawned| spawned.root)
+}
+
+/// [`spawn`], also returning the model's idle clip, and without starting that idle when `play_idle` is off: a vehicle
+/// prefab body owns its idle loop (`vehicle::VehicleIdle`, the 1.2 `UpdateIdleAnim` rule) instead of the creature one.
+pub(crate) fn spawn_with_idle(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibrary, file: &str, definition: Option<&Cdf>, transform: Transform, play_idle: bool) -> Option<Spawned> {
     // the base skin and the extra skin attachments
     let (main, main_material, attachments, mut rigid) = if file.ends_with(".cdf") {
         let cdf = match definition.cloned().map(Ok).unwrap_or_else(|| Cdf::load(file)) {
@@ -107,7 +119,7 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
         let model = spawn_loaded(commands, &main, &loaded, &options);
         let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
         commands.entity(model).insert(ChildOf(root));
-        return Some(root);
+        return Some(Spawned { root, idle: None });
     };
     let skeleton = rig.skeleton.clone();
     let root = commands.spawn((Name::new(main.clone()), transform, Visibility::default())).id();
@@ -154,9 +166,13 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
 
     // animations: `<model>.cal` next to the skeleton file
     let mut animator = Animator::new(rig.clone(), bones);
+    let mut idle = None;
     let mut entity = commands.entity(root);
     if let Some(set) = super::anim::shared_clip_set(&main, &cal_path, clips) {
-        animator.play(set.idle.clone(), true, 0.0);
+        idle = Some(set.idle.clone());
+        if play_idle {
+            animator.play(set.idle.clone(), true, 0.0);
+        }
         // monsters stand in a fighting stance while they fight (`fist_ba_combat_idle`)
         if let Some(combat) = super::idle::combat_idle(&rig, &set.cal, clips) {
             entity.insert(super::idle::IdleClips::new(None, Some(combat)));
@@ -165,7 +181,7 @@ pub(crate) fn spawn(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLi
     }
     entity.insert((animator, Motion::default()));
     if let Some(facial) = facial { entity.insert(facial); }
-    Some(root)
+    Some(Spawned { root, idle })
 }
 
 #[cfg(test)]
