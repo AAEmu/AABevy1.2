@@ -2608,11 +2608,18 @@ mod tests {
         let budget = AtomicI32::new(10_000);
         let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params ParticleLifeTime="6" Count="10" Texture="textures/x.dds"/></Particles></Childs></Particles></ParticleLibrary>"#;
         let lib = Library::parse(xml).unwrap();
-        assert!(lib.get("a").unwrap().one_shot());
+        let def = lib.get("a").unwrap();
+        assert!(def.one_shot());
+        let effect = crate::Effect::new("T.a");
+        assert!(!effect.primes(def), "the burst is not primed");
         let mut s = tree_sim(xml);
         let c = ctx(&budget);
-        // what `aa_fx::resolve` does for a burst, whatever its `bPrime`: start at t=0, not at 8 s
-        s.primed = true;
+        // the real priming decision: a burst starts at t=0, not advanced by `EffectSim::prime`
+        if effect.primes(def) {
+            s.prime(&c);
+        } else {
+            s.primed = true;
+        }
         s.step(&c);
         assert!(s.alive() > 0, "the burst's first frame is visible");
     }

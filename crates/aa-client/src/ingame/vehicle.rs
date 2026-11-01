@@ -1481,6 +1481,66 @@ mod tests {
         );
     }
 
+    /// The dead `_dead_effect` burst is spawned unprimed and actually retires when its simulation ends; the
+    /// continuous smoke stays.
+    #[test]
+    fn the_dead_burst_despawns_when_it_finishes() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use bevy::asset::AssetPlugin;
+        use bevy::transform::TransformPlugin;
+        let dead = "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor_c.tractor_body_dead";
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            TransformPlugin,
+            aa_fx::FxPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ));
+        let root = app.world_mut().spawn(Transform::default()).id();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            spawn_state_effects(&mut commands, root, dead, true);
+        });
+        app.update();
+        let explosion = effect_entity(
+            &mut app,
+            root,
+            "X2_EFFECTS.housing_test.small_ship_exp",
+        )
+        .expect("the spawned explosion");
+        // run the 6 s burst at 30x so the test does not take its real time
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .set_relative_speed(30.0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.world().get_entity(explosion).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the finished burst never retired"
+            );
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(
+            effect_entity(
+                &mut app,
+                root,
+                "X2_EFFECTS.fire_smoke.burning_smoke_01"
+            )
+            .is_some(),
+            "the continuous smoke stays"
+        );
+    }
+
     /// A slave first announced already damaged is built in its state's prefab with the same attribute-6
     /// maximum the per-frame check will use, including a template with no `unit_modifiers` row.
     #[test]
@@ -1675,6 +1735,16 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    fn effect_entity(app: &mut App, root: Entity, name: &str) -> Option<Entity> {
+        app.world_mut()
+            .query::<(Entity, &ChildOf, &aa_fx::Effect, &VehicleEffect)>()
+            .iter(app.world())
+            .find(|(_, parent, effect, _)| {
+                parent.parent() == root && effect.name.eq_ignore_ascii_case(name)
+            })
+            .map(|(entity, _, _, _)| entity)
     }
 
     fn hp_update(app: &mut App, hp: i32) {

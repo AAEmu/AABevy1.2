@@ -256,10 +256,16 @@ impl Effect {
     }
 }
 
-/// Whether a finished effect retires its entity: a one-shot with [`Effect::despawn_when_finished`], unless the
-/// dev `force_loop` keeps it.
-fn retires_when_finished(effect: &Effect, def: Option<&EffectDef>) -> bool {
-    effect.despawn_when_finished && !effect.force_loop && def.is_some_and(|def| def.one_shot())
+/// Whether a finished effect retires its entity: anything with [`Effect::despawn_when_finished`], unless the
+/// dev `force_loop` keeps it. A `Continuous` effect with a finite `EmitterLifeTime` also finishes and must retire.
+fn retires_when_finished(effect: &Effect) -> bool {
+    effect.despawn_when_finished && !effect.force_loop
+}
+
+/// Whether a finished run stays finished when it is deactivated (out of range): a placed burst must not replay
+/// when the camera comes back. A continuing effect starts again.
+fn keeps_finished(def: Option<&EffectDef>) -> bool {
+    def.is_some_and(|def| def.one_shot())
 }
 
 /// Runtime state of an [`Effect`] (inserted with it).
@@ -640,7 +646,8 @@ fn apply(
                 commands.entity(m).despawn();
             }
             run.sim = None;
-            run.finished = false;
+            let keep_finished = keeps_finished(run.def.as_deref());
+            run.finished = run.finished && keep_finished;
             run.uploaded_units.clear();
             commands.entity(entity).remove::<FxActive>();
             continue;
@@ -938,7 +945,7 @@ fn simulate(
                     }
                 } else {
                     run.finished = true;
-                    if retires_when_finished(effect, run.def.as_deref())
+                    if retires_when_finished(effect)
                         && let Ok(mut d) = despawn.lock()
                     {
                         d.push(entity);
@@ -1209,13 +1216,16 @@ mod tests {
         let mut effect = Effect::new("T.A.BURST");
         assert!(!effect.primes(burst));
         assert!(Effect::new("T.A.FIRE").primes(fire));
-        // and a finished burst with the flag retires; a continuing effect never does
+        // and a finished effect with the flag retires; a placed burst keeps `finished` when it is deactivated
         effect.despawn_when_finished = true;
-        assert!(retires_when_finished(&effect, Some(burst)));
+        assert!(retires_when_finished(&effect));
         effect.despawn_when_finished = false;
-        assert!(!retires_when_finished(&effect, Some(burst)));
+        assert!(!retires_when_finished(&effect));
         let mut fire_effect = Effect::new("T.A.FIRE");
         fire_effect.despawn_when_finished = true;
-        assert!(!retires_when_finished(&fire_effect, Some(fire)));
+        assert!(retires_when_finished(&fire_effect), "a finite continuous effect retires too");
+        assert!(keeps_finished(Some(burst)));
+        assert!(!keeps_finished(Some(fire)));
+        assert!(!keeps_finished(None));
     }
 }
