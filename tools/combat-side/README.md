@@ -134,13 +134,14 @@ lane dry run therefore reads the caster/victim animation list through
 
 * `channels`: rows per channel;
 * `missing`: required channels with zero rows (default:
-  `clock_sync,anim_state,anim_controller,gcd,castbar,unit_state,chat,inputs`);
-* `gcd.changed`: true when the cooldown pair becomes nonzero, or when a
-  recorded key press is followed within 3 s by a pair change;
+  `clock_sync,anim_state,gcd,castbar,unit_state,chat,inputs`);
+* `gcd.changed`: true when a recorded key press is followed within 3 s by a
+  change of the cooldown pair;
 * `gcd.pressed_changes`: the key/change pairs that prove a press started the
   GCD;
-* `animations.caster_ctrl` / `victim_ctrl`: the resolved controller addresses
-  and the candidates tried.
+* `animations.controller_lists`: whether the opt-in scheduler lists were
+  sampled; `caster_ctrl` / `victim_ctrl` and `tried` name the resolved
+  addresses when they were.
 
 The default fight plan presses the first slot twice (`1,1`) before the other
 keys, so a cast/GCD refusal (if any) is also captured in `chat`.  A fast plan
@@ -157,6 +158,8 @@ during its cast and during its cooldown to provoke the refusal text.
   contain what the client itself exposes.
 * `unit_state` uses the driver's `client_unit_state`; its `unit_id` is the
   native opaque id (`X2Unit:GetUnitId`), not the engine entity id.
-* The victim controller is found by the unit-tree id from the GM
-  `/findobject` reply (`BcId`).  If the target is not a unit or the tree cannot
-  be walked, `anim_controller` has no victim rows and the reason is logged.
+* The optional controller lists are not part of the default dry run: the lane
+  `aadriver.dll` has no `alloc`/`write`/`call` commands for the PlayAnim hook,
+  and the unit/model pointer chain did not expose the old scheduler lists.  The
+  dry run reads the caster and victim animation list through `anim_state` and
+  reports the scheduler list as not read.
