@@ -290,7 +290,9 @@ Commands (`session::Command`):
 `RefreshCharacters`, `CreateCharacter(CreateCharacter)`, `DeleteCharacter`, `CancelDeleteCharacter`,
 `EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`,
 `MoveVehicle(VehicleMoveRequest)`, `Hang { target_obj_id }`, `Unhang { reason }`, `Chat`,
-`LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`, `ReturnToWorldSelect`, `Disconnect`.
+`TeleportEnded { pos }` (the answer to `SCTeleportUnit`, sent by the app after the load),
+`NotifyInGameCompleted`, `LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`,
+`ReturnToWorldSelect`, `Disconnect`.
 
 Events (`session::Event`), in the order of a normal run:
 `PhaseChanged(Phase)`, `LoginSucceeded(AccountInfo)`, `WorldList`, `WorldQueue`, `ReadyToConnect`,
@@ -306,8 +308,11 @@ and for leaving `LeavePending`, `LeftWorld`, `Disconnected`. Failures: `LoginFai
 
 `PlayerSpawn` carries `obj_id`, the full `CharacterState` (id, name, race, gender, level, zone id,
 instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experience ...) and the player's own `Unit`
-(position, model id, equipment templates, appearance). Teleports are answered automatically
-(`CSTeleportEnded`) and reported as `Teleported`.
+(position, model id, equipment templates, appearance). A teleport is reported as `Teleported`; the session
+does **not** answer it. The 1.2 client sends `CSTeleportEnded` only once the destination is loaded
+(`FUN_391a4e00`; owner capture 2026-11-01: a 5 m GM move answered at once, cross-map jumps 2 s and 12 s
+later), so the application sends `Command::TeleportEnded { pos }` and then
+`Command::NotifyInGameCompleted` at the end of its load.
 
 ### State tables (`state`)
 
@@ -452,8 +457,9 @@ position against the `sub_zones` rectangles (`x`, `y`, `w`, `h` in metres, `link
 `parent_sub_zone_id`). `zone_key` is only read when the character is selected; after a teleport or a
 border crossing `zone_group_id` is the current zone. The server streams the surroundings of a new
 position (units, doodads, the zone chat channel switch) only after the client sends movement from
-there: after `Event::Teleported` send a `Command::Move` or two (the real client moves all the
-time; `walkthrough --cmd "/teleport ..."` does it).
+there: after `Event::Teleported`, send `Command::TeleportEnded { pos }` when the destination is loaded
+and a `Command::Move` or two from there (the real client moves all the time; `walkthrough --cmd
+"/teleport ..."` does it). `aa-client`'s `ingame::teleport` does this for the app.
 
 **Chat: `Chat`**
 

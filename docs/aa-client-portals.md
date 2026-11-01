@@ -77,13 +77,18 @@ unit T s after the world is entered (`p2_use_57.png`: the real constant, nothing
 
 ## Teleports
 
-`SCTeleportUnit` carries the yaw at the destination (radians), `player::follow_server` uses it. A jump of more than 300 m
-(`FAR`) or any `SCLoadInstance` (recall, world gates) shows the loading screen: the HUD stage is put aside (`hud::suspend`),
-the original loading UI is built (`login::loading::build`), streaming is boosted, input is off, the gauge follows the
+`SCTeleportUnit` carries the yaw at the destination (radians), `player::follow_server` uses it. aa-net does not answer
+`CSTeleportEnded`; the 1.2 client sends it from the end-of-load path (`FUN_391a4e00`), not from the handler
+(`FUN_391d6ed0` -> `FUN_3930c9e0` starts the load), which is why the owner capture of 2026-11-01 answered a 5 m GM
+move at once, a cross-map move 2 s later and the far one 12 s later. A jump of more than 300 m (`FAR`) or any
+`SCLoadInstance` (recall, world gates) shows the loading screen: the HUD stage is put aside (`hud::suspend`), the
+original loading UI is built (`login::loading::build`), streaming is boosted, input is off, the gauge follows the
 destination (terrain within 400 m, then objects, models, units), then the curtain (`login::curtain`) holds the last frame
-while the HUD comes back (`hud::resume`). After an `SCLoadInstance`, `CSInstanceLoaded` is sent once the destination is
-loaded (the server re-enables movement then). With `--enter-world` (no login plugin, no curtain) the loading UI goes away
-without the curtain. A short hop is a plain move.
+while the HUD comes back (`hud::resume`). At that point `ingame::teleport::acknowledge` sends `CSTeleportEnded`, then
+`CSNotifyInGameCompleted` (capture 2026-11-01: 13:44:02 after the 13:44:00 answer; 14:17:16 after 14:17:14), and a
+standing `CSMoveUnit` from the destination, so input and the server agree again. After an `SCLoadInstance`,
+`CSInstanceLoaded` is sent first, at the same point. With `--enter-world` (no login plugin, no curtain) the loading UI
+goes away without the curtain. A short hop is answered and reported at once.
 
 ## Dev flags
 
