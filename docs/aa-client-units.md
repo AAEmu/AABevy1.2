@@ -221,8 +221,18 @@ Pending live checks:
 ### Dismount placement (S2, 2026-10-28)
 
 The local player's `SCUnitDetached` (`FUN_390a2e90`, `FUN_390a6110` / `FUN_390aaff0`) moves the character off the seat
-instead of leaving it where the mount stood; a remote rider still unseats in place (pending). The reason comes from the
-detach packet (AAEmu echoes the request: 9 for `UnMountMate`, 10 for `DismissPet` while mounted).
+instead of leaving it where the mount stood; a remote rider keeps the world seat `pose_riders` draws and seeds its walk
+from there. The reason comes from the detach packet (AAEmu echoes the request: 9 for `UnMountMate`, 10 for
+`DismissPet` while mounted).
+
+**World pose.** The 1.2 `OnUnitDetached` handler (`FUN_391d4a70`, `x2game.dll.c:363904-363909`) calls
+`FUN_39355bd0` -> `Unit::DetachFrom` (`FUN_390b4000`, `x2game.dll.c:148624-148630`), which clears the attach ids
+(`+0xebc` / `+0xebd`) and detaches the model; it never writes the parent-local packet point, so the actor keeps its
+world transform. `track_local_mount` composes the mount's current `Transform` chain (a ship times a cannon's local
+attach) with the rider's seat bone/helper at the detach and starts the get-off there; a slave attached to another slave
+is not classified as a world cart, and `cart::drive_cart` refuses a parented slave. Owner run 2026-11-01
+15:32:02-15:32:08 (`rs-game.log`): the bound cannon's parent-local (-4.5703, -3.6836, 4.8404) was sent as world (the
+server measured 2872 m/s from 12008.822, 9022.671, 105.118); the first `CSMoveUnit` now carries the world seat.
 
 * **Side (`FUN_3909b1a0`):** `forward` is the mount's local Y flattened; the candidate is
   `mount + forward * 1.0 + left * 1.5` (`DAT_39ac3888` / `DAT_39ac388c`). The left candidate's capsule is tested first,
