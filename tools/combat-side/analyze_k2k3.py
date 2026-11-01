@@ -206,9 +206,10 @@ def main() -> int:
             },
             "answers": {
                 "first_swing_delay": ("the first attack clip starts 280 ms after the key-press before-stamp "
-                                      "(187 ms after the driver returned); the first damage of that swing is "
-                                      "at 1.08 s; the target was already 155 HP down at the press, so the "
-                                      "pre-run auto-attack state is not clean"),
+                                      "(187 ms after the driver returned); the first damage after the clip "
+                                      "starts is at t=11081 (995 ms into the clip, 1.28 s after the press); "
+                                      "the target was already 155 HP down at the press, so the pre-run "
+                                      "auto-attack state is not clean"),
                 "auto_repeat": ("one press repeats the swing (client attack clip every ~2.0 s) until the target "
                                 "dies; the re-press toggles it off after in-flight swings"),
                 "stance_exit": ("stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the "
