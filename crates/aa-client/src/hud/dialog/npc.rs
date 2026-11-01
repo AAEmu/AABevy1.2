@@ -448,6 +448,11 @@ impl Flow {
         self.barrier = false;
     }
 
+    /// The talk intents waiting for [`drive_npc`] this frame (`talk_input` queued them).
+    pub(super) fn intent_count(&self) -> usize {
+        self.intents.len()
+    }
+
     fn watches(&self, id: u32) -> bool {
         self.actor.is_some_and(|a| a.1 == id)
             || self.pending.as_ref().is_some_and(|p| p.scope.npc.0 == id)
@@ -1100,9 +1105,12 @@ pub(in crate::hud) fn drive_npc(
                     .action_time(selected, time.elapsed().as_millis() as u32)
                     && resolved(selected.scope, &data, player, &units)
                     && units.get(selected.npc().0).is_some_and(|unit| {
-                        data.pos
-                            .distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z))
-                            <= super::TALK_RANGE
+                        super::npc_in_reach(
+                            &data,
+                            data.pos,
+                            Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                            unit,
+                        )
                     })
                     && data.dialog.npc_flow.stage(selected);
                 if staged {
@@ -1165,7 +1173,12 @@ pub(in crate::hud) fn drive_npc(
         let mut data = bridge.0.borrow_mut();
         let current = identity(&data, player) == Some(intent.identity)
             && units.get(intent.npc.0).is_some_and(|unit| !unit.dead && matches!(unit.kind, UnitKind::Npc {template_id,..} if template_id==intent.npc.1)
-                && data.pos.distance(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z)) <= super::TALK_RANGE);
+                && super::npc_in_reach(
+                    &data,
+                    data.pos,
+                    Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+                    unit,
+                ));
         if current && let Some(query) = data.dialog.npc_flow.query(intent.identity, intent.npc) {
             if intent.target != Some(intent.npc.0) {
                 net.write(NetCommand(Command::Target {

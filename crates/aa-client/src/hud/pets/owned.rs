@@ -174,6 +174,13 @@ pub(super) struct View {
     casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
 
+impl View {
+    /// A mount walk is running (it holds the scripted forward key).
+    pub(super) fn walking(&self) -> bool {
+        self.approach.is_some()
+    }
+}
+
 /// The mount controller's walk to the mate (`FUN_3909b070`): a mount asked for out of the arrival window holds W
 /// toward the pet and sends `CSMountMate` when the player arrives. The reason is taken from the arrival positions, as
 /// `FUN_3909ae90` runs when the request is sent, not when the walk starts.
@@ -415,6 +422,7 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
     data.pets.owned.last_ride = Some(web_time::Instant::now());
     if !mount_arrived(from, mate) {
         // the native mount controller starts here; `step_mount_walk` sends the request at the arrival window
+        super::super::dialog::cancel_walk(data);
         if data.doodad.cancel_walk() {
             data.pets.release_w = true;
         }
@@ -428,7 +436,8 @@ fn mount(data: &mut HudData) -> Option<&'static str> {
     }
     // already inside the arrival window: the controller sends on its first frame, and any walk to this mate ends
     data.pets.owned.approach = None;
-    // a doodad walk must not keep steering while the mount is asked for
+    // a doodad walk must not keep steering while the mount is asked for; neither must a talk walk
+    super::super::dialog::cancel_walk(data);
     if data.doodad.cancel_walk() {
         data.pets.release_w = true;
     }

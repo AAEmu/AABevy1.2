@@ -282,8 +282,11 @@ silhouette pass; the game's native silhouette path is `Prefab::SetSilhouetteColo
 ## Walk-to, plate and phase messages
 
 A right click on a doodad out of reach starts `View::approach`: the character runs at it (camera turned, W held) until
-`stop_distance(reach)`, then the use is sent. A key of the player's, a missing doodad or [`STUCK_SECS`] without getting
-0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
+the **interaction gap** is inside `max_interaction_doodad_distance` (2.0999999 m, `x2game` config `+0x2a0`,
+`FUN_39093800`, a 3D surface gap against the doodad's shape; this port uses `doodad_almighties.sim_radius`), then
+the use is sent. The skill's own `max_range` is only the dynamic action bar's reach, not the right-click use range:
+a 100 m doodad skill clicked at 3 m walks first (2026-11-01). A key of the player's, a missing doodad or
+[`STUCK_SECS`] without getting 0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
 `DRAW_DOODAD_TOOLTIP`: name, `owner` while the doodad has one (`SCDoodadCreated`/`SCDoodadOriginator`), and
 `displayTime` = the growth seconds left
 (rounded up) from `DoodadVisual::remaining_ms`. `SCDoodadPhaseMsg` (0x157, bc object id + i32 message id) is decoded

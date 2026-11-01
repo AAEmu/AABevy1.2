@@ -998,7 +998,13 @@ Ctrl-E opens the original mailbox locally. It chooses a currently visible NaviOp
 function group within the lane's five-metre 2D send radius, when available; inbox reading also
 works without a mailbox. Native393b1040 emits numeric doodad ID plus boolean true; there is no
 invented interaction acknowledgement. The broader native interaction chooser and exact automatic
-end-distance behavior are still pending. Sending revalidates the selected mailbox against all
+end-distance behavior are still pending.
+
+The NPC talk/use reach is the common interaction reach of `FUN_393bf270` / `FUN_39093860`: a 3D
+surface gap strictly under `DAT_39ac79fc` 9.0 (3.0 m), or 12.25 (3.5 m) while `+0x3c26` is set,
+not the old six-metre centre distance. A right click beyond it walks to the NPC (`FUN_390a6af0`,
+the same scripted-forward walk the mount and doodad approaches use) and `CSStartInteraction` is
+sent only when the gap is inside the reach (2026-11-01). Sending revalidates the selected mailbox against all
 currently nearby mailboxes, rather than requiring it to remain the nearest. Hotkey consumption
 now completes before gameplay input, so Ctrl-E does not also move the character right.
 

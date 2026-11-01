@@ -135,6 +135,11 @@ pub(super) fn cancel_mount_walk(data: &mut HudData) {
     }
 }
 
+/// A mount walk is running (it holds the scripted forward key): the talk walk must not release it.
+pub(super) fn walking(data: &HudData) -> bool {
+    data.pets.owned.walking()
+}
+
 pub(super) fn refresh(world: &World, data: &mut HudData) {
     if data.pets.owner != data.character_id {
         data.pets = View {
