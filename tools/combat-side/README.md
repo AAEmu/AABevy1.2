@@ -69,18 +69,20 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
 ```
 
 * `wall_ms` is the recorder's `time.time()` clock.
-* `client_ms` is the client's clock for the row: `X2Time:GetUiMsec()` for UI
-  rows (`clock="ui"`), `System.GetCurrTime()*1000` for system rows
-  (`clock="system"`), and the last synced offset for memory and driver-template
-  rows (`clock="estimate"`).  `clock_sync` rows let a consumer map one clock to
-  the other.
+* `client_ms` is the unified client clock: the UI clock (`X2Time:GetUiMsec`)
+  for UI rows, the system clock (`System.GetCurrTime()*1000`) mapped through
+  the last sync for system rows, and the last synced offset for memory and
+  driver-template rows.  The clock used for the row is in `clock`
+  (`ui`, `system` or `estimate`).
+* `native_ms` is the raw value of that row's own clock when it has one (UI or
+  system); it is absent for estimated rows.
 * `t_ms` is `client_ms` minus the first synced client time; it is the
   cross-channel capture time.
 
 ### `gcd` row fields
 
-`gcd_remaining`, `gcd_total`, `cast_normal`, `cast_delay`, `channel`,
-`channel_delay` (the four cast slots at `unit+0x3ac4`), `stance_perm`,
+`gcd_remaining`, `gcd_total`, `cast_normal`, `cast_delay`, `cast_channel`,
+`cast_channel_delay` (the four cast slots at `unit+0x3ac4`), `stance_perm`,
 `combat_deadline`, `combat_in`, `latch_a`, `latch_b`, `weapon_active`,
 `weapon_slots`, `visual_byte`, `player_unit`, `caster_ctrl`, `victim_ctrl`.
 
@@ -132,7 +134,7 @@ schema.
 
 * `channels`: rows per channel;
 * `missing`: required channels with zero rows (default:
-  `clock_sync,anim_state,gcd,castbar,unit_state,chat,inputs`);
+  `clock_sync,anim_state,anim_controller,gcd,castbar,unit_state,chat,inputs`);
 * `gcd.changed`: true when the cooldown pair becomes nonzero, or when a
   recorded key press is followed within 3 s by a pair change;
 * `gcd.pressed_changes`: the key/change pairs that prove a press started the
@@ -140,8 +142,10 @@ schema.
 * `animations.caster_ctrl` / `victim_ctrl`: the resolved controller addresses
   and the candidates tried.
 
-The default fight plan presses the first slots twice (`1,1`) before the other
-keys, so a cast/GCD refusal (if any) is also captured in `chat`.
+The default fight plan presses the first slot twice (`1,1`) before the other
+keys, so a cast/GCD refusal (if any) is also captured in `chat`.  A fast plan
+(`--fight-keys 1,1,1,2,1,3,1,2 --fight-interval 0.45`) presses the GCD skill
+during its cast and during its cooldown to provoke the refusal text.
 
 ## Limits
 

@@ -258,6 +258,24 @@ class Clock:
             offset = self.ui_offset if self.ui_offset is not None else self.system_offset
         return int(round(wall + (offset or 0.0)))
 
+    def wall_for_ui(self, ui_ms: float) -> float:
+        with self.lock:
+            offset = self.ui_offset
+        return float(ui_ms) - (offset or 0.0)
+
+    def wall_for_system(self, system_ms: float) -> float:
+        with self.lock:
+            offset = self.system_offset
+        return float(system_ms) - (offset or 0.0)
+
+    def ui_for_system(self, system_ms: float) -> int:
+        with self.lock:
+            system = self.system_offset
+            ui = self.ui_offset
+        if system is None or ui is None:
+            return int(round(system_ms))
+        return int(round(system_ms + (ui - system)))
+
     def relative(self, client_ms: float | int | None) -> int | None:
         with self.lock:
             start = self.start_client_ms
@@ -278,8 +296,21 @@ class ChannelWriter:
     def write(self, channel: str, *, client_ms: int | float | None = None,
               wall_ms: float | None = None, clock_source: str = "estimate",
               **fields: object) -> None:
-        wall = ms_now() if wall_ms is None else wall_ms
-        client = self.clock.estimate(wall) if client_ms is None else int(round(float(client_ms)))
+        native = None
+        if client_ms is not None:
+            native = int(round(float(client_ms)))
+            if clock_source == "ui":
+                wall = self.clock.wall_for_ui(float(client_ms)) if wall_ms is None else wall_ms
+                client = native
+            elif clock_source == "system":
+                wall = self.clock.wall_for_system(float(client_ms)) if wall_ms is None else wall_ms
+                client = self.clock.ui_for_system(float(client_ms))
+            else:
+                wall = ms_now() if wall_ms is None else wall_ms
+                client = native
+        else:
+            wall = ms_now() if wall_ms is None else wall_ms
+            client = self.clock.estimate(wall)
         row = {
             "schema": SCHEMA,
             "channel": channel,
@@ -289,6 +320,8 @@ class ChannelWriter:
             "t_ms": self.clock.relative(client),
             "clock": clock_source if client_ms is not None else "estimate",
         }
+        if native is not None:
+            row["native_ms"] = native
         for key, value in fields.items():
             if isinstance(value, float) and not math.isfinite(value):
                 value = None
@@ -702,8 +735,8 @@ class MemorySampler(threading.Thread):
             "gcd", wall_ms=wall, client_ms=client, clock_source="estimate",
             player_unit=actor, caster_ctrl=self.caster_ctrl, victim_ctrl=self.victim_ctrl,
             gcd_remaining=gcd[0], gcd_total=gcd[1],
-            cast_normal=cast[0], cast_delay=cast[1], channel=cast[2],
-            channel_delay=cast[3], stance_perm=stance, combat_deadline=deadline,
+            cast_normal=cast[0], cast_delay=cast[1], cast_channel=cast[2],
+            cast_channel_delay=cast[3], stance_perm=stance, combat_deadline=deadline,
             combat_in=combat_in, latch_a=latch_a, latch_b=latch_b,
             weapon_active=weapon, weapon_slots=slots, visual_byte=visual)
         self.gcd_samples += 1
@@ -1030,7 +1063,7 @@ def main() -> int:
     parser.add_argument("--server-log", type=Path, default=None)
     parser.add_argument("--keep-client", action="store_true")
     parser.add_argument("--no-self-check", action="store_true")
-    parser.add_argument("--required", default="clock_sync,anim_state,gcd,castbar,unit_state,chat,inputs",
+    parser.add_argument("--required", default="clock_sync,anim_state,anim_controller,gcd,castbar,unit_state,chat,inputs",
                         help="comma-separated channels that must have rows")
     args = parser.parse_args()
 
