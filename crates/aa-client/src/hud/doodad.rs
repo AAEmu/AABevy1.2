@@ -788,6 +788,7 @@ fn track(
         names,
         views,
         poses,
+        mut boxes,
         visuals,
         mut target_decal,
         ladder_claim,
@@ -798,6 +799,7 @@ fn track(
         Res<aa_net::CharacterNames>,
         Res<Views>,
         super::pick::UnitPoses,
+        super::pick::ModelBoxes,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
         Option<Res<crate::ingame::ladder::LadderClaim>>,
@@ -969,12 +971,46 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = nearest.map(|(_, id)| id).or_else(|| {
-        script
-            .hovering
-            .then(|| nearest_usable(&d, &doodads, &units))
-            .flatten()
+    // the hover follows the same order as the click: a unit or the hull in front hides the
+    // doodad (a ladder parented to the picked slave beats that slave's loose box)
+    let unit_hit = ray.and_then(|r| {
+        let (entry, id) = super::pick::pick_unit_hit(
+            &r,
+            &units,
+            own,
+            None,
+            |_| true,
+            |unit, ray| {
+                (
+                    poses.get(unit, &units).map(|(pos, _)| pos),
+                    boxes.get_near(unit, ray),
+                )
+            },
+        )?;
+        let unit = units.get(id)?;
+        let (at, model) = (
+            poses.get(unit, &units).map(|(pos, _)| pos),
+            boxes.get_near(unit, &r),
+        );
+        let along = super::pick::unit_compare_hit(&r, unit, at, model).unwrap_or(entry);
+        Some((along, id))
     });
+    let hover = nearest
+        .filter(|(_, id)| {
+            let parent = db.as_deref().and_then(|db| {
+                let o = doodads.by_id.get(id)?;
+                (db.ladder_kind(o.func_group_id).is_some() && o.parent_obj_id != 0)
+                    .then_some(o.parent_obj_id)
+            });
+            super::pick::doodad_beats_unit(nearest, unit_hit, parent)
+        })
+        .map(|(_, id)| id)
+        .or_else(|| {
+            script
+                .hovering
+                .then(|| nearest_usable(&d, &doodads, &units))
+                .flatten()
+        });
     d.doodad.hover = hover;
     d.doodad.climb_click = climb_click;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);

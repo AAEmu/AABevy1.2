@@ -129,6 +129,22 @@ pub(crate) fn unit_middle_hit(ray: &Ray3d, unit: &Unit, world: Option<Vec3>) -> 
     (along > 0.0 && perpendicular2 <= radius * radius).then_some(along)
 }
 
+/// The distance to compare a picked unit against a doodad: the sphere middle when the ray hits
+/// the sphere, else the box middle along the ray. The box entry can be the masts or sails, far
+/// outside the hull, so it must not be compared with a doodad's surface.
+pub(crate) fn unit_compare_hit(
+    ray: &Ray3d,
+    unit: &Unit,
+    world: Option<Vec3>,
+    model: Option<PickBox>,
+) -> Option<f32> {
+    if let Some(along) = unit_middle_hit(ray, unit, world) {
+        return Some(along);
+    }
+    let span = model.filter(|model| !model.contains(ray.origin))?.span(ray)?;
+    Some((span.0 + span.1) * 0.5)
+}
+
 /// The unit the ray picks among the ones `accept` takes (never the local player), with `data`
 /// giving a unit's world position and drawn model box. Among sphere hits the nearest entry wins,
 /// and among box hits the nearest entry wins, except that an attached child (a cannon) whose entry
@@ -227,7 +243,6 @@ pub(crate) fn pick_unit_hit(
     Some((span.0, chosen))
 }
 
-
 /// [`pick_unit_hit`] as just the object id.
 pub(crate) fn pick_unit(
     ray: &Ray3d,
@@ -238,6 +253,23 @@ pub(crate) fn pick_unit(
     data: impl FnMut(&Unit, &Ray3d) -> (Option<Vec3>, Option<PickBox>),
 ) -> Option<u32> {
     pick_unit_hit(ray, units, own, ridden, accept, data).map(|(_, id)| id)
+}
+
+/// Whether a doodad hit beats a unit hit: a doodad attached to the picked slave beats that
+/// slave's loose box (like the cannon child rule); otherwise the nearer middle along the ray
+/// wins.
+pub(crate) fn doodad_beats_unit(
+    doodad: Option<(f32, u32)>,
+    unit: Option<(f32, u32)>,
+    doodad_parent: Option<u32>,
+) -> bool {
+    match (doodad, unit) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some((doodad_along, _)), Some((unit_along, unit_id))) => {
+            doodad_parent == Some(unit_id) || doodad_along <= unit_along
+        }
+    }
 }
 
 /// The current world pose of units, for readers outside the view systems (examples and tests have

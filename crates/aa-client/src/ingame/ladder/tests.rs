@@ -785,8 +785,10 @@ fn only_the_fixed_frame_kinds_use_the_helper_front_side() {
         let mut app = app_with(kind, 0);
         {
             let mut q = app.world_mut().query::<&mut Mover>();
-            // the helper faces +X; stand on its back (-X)
-            q.single_mut(app.world_mut()).unwrap().pos = Vec3::new(-0.5, 0.0, 0.0);
+            // the helper faces +X; stand on its back (-X) facing the ladder (+X)
+            let mut mover = q.single_mut(app.world_mut()).unwrap();
+            mover.pos = Vec3::new(-0.5, 0.0, 0.0);
+            mover.facing = -std::f32::consts::FRAC_PI_2;
         }
         tap(&mut app, "do_interaction_1");
         app.update();

@@ -584,20 +584,18 @@ fn right_click_pick(
     }
     let (camera, transform) = p.cameras.iter().find(|(c, _)| c.is_active)?;
     let ray = camera.viewport_to_world(transform, end).ok()?;
-    super::pick::pick_unit_hit(
+    let (entry, id) = super::pick::pick_unit_hit(
         &ray,
         units,
         own,
         ridden,
         |u| matches!(u.kind, UnitKind::Npc { .. } | UnitKind::Slave { .. }),
         |unit, ray| pick.data(unit, units, ray),
-    )
-}
-
-/// The climb doodad under the cursor takes the right click only when it is not behind a nearer
-/// unit or ship (the distances are along the same ray).
-fn climb_takes_click(climb: Option<f32>, unit: Option<f32>) -> bool {
-    climb.is_some_and(|c| unit.is_none_or(|u| c <= u))
+    )?;
+    let unit = units.get(id)?;
+    let (at, model) = pick.data(unit, units, &ray);
+    let along = crate::hud::pick::unit_compare_hit(&ray, unit, at, model).unwrap_or(entry);
+    Some((along, id))
 }
 
 /// `--hud-talk-nearest T` (talk to the nearest NPC that has something for the player, T seconds
@@ -773,10 +771,14 @@ pub fn talk_input(
         blocked,
         &mut pick,
     );
-    let ladder_wins = climb_takes_click(
-        over_climb.map(|(along, _)| along),
-        unit.map(|(along, _)| along),
-    );
+    let ladder_parent = over_climb.and_then(|(_, id)| {
+        doodads
+            .by_id
+            .get(&id)
+            .map(|o| o.parent_obj_id)
+            .filter(|parent| *parent != 0)
+    });
+    let ladder_wins = super::pick::doodad_beats_unit(over_climb, unit, ladder_parent);
     if ladder_wins
         && let Some((_, id)) = over_climb
         && let Some(mut grab) = ladder_grab
@@ -1255,13 +1257,95 @@ mod tests {
 
     #[test]
     fn a_climb_doodad_keeps_the_click_only_in_front_of_a_unit() {
-        assert!(climb_takes_click(Some(3.0), Some(5.0)), "ladder in front");
-        assert!(climb_takes_click(Some(3.0), None), "no unit behind");
         assert!(
-            !climb_takes_click(Some(5.0), Some(3.0)),
+            crate::hud::pick::doodad_beats_unit(Some((3.0, 77)), Some((5.0, 20)), None),
+            "ladder in front"
+        );
+        assert!(
+            crate::hud::pick::doodad_beats_unit(Some((3.0, 77)), None, None),
+            "no unit behind"
+        );
+        assert!(
+            !crate::hud::pick::doodad_beats_unit(Some((5.0, 77)), Some((3.0, 20)), None),
             "a nearer unit or the hull keeps the right click"
         );
-        assert!(!climb_takes_click(None, Some(3.0)), "no ladder");
+        assert!(
+            !crate::hud::pick::doodad_beats_unit(None, Some((3.0, 20)), None),
+            "no ladder"
+        );
+    }
+
+    /// A ladder parented to the ship beats the ship's loose box (the box is the union of every
+    /// drawn mesh, so its entry is outside the hull); a ray away from the ladder still picks the
+    /// ship. Uses a real [`super::pick::PickBox`] for the hull.
+    #[test]
+    fn a_ladder_on_the_hull_beats_the_ships_loose_box() {
+        let mut hull = crate::hud::expansion::fixture::spawn().unit;
+        hull.obj_id = 20;
+        hull.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 21,
+            summoner_id: 100,
+        };
+        hull.scale = 1.0;
+        let boxed = crate::hud::pick::PickBox {
+            centre: Vec3::new(0.0, 1.5, 0.0),
+            // masts and sails protrude past the hull side, as the loose union box does
+            half: Vec3::new(12.0, 1.5, 3.0),
+            rotation: Quat::IDENTITY,
+        };
+        // from outside the port side, above the 1.1 m sphere: the box entry is at x 12, the
+        // middle at x 0; the ladder sits on the side at x -10.1.
+        let ray = Ray3d::new(
+            Vec3::new(20.0, 3.0, 0.0),
+            bevy::math::Dir3::NEG_X,
+        );
+        let mut units = Units::default();
+        units.by_id.insert(20, hull.clone());
+        let (entry, id) = crate::hud::pick::pick_unit_hit(
+            &ray,
+            &units,
+            0,
+            None,
+            |_| true,
+            |_, _| (None, Some(boxed)),
+        )
+        .expect("the hull box is under the ray");
+        assert_eq!(id, 20);
+        let unit_along = crate::hud::pick::unit_compare_hit(&ray, &hull, None, Some(boxed))
+            .expect("the hull box is under the ray");
+        let ladder_along = 20.0 - 10.1;
+        assert!(
+            entry < ladder_along,
+            "the loose box entry {entry} is in front of the ladder"
+        );
+        // like for like: the entry is in front of the ladder, the box middle is behind it
+        assert!(!crate::hud::pick::doodad_beats_unit(
+            Some((ladder_along, 77)),
+            Some((entry, 20)),
+            None
+        ));
+        assert!(
+            crate::hud::pick::doodad_beats_unit(
+                Some((ladder_along, 77)),
+                Some((unit_along, 20)),
+                None
+            ),
+            "the ladder is in front of the box middle (ladder {ladder_along}, middle {unit_along})"
+        );
+        // a ladder behind the box middle still beats the hull it is attached to
+        assert!(crate::hud::pick::doodad_beats_unit(
+            Some((30.0, 77)),
+            Some((unit_along, 20)),
+            Some(20)
+        ));
+        // the same click away from the ladder has no doodad hit: the ship stays the pick
+        assert!(!crate::hud::pick::doodad_beats_unit(
+            None,
+            Some((unit_along, 20)),
+            None
+        ));
     }
 
     #[test]

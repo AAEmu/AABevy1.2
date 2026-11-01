@@ -876,14 +876,17 @@ pub fn control_ladder(
         // The fixed-frame kinds (1/4/5/8/9) stand on the ladder's own front side (its `$ladder`
         // helper +Y, `FUN_3916c520` keeps the identity hang rotation for them). The relative
         // kinds (2 rope, 3 wood, 6, 7 mast, 10 big tree) build the hang rotation from the
-        // player's own quaternion, so they keep the player's side. A ship ladder is used from the
-        // deck, inside the hull: for the fixed kinds a player-relative normal would put the body
-        // inside the wall and send the jump further in.
+        // player's own quaternion (`FUN_3916c520`, :270103-270167), not from where the player
+        // stands: the body lies opposite the player's facing (inferred from the quaternion; the
+        // native frame's body offset is not decoded). A ship ladder is used from the deck, inside
+        // the hull: for the fixed kinds a player-relative normal would put the body inside the
+        // wall and send the jump further in.
         let fixed_frame = matches!(kind, 1 | 4 | 5 | 8 | 9);
         let mut normal = if fixed_frame {
             helper_forward_game
         } else {
-            Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0)
+            let f = player::forward(mover.facing);
+            Vec3::new(-f.x, -f.y, 0.0)
         };
         normal.z = 0.0;
         normal = normal.normalize_or_zero();
