@@ -449,6 +449,7 @@ impl Flow {
     }
 
     /// The talk intents waiting for [`drive_npc`] this frame (`talk_input` queued them).
+    #[cfg(test)]
     pub(super) fn intent_count(&self) -> usize {
         self.intents.len()
     }

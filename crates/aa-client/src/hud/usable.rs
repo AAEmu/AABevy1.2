@@ -835,16 +835,18 @@ mod tests {
     ) {
         use aa_net::items::{ActionKind, ActionSlot, ACTION_SLOTS};
         use aa_net::state::{ActionBar, Target};
-        let mut data = HudData::default();
-        data.snapshot = Snapshot {
-            unit_id: "5".into(),
-            level: 1,
-            hp: 700,
-            max_hp: 700,
-            mp: 100,
-            max_mp: 100,
-            labor: 50,
-            ..Snapshot::default()
+        let mut data = HudData {
+            snapshot: Snapshot {
+                unit_id: "5".into(),
+                level: 1,
+                hp: 700,
+                max_hp: 700,
+                mp: 100,
+                max_mp: 100,
+                labor: 50,
+                ..Snapshot::default()
+            },
+            ..HudData::default()
         };
         let rules = Rules::default().with_skill(
             press.skill,
@@ -872,8 +874,10 @@ mod tests {
         });
         data.target_pos = Some(Vec3::new(2.0, 0.0, 0.0));
         let env = Env::of(&data, None, &[], None);
-        let mut bar = ActionBar::default();
-        bar.slots = vec![ActionSlot::default(); ACTION_SLOTS];
+        let mut bar = ActionBar {
+            slots: vec![ActionSlot::default(); ACTION_SLOTS],
+            ..ActionBar::default()
+        };
         bar.slots[2] = ActionSlot {
             kind: ActionKind::Spell,
             id: u64::from(press.skill),

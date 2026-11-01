@@ -1520,8 +1520,10 @@ mod tests {
 
     #[test]
     fn the_npc_interaction_reach_is_the_3d_surface_gap() {
-        let mut d = HudData::default();
-        d.player_radius = 0.5;
+        let d = HudData {
+            player_radius: 0.5,
+            ..HudData::default()
+        };
         let unit = npc(20, 42, 3.4);
         let mut units = Units::default();
         units.by_id.insert(20, unit.clone());
@@ -1548,10 +1550,15 @@ mod tests {
 
     fn npc_walk_app(npc_at: f32) -> (App, Shared) {
         let spawn = crate::hud::fixture_spawn();
-        let mut data = HudData::default();
-        data.character_id = spawn.character().id;
-        data.snapshot.unit_id = spawn.obj_id.to_string();
-        data.pos = Vec3::ZERO;
+        let data = HudData {
+            character_id: spawn.character().id,
+            snapshot: crate::hud::data::Snapshot {
+                unit_id: spawn.obj_id.to_string(),
+                ..crate::hud::data::Snapshot::default()
+            },
+            pos: Vec3::ZERO,
+            ..HudData::default()
+        };
         let shared: Shared = Rc::new(RefCell::new(data));
         let mut units = Units::default();
         units.by_id.insert(20, npc(20, 42, npc_at));
