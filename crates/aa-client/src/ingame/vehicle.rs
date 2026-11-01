@@ -2022,8 +2022,10 @@ mod tests {
         let Some(look) = db.vehicle_look(1008) else {
             return;
         };
-        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
-        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        // The turret gate reads the slave kind from the template id: template 73 is a real
+        // kind-7 slave on the same tractor model (1008), template 60 is a kind-6 farm wagon.
+        let max_hp = db.slave_max_hp(73, 50).expect("the cotton-field cart's MaxHealth");
+        let unit = slave_unit_kind(7, 7, 73, 1008, max_hp, max_hp);
         let mut units = Units::default();
         units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
         let mut app = damage_app(
