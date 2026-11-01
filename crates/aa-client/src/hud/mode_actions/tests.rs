@@ -277,6 +277,21 @@ fn the_farm_wagon_slave_bar_comes_from_slave_mount_skills() -> Result<(), Box<dy
         tables.has_passenger_point(146),
         "the Red Farm Hauler has point 2"
     );
+    // the point-2 attached rows `FUN_39347260` lists for a tank passenger: show the attached
+    // skill and cast the row's mount_skills.skill_id
+    assert_eq!(
+        tables
+            .passenger_bar(46, 2)
+            .iter()
+            .map(|s| (s.skill, s.mount_skill, s.cast_skill()))
+            .collect::<Vec<_>>(),
+        [(20238, 51, 15235)],
+        "the tank 46's point-2 seat"
+    );
+    assert!(
+        tables.passenger_bar(60, 2).is_empty(),
+        "the Farm Wagon has no point-2 seat skill"
+    );
     assert_eq!(
         tables.text(Function::Unbind),
         "Disembark from current device."
