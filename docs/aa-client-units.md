@@ -230,7 +230,8 @@ from there. The reason comes from the detach packet (AAEmu echoes the request: 9
 (`+0xebc` / `+0xebd`) and detaches the model; it never writes the parent-local packet point, so the actor keeps its
 world transform. `track_local_mount` composes the mount's current `Transform` chain (a ship times a cannon's local
 attach) with the rider's seat bone/helper at the detach and starts the get-off there; a slave attached to another slave
-is not classified as a world cart, and `cart::drive_cart` refuses a parented slave. Owner run 2026-11-01
+is never a driven mount, and `cart::drive_cart` refuses a parented slave. A cannon on a hull follows `unit_parent` to
+the root `ShipModel` and lands on that hull's deck. Owner run 2026-11-01
 15:32:02-15:32:08 (`rs-game.log`): the bound cannon's parent-local (-4.5703, -3.6836, 4.8404) was sent as world (the
 server measured 2872 m/s from 12008.822, 9022.671, 105.118); the first `CSMoveUnit` now carries the world seat.
 
@@ -1079,10 +1080,18 @@ vehicle_models` row has turret limits. `ingame::turret::slave_turret` reads the 
 `Db::turret_limits` (degrees and deg/s into radians). A row with a non-numeric angle (vehicle_models 5,
 the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not read as zero.
 
+* **Slave kind.** `UnitKind::Slave.id` is the server's persisted slave id, not its kind. The 1.2
+  client keeps the unit-state template id at `Unit+0x420` (`FUN_398a1f90` copies net `+0x448`,
+  `x2game.dll.c:1937685`), tests base unit type 2 and looks it up with `FUN_39696380(Unit+0x420)`
+  (`FUN_39345ea0`, `x2game.dll.c:677830-677836`), then reads `slaves.slave_kind_id`
+  (`x2game.dll.c:1482520/1482585`); `FUN_39571630` names 7 `siege_weapon` and 8 `slave_equipment`
+  (`x2game.dll.c:1140951-1140971`). `Db::slave_kind` does that lookup from `UnitKind::Slave.template_id`
+  for ship and ground cannons alike (slaves.id 10 = kind 8, model 117).
 * **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
   gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
-  slave is kind 7/8, the `vehicle_models` row parses to a non-zero turret range, and its `velocity`
-  is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database copy, so
+  slave's template kind is 7/8, the `vehicle_models` row parses to a non-zero turret range, and its
+  `velocity` is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database
+  copy, so
   `velocity == 0` is the substitute (S12-C6); the trebuchets/tanks (velocity 2.5-3.5) and the
   cotton-field cart (4.0) stay drivable, and the all-zero rows (vehicle_models 37/40) are not
   turrets. `turret_seat_model` is the gate; a real-data test walks every kind-7/8 `slaves` row. So
