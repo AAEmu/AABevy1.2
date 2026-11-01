@@ -571,12 +571,16 @@ pub(crate) fn block_cinema_input(
             // same frame; Escape is not replayed as a fresh press
             if key != KeyCode::Escape {
                 keys.press(key);
+                // held, not a fresh press: systems reading `just_pressed` (panel keys, clicks)
+                // must not fire on the replay
+                keys.clear_just_pressed(key);
                 held.push(key);
             }
         }
         let held_mouse: Vec<MouseButton> = player.held_mouse.drain(..).collect();
         for button in &held_mouse {
             mouse.press(*button);
+            mouse.clear_just_pressed(*button);
         }
         if !held.is_empty() || !held_mouse.is_empty() {
             // hold, not tap: the movement systems read `pressed`, and the release edge still comes
@@ -1004,6 +1008,10 @@ mod tests {
         assert!(
             mouse.pressed(MouseButton::Right),
             "a held RMB comes back after the window"
+        );
+        assert!(
+            !mouse.just_pressed(MouseButton::Right),
+            "the replay is a hold, not a fresh click"
         );
         assert!(
             !mouse.pressed(MouseButton::Left),
