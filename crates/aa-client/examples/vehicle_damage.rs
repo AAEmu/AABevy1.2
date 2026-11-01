@@ -254,6 +254,7 @@ fn scene(
                 dying_start: None,
                 dying_time: 0.0,
                 death_seen: false,
+                dead_effect_played: false,
             });
         ingame::vehicle::spawn_state_effects(&mut commands, root, &variant, false);
         info!(
@@ -288,6 +289,7 @@ fn scene(
             dying_start: None,
             dying_time: LIVE_DYING_TIME,
             death_seen: false,
+            dead_effect_played: false,
         },
     ));
     ingame::vehicle::spawn_state_effects(&mut commands, root, live_variants.for_state(1), false);

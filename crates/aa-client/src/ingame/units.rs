@@ -944,6 +944,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
                 dying_start: None,
                 dying_time,
                 death_seen: state == 5,
+                dead_effect_played: false,
             });
             super::vehicle::spawn_state_effects(commands, root, &variant, false);
             root

@@ -369,12 +369,17 @@ poller never returns 5: dying is entered by the death path below.
   `vehicle::finish_damage_swaps` then despawns the old parts/wheels/effects and installs the new parts and
   `$` helpers, and drops the stale `Spindle` and `TurretGun` caches. The old body therefore stays visible
   while the new prefab is read, and a failed read keeps it instead of leaving an empty vehicle. A state
-  change that keeps the same prefab only updates the state (`FUN_390e7910`'s "same model" return).
-  `SCMySlave.max_hp` does not take part.
+  change that keeps the same prefab only updates the state (`FUN_390e7910`'s "same model" return); that
+  early path (and a missing `vehicle_look` / `vehicle_variants`) still ends the dying window when the new
+  state is not 5, so a model without a `dead` / `dying` row can leave 6 again. `SCMySlave.max_hp` does not
+  take part.
 * **Effects.** The new prefab's active `ParticleEffect` entities are spawned with it (damaged fire,
-  dead smoke, the dying prefab's own emitters). On a worsening state (`old < new`, also 1 -> 6 and
-  4 -> 5) the prefab's `_spawn_effect*` entities are played once (`FUN_39109120`, x2game.dll.c:206810).
-  `_despawn_effect` has no traced caller and is left out. The spawn-time filter is exactly
+  dead smoke, the dying prefab's own emitters). The `_spawn_effect*` entities are played once
+  (`FUN_39109120`, x2game.dll.c:206810) when the state worsens (`old < new`, also 1 -> 6), and on every
+  entry to dying: `FUN_390e7910(5,1)` passes 1, so the 6 -> 5 route of an HP-0 update followed by the
+  death packet plays the dying prefab's effects too. The dead prefab's one-shots are not replayed on the
+  following 5 -> 6 when the poller already showed 6 for this death. `_despawn_effect` has no traced caller
+  and is left out. The spawn-time filter is exactly
   `FUN_390eaf40`'s lists: type-5 particles named `exhaust` (the +0x2c0 list), `splash_l` / `splash_r`
   (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the ship's speed and angular velocity, which
   this slice does not draw. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
