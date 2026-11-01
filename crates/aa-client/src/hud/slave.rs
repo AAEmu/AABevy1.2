@@ -15,8 +15,9 @@
 //! dead (`CANT_DO_WHILE_YOU_DEAD` 0x14c), we are bound to another slave (0x66), we are bound to
 //! this one (silent), a bind is already pending (0x13), and the same gap strictly below
 //! `DAT_39ac7408` 16.0 -> 4.0 m (0x9a). 1.2 minimises over per-collider shapes that are not
-//! recovered; this client uses one scaled actor-model radius per unit, an approximation
-//! (unverified). The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
+//! recovered; this client uses one sphere per unit (unverified), and a slave has no
+//! `ActorModel`, so its radius is 0 and only the player's radius reduces the centre distance.
+//! The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
 //!
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
 //! (live capture 2026-10-28, case e), never 0x068.
@@ -28,14 +29,15 @@
 //! while already seated; the server decides (capture-pending S11-C2). Any other first skill (0 or
 //! unknown) does nothing.
 //!
-//! The interactive key (F) sends nothing for a cart; NPC talk keeps the path it had. The player
-//! flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13), the parent unit type 0xe (native silent
-//! refusal) and the dynamic action bar 12076 path (`FUN_393b1de0`) are not ported: their meaning
-//! is unverified.
+//! The interactive key (F) on a slave is the dynamic action bar's 12076 entry (`FUN_393b1de0` ->
+//! `FUN_393be280`, through `candidate` below); NPC talk keeps the path it had. The player flags
+//! at +0x3a70..+0x3a73/+0x3a7b (native 0x13) and the parent unit type 0xe (native silent refusal)
+//! are not ported: their meaning is unverified.
 //!
-//! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`): `CSDiscardSlave`
-//! 0x032 with the bound timeline, refused with 0x67 while the slave's speed squared is above 25.0
-//! (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
+//! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`):
+//! `CSDiscardSlave` 0x032 for the slave `SCSlaveBound` named as the local player's master (its
+//! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
+//! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
 //! `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`); that native path has no
 //! speed check. The speed source is unverified (see the docs).
 
@@ -62,6 +64,10 @@ pub(super) const INTERACT_REACH: f32 = 3.0;
 pub(super) const MOUNTED_INTERACT_REACH: f32 = 3.5;
 /// `DAT_39ac7408` (16.0): `FUN_39346290`'s bind reach, sqrt(16.0) = 4.0 m.
 pub(super) const BIND_REACH: f32 = 4.0;
+/// `_DAT_399d3230` (6.25): the interaction indicator's candidate reach, sqrt(6.25) = 2.5 m.
+/// The native passes the squared value to `FUN_393601a0`, which compares the surface gap with
+/// `sqrt` of it (`FUN_39093860`).
+pub(super) const CANDIDATE_REACH: f32 = 2.5;
 /// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
 /// `_DAT_3a169948`: the passenger walk-off throttle.
@@ -98,13 +104,26 @@ pub(super) fn action_target(units: &Units, picked: Option<u32>) -> Option<u32> {
 
 /// The reach predicate of `FUN_3989bf90` -> `FUN_398b1ab0` -> `FUN_398b1af0`: the 3D surface
 /// gap of two sphere colliders, `|centre_a - centre_b| - (r_a + r_b)`, not clamped at 0. 1.2
-/// takes the minimum over the target's several colliders; one scaled actor-model sphere per unit
-/// approximates that (unverified).
-fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32) -> f32 {
+/// takes the minimum over the target's several colliders; this port uses one sphere per unit
+/// (unverified). A slave has no `ActorModel`, so [`radius`] returns 0 for it and its gap is the
+/// centre distance minus the player's actor radius.
+pub(super) fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32) -> f32 {
     from.distance(to) - (from_radius + to_radius)
 }
 
-/// The target's scaled actor-model radius, the same source as `api::distance_to`.
+/// The key `FUN_393601a0` (units) and `FUN_3902f010` (doodads) store per candidate, ordered by
+/// `FUN_3902ed20`: the surface gap minus `1 + facing` (`_DAT_3999c488` is the 1.0), where
+/// `facing` is the player's forward dot the horizontal direction to the candidate. The gap is
+/// taken absolute like the native bits mask (`DAT_3999d500` 0x7fffffff); lower sorts first.
+pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
+    let toward = (at - from).truncate().normalize_or_zero();
+    gap.abs() - (1.0 + forward.dot(toward))
+}
+
+/// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
+/// model is a `VehicleModel`, not an `ActorModel`, so the catalog has no radius for it and this
+/// returns 0: the slave's collider is not approximated at all (unverified, but the 1.2
+/// `FUN_3989bf90` uses the slave's real collision shape, which is also not recovered).
 fn radius(data: &HudData, unit: &Unit) -> f32 {
     data.game
         .get()
@@ -116,11 +135,33 @@ fn radius(data: &HudData, unit: &Unit) -> f32 {
 /// point-1 seat marks the cart `Driven`, so the client drives the cart from the stale mover
 /// instead of following it, and a cart has no `Animator` for the seat pose. Use the attached
 /// unit's replicated position then.
-fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
+pub(super) fn player_centre(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec3 {
     data.mounted
         .player_attachment()
         .and_then(|attachment| world(attachment.obj_id))
         .map_or(data.pos, |(pos, _)| pos)
+}
+
+/// The facing the candidate checks use. While seated the HUD yaw can stay at the boarding
+/// point (the same staleness as [`player_centre`]), so use the attached unit's world yaw (yaw 0
+/// faces +y).
+pub(super) fn player_forward(data: &HudData, world: &impl Fn(u32) -> Option<(Vec3, f32)>) -> Vec2 {
+    let yaw = data
+        .mounted
+        .player_attachment()
+        .and_then(|attachment| world(attachment.obj_id))
+        .map_or(data.yaw, |(_, yaw)| yaw);
+    Vec2::new(-yaw.sin(), yaw.cos())
+}
+
+/// A unit's world pose from the packets alone (a child slave composed through its parent), for
+/// the callers that have no drawn transforms at hand.
+pub(super) fn replicated_pose(units: &Units) -> impl Fn(u32) -> Option<(Vec3, f32)> + '_ {
+    move |id| {
+        units
+            .get(id)
+            .and_then(|unit| crate::ingame::units::unit_world_pose_in(unit, units))
+    }
 }
 
 /// `FUN_393bf270`: the interaction reach in metres (3.5 on a mount). Only riding a mate counts as
@@ -193,6 +234,76 @@ impl SlaveSeat {
     }
 }
 
+/// The slave the interaction indicator would offer, and the skills the dynamic action bar shows.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Candidate {
+    pub obj_id: u32,
+    pub template: u32,
+    /// 12076 always; 13863 when the model has a free `$passenger0` point.
+    pub skills: Vec<u32>,
+    /// The native ordering key (see [`native_key`]): lower sorts first, shared with the doodad
+    /// producer so the dynamic action bar arbitrates both on the same value.
+    pub key: f32,
+    /// Centre distance, metres (the HUD's NPC-talk priority uses it).
+    pub dist: f32,
+}
+
+/// `InteractionIndicator::MakeCandidate` (`FUN_393bdad0`) for a slave (`FUN_393bbb80`): every
+/// slave within `_DAT_399d3230` 6.25 -> 2.5 m surface gap is offered, ordered by the native key
+/// `gap - (1 + facing)` (`FUN_393601a0`; `FUN_3902ed20` sorts the one unit/doodad set by it).
+/// No candidate while riding a mate (`player+0x3c26`, the only writer of that byte is the mate
+/// mount path), while sitting on a doodad (`player+0x3b94`, set by `FUN_393635e0`), and none for
+/// the slave already bound to or sat on (`FUN_3901be50` / `FUN_3901c5f0`); another slave is
+/// still offered. The native builder has no dead check, so neither does this.
+///
+/// The facing is only the key's bonus, not a gate: a slave behind the player is still offered
+/// when it is the only one in reach.
+pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
+    if data.mounted.riding_mate() || data.doodad.seated {
+        return None;
+    }
+    let game = data.game.get()?;
+    let world = replicated_pose(units);
+    let from = player_centre(data, &world);
+    let forward = player_forward(data, &world);
+    let seated = current_slave(data, units);
+    let mut best: Option<(f32, Candidate)> = None;
+    for unit in units.iter() {
+        let UnitKind::Slave { template_id, .. } = unit.kind else {
+            continue;
+        };
+        if seated == Some(unit.obj_id) {
+            continue;
+        }
+        let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
+        let gap = surface_gap(from, data.player_radius, at, radius(data, unit));
+        if gap >= CANDIDATE_REACH {
+            continue;
+        }
+        let mut skills = vec![SKILL_OCCUPY];
+        if game.mode_actions.has_passenger_point(template_id)
+            && !units.iter().any(|u| {
+                u.attached_to
+                    .is_some_and(|a| a.obj_id == unit.obj_id && a.point == 2)
+            })
+        {
+            skills.push(SKILL_PASSENGER);
+        }
+        let key = native_key(from, forward, at, gap);
+        let candidate = Candidate {
+            obj_id: unit.obj_id,
+            template: template_id,
+            skills,
+            key,
+            dist: from.distance(at),
+        };
+        if best.as_ref().is_none_or(|(best, _)| key < *best) {
+            best = Some((key, candidate));
+        }
+    }
+    best.map(|(_, candidate)| candidate)
+}
+
 pub(crate) fn receive(
     data: &mut HudData,
     units: &Units,
@@ -237,7 +348,7 @@ pub(crate) fn receive(
 /// this port keeps only the dead check. A right click while seated never reaches this path: it
 /// sends only `CSChangeTarget` (`interact`). Riding a mate only widens the interaction reach; the
 /// port does not refuse it (capture-pending S11-C5).
-fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
+pub(super) fn passenger(data: &mut HudData, units: &Units, target: u32) -> Outcome {
     if units.get(target).is_some_and(|unit| unit.dead) {
         return Outcome::Refused(MSG_SLAVE_CANNOT_BIND_WHILE_IS_DEAD);
     }
@@ -339,18 +450,43 @@ pub(super) fn bind(
     Outcome::Sent
 }
 
-/// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon`: `CSDiscardSlave` for the bound slave.
+/// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon` and the mode bar's `unbind` slot:
+/// `CSDiscardSlave` for the slave `SCSlaveBound` named as the local player's master. That same
+/// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
+/// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
+/// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
+/// one request per 1500 ms (`_DAT_3a169948`).
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
 
-fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
-    let Some((obj_id, tl_id)) = data.mounted.discard_slave() else {
+pub(super) fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
+    // `FUN_39345aa0` takes its bound branch on `this+0x14`, the timeline SCSlaveBound stored for
+    // the local player's master (`this+0x18` is that slave's object id, used for the speed
+    // lookup); the seat point plays no part. Both the check and the packet use the bound slave,
+    // never the seat's `discard_slave` preference.
+    if let Some((obj_id, tl_id)) = data.mounted.bound_slave() {
+        // No replicated movement, or one older than the staleness bound, means a standing slave.
+        if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
+            return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
+        }
+        data.requests
+            .push(Request::Slave(SlaveCommand::Unbind { tl_id }));
+        return Outcome::Sent;
+    }
+    let Some((_, tl_id)) = data.mounted.discard_slave() else {
         return Outcome::Silent;
     };
-    // No replicated movement, or one older than the staleness bound, means a standing slave.
-    if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
-        return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
+    if !data
+        .mounted
+        .player_attachment()
+        .is_some_and(|attachment| attachment.point > 1)
+    {
+        return Outcome::Silent;
+    }
+    if !data.mounted.walk_off_throttle(now) {
+        // Native FUN_39362170 returns silently inside the 1500 ms window.
+        return Outcome::Silent;
     }
     data.requests
         .push(Request::Slave(SlaveCommand::Unbind { tl_id }));

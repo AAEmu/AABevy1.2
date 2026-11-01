@@ -394,7 +394,15 @@ An item slot is dark when its stack is empty or its use skill is (a potion goes 
 global cooldown are not reasons: their sweeps show them.
 
 Before it sends `UseSkill` / `UseItem`, `use_slot` / `use_bag_slot` ask the same rules (`Env::precheck`): a use that cannot work is
-not sent and says why. The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
+not sent and says why. The shared `ground_target::route` then applies the 1.2 linked-item rule (`FUN_393925c0`,
+`ingame::linked_skill`): a skill with `skills.link_equip_slot_id` (14901 "Use Glider") is cast as the equipped item's use skill
+with the item as caster, and an empty slot, an unknown item template (743838-743839) or a wrong-type slot raises the local 326
+`MUST_EQUIP_PROPER_ITEM` with no packet. This
+covers the action bar, hotkeys, the skill book's slots and `/skill`; the script runner uses the same helper. The HUD resolves
+the same rule for the slot itself (`Env::precheck`, `slot_blocked` and the slot cooldown): no matching item darkens the slot
+(`skillUsable=0`, `FUN_3943fa10`), and a linked slot shows the converted skill's cooldown (`FUN_393f61c0`/`FUN_3943f310`). A
+matching item whose `use_skill_id` is 0 converts to skill 0: `FUN_3943fa10` looks it up and darkens the slot too, and the press
+is refused as `URK_EQUIP_ITEM` with no packet (never an Item cast with skill 0). The client refuses less than the slot shows, so it never blocks what the server would allow: a target less than
 2 m beyond the reach is still sent (the server knows the size of the bodies), the own cooldown is refused with the alert ("Can't be used
 right now."; any remaining time of it counts, also one as short as the global cooldown). The log has one line per change of the dark set:
 `hud: dark slots [(2, "TOO_FAR_RANGE"), (4, "TOO_FAR_RANGE")]; target Some("Solzreed Fox") at Some(11.7) m`.
@@ -511,11 +519,19 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
 * **C1 report.** G sends `CSStartedCinema` 0x0cf; the sequence runs 22.22 s (`C1-run3`: start 0.11,
   completed 22.22, `CSCompleteQuestContext` 22.41). Esc at +3.1 s is ignored and the hand-in still
   follows 0x0ce; the client sends no cancel. Bevy drops `KeyboardInput`, `MouseButtonInput`,
-  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:476`); with chat focused only
+  wheel and `ButtonInput` at the source while the movie plays (`cinema.rs:556`); with chat focused only
   keyboard text is left, while the mouse and the button mirrors stay gated. Saved `Actions` and
-  auto-run are cleared, and held keys are re-read when it ends. It ends with 0x0ce
-  then the quest request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no
-  1.2 row covers it. The close/X button was not drivable (C1b, open).
+  auto-run are cleared. The 2026-10-31 capture (`2026-10-31-cinemacap` cases 1c/1b) shows that 1.2
+  then keeps game input blocked for about 2.4 s after the movie: a key still physically held is
+  replayed only after that window as a held action (no tap edge, so movement starts and its physical
+  release stops it), while a key released during the movie or the window is not replayed
+  (capture-measured; no matching x2game timer was found). Escape is never replayed. Held mouse
+  buttons (RMB mouselook, LMB+RMB forward) are tracked and replayed the same way; the capture held
+  only W, so mouse handling is inferred, not captured. The HUD is restored at the movie end; the
+  capture still shows the original's ending/loading screen at end+0.7 s and the HUD at end+11 s, so
+  the original's HUD return within that range is unverified. It ends with 0x0ce then the quest
+  request (`cinema_flow.rs:38`, `cinema_flow.rs:56`). Chat typing is left alone: no 1.2 row covers
+  it. The close/X button was not drivable (C1b, open).
 * **0x0d0.** The u32 body is the component id, not the quest id: `C1-click` sends 5336 = `d8 14`
   and `C2-call` sends 6758 = `66 1a`. It is sent when the directing dialog opens for a Start/Ready
   component with a cinema, after `CSInteractNPC` (`C1-click`: 19:57:33), not at G. The
@@ -542,17 +558,17 @@ The 2026-10-30 farm/cinema capture (`2026-10-30-capture-farm-cinema.md`, rows `C
   `CSStartedCinema` in the same second (20:23:39), `CSCompletedCinema` 12 s later, and no 0x0d0.
   Bevy starts a Progress component's `cinema_id` only from a live `QuestUpdated`; a
   `QuestsLoaded` relog does not replay it. Dropping or completing a quest forgets its played
-  entries, so re-accepting plays the movie again (`cinema.rs:333`).
+  entries, so re-accepting plays the movie again (`cinema.rs:353`).
 
 Playback reads `worlds/main_world/cinemas/<name>.xml`: EndTime, the Scene camera-selection track and
 the camera position/rotation/FOV tracks; `drive_cinema_camera` applies all three and restores the FOV
-after the movie (`cinema.rs:212`, `cinema.rs:220`, `cinema.rs:522`); the movie camera is in the
+after the movie (`cinema.rs:307`, `cinema.rs:617`); the movie camera is in the
 final `CameraFinal` set after `cam_fov`, so a quest or buff lens cannot win. Only the world camera
 (its `OrbitCamera` marker) is driven, not preview cameras. Animation ids the pak does not
 ship log `[cut scene error] invalid animation ID! name=...` and the movie still runs its time
-(`cinema.rs:288`); a missing/unreadable sequence logs and sends the quest request immediately, so a
-bad asset never holds the quest (`cinema.rs:400`). The `ObjCinema` act steps remain only tracked
-(`cinema.rs:65`).
+(`cinema.rs:233`); a missing/unreadable sequence logs and sends the quest request immediately, so a
+bad asset never holds the quest (`cinema.rs:424`). The `ObjCinema` act steps remain only tracked
+(`cinema.rs:78`).
 
 Still capture-pending: **C1b** the close/X button during a movie; **C7** whether the cinema17 repro
 runs 1-2 confirmed the same dialog opened at 16:20:59/16:29:42. Chat typing during a movie is also
@@ -3204,24 +3220,100 @@ zero errors; this is not a warning-clean claim. Deliberately not changed: the un
 indexed `action_bar_page` action, the visual page control animation, and the server's slot storage (the
 server already stores slots by the 1-based number).
 
-## Pending live checks (driven vehicle bar)
+## Vehicle mode bar and Grab Machine checkpoint (2026-11-01)
 
 The Group-A2 capture (2026-10-30) read the Farm Wagon driver's bar after `CSBindSlave`: 7 `modeSkillActionBar`
 slots, 5 `slave_skill` entries (Owner's Mark 20704 R, First Round in New Morning 20291 T with 10 s, Sound Horn
 15622 Y, Water Plant 15450 U, Create Water 15546 unbound) and two `function` buttons (6 "Disembark from current
-device", 7 "Check details on a summon"); slots 1-5 match `slave_mount_skills` rows 181-185 for slave 60. This client
-publishes the five skill slots (the two function buttons have no skill data and are not modelled) and restores the
-buff-skills bar on `SCUnitDetached`. A later capture must confirm: the function buttons' actions and icons; a ship
-helm or siege weapon bar (same table, other slave rows); whether the bar appears for a bound-but-not-seated slave
-(this client requires the driver seat, point 1); whether a passenger seat shows nothing (assumed); player death while
-driving (does 1.2 clear the slave bar? this client keeps it while the attach remains); whether the siege/mount bar
-really goes to 0 (this client only lowers input mode 1, `input_modes.set(1, ...)`, and does not touch a separate
-siege bar); a slave skill's cooldown after stepping off and back on (this client keeps it per slave object id, from
-the `SCSkillStarted`/`SCSkillFired` `Mount` receipts, since AAEmu's `start_skill_cooldown` sends `SCCooldowns` only
-to a player caster); and the pressed slot's exact target field (this client sends the current target, 0 when none, with
-the slave's object id and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins that packet). The
-Eznan Cutter helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 for model 393
-(normal 40 / wide 25); its bar was not read. Also pending: the slave's own cooldown start after a cast-time
-skill (this client follows the server's `cast`, which starts it at the cast end, so an interrupted cast
-leaves no local timer) and whether a native press during the slave's global cooldown is dropped silently
-like the player's.
+device", 7 "Check details on a summon"); slots 1-5 match `slave_mount_skills` rows 181-185 for slave 60.
+The 2026-11-01 decompile resolves the function slots: the bar is native (`FUN_39204500` /
+`FUN_392045f0`), entry kind 3 (`FUN_39204320`) is a function button with its callback, icon path, text
+category and key. `hud/mode_actions.rs` now models `Entry::{Player,Skill,Function}` and fills it in that
+order.
+
+* **Any slave seat** (`FUN_39345f10`) gets the mount skills attached to its point (`FUN_39347260`
+  with the seat point: point 1 for the Farm Wagon, the `mount_attached_skills` point-2 rows for the
+  tank seats), then `unbind` (slot 6: `ui/icon/icon_skill_vehicle03.dds`, `ui_texts` 33 `unbind`).
+  `FUN_39347260` / `FUN_39347130` filter EVERY seat, the driver's included: a row with no attached
+  list counts only at point 1, and a row with one only when its FIRST `mount_attached_skills` entry
+  (lowest row id) is at the seat point. A row's skill level (`skills.ability_level`, the skill's
+  `+8`) must also not exceed the slave unit's level byte (`+0x4b4`, `slaves.level`); one 1.2 row is
+  above it (slave 44's skill 13572, ability level 99 against a level-50 slave) and is dropped. So
+  the tank 46 driver bar is rows 201 (no list) and 45 (first entry point 1), never 51 (first entry
+  point 2), whose skill 20238 belongs to the passenger seat. A passenger's attached skill is shown
+  like a gunner's: the point-2 skill (20238 on the tank 46) is displayed and the row's
+  `mount_skills.skill_id` (15235) is cast. The `unbind` is appended after
+  the skill loop even when the slave has no `slave_mount_skills` rows at all (39 of the 140 slaves,
+  including the carriage 7, the rowboats 55/91 and the ship 23), so those seats still get it.
+* **The driver seat** (point 1) appends `showSlaveInfo` (slot 7: `ui/icon/icon_skill_info_view.dds`,
+  `ui_texts` 33 `showSlaveInfo`). The native has two further gates
+  (`slave+0x3af0 == DAT_39d1fb98`, `FUN_3901be50() == 0`) that are not decoded; the port shows it on
+  the driver seat, which the owner's capture confirms for the Farm Wagon.
+* **A mate rider** (`player+0x3c26`, set only by the mate mount path `FUN_39369c10` and cleared by
+  `FUN_39362690`) gets `command_unmount` first (slot 1: `icon_skill_vehicle03.dds`, `ui_texts` 19,
+  command 9 via `FUN_39361e80`), then the buff skills. The native adds it only when
+  `FUN_3933b1b0(parent) == 0`: that predicate is 1 for the player's own mate (kind 5 and its
+  `+0x420` owner is the local player), so riding the player's own pet shows no function slot (its
+  pet bar owns the dismount) and only a foreign mate gets this one. Which native mate field the
+  spawn's `owner_id` maps to is unproven; the port uses the received `UnitKind::Mate.owner_id`.
+* **Clicks**: `unbind` is `FUN_39345aa0` -> `CSDiscardSlave` 0x032 (`{u16 tl_id}`). Its driver branch
+  is keyed on `this+0x14`, the timeline of the slave SCSlaveBound named as the local player's
+  master, not on the seat point; the speed check resolves `this+0x18`, that bound slave's object
+  id, so both the 5 m/s refusal (`_DAT_3999f85c` 25.0, `SLAVE_SHUT_OFF_TO_UNBIND` 0x67) and the
+  packet name the BOUND slave even when the player sits on another one. Without it `FUN_39362170`
+  sends only from an attachment above point 1 (no speed check, one request per `_DAT_3a169948`
+  1500 ms) and is silent for a point-1 seat that is not the player's. `showSlaveInfo` fires UI event `SHOW_SLAVE_INFO` (0x60) and the stock
+  `slave_info.alb` opens; `command_unmount` uses the existing mate unmount (`CSUnMountMate` 0x0a8
+  reason 9).
+* **Grab Machine**: the dynamic action bar has a slave producer (`hud/slave.rs::candidate`) with
+  the native gates: no prompt while riding a mate (`player+0x3c26`), while sitting on a bonded seat
+  doodad (`player+0x3b94`, `FUN_393635e0` `BondLazyDoodad`; the same gate hides the doodad bar), and
+  none for the slave already bound to or sat on (`FUN_393bbb80`); another slave is still offered.
+  Every slave within `_DAT_399d3230` = 6.25 -> 2.5 m surface gap (`FUN_393601a0` ->
+  `FUN_39093860`) is a candidate whatever its facing; the native key `gap - (1 + facing)`
+  (`FUN_393601a0`, `_DAT_3999c488` = 1.0, sorted by `FUN_3902ed20`) only orders the one set. The
+  keyboard prompt and the doodad bar are arbitrated on that same key, not on centre distance: a
+  Farm Wagon's storage boxes (doodads 3446 at attach points 9-12) are often nearer but behind or
+  beside the player while the wagon is in front, so the native key keeps the Grab Machine. A
+  right-clicked doodad is preferred only among doodads; it keeps its native key against a slave.
+  A tie keeps the doodad: that tie-break is in `FUN_393bd9e0`, which is not decoded. The bar
+  is `DYNAMIC_ACTION_BAR_SHOW("npc", id)` with 12076 "Grab Machine"; 13863 "passenger seat" is
+  added when the model has `model_bindings` point 2 (`FUN_390c9f70(2)`) and no unit is attached
+  there. F / `ExecuteDynamicAction` sends `CSBindSlave` 0x031 for 12076 (`FUN_393b1de0` ->
+  `FUN_393be280`), or the plain 13863 `CSStartSkill`.
+* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window, which shows the received name, class,
+  slave kind, lowercase hex unit id and any received slave equipment (`GetMountedSiegeWeaponInfo`,
+  `GetSlaveEquipSlotInfo`). `X2SiegeWeapon:GetVehicleInfo`, `GetSiegeWeaponSpeed` and
+  `GetSiegeWeaponTurnSpeed` are still stubs, so the window has no gear/handbrake/traction-control
+  block and no speed/turn-speed rows. It guards the nil values and logs no script error (the ignored
+  `original_summon_info_window_opens_on_show_slave_info` test opens it against the real UI/pak/DB).
+* **Seat bar deviation**: 1.2 composes the seat bar and then appends the buff skills
+  (`FUN_392044a0` runs after `FUN_39204500`), so its bar is the seat skills, the functions and the
+  buffs. This port replaces the buff skills with the seat bar instead. Left as a documented gap.
+* **Evidence/tests**: `vehicle_bar` example (driver bar with both function slots and the F prompt for
+  a second wagon in one frame, measured from the driven wagon while the HUD position/yaw are stale),
+  `hud/mode_actions/tests.rs` (driver 7 slots, a slave with no mount skills keeps `unbind` +
+  `showSlaveInfo`, the tank 46's driver and passenger bars, the first-attached-entry seat rule,
+  the point-2 attached skill before `unbind`, a foreign mate's `command_unmount` and none on the
+  player's own mate, the stale slot cache, `0x67`, function event, icons/texts),
+  `hud/slave/tests.rs` (the candidate reach and key in front/beside/behind, measurement from the
+  seat, mate/bond/seated suppression, 13863 only with a free point 2, the SCSlaveBound driver gate,
+  `CSDiscardSlave`, passenger 1500 ms throttle), and the inline doodad tests in `hud/doodad.rs` (the
+  `"npc"` source, F -> `CSBindSlave`, the native-key arbitration of the wagon against its storage
+  box, no bar while seated).
+
+Still pending: the two `showSlaveInfo` gates; a live passenger bar and the point-2 skills
+(decompile only); the exact `player+0x3b94` non-empty state (ported from the received bond); the
+buff skills 1.2 appends to the seat bar; the `buff_mount_skills` list `FUN_39347260` uses instead
+of `slave_mount_skills` when the ridden unit has a buff id at `+0x5fe4`; a live 0x67 at >5 m/s; a ship helm/siege bar (same table,
+other rows); player death while driving; a slave skill cooldown after re-boarding; and the pressed
+slot target field (this client sends the current target, 0 when none, with the slave's object id
+and its `mount_skills` row as `StartCaster::Mount`; the byte-exact test pins it). The Eznan Cutter
+helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 for model 393
+(normal 40 / wide 25); its bar was not read.
+
+## Options open regression (2026-10-31)
+
+`cargo run -p aa-client --example options_hang -- --headless --mute` boots the real World-stage HUD,
+raises `open_config`, opens the original Options frame and fails if the open plus the next tick take
+more than 3 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.
