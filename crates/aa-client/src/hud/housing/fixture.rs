@@ -311,6 +311,7 @@ fn drive(
     step: Res<Step>,
     mut world: Local<Option<WorldState>>,
     rt: NonSend<UiRuntime>,
+    bridge: NonSend<HudBridge>,
     mut units: ResMut<Units>,
     mut houses: ResMut<Houses>,
     mut doodads: ResMut<Doodads>,
@@ -393,6 +394,15 @@ fn drive(
                 &mut events,
             );
             info!("house_owner: check done (final tax state: {state})");
+        }
+        9 => {
+            crate::hud::crafting::apply_actability(
+                &mut bridge.0.borrow_mut(),
+                &Event::Actability(aa_net::ActabilityEvent::Snapshot {
+                    last: true,
+                    entries: vec![aa_net::ActabilityValue { id: 1, point: 100, step: 0 }],
+                }),
+            );
         }
         _ => {}
     }
@@ -503,6 +513,15 @@ fn verify(
                 assert(alwaysPublic == true)
                 "#);
         }
+        // The received actability points changed: the spy sees the native event.
+        9 => lua(r#"
+            local seen = false
+            for i = #SPY, 1, -1 do
+                if SPY[i][1] == 'CHANGE_ACTABILITY_DECO_NUM' then seen = true break end
+            end
+            assert(seen, 'the spy saw no CHANGE_ACTABILITY_DECO_NUM')
+            assert(X2House:GetActabilityDecoCount() == 2, tostring(X2House:GetActabilityDecoCount()))
+            "#),
         _ => {}
     }
 }

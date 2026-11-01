@@ -131,7 +131,7 @@ interacted with) they answer for the current house.
 | Group | Methods |
 |---|---|
 | House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` (`placed - housing_binding_doodads`, `absolute_deco_limit - housing_binding_doodads`, `FUN_394796B0`) |
-| Actability | `GetActabilityDecoCount`, `GetDecoActabilityPoint(i)` (`name`, `decoPoint`), `GetDecoActabilityByType(i)` (totals `type`/`totalDecoPoint`/`totalPoint`, item rows `name`/`decoPoint`), `GetDecoActabilityLimitGroup()` (`name`, `arrangeCount`, `maxCount` from `housing_deco_limit_elems`); the house entries group `housing_decorations.actability_group_id` and sum `actability_up`, the limit rows count `deco_actability_group_id` |
+| Actability | `GetActabilityDecoCount`, `GetDecoActabilityPoint(i)` (`name`, `decoPoint`), `GetDecoActabilityByType(i)` (totals `type`/`totalDecoPoint`/`totalPoint`, item rows `name`/`decoPoint`), `GetDecoActabilityLimitGroup()` (`name`, `arrangeCount`, `maxCount` from `housing_deco_limit_elems`, or nil without a limit list, `FUN_3947A310`); the house entries group `housing_decorations.actability_group_id` and sum `actability_up`, but only for a design with a limit list and a decoration with a `deco_actability_group_id` (`FUN_3932FD00`); the limit rows count `deco_actability_group_id` |
 | Owner | `SetHouseName`, `SetHousePermission` (owner only; one `CSChangeHousePermission` with the server enum, none for an always-public design 0x80, family needs a family 0x178, guild needs an expedition 0x137), `SetHouseAllowRecover` (owner; a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
 | Construction | `GetHousingModelName`, `GetHousingModelConstructionInfo`, `GetHouseConstructionStepInfo`, `NextStepFromBuildCheck`, `PrevStepFromBuildCheck` |
 | Tax | `CountTaxItemForTax` (one certificate 31891 / 31892 per gold, rounded up; `featureSet.taxItem`), the `HOUSE_TAX_INFO` event |
@@ -140,8 +140,9 @@ interacted with) they answer for the current house.
 Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO` (raw `weeksWithoutPay`, the native order),
 `HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`, `BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`,
 `HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`, `HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`,
-`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (a change of the
-received actability points, native `0x23c`, raised by `FUN_3907BA10`).
+`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (raised here when
+the received actability points change; native `0x23c` is raised by `FUN_3907BA10`, which only resets the struct at
+`DAT_39aff990`, so this trigger is capture-pending C7).
 
 ## Map
 

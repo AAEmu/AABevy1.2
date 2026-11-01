@@ -168,7 +168,7 @@ struct View {
     clicks: u32,
     pointer_picked: Option<u32>,
     last_tax: Option<HouseTaxInfo>,
-    /// The player's actability points, as `CHANGE_ACTABILITY_DECO_NUM` sees them change.
+    /// The received actability points the last frame compared; a difference raises the event.
     actability: Vec<(u32, Option<i32>)>,
 }
 
@@ -416,12 +416,14 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
             Ok((i64::from(attached) - i64::from(builtins), i64::from(absolute) - i64::from(builtins)))
         })?,
     )?;
-    let s = state.clone();
+    let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetActabilityDecoCount",
         lua.create_function(move |_, _: Value| {
             let v = s.0.borrow();
-            Ok(v.current.as_ref().map_or(0, |c| actability_entries(&c.furniture).len() as i64))
+            let Some(c) = v.current.as_ref() else { return Ok(0) };
+            let tables = b.borrow();
+            Ok(actability_entries(&c.furniture, c.design, tables.game.get().map(|g| &g.housing)).len() as i64)
         })?,
     )?;
     let (s, b) = (state.clone(), bridge.clone());
@@ -430,7 +432,10 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         lua.create_function(move |lua, (_, index): (Value, i64)| {
             let v = s.0.borrow();
             let Some(c) = v.current.as_ref() else { return Ok(Value::Nil) };
-            let entries = actability_entries(&c.furniture);
+            let entries = {
+                let tables = b.borrow();
+                actability_entries(&c.furniture, c.design, tables.game.get().map(|g| &g.housing))
+            };
             let Some(&(group, points)) = usize::try_from(index - 1).ok().and_then(|i| entries.get(i)) else {
                 return Ok(Value::Nil);
             };
@@ -450,7 +455,10 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         lua.create_function(move |lua, (_, index): (Value, i64)| {
             let v = s.0.borrow();
             let Some(c) = v.current.as_ref() else { return Ok((Value::Nil, Value::Nil)) };
-            let entries = actability_entries(&c.furniture);
+            let entries = {
+                let tables = b.borrow();
+                actability_entries(&c.furniture, c.design, tables.game.get().map(|g| &g.housing))
+            };
             let Some(&(group, points)) = usize::try_from(index - 1).ok().and_then(|i| entries.get(i)) else {
                 return Ok((Value::Nil, Value::Nil));
             };
@@ -475,11 +483,17 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
         "GetDecoActabilityLimitGroup",
         lua.create_function(move |lua, _: Value| {
             let v = s.0.borrow();
-            let Some(c) = v.current.as_ref() else { return lua.create_table() };
+            let Some(c) = v.current.as_ref() else { return Ok(Value::Nil) };
             let tables = b.borrow();
-            let Some(game) = tables.game.get() else { return lua.create_table() };
+            let Some(game) = tables.game.get() else { return Ok(Value::Nil) };
+            let Some(design) = game.housing.housings.get(&c.design) else { return Ok(Value::Nil) };
+            // `FUN_3947A310`: the getter answers nil when the design has no `housing_deco_limits` row,
+            // which `maintain_window.alb` shows as `noneFurniture`; the 170 designs with a NULL (0)
+            // `housing_deco_limit_id` are that case.
+            if design.housing_deco_limit_id == 0 {
+                return Ok(Value::Nil);
+            }
             let out = lua.create_table()?;
-            let Some(design) = game.housing.housings.get(&c.design) else { return Ok(out) };
             let mut row = 1;
             for elem in game.housing.deco_limit_elems(design.housing_deco_limit_id) {
                 let Some(name) = game.housing.deco_actability_groups.get(&elem.deco_actability_group_id) else {
@@ -496,18 +510,40 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
                 out.set(row, entry)?;
                 row += 1;
             }
-            Ok(out)
+            Ok(Value::Table(out))
         })?,
     )?;
     Ok(())
 }
 
 /// `FUN_39325EC0`'s house list: one entry per decoration actability group, in placement order, with the
-/// `actability_up` of its furniture summed.
-fn actability_entries(furniture: &[Furniture]) -> Vec<(u32, u32)> {
+/// `actability_up` of its furniture summed. `FUN_3932FD00` adds nothing for a design without a limit
+/// list (no `housing_deco_limits` row: the 170 NULL `housing_deco_limit_id` designs) or for a
+/// decoration without a `deco_actability_group_id` (`piVar2[4] != DAT_3a167edc`), so neither reaches the
+/// counters.
+fn actability_entries(
+    furniture: &[Furniture],
+    design: u32,
+    tables: Option<&super::data::housing::Tables>,
+) -> Vec<(u32, u32)> {
+    let Some(tables) = tables else {
+        return Vec::new();
+    };
+    let Some(template) = tables.housings.get(&design) else {
+        return Vec::new();
+    };
+    if template.housing_deco_limit_id == 0 {
+        return Vec::new();
+    }
     let mut out: Vec<(u32, u32)> = Vec::new();
-    for f in furniture.iter().filter(|f| f.actability_group != 0) {
-        match out.iter_mut().find(|(group, _)| *group == f.actability_group) {
+    for f in furniture
+        .iter()
+        .filter(|f| f.actability_group != 0 && f.deco_group != 0)
+    {
+        match out
+            .iter_mut()
+            .find(|(group, _)| *group == f.actability_group)
+        {
             Some((_, points)) => *points += f.points,
             None => out.push((f.actability_group, f.points)),
         }
@@ -870,7 +906,9 @@ pub(crate) fn sync(
     let count = |t: u32| inventory.bag.iter().flatten().filter(|i| i.template_id == t).map(|i| i64::from(i.count)).sum::<i64>();
     v.tax_certificates = count(TAX_CERTIFICATE) + count(BOUND_TAX_CERTIFICATE);
     v.appraisals = count(APPRAISAL_CERTIFICATE);
-    // `FUN_3907BA10`: a change of the player's actability points refreshes the house actability counters.
+    // Raise `CHANGE_ACTABILITY_DECO_NUM` (native 0x23c) when the received actability points change.
+    // `FUN_3907BA10`, which raises 0x23c, only resets the struct at `DAT_39aff990`; it does not prove
+    // the trigger. The refresh-on-change here is capture-pending (C7).
     let actability = {
         let d = bridge.0.borrow();
         crate::hud::crafting::actability_signature(&d)

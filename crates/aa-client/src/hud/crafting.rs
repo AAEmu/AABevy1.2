@@ -66,6 +66,12 @@ pub(super) fn actability_group_name(data: &HudData, group: u32) -> Option<&str> 
     data.game.get()?.crafting.groups.get(&group).map(|g| g.name.as_str())
 }
 
+/// Apply a received actability event to the HUD's copy (the housing self-check and its test drive
+/// the `CHANGE_ACTABILITY_DECO_NUM` change detector with it).
+pub(super) fn apply_actability(data: &mut HudData, event: &aa_net::Event) -> bool {
+    data.crafting.actabilities.apply(event)
+}
+
 /// The received actability points, as `CHANGE_ACTABILITY_DECO_NUM` compares them (order independent).
 pub(super) fn actability_signature(data: &HudData) -> Vec<(u32, Option<i32>)> {
     let mut entries: Vec<_> = data.crafting.actabilities.entries.iter().map(|a| (a.id, a.point)).collect();
