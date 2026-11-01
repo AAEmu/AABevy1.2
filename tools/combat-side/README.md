@@ -99,6 +99,33 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
 | `unit_state` | once per second (player and target, alternating): the driver's `client_unit_state` (name, id, distance, HP/MP, buffs) |
 | `chat` | every client chat/system dispatch, with a `likely_refusal` flag |
 | `inputs` | every driver key press, with client clock before/after and the driver reply |
+| `actions` | optional (`--action-slots 1-10`): per client frame, `X2Action` `GetActionCooldownEx` / `GetActionCooldown`, type, repeat/current/empty flags for each named slot |
+| `sounds` | optional (`--hook-ui-sounds`): every `X2Sound.PlayUISound` / `PlaySound` call with its client time |
+| `steps` | optional (`--script`): one row per scenario op with the client-time bracket and its result |
+
+## Scenario scripts
+
+`--script <json>` replaces `--fight-keys` with a list of ops, so a capture does
+not need a new Python branch for each scenario.  Supported ops:
+
+* `mark` (name), `sleep` (ms), `key` (key, duration_ms), `chat` (message,
+  settle_ms), `lua` (target, code), `snapshot` (target, code);
+* `spawn` (template, settle_ms): `/despawn npc <template> 30` then `/spawn`;
+* `findtarget` (template, name, approach): `/findobject` + `client_target`,
+  optionally walking `approach_ms` towards the target when it is farther than
+  `approach_if` metres;
+* `clear_target` (`X2Unit:TargetUnit('')`), `self_target`;
+* `set_slots` (page, map): `X2Action:ClearAction` + `SetActionSpell` and a
+  per-slot readback of type/name/ok;
+* `buff` (buff, level, self): GM `/buff astarget`;
+* `wait_alive`, `wait_combat` (timeout, poll_ms): poll `UnitIsDead` /
+  `UnitCombatState('player')`;
+* `wait_target_dead` (timeout, poll_ms): poll `client_unit_state` and return
+  when the target is absent or has 0 HP.
+
+Every op writes a `steps` row with `client_ms`, `wall_ms`, `result` and
+`error`; an optional op (`"optional": true`) records the error and continues.
+The committed K2/K3 scripts are in `tools/combat-side/scenarios/`.
 
 ### Common row fields
 

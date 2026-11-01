@@ -358,6 +358,20 @@ class McpReplyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             mcp._read_matching()
 
+    def test_text_forwards_arguments_to_tool(self) -> None:
+        mcp = object.__new__(rec.Mcp)
+        seen: dict[str, object] = {}
+
+        def tool(name: str, bracket: object = None, **arguments: object) -> dict:
+            seen.update(name=name, bracket=bracket, arguments=arguments)
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        mcp.tool = tool
+        self.assertEqual(mcp.text("client_lua", pid=3, target="ui", code="return 1"), "ok")
+        self.assertEqual(seen["name"], "client_lua")
+        self.assertEqual(seen["arguments"],
+                         {"pid": 3, "target": "ui", "code": "return 1"})
+
 
 class MainInterruptTests(unittest.TestCase):
     class FakeMcp:

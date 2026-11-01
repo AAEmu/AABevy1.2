@@ -235,7 +235,8 @@ class Mcp:
 
     def text(self, name: str, bracket: dict[str, float] | None = None,
              **arguments: object) -> str:
-        return "\n".join(c["text"] for c in self.tool(name, bracket=bracket)["content"]
+        return "\n".join(c["text"] for c in self.tool(name, bracket=bracket,
+                                                      **arguments)["content"]
                          if c.get("type") == "text")
 
     def resync(self) -> None:
@@ -690,6 +691,14 @@ def take_chat(mcp: Mcp, pid: int) -> list[str]:
     return text.splitlines() if text else []
 
 
+def take_sound(mcp: Mcp, pid: int) -> list[str]:
+    code = ("local o=_G.__combat_recorder if not o then return '' end "
+            "local t=o.sound if not t then return '' end o.sound={} "
+            "return table.concat(t,'\\n')")
+    text = mcp.text("client_lua", pid=pid, target="ui", code=code)
+    return text.splitlines() if text else []
+
+
 def stop_timer(mcp: Mcp, pid: int, target: str, name: str) -> None:
     mcp.text("client_lua", pid=pid, target=target,
              code="_G.CS[%s..'_stop']=true return 1" % json.dumps(name))
@@ -839,6 +848,55 @@ return table.concat(rows, '|')
 """
 
 
+def action_sample(slots: list[int]) -> str:
+    """Lua for one frame of the action bar: slot cooldowns, type and repeat state.
+
+    ``GetActionCooldownEx`` is the four-value export of the cooldown manager
+    (``FUN_3943f420`` -> ``FUN_393f61c0``); ``GetActionCooldown`` is the
+    two-value wrapper.  Both are sampled because the client UI uses the four
+    values and the old action bars use the pair.  The flags decide the
+    auto-attack questions: ``IsAutoRepeatAction`` is the slot's repeat toggle
+    and ``IsCurrentAction`` the slot the client considers active.
+    """
+    slot_list = ",".join(str(int(slot)) for slot in slots)
+    return r"""
+local now = 0
+pcall(function() now = X2Time:GetUiMsec() or 0 end)
+local function q(v)
+  if v == nil then return '' end
+  return (tostring(v):gsub('[|~;,\r\n]', ' '))
+end
+local out = { tostring(now) }
+for _, slot in ipairs({%s}) do
+  local a, b, c, d = '', '', '', ''
+  local ok, x1, x2, x3, x4 = pcall(X2Action.GetActionCooldownEx, X2Action, slot)
+  if ok then a, b, c, d = q(x1), q(x2), q(x3), q(x4) end
+  local e, f = '', ''
+  local ok2, y1, y2 = pcall(X2Action.GetActionCooldown, X2Action, slot)
+  if ok2 then e, f = q(y1), q(y2) end
+  local ty = ''
+  local ok3, z = pcall(X2Action.GetActionType, X2Action, slot)
+  if ok3 then ty = q(z) end
+  local rep = ''
+  local ok4, r = pcall(X2Action.IsAutoRepeatAction, X2Action, slot)
+  if ok4 then rep = q(r) end
+  local cur = ''
+  local ok5, k = pcall(X2Action.IsCurrentAction, X2Action, slot)
+  if ok5 then cur = q(k) end
+  local empty = ''
+  local ok6, m = pcall(X2Action.IsEmptySlot, X2Action, slot)
+  if ok6 then empty = q(m) else
+    local ok7, n = pcall(X2Action.IsActionEmtpty, X2Action, slot)
+    if ok7 then empty = q(n) end
+  end
+  out[#out + 1] = slot .. '~' .. a .. ',' .. b .. ',' .. c .. ',' .. d ..
+                 '~' .. e .. ',' .. f .. '~' .. ty .. '~' .. rep ..
+                 '~' .. cur .. '~' .. empty
+end
+return table.concat(out, '|')
+""" % slot_list
+
+
 CHAT_HOOK = r"""
 _G.__combat_recorder = _G.__combat_recorder or { chat = {} }
 local o = _G.__combat_recorder
@@ -885,17 +943,63 @@ return 'hooked'
 """
 
 
+SOUND_HOOK = r"""
+_G.__combat_recorder = _G.__combat_recorder or { chat = {}, sound = {} }
+local o = _G.__combat_recorder
+local function esc(v)
+  if v == nil then return '' end
+  return (tostring(v):gsub('[\t\r\n|]', ' '))
+end
+local function stamp()
+  local ok, t = pcall(function() return X2Time:GetUiMsec() end)
+  if ok and t then return tostring(t) end
+  return ''
+end
+local function add(name, ...)
+  if #o.sound >= 8192 then return end
+  local parts = { stamp(), name }
+  for i = 1, select('#', ...) do parts[#parts + 1] = esc((select(i, ...))) end
+  o.sound[#o.sound + 1] = table.concat(parts, '\t')
+end
+if type(X2Sound) == 'table' then
+  for _, name in ipairs({'PlayUISound', 'PlaySound'}) do
+    local key = 'sound_hook_' .. name
+    local ok, fn = pcall(function() return X2Sound[name] end)
+    if ok and type(fn) == 'function' and not o[key] then
+      local original = fn
+      o['sound_original_' .. name] = original
+      local wrapped = function(self, ...)
+        add(name, ...)
+        return original(self, ...)
+      end
+      local set_ok = pcall(function() X2Sound[name] = wrapped end)
+      o[key] = set_ok
+    end
+  end
+end
+return 'sounds hooked'
+"""
+
+
 CHAT_UNHOOK = r"""
 local o = _G.__combat_recorder
 if o then
   if o.method_hooked and o.chat_original ~= nil then
     X2Chat.DispatchChatMessage = o.chat_original
   end
+  if type(X2Sound) == 'table' then
+    for _, name in ipairs({'PlayUISound', 'PlaySound'}) do
+      local original = o['sound_original_' .. name]
+      if original ~= nil then pcall(function() X2Sound[name] = original end) end
+      o['sound_hook_' .. name] = nil
+    end
+  end
   if o.globals_original then
     for name, original in pairs(o.globals_original) do _G[name] = original end
   end
   o.method_hooked = nil
   o.chat = nil
+  o.sound = nil
 end
 if _G.CS then
   for key in pairs(_G.CS) do
@@ -1290,7 +1394,39 @@ def write_chat_rows(writer: ChannelWriter, rows: list[str]) -> None:
                      likely_refusal=any(hint in lowered for hint in REFUSAL_HINTS))
 
 
-def drain_lua(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter) -> None:
+def write_action_rows(writer: ChannelWriter, rows: list[str]) -> None:
+    for parts in parse_lua_rows(rows):
+        if len(parts) < 2:
+            continue
+        slots: dict[str, dict[str, str]] = {}
+        for entry in parts[1:]:
+            fields = entry.split("~")
+            if len(fields) < 7:
+                continue
+            slot = fields[0]
+            slots[slot] = {
+                "cd_ex": fields[1],
+                "cd": fields[2],
+                "type": fields[3],
+                "repeat": fields[4],
+                "current": fields[5],
+                "empty": fields[6],
+            }
+        writer.write("actions", client_ms=parts[0], clock_source="ui", slots=slots)
+
+
+def write_sound_rows(writer: ChannelWriter, rows: list[str]) -> None:
+    for line in rows:
+        fields = line.split("\t")
+        if len(fields) < 2:
+            continue
+        writer.write("sounds", client_ms=fields[0] if fields[0] else None,
+                     clock_source="ui", function=fields[1], args=fields[2:],
+                     text=" ".join(fields[2:]))
+
+
+def drain_lua(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter,
+              action: bool = False, sound: bool = False) -> None:
     """Move every buffered Lua channel into its JSONL file right now."""
     batches: dict[str, list[str]] = {}
     for name, target in (("anim", "system"), ("cast", "ui"), ("buff", "ui")):
@@ -1299,11 +1435,25 @@ def drain_lua(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter) -> None:
         except Exception as error:
             log("flush", name, "failed:", error)
             batches[name] = []
+    if action:
+        try:
+            batches["action"] = take_rows(mcp, pid, "ui", "action")
+        except Exception as error:
+            log("flush action failed:", error)
+            batches["action"] = []
     try:
         chat = take_chat(mcp, pid)
     except Exception as error:
         log("flush chat failed:", error)
         chat = []
+    if sound:
+        try:
+            sounds = take_sound(mcp, pid)
+        except Exception as error:
+            log("flush sounds failed:", error)
+            sounds = []
+    else:
+        sounds = []
     origins: list[tuple[int, str]] = []
     for parts in parse_lua_rows(batches["cast"]):
         if len(parts) > 17 and parts[17]:
@@ -1314,25 +1464,30 @@ def drain_lua(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter) -> None:
     write_anim_rows(writer, batches["anim"], clock, origins)
     write_cast_rows(writer, batches["cast"])
     write_buff_rows(writer, batches["buff"])
+    write_action_rows(writer, batches.get("action", []))
     write_chat_rows(writer, chat)
+    write_sound_rows(writer, sounds)
 
 
 class LuaFlusher(threading.Thread):
     """Drain the Lua buffers every few seconds so a disconnect loses little."""
 
     def __init__(self, mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter,
-                 interval: float = 5.0):
+                 interval: float = 5.0, action: bool = False, sound: bool = False):
         super().__init__(daemon=True)
         self.mcp = mcp
         self.pid = pid
         self.clock = clock
         self.writer = writer
         self.interval = interval
+        self.action = action
+        self.sound = sound
         self.stop_event = threading.Event()
 
     def run(self) -> None:
         while not self.stop_event.wait(self.interval):
-            drain_lua(self.mcp, self.pid, self.clock, self.writer)
+            drain_lua(self.mcp, self.pid, self.clock, self.writer,
+                      action=self.action, sound=self.sound)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -1973,6 +2128,259 @@ def remap_channels(run: Path, clock: Clock) -> dict:
     return memory_ui
 
 
+def parse_slots(text: str) -> list[int]:
+    slots: list[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            first, last = part.split("-", 1)
+            slots.extend(range(int(first), int(last) + 1))
+        else:
+            slots.append(int(part))
+    return sorted(set(slots))
+
+
+def take_chat_now(mcp: Mcp, pid: int, writer: ChannelWriter) -> str:
+    """Drain the chat hook into its channel and return the lines just read."""
+    rows = take_chat(mcp, pid)
+    write_chat_rows(writer, rows)
+    return "\n".join(rows)
+
+
+def press_key(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter,
+              inputs: list[dict], key: str, duration_ms: int = 80,
+              note: str = "") -> str:
+    """Press one key through the driver and record the bracket around it."""
+    before_client, before_wall, b_after, _ = read_clock(mcp, pid, "system")
+    if before_client is not None:
+        clock.add("system", before_client, before_wall, b_after)
+    try:
+        reply = mcp.text("client_input", pid=pid, key=key, duration_ms=duration_ms)
+    except Exception as error:
+        reply = "error: " + str(error)
+    after_client, a_before, after_wall, _ = read_clock(mcp, pid, "system")
+    if after_client is not None:
+        clock.add("system", after_client, a_before, after_wall)
+    event = {"key": key, "before_wall_ms": before_wall,
+             "before_client_ms": before_client, "after_client_ms": after_client,
+             "after_wall_ms": after_wall, "result": reply}
+    inputs.append(event)
+    if before_client is not None:
+        writer.write("inputs", client_ms=before_client, clock_source="system",
+                     wall_ms=before_wall, key=key, duration_ms=duration_ms,
+                     before_client_ms=before_client, after_client_ms=after_client,
+                     after_wall_ms=after_wall, result=reply, note=note)
+    return reply
+
+
+def find_target(mcp: Mcp, pid: int, writer: ChannelWriter, template: int,
+                name: str, attempts: int = 3, wait: float = 1.2) -> tuple[int, dict, str]:
+    """``/findobject`` + ``client_target``: the nearest live unit of a template."""
+    for attempt in range(attempts):
+        mcp.text("client_chat", pid=pid, message=f"/findobject npc {template} 5")
+        time.sleep(wait)
+        chat_text = take_chat_now(mcp, pid, writer)
+        candidates = [int(value) for value in re.findall(r"BcId:\s*(\d+)", chat_text)]
+        if not candidates:
+            log("findobject attempt", attempt + 1, "no BcId rows")
+        for candidate in candidates:
+            try:
+                target = mcp.text("client_target", pid=pid,
+                                  unit_id=format(candidate, "X"), expected_name=name)
+                state = json.loads(
+                    mcp.text("client_unit_state", pid=pid, target="target"))
+            except Exception as error:
+                log("target candidate", candidate, "failed", error)
+                continue
+            if (state.get("present") and state.get("name") == name
+                    and int(state.get("health") or 0) > 0):
+                return candidate, state, target
+        time.sleep(1.0)
+    raise RuntimeError(f"no live {name!r} target after {attempts} findobject attempts")
+
+
+def player_unit_id(mcp: Mcp, pid: int) -> str:
+    state = json.loads(mcp.text("client_unit_state", pid=pid, target="player"))
+    return str(state.get("unit_id") or "")
+
+
+def self_target(mcp: Mcp, pid: int) -> str:
+    unit = player_unit_id(mcp, pid)
+    if not unit:
+        raise RuntimeError("the player has no native unit id")
+    return mcp.text("client_lua", pid=pid, target="ui",
+                    code=("X2Unit:SetWatchTarget(%s) X2Unit:TargetUnit('watchtarget') "
+                          "local id=X2Unit:GetTargetUnitId() return tostring(id)"
+                          % json.dumps(unit)))
+
+
+def run_script(mcp: Mcp, pid: int, clock: Clock, writer: ChannelWriter,
+               steps: list[dict], inputs: list[dict], player_id: int) -> None:
+    """Run a recorded scenario: every op is a ``steps`` row bracketed by client time."""
+    state: dict[str, object] = {"victim_id": 0, "player_id": player_id}
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise RuntimeError(f"script step {index} is not an object")
+        op = step.get("op")
+        note = str(step.get("note", ""))
+        before_client, before_wall, b_after, _ = read_clock(mcp, pid, "system")
+        if before_client is not None:
+            clock.add("system", before_client, before_wall, b_after)
+        result = ""
+        error_text = ""
+        try:
+            if op == "mark":
+                result = str(step.get("name", ""))
+            elif op == "sleep":
+                time.sleep(float(step.get("ms", 1000)) / 1000.0)
+                result = "slept"
+            elif op == "key":
+                result = press_key(mcp, pid, clock, writer, inputs,
+                                   str(step["key"]), int(step.get("duration_ms", 80)), note)
+            elif op == "chat":
+                result = mcp.text("client_chat", pid=pid, message=str(step["message"]))
+                time.sleep(float(step.get("settle_ms", 0)) / 1000.0)
+            elif op == "lua":
+                result = mcp.text("client_lua", pid=pid,
+                                  target=str(step.get("target", "ui")),
+                                  code=str(step["code"]))
+            elif op == "spawn":
+                template = int(step["template"])
+                mcp.text("client_chat", pid=pid,
+                         message=f"/despawn npc {template} 30")
+                time.sleep(float(step.get("despawn_ms", 800)) / 1000.0)
+                mcp.text("client_chat", pid=pid, message=f"/spawn npc {template}")
+                time.sleep(float(step.get("settle_ms", 2000)) / 1000.0)
+                result = "spawned"
+            elif op == "findtarget":
+                victim, unit_state, target = find_target(
+                    mcp, pid, writer, int(step["template"]), str(step["name"]),
+                    int(step.get("attempts", 3)), float(step.get("wait_ms", 1200)) / 1000.0)
+                state["victim_id"] = victim
+                state["victim_state"] = unit_state
+                result = f"{victim} distance={unit_state.get('distance')} {target}"
+                distance = float(unit_state.get("distance") or 0.0)
+                if step.get("approach") and distance > float(step.get("approach_if", 3.5)):
+                    reply = press_key(mcp, pid, clock, writer, inputs, "w",
+                                      int(step.get("approach_ms", 800)), "approach target")
+                    time.sleep(float(step.get("approach_settle_ms", 400)) / 1000.0)
+                    close = json.loads(
+                        mcp.text("client_unit_state", pid=pid, target="target"))
+                    result += (f" distance_after={close.get('distance')}"
+                               f" approach={reply}")
+            elif op == "clear_target":
+                result = mcp.text(
+                    "client_lua", pid=pid, target="ui",
+                    code=("local before=X2Unit:GetTargetUnitId() "
+                          "X2Unit:TargetUnit('') "
+                          "local after=X2Unit:GetTargetUnitId() "
+                          "return tostring(before)..'|'..tostring(after)"))
+                state["victim_id"] = 0
+            elif op == "self_target":
+                result = self_target(mcp, pid)
+            elif op == "set_slots":
+                mapping = {int(k): int(v) for k, v in step.get("slots", {}).items()}
+                lua_map = ",".join(f"[{slot}]={skill}" for slot, skill in sorted(mapping.items()))
+                code = (r"""
+pcall(function() X2Action:SetActionBarPage(%d) end)
+local map={%s}
+local out={}
+for slot,id in pairs(map) do
+  pcall(function() X2Action:ClearAction(slot) end)
+  local ok,err=pcall(function() X2Action:SetActionSpell(slot, id) end)
+  local ok2,t=pcall(X2Action.GetActionTooltipText, X2Action, slot)
+  local name='?'
+  if ok2 and type(t)=='table' and t.name~=nil then name=tostring(t.name) end
+  out[#out+1]=string.format('%%d:%%s:%%s:%%s', slot, tostring(X2Action:GetActionType(slot)), name, tostring(ok))
+end
+table.sort(out)
+return table.concat(out, '|')
+""" % (int(step.get("page", 1)), lua_map))
+                result = mcp.text("client_lua", pid=pid, target="ui", code=code)
+            elif op == "buff":
+                buff = int(step["buff"])
+                level = int(step.get("level", 1))
+                if step.get("self"):
+                    self_target(mcp, pid)
+                    time.sleep(0.3)
+                message = (f"/buff astarget -{abs(buff)}" if buff < 0
+                           else f"/buff astarget {buff} {level}")
+                mcp.text("client_chat", pid=pid, message=message)
+                time.sleep(float(step.get("settle_ms", 800)) / 1000.0)
+                result = message
+            elif op == "wait_target_dead":
+                timeout = float(step.get("timeout", 60.0))
+                poll = float(step.get("poll_ms", 250)) / 1000.0
+                deadline = time.monotonic() + timeout
+                last: dict = {}
+                start = time.monotonic()
+                while time.monotonic() < deadline:
+                    last = json.loads(
+                        mcp.text("client_unit_state", pid=pid, target="target"))
+                    if not last.get("present") or int(last.get("health") or 0) <= 0:
+                        result = ("dead present=%s health=%s after %.2fs"
+                                  % (last.get("present"), last.get("health"),
+                                     time.monotonic() - start))
+                        break
+                    time.sleep(poll)
+                else:
+                    raise RuntimeError("target did not die: %s" % last)
+            elif op == "wait_alive":
+                timeout = float(step.get("timeout", 20.0))
+                poll = float(step.get("poll_ms", 250)) / 1000.0
+                deadline = time.monotonic() + timeout
+                start = time.monotonic()
+                last = ""
+                while time.monotonic() < deadline:
+                    last = mcp.text(
+                        "client_lua", pid=pid, target="ui",
+                        code="return tostring(X2Unit:UnitIsDead('player'))").strip()
+                    if last == "false":
+                        result = "alive after %.2fs" % (time.monotonic() - start)
+                        break
+                    time.sleep(poll)
+                else:
+                    raise RuntimeError("player still dead: %s" % last)
+            elif op == "wait_combat":
+                timeout = float(step.get("timeout", 30.0))
+                poll = float(step.get("poll_ms", 250)) / 1000.0
+                deadline = time.monotonic() + timeout
+                start = time.monotonic()
+                last = ""
+                while time.monotonic() < deadline:
+                    last = mcp.text(
+                        "client_lua", pid=pid, target="ui",
+                        code="return tostring(X2Unit:UnitCombatState('player'))").strip()
+                    if last == "false":
+                        result = "combat=false after %.2fs" % (time.monotonic() - start)
+                        break
+                    time.sleep(poll)
+                else:
+                    raise RuntimeError("player still in combat: %s" % last)
+            elif op == "snapshot":
+                result = mcp.text("client_lua", pid=pid,
+                                  target=str(step.get("target", "ui")),
+                                  code=str(step["code"]))
+            else:
+                raise RuntimeError(f"unknown script op {op!r}")
+        except Exception as error:
+            error_text = f"{type(error).__name__}: {error}"
+            result = "error: " + error_text
+        after_client, a_before, after_wall, _ = read_clock(mcp, pid, "system")
+        if after_client is not None:
+            clock.add("system", after_client, a_before, after_wall)
+        writer.write("steps", client_ms=before_client, clock_source="system",
+                     wall_ms=before_wall, index=index, op=op, note=note,
+                     result=str(result)[:4000],
+                     after_client_ms=after_client, after_wall_ms=after_wall,
+                     error=error_text or None)
+        log("step", index, op, note, str(result)[:300])
+        if error_text and not step.get("optional"):
+            raise RuntimeError(f"script step {index} ({op}) failed: {error_text}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(epilog=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2007,6 +2415,15 @@ def main() -> int:
     parser.add_argument("--fight-interval", type=float, default=1.1)
     parser.add_argument("--fight-seconds", type=float, default=0.0,
                         help="record this long after the last key (0 = a little over one interval)")
+    parser.add_argument("--script", type=Path, default=None,
+                        help="JSON scenario run instead of --fight-keys: a list of "
+                             "mark/sleep/key/chat/lua/spawn/findtarget/clear_target/"
+                             "self_target/set_slots/buff/wait_target_dead/snapshot ops")
+    parser.add_argument("--action-slots", default="",
+                        help="comma-separated action bar slots sampled every frame "
+                             "(e.g. 1-10); writes the actions channel")
+    parser.add_argument("--hook-ui-sounds", action="store_true",
+                        help="record X2Sound PlayUISound/PlaySound calls (the UI refusal sound)")
     parser.add_argument("--server-log", type=Path, default=None)
     parser.add_argument("--controller-lists", action="store_true",
                         help="also sample the old controller scheduler lists; needs the "
@@ -2046,6 +2463,12 @@ def main() -> int:
     memory_ui: dict = {}
     timer_resolution = False
     required = [name.strip() for name in args.required.split(",") if name.strip()]
+    action_slots = parse_slots(args.action_slots)
+    scenario: list[dict] | None = None
+    if args.script:
+        scenario = json.loads(args.script.read_text(encoding="utf-8"))
+        if not isinstance(scenario, list):
+            raise SystemExit("--script must hold a JSON list of scenario steps")
     started = time.monotonic()
     try:
         winmm = ctypes.WinDLL("winmm")
@@ -2084,6 +2507,10 @@ def main() -> int:
         log("installing chat hook", mcp.text("client_lua", pid=pid, target="ui", code=CHAT_HOOK))
         mcp.text("client_lua", pid=pid, target="ui",
                  code="local o=assert(_G.__combat_recorder) o.chat={} return 1")
+        if args.hook_ui_sounds:
+            log("sound hook", mcp.text("client_lua", pid=pid, target="ui", code=SOUND_HOOK))
+            mcp.text("client_lua", pid=pid, target="ui",
+                     code="local o=assert(_G.__combat_recorder) o.sound={} return 1")
         if args.server_log:
             server_offset = args.server_log.stat().st_size if args.server_log.exists() else 0
 
@@ -2189,45 +2616,36 @@ def main() -> int:
                                    code=lua_timer("cast", 1, UI_CAST_SAMPLE)))
         log("buff timer", mcp.text("client_lua", pid=pid, target="ui",
                                    code=lua_timer("buff", 1000, UI_BUFF_SAMPLE)))
+        if action_slots:
+            log("action timer", mcp.text(
+                "client_lua", pid=pid, target="ui",
+                code=lua_timer("action", 1, action_sample(action_slots))))
 
         sync = ClockSync(mcp, pid, clock, writer)
         sync.start()
         unit_sampler = UnitStateSampler(mcp, pid, clock, writer)
         unit_sampler.start()
-        flusher = LuaFlusher(mcp, pid, clock, writer)
+        flusher = LuaFlusher(mcp, pid, clock, writer, action=bool(action_slots),
+                             sound=args.hook_ui_sounds)
         flusher.start()
         sampler = MemorySampler(mem, clock, writer, base, actor, victim_unit,
                                 caster_ctrl, victim_ctrl, victim_id,
                                 controllers=args.controller_lists)
         sampler.start()
 
-        keys = [key.strip() for key in args.fight_keys.split(",") if key.strip()]
-        wall0 = time.monotonic()
-        for index, key in enumerate(keys):
-            target_time = wall0 + index * args.fight_interval
-            delay = target_time - time.monotonic()
-            if delay > 0:
-                time.sleep(delay)
-            before_client, before_wall, b_after, _ = read_clock(mcp, pid, "system")
-            if before_client is not None:
-                clock.add("system", before_client, before_wall, b_after)
-            try:
-                reply = mcp.text("client_input", pid=pid, key=key, duration_ms=80)
-            except Exception as error:
-                reply = "error: " + str(error)
-            after_client, a_before, after_wall, _ = read_clock(mcp, pid, "system")
-            if after_client is not None:
-                clock.add("system", after_client, a_before, after_wall)
-            event = {"key": key, "before_wall_ms": before_wall,
-                     "before_client_ms": before_client, "after_client_ms": after_client,
-                     "after_wall_ms": after_wall, "result": reply}
-            inputs.append(event)
-            if before_client is not None:
-                writer.write("inputs", client_ms=before_client, clock_source="system",
-                             wall_ms=before_wall, key=key, duration_ms=80,
-                             before_client_ms=before_client, after_client_ms=after_client,
-                             after_wall_ms=after_wall, result=reply)
-            log("key", key, "at", round(time.monotonic() - wall0, 2), reply)
+        if scenario is not None:
+            log("script steps", len(scenario))
+            run_script(mcp, pid, clock, writer, scenario, inputs, player_id)
+        else:
+            keys = [key.strip() for key in args.fight_keys.split(",") if key.strip()]
+            wall0 = time.monotonic()
+            for index, key in enumerate(keys):
+                target_time = wall0 + index * args.fight_interval
+                delay = target_time - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+                reply = press_key(mcp, pid, clock, writer, inputs, key, 80)
+                log("key", key, "at", round(time.monotonic() - wall0, 2), reply)
         tail = args.fight_seconds or (args.fight_interval + 1.0)
         time.sleep(tail)
     except BaseException as error:
@@ -2248,14 +2666,16 @@ def main() -> int:
             except Exception as error:
                 log("driver reconnect failed:", error)
             if pid:
-                for target, name in (("system", "anim"), ("ui", "cast"), ("ui", "buff")):
+                for target, name in (("system", "anim"), ("ui", "cast"),
+                                     ("ui", "buff"), ("ui", "action")):
                     try:
                         stop_timer(mcp, pid, target, name)
                     except Exception:
                         pass
             if clock.epoch is not None:
                 try:
-                    drain_lua(mcp, pid, clock, writer)
+                    drain_lua(mcp, pid, clock, writer,
+                              action=bool(action_slots), sound=args.hook_ui_sounds)
                 except Exception as error:
                     log("final drain failed:", error)
             try:

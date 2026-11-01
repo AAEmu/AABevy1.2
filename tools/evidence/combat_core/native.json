@@ -1,0 +1,424 @@
+{
+  "schema": "aabevy.combat-core-native/v1",
+  "date": "2026-11-01",
+  "client": "ArcheAge 1.2 r208022, pid 77088, hidden; account clienttest, character Combatt1 (level 45, Battlerage/Sorcery/Auramancy, one-hand sword 21377)",
+  "server": "AAEmu lane combatcap (our server replies are stimulus, not 1.2 evidence)",
+  "capture_root": "<capture-root>/2026-11-01-combat-k2k3",
+  "runs": {
+    "run": {
+      "status": "ok",
+      "self_check": true,
+      "channels": {
+        "gcd": 47227,
+        "anim_state": 5096,
+        "castbar": 5096,
+        "actions": 5096,
+        "inputs": 31,
+        "steps": 141,
+        "chat": 264
+      },
+      "memory_ui": {
+        "status": "confirmed",
+        "offset_ms": 24.0,
+        "spread_ms": 1,
+        "pairs": 4,
+        "residual_max_ms": null
+      }
+    },
+    "run3": {
+      "status": "ok",
+      "self_check": true,
+      "channels": {
+        "gcd": 10901,
+        "anim_state": 1165,
+        "castbar": 1165,
+        "actions": 1165,
+        "inputs": 11,
+        "steps": 53,
+        "chat": 183
+      },
+      "memory_ui": {
+        "status": "low-confidence",
+        "offset_ms": 19,
+        "spread_ms": 0,
+        "pairs": 1,
+        "residual_max_ms": null
+      }
+    },
+    "run2": {
+      "status": "invalid",
+      "reason": "the character was dead; every skill answered 'Can't be used while dead.'",
+      "self_check": false
+    }
+  },
+  "k2": {
+    "auto_attack": {
+      "key": "3",
+      "slot": 3,
+      "skill_id": 2,
+      "first_press": {
+        "input_row": {
+          "schema": "aabevy.combat-recorder/v2",
+          "channel": "inputs",
+          "seq": 0,
+          "wall_ms": 326516826.9,
+          "client_ms": 815051,
+          "t_ms": 9806,
+          "clock": "system",
+          "native_ms": 800670,
+          "key": "3",
+          "duration_ms": 80,
+          "before_client_ms": 800670.0,
+          "after_client_ms": 800763.0,
+          "after_wall_ms": 326516962.0598,
+          "result": "pressed (automatic release scheduled)",
+          "note": "auto-attack key once"
+        },
+        "first_attack_anim_t_ms": 10086,
+        "delay_ms_from_before_stamp": 280,
+        "first_attack_state": "onehand_co_attack_r_slash+Combat Start"
+      },
+      "swing_anim_starts_t_ms": [
+        10086,
+        12085,
+        14082,
+        16083,
+        18125,
+        20114,
+        22106,
+        24141,
+        26126,
+        28130,
+        30161,
+        32157,
+        34167,
+        36168,
+        38163,
+        40187,
+        42223,
+        44214
+      ],
+      "swing_cadence_ms": [
+        1999,
+        1997,
+        2001,
+        2042,
+        1989,
+        1992,
+        2035,
+        1985,
+        2004,
+        2031,
+        1996,
+        2010,
+        2001,
+        1995,
+        2024,
+        2036,
+        1991
+      ],
+      "target_hp_zero_t_ms": 45691,
+      "target_lost_t_ms": 58550,
+      "stance_1_to_0_t_ms": 59322,
+      "stance_exit_after_target_lost_ms": 772,
+      "stance_exit_after_no_target_press_ms": 613,
+      "weapon_active_transitions": [
+        [
+          10061,
+          0,
+          1
+        ],
+        [
+          143899,
+          1,
+          0
+        ],
+        [
+          146304,
+          0,
+          1
+        ],
+        [
+          226960,
+          1,
+          0
+        ]
+      ],
+      "no_target_press_t_ms": 58709,
+      "repress": {
+        "input": {
+          "schema": "aabevy.combat-recorder/v2",
+          "channel": "inputs",
+          "seq": 3,
+          "wall_ms": 326575608.7,
+          "client_ms": 873833,
+          "t_ms": 68588,
+          "clock": "system",
+          "native_ms": 859404,
+          "key": "3",
+          "duration_ms": 80,
+          "before_client_ms": 859404.0,
+          "after_client_ms": 859494.0,
+          "after_wall_ms": 326575689.9951,
+          "result": "pressed (automatic release scheduled)",
+          "note": "re-press mid-fight"
+        },
+        "wait": {
+          "schema": "aabevy.combat-recorder/v2",
+          "channel": "steps",
+          "seq": 24,
+          "wall_ms": 326581870.8,
+          "client_ms": 880095,
+          "t_ms": 74850,
+          "clock": "system",
+          "native_ms": 865661,
+          "index": 24,
+          "op": "wait_target_dead",
+          "note": "did the re-press stop the swings?",
+          "result": "error: RuntimeError: target did not die: {'buff_count': 0, 'buffs': {}, 'debuff_count': 0, 'debuffs': {}, 'distance': 3.04017162, 'health': 2454, 'max_health': 3544, 'name': 'rat_brown ', 'present': True, 'unit': 'target', 'unit_id': '1e65'}",
+          "after_client_ms": 890738.0,
+          "after_wall_ms": 326606940.7653,
+          "error": "RuntimeError: target did not die: {'buff_count': 0, 'buffs': {}, 'debuff_count': 0, 'debuffs': {}, 'distance': 3.04017162, 'health': 2454, 'max_health': 3544, 'name': 'rat_brown ', 'present': True, 'unit': 'target', 'unit_id': '1e65'}"
+        }
+      },
+      "walk": {
+        "input": {
+          "schema": "aabevy.combat-recorder/v2",
+          "channel": "inputs",
+          "seq": 5,
+          "wall_ms": 326619903.7,
+          "client_ms": 918128,
+          "t_ms": 112883,
+          "clock": "system",
+          "native_ms": 903663,
+          "key": "s",
+          "duration_ms": 2500,
+          "before_client_ms": 903663.0,
+          "after_client_ms": 903852.0,
+          "after_wall_ms": 326620051.9828,
+          "result": "pressed (automatic release scheduled)",
+          "note": "walk away mid-fight"
+        },
+        "run_state_t_ms": 113119,
+        "distance_at_110274": 2.82,
+        "distance_at_113454": 4.08,
+        "distance_at_114592": 7.69,
+        "distance_at_115540": 10.47
+      },
+      "out_of_range_press": {
+        "schema": "aabevy.combat-recorder/v2",
+        "channel": "inputs",
+        "seq": 6,
+        "wall_ms": 326624465.4,
+        "client_ms": 922689,
+        "t_ms": 117444,
+        "clock": "system",
+        "native_ms": 908221,
+        "key": "3",
+        "duration_ms": 80,
+        "before_client_ms": 908221.0,
+        "after_client_ms": 908322.0,
+        "after_wall_ms": 326624526.0326,
+        "result": "pressed (automatic release scheduled)",
+        "note": "auto-attack out of range"
+      },
+      "gcd_at_presses": [
+        {
+          "press_t_ms": 9806,
+          "max_total": 1000,
+          "max_remaining": 0,
+          "gcd_rise": false
+        },
+        {
+          "press_t_ms": 66794,
+          "max_total": 1000,
+          "max_remaining": 0,
+          "gcd_rise": false
+        },
+        {
+          "press_t_ms": 68588,
+          "max_total": 1000,
+          "max_remaining": 0,
+          "gcd_rise": false
+        },
+        {
+          "press_t_ms": 110274,
+          "max_total": 1000,
+          "max_remaining": 0,
+          "gcd_rise": false
+        },
+        {
+          "press_t_ms": 117444,
+          "max_total": 1000,
+          "max_remaining": 0,
+          "gcd_rise": false
+        }
+      ]
+    },
+    "answers": {
+      "first_swing_delay": "the first attack clip starts 280 ms after the key-press before-stamp (187 ms after the driver returned); the first damage of that swing is at 1.08 s; the target was already 155 HP down at the press, so the pre-run auto-attack state is not clean",
+      "auto_repeat": "one press repeats the swing (client attack clip every ~2.0 s) until the target dies; the re-press toggles it off after in-flight swings",
+      "stance_exit": "stance_perm 1->0 0.77 s after the target/corpse was lost and 0.61 s after the fight-ending no-target press; UnitCombatState false at the same frame. The 13.6 s from the last hit is the corpse/target lifetime, not a client 10 s timer",
+      "battle_start_end": "the 'Combat Start' overlay is part of the first attack clip at t=10086; no chat 'Battle End'; the client combat state goes false at t=59323 and the stance byte 1->0 at t=59322",
+      "repress": "toggles the auto-attack off: target HP 3317 at t=67344 -> 2454 at t=99332, then stable for the 25 s wait; no attack clip after the in-flight swings",
+      "walk_away": "walking switches to onehand_combat_RUN at t=113119 and stops the attack clips; the target stays at its spawn (distance 3.0 -> 10.5 m); the post-walk press at t=117394 produces no clip and no StartSkill",
+      "gcd_exempt": "the auto-attack never changes the cooldown-manager pair (0/1000 before, during and after the presses); skill 2 is the GCD-exempt action"
+    }
+  },
+  "k3": {
+    "recall": {
+      "cast_start_t_ms": 10217,
+      "last_cast_row_t_ms": 18637,
+      "action_slot_1": {
+        "at_start": {
+          "cd_ex": "1000,905,0,0",
+          "cd": "1000,905",
+          "type": "Spell",
+          "repeat": "false",
+          "current": "false",
+          "empty": "false"
+        },
+        "after_1s": {
+          "cd_ex": "1000,3,0,0",
+          "cd": "1000,3",
+          "type": "Spell",
+          "repeat": "false",
+          "current": "false",
+          "empty": "false"
+        }
+      },
+      "answer": "the 10 s cast bar is present (total 10000); only the 1000 ms GCD is on the slot during the cast, the 30 min skill cooldown is not started at the request"
+    },
+    "cd_10152": {
+      "rows": [
+        {
+          "t_ms": 46247,
+          "cd_ex": "30000,29816,30000,29816"
+        },
+        {
+          "t_ms": 47167,
+          "cd_ex": "30000,28895,30000,28895"
+        }
+      ]
+    },
+    "gcd_per_skill": {
+      "12026": {
+        "no_buff_ms": 1000,
+        "buff_3024_ms": 500
+      },
+      "18132": {
+        "no_buff_ms": 2000,
+        "buff_3024_ms": 1000,
+        "note": "the memory global is 2000 ms; the action slot shows a 500 ms custom cooldown"
+      },
+      "11991": {
+        "no_buff_ms": 1000,
+        "buff_3024_ms": 500,
+        "cast_ms": 1500
+      },
+      "10752": {
+        "no_buff_ms": 1000,
+        "cast_ms": 1000
+      },
+      "10455": {
+        "no_buff_ms": 500,
+        "note": "ignore_global_cooldown is not a zero GCD; the client uses a 500 ms GCD"
+      },
+      "10152": {
+        "no_buff_ms": 1000,
+        "cooldown_ms": 30000
+      },
+      "10594": {
+        "no_buff_ms": 1000,
+        "cast_ms": 10000,
+        "cooldown_ms": 1800000
+      },
+      "2": {
+        "no_buff_ms": 0,
+        "note": "auto-attack is GCD-exempt"
+      }
+    },
+    "second_press": {
+      "during_cast_11991": "12026 at t=177900 during the Health Lift cast: 'Already performing an action.' at t=177952; no StartSkill; the cast runs to its end",
+      "during_gcd_18132": "the same skill at t=34029, 550 ms into a 2000 ms GCD: silently dropped (no text, no new GCD, no StartSkill)",
+      "during_gcd_frenzy": "18132 at t=40659, 420 ms into Frenzy's 500 ms GCD: queued; a new 2000 ms GCD starts at t=41132 and the server logs StartSkill 18132 at 10:36:26",
+      "after_gcd": "18132 at t=36859 after the GCD is accepted",
+      "rule": "a second press is buffered only when the current GCD ends within about 0.25 s; otherwise it is dropped; during a cast it is refused"
+    },
+    "refusals": {
+      "run": [
+        {
+          "t_ms": 147151,
+          "text": "Can't be used in combat."
+        },
+        {
+          "t_ms": 164656,
+          "text": "Can't be used right now."
+        },
+        {
+          "t_ms": 177952,
+          "text": "Already performing an action."
+        },
+        {
+          "t_ms": 193323,
+          "text": "Can't be used right now."
+        },
+        {
+          "t_ms": 222075,
+          "text": "Can't be used right now."
+        },
+        {
+          "t_ms": 225505,
+          "text": "12  cFFFFFFFF[buff] r  cFFFF0000No target unit selected r"
+        },
+        {
+          "t_ms": 228635,
+          "text": "Can't be used right now."
+        }
+      ],
+      "run3": [
+        {
+          "t_ms": 897,
+          "text": "12 Target is already alive"
+        },
+        {
+          "t_ms": 47357,
+          "text": "Can't be used right now."
+        }
+      ],
+      "order": [
+        "cast in progress ('Already performing an action.')",
+        "combat restriction ('Can't be used in combat.')",
+        "skill cooldown ('Can't be used right now.')",
+        "GCD: silent buffer/drop (no text)",
+        "range (probe only, not recorded: 'Target is too far.' for a skill; 'Invalid target.' for auto-attack)",
+        "dead (run2 only, invalid run: 'Can't be used while dead.')"
+      ],
+      "sound": "not captured: the lane starts the client with -aaemu-silent and s_SoundEnable 0; the X2Sound hook saw no PlayUISound calls"
+    },
+    "cooldown_display": {
+      "instant_10152": "30000,30000 at t=46057 (+178 ms after the t=45879 press), then 29816 at t=46247 -> starts at the request",
+      "instant_12026": "21000,14073 at t=222058; the countdown matches the t=215083 press -> starts at the request",
+      "cast_10594": "no 1800000 during the 10 s cast; the slot shows only 1000,858 -> 1000,0; the fire start was not observed (cancelled at 8.3 s to avoid the zone change)"
+    },
+    "missing_4s_cast": "the 3.5 s Rampage (14166) is learned server-side but not in the client's general skill book: SetActionSpell(9,14166) left the slot empty (9:None:?:true at t=128608). The 4 s skills 11347/14679 are also general skills not in the book. No ~4 s cast is available on this character without a new character/learn path"
+  },
+  "verification": {
+    "K2_first_swing": "CAP (client animation + input bracket; the pre-press target damage makes the exact start state ambiguous)",
+    "K2_toggle_repeat_walk": "CAP (client animation/HP; the server's damage cadence differs)",
+    "K2_stance_exit": "CAP (client stance byte; the 10 s/13.6 s corpse and combat linger are our server's behaviour)",
+    "K3_gcd": "CAP (cooldown-manager pair, 5 ms); the 2000 ms for 18132 is client-observed but its producer (plot vs server SCSkillStarted) is not proven",
+    "K3_buff": "CAP (the client halves the GCD after the server adds buff 3024)",
+    "K3_cast_bar": "CAP (UnitCastingInfo; UI frame 52 ms)",
+    "K3_cooldown": "CAP (action slot GetActionCooldownEx; instant at request, cast start not at request)",
+    "K3_second_press": "CAP (chat + GCD + server StartSkill trace)",
+    "K3_refusals": "CAP for the recorded texts; range texts are probe-only"
+  },
+  "caveats": [
+    "Our server's replies (SCCombatCleared, SCSkillStarted, damage ticks, refusals) are stimulus, not 1.2 server evidence.",
+    "The character died before run2 (the gap while the runs were analysed); run2 is invalid and kept only for the 'Can't be used while dead.' row.",
+    "The first K2 target was already 155 HP down at the find; the auto-attack may have been on from the pre-run probe. The toggle conclusion rests on the re-press and no-target press.",
+    "The weapon byte weapon_active stayed 1 after the first draw; no sheathe was observed. The stance evidence is the stance_perm byte.",
+    "The client's system clock drifted 813 ppm in run; the UI clock is the stable reference. Input-to-UI comparisons are within the 52 ms frame plus the clock residual."
+  ]
+}
