@@ -7,14 +7,20 @@ cooldown-manager GCD pair, the cast bar, caster/victim animation state,
 `UnitBuff`/`UnitDeBuff`, `client_unit_state` regen samples and the chat /
 system-message log.
 
-The client clocks are sampled inside a recorder bracket (``wall_ms`` before and
-after the read); the recorder fits an offset and drift line per clock over the
-whole run and remaps every row through that final fit.  A read that fails
-(`ReadProcessMemory` error) is written as a marked ``read_failed`` row and stops
-the sampler with an error instead of silently producing zeros.  The Lua buffers
-are drained every 5 s, so a disconnect loses at most a few seconds; the chat
-hooks and ``_G.CS`` timers are removed at the end in both Lua states, also with
-``--keep-client``.
+The client clocks are sampled inside a recorder bracket taken under the MCP
+lock (``wall_ms`` before and after the request); the recorder fits the offset
+per clock over the whole run and remaps every row through that final fit.  The
+slope is held at 1 unless the samples span more than 60 s (the unconstrained
+slope and its standard error are still reported).  Memory rows are on a
+different clock edge than the Lua rows: the client answers Lua only on a frame
+and returns that frame's start time, so the recorder measures the memory-to-UI
+offset from matched GCD rises and cast starts in each run and shifts the memory
+rows by it.  A read that fails (`ReadProcessMemory` error) is retried for 5 s
+with marked ``gap`` rows; if the actor never returns, a ``read_failed`` row
+stops the sampler with an error instead of silently producing zeros.  The Lua
+buffers are drained every 5 s, so a disconnect loses at most a few seconds; the
+chat hooks and ``_G.CS`` timers are removed at the end in both Lua states, also
+with ``--keep-client``.
 
 The client is started by the lane (`Scripts/live-stack.sh client`), not by this
 tool.  The recorder hides it, verifies `hidden=1` in `client_status`, and stops
@@ -56,8 +62,11 @@ running (the hooks and timers are still removed) so a failed run can be retried
 without starting the client again; stop it by pid afterwards.
 
 Exit status: `0` when the self-check passes, `2` when a required channel is
-empty, the GCD pair never rises after a press, or a channel's `client_ms` runs
-backwards, `1` on a setup failure (including a failed memory read).
+empty, the GCD never completes a press-linked rise, the measured memory-to-UI
+alignment is worse than 25 ms, or a channel's `client_ms` runs backwards, `1`
+on a setup failure (including a failed memory read or an interrupt).  A
+`KeyboardInterrupt` is recorded in `self_check.json` as a failure, cleanup
+runs, and the interrupt is re-raised.
 
 ## Channels
 
@@ -86,14 +95,17 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
  ...channel fields...}
 ```
 
-* `wall_ms` is the recorder's `time.time()` clock.
+* `wall_ms` is the recorder's monotonic `perf_counter` clock in milliseconds
+  (not epoch time); it never jumps with the system clock.
 * `client_ms` is the unified client clock: the UI clock (`X2Time:GetUiMsec`)
   for UI rows, the system clock (`System.GetCurrTime()*1000`) mapped through
   the fitted UI/system clock pair for system rows, and the fitted clock model
   for memory and driver-template rows.  The clock used for the row is in
   `clock` (`ui`, `system` or `estimate`).  After the run every row is rewritten
-  with the final fit, so `client_ms` is monotonic per channel and comparable
-  across channels.
+  with the final fit; estimate rows are then shifted by the measured
+  memory-to-UI offset (27 ms in run5) so they align with the UI cast clock.
+  `self_check.json`'s `memory_ui` block reports the offset, its spread and the
+  residual after the shift; the clock residuals are fit quality only.
 * `native_ms` is the raw value of that row's own clock when it has one (UI or
   system); it is absent for estimated rows.
 * `t_ms` is `client_ms` minus the fitted client time at the first clock
@@ -105,7 +117,8 @@ Every file is `<channel>.jsonl` in `--run-dir`; each line is one JSON object.
 `cast_channel_delay` (the four cast slots at `unit+0x3ac4`), `stance_perm`,
 `combat_deadline`, `combat_in`, `latch_a`, `latch_b`, `weapon_active`,
 `weapon_slots`, `visual_byte`, `player_unit`, `caster_ctrl`, `victim_ctrl`.
-A failed read row instead carries `read_failed` and `error`.
+A failed read row instead carries `read_failed` and `error`; a row written while
+the actor is unavailable carries `gap` and `reason` and has no GCD fields.
 
 `anim_state` and `castbar` carry `seamless_origin`; the client's positions are
 seamless-local, so global = local + origin (the origin sampled in the UI camera
@@ -161,17 +174,27 @@ lane dry run therefore reads the caster/victim animation list through
 * `missing`: required channels with zero rows (default:
   `clock_sync,anim_state,gcd,castbar,unit_state,chat,inputs`);
 * `gcd.changed`: true when a recorded key press is followed within 3 s by a
-  **rise** of `gcd_remaining` or a change of `gcd_total`; countdown-only changes
-  do not count (`gcd.countdown_ticks_rejected` counts those);
-* `gcd.pressed_changes`: the key/change pairs that prove a press started the
-  GCD;
+  rise of `gcd_remaining` that reaches about `gcd_total` and then falls to 0
+  within `gcd_total` plus 250 ms; countdown-only changes, short rises, slow
+  falls and rising counters do not count (`gcd.countdown_ticks_rejected`,
+  `gcd.incomplete_rises` and `gcd.short_or_slow_rises` count the rejects);
+* `gcd.changed` also requires most complete rises to follow a key press
+  (`linked_complete_rises` must be more than half of `complete_rises`);
+* `gcd.pressed_changes`: the press-linked complete runs with their start/end,
+  peak, total and duration;
 * `quality.monotonic`: per channel, whether `client_ms` never runs backwards
   (count, largest backstep and the first offender); a backstep fails the check;
 * `quality.rates`: per channel, the measured step between rows (median, p95 and
   max wall delta), not the requested timer interval;
-* `clock`: per client clock, the fitted offset and drift, the sample count and
-  round trips, the residual min/median/max/RMS and the residual of the
-  best-round-trip sample;
+* `memory_ui`: the measured memory-to-UI offset (median of GCD-rise minus
+  matched cast-start), its spread/stdev, the pairs, and the residual after the
+  shift; this is the real cross-channel fit check (`ok` requires the residual
+  maximum to stay within 25 ms when measurable);
+* `clock`: per client clock, the fitted offset, the applied drift (0 unless the
+  span exceeds 60 s), the unconstrained fitted drift and its standard error,
+  the sample count and round trips, and the residual min/median/max/RMS.  The
+  residual describes how well the wall-to-client line reproduces the clock
+  reads, not the cross-channel accuracy;
 * `animations.controller_lists`: whether the opt-in scheduler lists were
   sampled; `caster_ctrl` / `victim_ctrl` and `tried` name the resolved
   addresses when they were.
@@ -201,6 +224,23 @@ re-arms on the next frame, and this hidden client renders at about 19 fps
 Python memory sampler uses `timeBeginPeriod(1)` and a `perf_counter` busy-wait
 for its 5 ms cadence; before that it inherited the 15.6 ms Windows timer.
 
+The memory-to-UI alignment measured on run5: offset **27 ms**, spread 6 ms
+(stdev 2.5 ms) over 3 matched Flamebolt casts; after shifting the memory rows
+the three GCD rises sit at +4, -2 and 0 ms from their cast starts (median 0,
+max 4 ms).  The recomputed run is in `run5-recomputed/`; the raw run is
+untouched.
+
+## Tests
+
+```bash
+python -m unittest discover -s tools/combat-side -p "test_*.py" -v
+```
+
+The offline tests cover the drift gate, the completed-rise GCD rule (including
+an incrementing-counter negative case and the "most rises follow a press"
+majority), the memory-to-UI measurement and shift, stale-reply skipping, the
+KeyboardInterrupt self-check, and sampler gap recovery.
+
 ## Limits
 
 * The client clock was read from `X2Time:GetUiMsec` (UI) and
@@ -219,3 +259,15 @@ for its 5 ms cadence; before that it inherited the 15.6 ms Windows timer.
   and the unit/model pointer chain did not expose the old scheduler lists.  The
   dry run reads the caster and victim animation list through `anim_state` and
   reports the scheduler list as not read.
+* A zone change or respawn longer than the 5 s recovery grace still stops the
+  sampler.  The victim pointer is refreshed by its object id only; a respawn
+  that gives it a new id is not re-targeted.
+* The memory-to-UI offset is measurable only when a GCD rise has a cast-bar
+  start.  Instant skills without a cast bar still count for the GCD check but
+  cannot contribute a cross-channel pair; a run with no casts leaves
+  `memory_ui.measurable=false` and does not gate the self-check.
+* Drift is not applied on runs shorter than 60 s; the slope reported there is
+  the unconstrained estimate with its standard error, not a correction.
+* Gap rows are written while the actor is unavailable, so the `gcd` channel can
+  contain rows with `gap=true` and no GCD fields; they are skipped by the GCD
+  checks and included in the monotonic/rate reports.

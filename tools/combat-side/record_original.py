@@ -53,12 +53,14 @@ import json
 import math
 import os
 import re
+import statistics
 import struct
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 SCHEMA = "aabevy.combat-recorder/v2"
 DUMP_BASE = 0x38FF0000
@@ -94,7 +96,8 @@ def log(*a: object) -> None:
 
 
 def ms_now() -> float:
-    return time.time() * 1000.0
+    """Monotonic recorder milliseconds (never jumps with the system clock)."""
+    return time.perf_counter_ns() / 1_000_000.0
 
 
 def sleep_until(deadline: float) -> None:
@@ -112,20 +115,23 @@ def sleep_until(deadline: float) -> None:
 
 
 def read_clock(mcp: Mcp, pid: int, target: str) -> tuple[float | None, float, float, str | None]:
-    """Read one client clock inside a recorder bracket; return value and stamps."""
-    before = ms_now()
+    """Read one client clock inside a bracket taken under the MCP lock."""
+    bracket: dict[str, float] = {}
     try:
         if target == "system":
             text = mcp.text("client_lua", pid=pid, target="system",
-                            code="return System.GetCurrTime()")
+                            code="return System.GetCurrTime()", bracket=bracket)
             value: float | None = float(text.strip()) * 1000.0
         else:
             text = mcp.text("client_lua", pid=pid, target="ui",
-                            code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''")
+                            code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''",
+                            bracket=bracket)
             value = float(text.strip()) if text.strip() else None
-        return value, before, ms_now(), None
+        return (value, bracket.get("before", ms_now()),
+                bracket.get("after", ms_now()), None)
     except Exception as error:
-        return None, before, ms_now(), str(error)
+        return (None, bracket.get("before", ms_now()),
+                bracket.get("after", ms_now()), str(error))
 
 
 def clean(value: object) -> str:
@@ -138,66 +144,107 @@ def s32(value: int) -> int:
 
 
 class Mcp:
-    """Minimal serialised newline JSON-RPC client for ``aaemu-clientdriver mcp``."""
+    """Minimal serialised newline JSON-RPC client for ``aaemu-clientdriver mcp``.
+
+    The driver runs in its own process group so a console Ctrl-C aimed at the
+    recorder does not kill it.  A reply left unread by an interrupted call is
+    skipped by id on the next call, and ``resync`` restarts a dead driver
+    before cleanup so the tail of the run can still be drained.
+    """
 
     def __init__(self, driver: Path, dll: Path, launcher: Path, client: Path,
                  password_file: Path | None, login: str, user: str, artifact: Path):
-        args = [str(driver), "mcp", "--dll", str(dll), "--client", str(client),
-                "--launcher", str(launcher), "--login", login, "--user", user,
-                "--artifact-dir", str(artifact)]
+        self.args = [str(driver), "mcp", "--dll", str(dll), "--client", str(client),
+                     "--launcher", str(launcher), "--login", login, "--user", user,
+                     "--artifact-dir", str(artifact)]
         if password_file is not None:
-            args += ["--password-file", str(password_file)]
-        self.process = subprocess.Popen(args, stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.DEVNULL, text=True,
-                                        encoding="utf-8")
-        self.sequence = 0
+            self.args += ["--password-file", str(password_file)]
         self.lock = threading.Lock()
+        self.process: subprocess.Popen | None = None
+        self.sequence = 0
+        self.skipped = 0
+        self.start()
+
+    def start(self) -> None:
+        self.process = subprocess.Popen(
+            self.args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        self.sequence = 0
+        assert self.process.stdin and self.process.stdout
         self.call("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                  "clientInfo": {"name": "combat-recorder", "version": "2"}})
-        assert self.process.stdin and self.process.stdout
         self.process.stdin.write(json.dumps({"jsonrpc": "2.0",
                                              "method": "notifications/initialized"}) + "\n")
         self.process.stdin.flush()
 
-    def call(self, method: str, params: object = None) -> object:
+    def _read_matching(self) -> dict:
+        """Read until the reply to the current request; skip stale replies."""
+        assert self.process and self.process.stdout
+        for _ in range(32):
+            line = self.process.stdout.readline()
+            if not line:
+                raise RuntimeError("driver MCP closed stdout")
+            response = json.loads(line)
+            if response.get("id") == self.sequence:
+                return response
+            self.skipped += 1
+        raise RuntimeError(f"driver MCP sent no reply for id {self.sequence}")
+
+    def call(self, method: str, params: object = None,
+             bracket: dict[str, float] | None = None) -> object:
         with self.lock:
-            assert self.process.stdin and self.process.stdout
+            assert self.process and self.process.stdin and self.process.stdout
             self.sequence += 1
             request: dict[str, object] = {"jsonrpc": "2.0", "id": self.sequence,
                                           "method": method}
             if params is not None:
                 request["params"] = params
+            if bracket is not None:
+                bracket["before"] = ms_now()
             self.process.stdin.write(json.dumps(request) + "\n")
             self.process.stdin.flush()
-            line = self.process.stdout.readline()
-            if not line:
-                raise RuntimeError("driver MCP closed stdout")
-            response = json.loads(line)
-            if response.get("id") != self.sequence:
-                raise RuntimeError(f"driver MCP id mismatch: {response}")
+            response = self._read_matching()
+            if bracket is not None:
+                bracket["after"] = ms_now()
             if "error" in response:
                 raise RuntimeError(str(response["error"]))
             return response["result"]
 
-    def tool(self, name: str, **arguments: object) -> dict:
-        result = self.call("tools/call", {"name": name, "arguments": arguments})
+    def tool(self, name: str, bracket: dict[str, float] | None = None,
+             **arguments: object) -> dict:
+        result = self.call("tools/call", {"name": name, "arguments": arguments},
+                           bracket=bracket)
         if result.get("isError"):
             raise RuntimeError("\n".join(c.get("text", "")
                                          for c in result.get("content", [])))
         return result
 
-    def text(self, name: str, **arguments: object) -> str:
-        return "\n".join(c["text"] for c in self.tool(name, **arguments)["content"]
+    def text(self, name: str, bracket: dict[str, float] | None = None,
+             **arguments: object) -> str:
+        return "\n".join(c["text"] for c in self.tool(name, bracket=bracket)["content"]
                          if c.get("type") == "text")
 
+    def resync(self) -> None:
+        """Reconnect a driver that the interrupt killed; keep a live one."""
+        if self.process is None or self.process.poll() is not None:
+            self.close()
+            self.start()
+
     def close(self) -> None:
+        process = self.process
+        self.process = None
+        if process is None:
+            return
         try:
-            assert self.process.stdin
-            self.process.stdin.close()
-            self.process.wait(timeout=15)
+            if process.stdin:
+                process.stdin.close()
+            process.wait(timeout=5)
         except Exception:
-            self.process.kill()
+            try:
+                process.kill()
+            except Exception:
+                pass
 
 
 class MemoryReadError(RuntimeError):
@@ -281,22 +328,40 @@ class Mem:
         return 0
 
 
+class ClockFit(NamedTuple):
+    intercept: float       # client ms at the epoch wall
+    slope: float           # client ms per wall ms (1.0 when drift is not applied)
+    fitted_slope: float    # unconstrained weighted least-squares slope
+    slope_stderr: float    # weighted standard error of fitted_slope
+    span_ms: float         # span of the sample midpoints
+    drift_applied: bool
+
+
 class Clock:
-    """Client clock model: offset and drift fitted over bracketed samples.
+    """Client clock model: offset fitted over bracketed samples.
 
     One sample brackets a single client clock read between two recorder stamps.
     The read happened somewhere inside the bracket, so its wall time is the
     midpoint and its uncertainty is half the round trip.  Each clock gets a
     weighted least-squares line through all of its samples, weighted by
-    ``1 / rtt^2`` so the smallest round trips dominate.  Samples keep arriving
-    while the run goes on, and every row is remapped through the final fit when
-    the run ends.
+    ``1 / rtt^2`` so the smallest round trips dominate.  The slope is held at
+    1.0 unless the samples span more than ``DRIFT_SPAN_MS``; a shorter run
+    cannot separate drift from the frame-quantised read noise, and the fitted
+    slope is reported only as an unconstrained estimate with its standard
+    error.
+
+    Samples keep arriving while the run goes on, and every row is remapped
+    through the final fit when the run ends.  The fit measures how well the
+    wall-to-client mapping reproduces the clock reads; the per-run memory-to-UI
+    offset is measured separately from matched GCD rises and cast starts.
     """
+
+    DRIFT_SPAN_MS = 60_000.0
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.samples: dict[str, list[tuple[float, float, float]]] = {"system": [], "ui": []}
-        self.fits: dict[str, tuple[float, float] | None] = {"system": None, "ui": None}
+        self.fits: dict[str, ClockFit | None] = {"system": None, "ui": None}
         self.epoch: float | None = None
 
     def add(self, kind: str, client_ms: float, wall_before: float,
@@ -309,8 +374,8 @@ class Clock:
             if self.epoch is None:
                 self.epoch = midpoint
 
-    def _fit(self, kind: str) -> tuple[float, float] | None:
-        """Return (client at epoch, slope) for one clock; caller holds the lock."""
+    def _fit(self, kind: str) -> ClockFit | None:
+        """Return the fit for one clock; the caller holds the lock."""
         samples = self.samples[kind]
         if not samples:
             return None
@@ -318,24 +383,45 @@ class Clock:
         if cached is not None:
             return cached
         epoch = self.epoch if self.epoch is not None else samples[0][1]
-        sw = swx = swy = swxx = swxy = 0.0
-        for client, midpoint, rtt in samples:
-            x = midpoint - epoch
-            weight = 1.0 / max(rtt, 0.5) ** 2
-            sw += weight
-            swx += weight * x
-            swy += weight * client
-            swxx += weight * x * x
-            swxy += weight * x * client
-        denominator = sw * swxx - swx * swx
-        slope = (sw * swxy - swx * swy) / denominator if abs(denominator) > 1e-12 else 1.0
-        fit = ((swy - slope * swx) / sw, slope)
-        self.fits[kind] = fit
-        return fit
+        weighted = [(client, midpoint, 1.0 / max(rtt, 0.5) ** 2)
+                    for client, midpoint, rtt in samples]
+        sw = sum(weight for _, _, weight in weighted)
+        swx = sum(weight * (midpoint - epoch)
+                  for _, midpoint, weight in weighted)
+        swy = sum(weight * client for client, _, weight in weighted)
+        swxx = sum(weight * (midpoint - epoch) ** 2
+                   for _, midpoint, weight in weighted)
+        swxy = sum(weight * client * (midpoint - epoch)
+                   for client, midpoint, weight in weighted)
+        times = [midpoint for _, midpoint, _ in samples]
+        span = max(times) - min(times)
+        centered = swxx - swx * swx / sw
+        if abs(centered) > 1e-12:
+            fitted_slope = (sw * swxy - swx * swy) / (sw * centered)
+        else:
+            fitted_slope = 1.0
+        fitted_intercept = (swy - fitted_slope * swx) / sw
+        if len(samples) > 2 and centered > 1e-12:
+            residual_sq = sum(
+                weight * (client - (fitted_intercept + fitted_slope * (midpoint - epoch))) ** 2
+                for client, midpoint, weight in weighted)
+            slope_stderr = math.sqrt((residual_sq / (len(samples) - 2)) / centered)
+        else:
+            slope_stderr = math.inf
+        if span >= self.DRIFT_SPAN_MS:
+            fitted = ClockFit(fitted_intercept, fitted_slope, fitted_slope,
+                              slope_stderr, span, True)
+        else:
+            # client = intercept + (midpoint - epoch); intercept is the
+            # weighted mean of client - (midpoint - epoch).
+            intercept = sum(weight * (client - (midpoint - epoch))
+                            for client, midpoint, weight in weighted) / sw
+            fitted = ClockFit(intercept, 1.0, fitted_slope, slope_stderr, span, False)
+        self.fits[kind] = fitted
+        return fitted
 
-    def _best(self) -> tuple[tuple[float, float] | None, float | None]:
-        return (self._fit("ui") or self._fit("system"),
-                self.epoch)
+    def _best(self) -> tuple[ClockFit | None, float | None]:
+        return (self._fit("ui") or self._fit("system"), self.epoch)
 
     def estimate(self, wall_ms: float | None = None) -> int:
         wall = ms_now() if wall_ms is None else wall_ms
@@ -343,39 +429,37 @@ class Clock:
             fit, epoch = self._best()
         if fit is None or epoch is None:
             return int(round(wall))
-        return int(round(fit[0] + fit[1] * (wall - epoch)))
+        return int(round(fit.intercept + fit.slope * (wall - epoch)))
 
     def wall_for_ui(self, ui_ms: float) -> float:
         with self.lock:
             fit, epoch = self._best()
-        if fit is None or epoch is None or abs(fit[1]) < 1e-6:
+        if fit is None or epoch is None or abs(fit.slope) < 1e-6:
             return float(ui_ms)
-        return epoch + (float(ui_ms) - fit[0]) / fit[1]
+        return epoch + (float(ui_ms) - fit.intercept) / fit.slope
 
     def wall_for_system(self, system_ms: float) -> float:
         with self.lock:
             fit, epoch = self._fit("system"), self.epoch
-        if fit is None or epoch is None or abs(fit[1]) < 1e-6:
+        if fit is None or epoch is None or abs(fit.slope) < 1e-6:
             return float(system_ms)
-        return epoch + (float(system_ms) - fit[0]) / fit[1]
+        return epoch + (float(system_ms) - fit.intercept) / fit.slope
 
     def ui_for_system(self, system_ms: float) -> int:
         with self.lock:
             system_fit = self._fit("system")
             ui_fit = self._fit("ui")
             epoch = self.epoch
-        if system_fit is None or ui_fit is None or epoch is None or abs(system_fit[1]) < 1e-6:
+        if system_fit is None or ui_fit is None or epoch is None or abs(system_fit.slope) < 1e-6:
             return int(round(float(system_ms)))
-        wall = epoch + (float(system_ms) - system_fit[0]) / system_fit[1]
-        return int(round(ui_fit[0] + ui_fit[1] * (wall - epoch)))
+        wall = epoch + (float(system_ms) - system_fit.intercept) / system_fit.slope
+        return int(round(ui_fit.intercept + ui_fit.slope * (wall - epoch)))
 
     @property
     def start_client_ms(self) -> float | None:
         with self.lock:
-            fit, epoch = self._best()
-        if fit is None or epoch is None:
-            return None
-        return float(fit[0])
+            fit, _ = self._best()
+        return float(fit.intercept) if fit is not None else None
 
     def relative(self, client_ms: float | int | None) -> int | None:
         start = self.start_client_ms
@@ -389,7 +473,8 @@ class Clock:
             start = self._best()[0]
             out: dict[str, object] = {
                 "epoch_wall_ms": round(epoch, 1) if epoch is not None else None,
-                "start_client_ms": round(start[0], 1) if start is not None else None,
+                "start_client_ms": round(start.intercept, 1) if start is not None else None,
+                "wall_clock": "perf_counter",
             }
             for kind in ("system", "ui"):
                 fit = self._fit(kind)
@@ -397,19 +482,27 @@ class Clock:
                 if fit is None or epoch is None:
                     out[kind] = None
                     continue
-                residuals = [client - (fit[0] + fit[1] * (mid - epoch))
+                residuals = [client - (fit.intercept + fit.slope * (mid - epoch))
                              for client, mid, _ in samples]
                 absolute = sorted(abs(value) for value in residuals)
                 rtts = sorted(rtt for _, _, rtt in samples)
                 best_index = min(range(len(samples)), key=lambda i: samples[i][2])
+                fitted_ppm = (fit.fitted_slope - 1.0) * 1e6
                 out[kind] = {
                     "samples": len(samples),
-                    "offset_ms": round(fit[0] - epoch, 3),
-                    "drift_ppm": round((fit[1] - 1.0) * 1e6, 2),
+                    "span_s": round(fit.span_ms / 1000.0, 1),
+                    "offset_ms": round(fit.intercept - epoch, 3),
+                    "drift_ppm": round((fit.slope - 1.0) * 1e6, 2),
+                    "fitted_drift_ppm": round(fitted_ppm, 2),
+                    "drift_stderr_ppm": round(fit.slope_stderr * 1e6, 2)
+                    if math.isfinite(fit.slope_stderr) else None,
+                    "drift_applied": fit.drift_applied,
+                    "drift_warning": bool(fit.drift_applied and abs(fitted_ppm) > 200.0),
                     "residual_min_ms": round(absolute[0], 3),
                     "residual_median_ms": round(absolute[len(absolute) // 2], 3),
                     "residual_max_ms": round(absolute[-1], 3),
                     "residual_rms_ms": round(math.sqrt(sum(v * v for v in residuals) / len(residuals)), 3),
+                    "residual_is_fit_quality": True,
                     "rtt_min_ms": round(rtts[0], 3),
                     "rtt_median_ms": round(rtts[len(rtts) // 2], 3),
                     "rtt_max_ms": round(rtts[-1], 3),
@@ -494,31 +587,37 @@ class ClockSync(threading.Thread):
 
     def run(self) -> None:
         while not self.stop_event.is_set():
-            before = ms_now()
             system = ui = None
             system_error = ui_error = None
             system_rtt = ui_rtt = None
+            system_bracket: dict[str, float] = {}
             try:
                 text = self.mcp.text("client_lua", pid=self.pid, target="system",
-                                     code="return System.GetCurrTime()")
-                after = ms_now()
+                                     code="return System.GetCurrTime()",
+                                     bracket=system_bracket)
                 system = float(text.strip()) * 1000.0
+                before = system_bracket["before"]
+                after = system_bracket["after"]
                 self.clock.add("system", system, before, after)
                 system_rtt = after - before
             except Exception as error:
-                after = ms_now()
+                before = system_bracket.get("before", ms_now())
+                after = system_bracket.get("after", ms_now())
                 system_error = str(error)
-            ui_before = ms_now()
+            ui_bracket: dict[str, float] = {}
             try:
                 text = self.mcp.text("client_lua", pid=self.pid, target="ui",
-                                     code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''")
-                ui_after = ms_now()
+                                     code="local ok,t=pcall(function() return X2Time:GetUiMsec() end) if ok and t then return t end return ''",
+                                     bracket=ui_bracket)
+                ui_before = ui_bracket["before"]
+                ui_after = ui_bracket["after"]
                 ui = float(text.strip()) if text.strip() else None
                 if ui is not None:
                     self.clock.add("ui", ui, ui_before, ui_after)
                 ui_rtt = ui_after - ui_before
             except Exception as error:
-                ui_after = ms_now()
+                ui_before = ui_bracket.get("before", ms_now())
+                ui_after = ui_bracket.get("after", ms_now())
                 ui_error = str(error)
             wall = ((ui_before + ui_after) / 2.0 if ui is not None
                     else (before + after) / 2.0)
@@ -903,7 +1002,7 @@ class MemorySampler(threading.Thread):
     def __init__(self, mem: Mem, clock: Clock, writer: ChannelWriter, base: int,
                  actor: int, victim_unit: int, caster_ctrl: int, victim_ctrl: int,
                  victim_id: int = 0, controllers: bool = False,
-                 interval: float = 0.005):
+                 interval: float = 0.005, recovery: float = 5.0):
         super().__init__(daemon=True)
         self.mem = mem
         self.clock = clock
@@ -916,6 +1015,7 @@ class MemorySampler(threading.Thread):
         self.victim_ctrl = victim_ctrl
         self.controllers = controllers
         self.interval = interval
+        self.recovery = recovery
         self.stop_event = threading.Event()
         self.gcd_samples = 0
         self.gcd_nonzero = 0
@@ -962,7 +1062,8 @@ class MemorySampler(threading.Thread):
                                   ctrl=ctrl, **entry)
                 self.anim_samples += 1
 
-    def refresh(self) -> None:
+    def refresh(self) -> bool:
+        """Refresh the pointers; True when the actor address is readable."""
         local = self.mem.u32(self.base + (G_CONNECTION - DUMP_BASE))
         actor = self.mem.u32(local + 0x10C) if local else 0
         if actor and actor != self.actor:
@@ -971,25 +1072,48 @@ class MemorySampler(threading.Thread):
             self.caster_ctrl = 0
             if self.controllers:
                 self.caster_ctrl, _ = resolve_controller(self.mem, actor, None, "caster")
-        if not self.victim_id:
-            return
-        unit = 0
-        for key, candidate in walk_units(self.mem, self.base):
-            if key == self.victim_id:
-                unit = candidate
-                break
-        if unit and unit != self.victim_unit:
-            log("victim unit moved", hex(self.victim_unit or 0), "->", hex(unit))
-            self.victim_unit = unit
-            self.victim_ctrl = 0
-            if self.controllers:
-                self.victim_ctrl, _ = resolve_controller(self.mem, unit, None, "victim")
+        if self.victim_id:
+            unit = 0
+            for key, candidate in walk_units(self.mem, self.base):
+                if key == self.victim_id:
+                    unit = candidate
+                    break
+            if unit and unit != self.victim_unit:
+                log("victim unit moved", hex(self.victim_unit or 0), "->", hex(unit))
+                self.victim_unit = unit
+                self.victim_ctrl = 0
+                if self.controllers:
+                    self.victim_ctrl, _ = resolve_controller(self.mem, unit, None, "victim")
+        return bool(actor)
+
+    def recover(self, error: MemoryReadError) -> bool:
+        """Wait for the actor to come back; gap rows mark the outage."""
+        deadline = time.perf_counter() + self.recovery
+        next_mark = 0.0
+        while not self.stop_event.is_set() and time.perf_counter() < deadline:
+            try:
+                valid = self.refresh()
+            except Exception:
+                valid = False
+            if valid:
+                try:
+                    self.sample()
+                    log("sampler resumed after a gap")
+                    return True
+                except MemoryReadError:
+                    pass
+            now = time.perf_counter()
+            if now >= next_mark:
+                self.writer.write("gcd", clock_source="estimate", gap=True,
+                                  reason="actor-unavailable", last_error=str(error))
+                next_mark = now + 0.25
+            sleep_until(min(deadline, time.perf_counter() + 0.05))
+        return False
 
     def run(self) -> None:
         next_time = time.perf_counter()
         next_refresh = next_time + 1.0
         while not self.stop_event.is_set():
-            actor_before = self.actor
             failure: MemoryReadError | None = None
             try:
                 if time.perf_counter() >= next_refresh:
@@ -997,18 +1121,11 @@ class MemorySampler(threading.Thread):
                     next_refresh += 1.0
                 self.sample()
             except MemoryReadError as error:
-                # A respawn or zone change frees the old actor; refresh and retry
-                # once before treating the read as fatal.
-                try:
-                    self.refresh()
-                except Exception:
-                    pass
-                if self.actor != actor_before:
-                    try:
-                        self.sample()
-                    except MemoryReadError as retry:
-                        failure = retry
-                else:
+                # A respawn or zone change frees the old actor; give the new
+                # one a few seconds and mark the gap while waiting.
+                if not self.recover(error):
+                    if self.stop_event.is_set():
+                        return
                     failure = error
             except Exception as error:
                 self.error = str(error)
@@ -1371,6 +1488,58 @@ def parse_lua_rows(rows: list[str]) -> list[list[str]]:
     return [line.split("|") for line in rows if line]
 
 
+def gcd_runs(gcd_rows: list[dict]) -> list[dict]:
+    """Split the GCD rows into runs that start at a rise of ``remaining``."""
+    runs: list[dict] = []
+    previous = None
+    for row in gcd_rows:
+        if (row.get("read_failed") or row.get("gap")
+                or row.get("gcd_remaining") is None):
+            continue
+        current = (row.get("gcd_remaining"), row.get("gcd_total"))
+        if previous is not None and current[0] > previous[0]:
+            if runs and runs[-1]["done"] is None:
+                runs[-1]["superseded"] = True
+            runs.append({"start": row, "from": list(previous), "to": list(current),
+                         "peak": current[0], "total": current[1] or 0,
+                         "done": None, "superseded": False})
+        elif runs and runs[-1]["done"] is None:
+            run = runs[-1]
+            run["peak"] = max(run["peak"], current[0])
+            if current[0] == 0:
+                run["done"] = row
+        previous = current
+    return runs
+
+
+def gcd_run_complete(run: dict, slack_ms: float = 250.0) -> bool:
+    total = run["total"]
+    if total <= 0 or run["done"] is None:
+        return False
+    tolerance = max(50.0, total * 0.05)
+    if not total - tolerance <= run["peak"] <= total + tolerance:
+        return False
+    duration = run["done"].get("client_ms", 0) - run["start"].get("client_ms", 0)
+    return 0 <= duration <= total + slack_ms
+
+
+def gcd_run_press(run: dict, inputs: list[dict]) -> dict | None:
+    start_wall = run["start"].get("wall_ms")
+    if start_wall is None:
+        return None
+    best = None
+    best_delta = None
+    for event in inputs:
+        before = event.get("before_wall_ms", event.get("wall_ms"))
+        if before is None:
+            continue
+        delta = start_wall - before
+        if 0 <= delta <= 3000 and (best_delta is None or delta < best_delta):
+            best = event
+            best_delta = delta
+    return best
+
+
 def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
                caster_ctrl: int, victim_ctrl: int, ctrl_tried: dict[str, list[str]],
                required: list[str]) -> dict:
@@ -1379,31 +1548,45 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
     changes = []
     previous = None
     for row in gcd_rows:
-        if row.get("read_failed") or row.get("gcd_remaining") is None:
+        if (row.get("read_failed") or row.get("gap")
+                or row.get("gcd_remaining") is None):
             continue
         current = (row.get("gcd_remaining"), row.get("gcd_total"))
         if previous is not None and current != previous:
             changes.append({"wall_ms": row.get("wall_ms"), "client_ms": row.get("client_ms"),
                             "from": list(previous), "to": list(current)})
         previous = current
-    presses = []
-    countdown_only = 0
+    press_ticks = 0
     for event in inputs:
-        before = event.get("before_wall_ms")
+        before = event.get("before_wall_ms", event.get("wall_ms"))
         for change in changes:
-            if before is None or not 0 <= change["wall_ms"] - before <= 3000:
-                continue
-            old = change["from"]
-            new = change["to"]
-            rises = old[0] is not None and new[0] is not None and new[0] > old[0]
-            total_changed = new[1] != old[1]
-            if rises or total_changed:
-                presses.append({"key": event.get("key"), "before_wall_ms": before,
-                                "change": change})
-            else:
-                countdown_only += 1
-            break
-    gcd_changed = bool(presses)
+            if before is not None and 0 <= change["wall_ms"] - before <= 3000:
+                if change["to"][0] <= change["from"][0]:
+                    press_ticks += 1
+                break
+    runs = gcd_runs(gcd_rows)
+    complete = [run for run in runs if gcd_run_complete(run)]
+    linked: list[tuple[dict, dict]] = []
+    for run in complete:
+        event = gcd_run_press(run, inputs)
+        if event is not None:
+            linked.append((run, event))
+    # "Most rises follow a press": at least one and at least half of the
+    # complete rises must be press-linked.
+    gcd_changed = bool(linked) and len(linked) * 2 > len(complete)
+    pressed_runs = []
+    for run, event in linked:
+        pressed_runs.append({
+            "key": event.get("key"),
+            "start_client_ms": run["start"].get("client_ms"),
+            "end_client_ms": run["done"].get("client_ms"),
+            "from": run["from"],
+            "to": run["to"],
+            "peak": run["peak"],
+            "total": run["total"],
+            "duration_ms": (run["done"].get("client_ms", 0)
+                            - run["start"].get("client_ms", 0)),
+        })
     result = {
         "ok": not missing and gcd_changed,
         "channels": counts,
@@ -1411,8 +1594,16 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
         "missing": missing,
         "gcd": {
             "changed": gcd_changed,
-            "pressed_changes": presses,
-            "countdown_ticks_rejected": countdown_only,
+            "pressed_changes": pressed_runs,
+            "pressed_runs": pressed_runs,
+            "rises": len(runs),
+            "complete_rises": len(complete),
+            "linked_complete_rises": len(linked),
+            "incomplete_rises": sum(1 for run in runs if run["done"] is None),
+            "short_or_slow_rises": sum(1 for run in runs
+                                       if run["done"] is not None
+                                       and not gcd_run_complete(run)),
+            "countdown_ticks_rejected": press_ticks,
             "changes": changes[:200],
             "samples": len(gcd_rows),
         },
@@ -1424,8 +1615,6 @@ def self_check(writer: ChannelWriter, gcd_rows: list[dict], inputs: list[dict],
         },
     }
     return result
-
-
 def read_channels(run: Path) -> dict[str, list[dict]]:
     channels: dict[str, list[dict]] = {}
     for path in sorted(run.glob("*.jsonl")):
@@ -1473,8 +1662,137 @@ def rate_report(channels: dict[str, list[dict]]) -> dict:
     return report
 
 
-def remap_channels(run: Path, clock: Clock) -> None:
-    """Rewrite every row through the final clock fit."""
+def _as_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def cast_start_rows(rows: list[dict]) -> list[dict]:
+    """Rows where a player cast begins (name/show becomes active or resets)."""
+    starts = []
+    previous_active = False
+    previous_name = None
+    previous_current = 0.0
+    for row in rows:
+        active = (str(row.get("player_show")).lower() == "true"
+                  and bool(row.get("player_name")))
+        current = _as_float(row.get("player_current")) or 0.0
+        name = row.get("player_name") if active else None
+        if active and (not previous_active or name != previous_name
+                       or (previous_current > 0 and current <= 0)):
+            starts.append(row)
+        previous_active = active
+        previous_name = name
+        previous_current = current if active else 0.0
+    return starts
+
+
+def measure_memory_ui_offset(channels: dict[str, list[dict]],
+                             window_ms: float = 150.0,
+                             negative_slack_ms: float = 25.0) -> dict:
+    """Compare each GCD rise with the cast start of the same press.
+
+    Both sides are client-clock times: the cast start is the UI clock the
+    client reports, the GCD rise is a memory row mapped through the fitted
+    clock.  Their difference is the memory-to-UI offset for this run.  A small
+    negative difference is allowed so the same pairs can be re-measured after
+    the offset has been applied.
+    """
+    gcd_rows = channels.get("gcd", [])
+    cast_rows = channels.get("castbar", [])
+    rises = []
+    previous = None
+    for row in gcd_rows:
+        if (row.get("read_failed") or row.get("gap")
+                or row.get("gcd_remaining") is None):
+            continue
+        current = row.get("gcd_remaining")
+        if (previous is not None and current > previous
+                and row.get("client_ms") is not None):
+            rises.append(row)
+        previous = current
+    starts = cast_start_rows(cast_rows)
+    used: set[int] = set()
+    pairs: list[dict] = []
+    for rise in rises:
+        rise_ms = rise.get("client_ms")
+        best = None
+        for index, start in enumerate(starts):
+            if index in used:
+                continue
+            start_ms = start.get("native_ms")
+            if start_ms is None:
+                start_ms = start.get("client_ms")
+            if start_ms is None:
+                continue
+            delta = rise_ms - start_ms
+            if (-negative_slack_ms <= delta <= window_ms
+                    and (best is None or abs(delta) < abs(best[0]))):
+                best = (delta, index, start, start_ms)
+        if best is not None:
+            used.add(best[1])
+            pairs.append({
+                "cast_start_ms": int(round(best[3])),
+                "gcd_rise_ms": int(rise_ms),
+                "offset_ms": round(best[0], 1),
+                "skill": best[2].get("player_name"),
+            })
+    offsets = [pair["offset_ms"] for pair in pairs]
+    median = statistics.median(offsets) if offsets else 0.0
+    residuals = sorted(abs(offset - median) for offset in offsets)
+    measurable = bool(starts) and bool(rises)
+    if pairs:
+        ok = residuals[-1] <= 25.0
+    else:
+        ok = not measurable
+    return {
+        "measurable": measurable,
+        "measured": bool(pairs),
+        "ok": ok,
+        "offset_ms": round(median, 2),
+        "pairs": len(pairs),
+        "gcd_rises": len(rises),
+        "cast_starts": len(starts),
+        "window_ms": window_ms,
+        "negative_slack_ms": negative_slack_ms,
+        "spread_ms": round(max(offsets) - min(offsets), 2) if offsets else None,
+        "stdev_ms": round(statistics.pstdev(offsets), 2) if len(offsets) > 1 else 0.0,
+        "residual_after_median_ms": round(statistics.median(residuals), 2)
+        if residuals else None,
+        "residual_after_max_ms": round(residuals[-1], 2) if residuals else None,
+        "samples": pairs,
+    }
+
+
+def shift_estimate_rows(run: Path, offset_ms: float) -> int:
+    """Move memory/estimate rows onto the UI clock; returns the row count."""
+    if not offset_ms:
+        return 0
+    shifted = 0
+    for path in sorted(run.glob("*.jsonl")):
+        lines = []
+        changed = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("clock") == "estimate" and isinstance(row.get("client_ms"), int):
+                row["client_ms"] = int(round(row["client_ms"] - offset_ms))
+                if isinstance(row.get("t_ms"), int):
+                    row["t_ms"] = int(round(row["t_ms"] - offset_ms))
+                shifted += 1
+                changed = True
+            lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        if changed:
+            path.write_text(("\n".join(lines) + "\n") if lines else "",
+                            encoding="utf-8")
+    return shifted
+
+
+def remap_channels(run: Path, clock: Clock) -> dict:
+    """Rewrite every row through the final fit, then align memory to UI."""
     for path in sorted(run.glob("*.jsonl")):
         lines = []
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -1501,6 +1819,14 @@ def remap_channels(run: Path, clock: Clock) -> None:
                 row["wall_ms"] = round(float(wall), 1)
             lines.append(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         path.write_text(("\n".join(lines) + "\n") if lines else "", encoding="utf-8")
+    memory_ui = measure_memory_ui_offset(read_channels(run))
+    memory_ui["applied_rows"] = shift_estimate_rows(run, memory_ui["offset_ms"])
+    memory_ui["applied_offset_ms"] = (memory_ui["offset_ms"]
+                                      if memory_ui["applied_rows"] else 0.0)
+    if memory_ui["measured"]:
+        after = measure_memory_ui_offset(read_channels(run))
+        memory_ui["after_offset_ms"] = after["offset_ms"]
+    return memory_ui
 
 
 def main() -> int:
@@ -1571,8 +1897,9 @@ def main() -> int:
     player_name = ""
     caster_ctrl = victim_ctrl = 0
     ctrl_tried: dict[str, list[str]] = {}
-    failure: Exception | None = None
+    failure: BaseException | None = None
     result: dict[str, object] = {"ok": False}
+    memory_ui: dict = {}
     timer_resolution = False
     required = [name.strip() for name in args.required.split(",") if name.strip()]
     started = time.monotonic()
@@ -1759,9 +2086,11 @@ def main() -> int:
             log("key", key, "at", round(time.monotonic() - wall0, 2), reply)
         tail = args.fight_seconds or (args.fight_interval + 1.0)
         time.sleep(tail)
-    except Exception as error:
+    except BaseException as error:
+        # KeyboardInterrupt and SystemExit must still run the cleanup and leave
+        # a failed self_check; they are re-raised after the finally block.
         failure = error
-        log("recording failed:", error)
+        log("recording failed:", type(error).__name__, error)
     finally:
         for thread in (flusher, sync, unit_sampler, sampler):
             if thread is not None:
@@ -1770,6 +2099,10 @@ def main() -> int:
                 except Exception:
                     pass
         if mcp is not None:
+            try:
+                mcp.resync()
+            except Exception as error:
+                log("driver reconnect failed:", error)
             if pid:
                 for target, name in (("system", "anim"), ("ui", "cast"), ("ui", "buff")):
                     try:
@@ -1793,7 +2126,7 @@ def main() -> int:
                     log("client cleanup failed on", target, ":", error)
         writer.close()
         try:
-            remap_channels(args.run_dir, clock)
+            memory_ui = remap_channels(args.run_dir, clock)
         except Exception as error:
             log("clock remap failed:", error)
             if failure is None:
@@ -1824,14 +2157,18 @@ def main() -> int:
                 "duration_s": round(time.monotonic() - started, 1),
                 "clock": clock.report(),
                 "quality": quality,
+                "memory_ui": memory_ui,
             })
             if not all(entry["ok"] for entry in quality["monotonic"].values()):
                 result["ok"] = False
+            if memory_ui.get("measurable") and not memory_ui.get("ok"):
+                result["ok"] = False
             if failure is not None:
                 result["ok"] = False
-                result["error"] = str(failure)
+                result["error"] = f"{type(failure).__name__}: {failure}"
             end_wall = ms_now()
-            end_client = clock.estimate(end_wall)
+            end_client = int(round(clock.estimate(end_wall)
+                                   - memory_ui.get("applied_offset_ms", 0.0)))
             final_counts = dict(writer.counts)
             final_counts["meta"] = final_counts.get("meta", 0) + 1
             end_row = {
@@ -1855,7 +2192,8 @@ def main() -> int:
             failure = failure or error
             try:
                 (args.run_dir / "self_check.json").write_text(
-                    json.dumps({"ok": False, "error": str(failure),
+                    json.dumps({"ok": False,
+                                "error": f"{type(failure).__name__}: {failure}",
                                 "channels": writer.counts}, indent=1) + "\n",
                     encoding="utf-8")
             except Exception:
@@ -1865,6 +2203,18 @@ def main() -> int:
             log("self-check", "ok" if result.get("ok") else "FAILED",
                 "missing", result.get("missing"),
                 "gcd_changed", result["gcd"]["changed"])
+            if isinstance(result.get("memory_ui"), dict):
+                info = result["memory_ui"]
+                if info.get("measured"):
+                    log("memory->UI offset", info["offset_ms"], "ms",
+                        "spread", info["spread_ms"], "ms",
+                        "pairs", info["pairs"],
+                        "residual max", info["residual_after_max_ms"], "ms",
+                        "applied", info.get("applied_offset_ms"), "ms")
+                else:
+                    log("memory->UI offset unmeasured",
+                        "rises", info.get("gcd_rises"),
+                        "cast starts", info.get("cast_starts"))
             if isinstance(result.get("quality"), dict):
                 mono = result["quality"]["monotonic"]
                 bad = [name for name, entry in mono.items() if not entry["ok"]]
@@ -1875,6 +2225,9 @@ def main() -> int:
                     if info:
                         log("clock", kind, "offset", info["offset_ms"], "ms",
                             "drift", info["drift_ppm"], "ppm",
+                            "applied", info["drift_applied"],
+                            "fitted drift", info["fitted_drift_ppm"],
+                            "+-", info["drift_stderr_ppm"], "ppm",
                             "residual max", info["residual_max_ms"], "ms",
                             "rtt min", info["rtt_min_ms"], "ms")
         if pid and not args.keep_client:
@@ -1888,6 +2241,8 @@ def main() -> int:
             except Exception:
                 pass
     if failure is not None:
+        if isinstance(failure, (KeyboardInterrupt, SystemExit)):
+            raise failure
         return 1
     if isinstance(result, dict) and (result.get("ok") or args.no_self_check):
         return 0
