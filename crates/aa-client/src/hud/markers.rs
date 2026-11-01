@@ -633,11 +633,13 @@ mod tests {
     }
 
     /// A friendly dot without a name must not show the raw `M_FRIENDLY` ui_texts key: the 1.2
-    /// table has no MAP_TEXT row for it (`FUN_3904ce90`, x2game.dll.c:73822) and the native
-    /// `LocalizeUiText` only answers "category ?? key" on a miss (x2game.dll.c:942636).
+    /// table has no MAP_TEXT row for it (category 0x14 dots, `FUN_3904ce90`, x2game.dll.c:73822-73823)
+    /// and the native `LocalizeUiText` answers "20 ?? M_FRIENDLY" on a miss (x2game.dll.c:942705,
+    /// 585013). The no-label choice is inferred: 1.2's label for these dots is not established.
     #[test]
     fn friendly_dot_without_a_name_has_no_label() -> Result<(), Box<dyn std::error::Error>> {
-        if !std::path::Path::new(aa_anim::db::DEFAULT_DB).exists() {
+        let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&db).exists() {
             return Ok(());
         }
         let (rt, _bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;

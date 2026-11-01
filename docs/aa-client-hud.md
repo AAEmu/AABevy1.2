@@ -597,8 +597,9 @@ data); the icons are drawn natively from `ui/map/icon/npc_icon.dds` (24 px cells
 * **Gravesite** (`corpse_pos`) while the exp lost can still be won back; **dots** (`hostile` / `friendly`) of the
   units in view within 250 m when the roadmap's "NPC" check is on. Their tooltip is the NPC template's name (like the
   quest marks); a dot without one has no label. The 1.2 symbol table has no `MAP_TEXT` row for `M_FRIENDLY`/`M_HOSTILE`
-  (`FUN_3904ce90`, `x2game.dll.c:73822`) and `LocalizeUiText` only answers "category ?? key" on a miss
-  (`x2game.dll.c:942636`), so the raw key must not become the label.
+  (category 0x14 dots, `FUN_3904ce90`, `x2game.dll.c:73822-73823`); `LocalizeUiText` would answer
+  `"20 ?? M_FRIENDLY"` on that miss (`x2game.dll.c:942705` and `585013`). The no-label choice is inferred: 1.2's label
+  for these dots is not established.
 * **Filters.** The "Show Icons" window of the big map works: `markers.lua` keeps each check (`SetNpcFilter`) and the
   three folders (Merchants, Infrastructure, Housing Province) and leaves the filtered icons out of both maps; the
   roadmap's NPC check hides every npc-like icon until it is on, as the toolkit's `roadmap` widget does.

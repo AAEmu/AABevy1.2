@@ -99,8 +99,9 @@ local function tipOf(ic)
     local key = "M_" .. string.upper(ic.kind)
     local ok, t = pcall(function() return locale.map.getSymbolText(X2Map:GetMapIconText(_G[key])) end)
     -- `LocalizeUiText` answers the key itself when `ui_texts` has no MAP_TEXT row (the native
-    -- falls back to "category ?? key", x2game.dll.c:942636): a friendly/hostile dot has no label
-    -- rather than the raw M_FRIENDLY/M_HOSTILE key.
+    -- falls back to "20 ?? M_FRIENDLY", x2game.dll.c:942705/585013): a friendly/hostile dot has
+    -- no label rather than the raw key. This no-label choice is inferred; 1.2's label for the
+    -- category 0x14 dots is not established.
     text = (ok and type(t) == "string" and t ~= "" and t ~= key) and t or false
     symbolTexts[ic.kind] = text
   end

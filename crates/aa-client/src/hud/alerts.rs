@@ -471,7 +471,8 @@ mod tests {
     /// one request per death; `SCCharacterResurrected` then closes it.
     #[test]
     fn real_death_packet_starts_the_countdown_and_sends_one_request() -> Result<(), Box<dyn std::error::Error>> {
-        if !std::path::Path::new(aa_anim::db::DEFAULT_DB).exists() {
+        let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&db).exists() {
             return Ok(());
         }
         let (rt, bridge, path) = super::super::breath::fixture::runtime(1280.0, 720.0)?;
@@ -537,7 +538,17 @@ mod tests {
         app.update();
         let commands: Vec<_> = app.world_mut().resource_mut::<Messages<aa_net::NetCommand>>().drain().collect();
         assert!(matches!(&commands[..], [aa_net::NetCommand(aa_net::Command::Resurrect { in_place: false })]), "{commands:?}");
-        // `SCCharacterResurrected` raises PLAYER_RESURRECTED (native event 93) and hides the window.
+        // Another player's `SCCharacterResurrected` is not ours: the window stays open.
+        app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 999, pos: Default::default(), yaw: 0.0 }));
+        app.update();
+        aa_ui::lua::tick(&app.world().non_send::<UiRuntime>().lua, 16.0);
+        assert!(
+            app.world().non_send::<UiRuntime>().lua
+                .load("return ADDON:GetContent(UIC_DEATH_AND_RESURRECTION_WND):IsVisible()").eval::<bool>()?,
+            "another player's resurrection leaves the window open"
+        );
+        assert!(bridge.borrow().death_started.get().is_some(), "another player's resurrection keeps the timers");
+        // Our `SCCharacterResurrected` raises PLAYER_RESURRECTED (native event 93) and hides the window.
         app.world_mut().write_message(NetEvent(Event::Resurrected { obj_id: 100, pos: Default::default(), yaw: 0.0 }));
         app.update();
         aa_ui::lua::tick(&app.world().non_send::<UiRuntime>().lua, 16.0);
