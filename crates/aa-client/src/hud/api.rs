@@ -111,10 +111,12 @@ pub struct HudData {
     pub pos: Vec3,
     pub yaw: f32,
     /// The slave whose point-1 seat is a turret (`ingame::LocalMount::turret_seat`): its bar
-    /// shows the point-1 attached skill. `None` on foot and on a drivable vehicle.
+    /// shows the point-1 attached skill. `None` on foot; a drivable catapult/tank has one too
+    /// (it aims while the cart path moves it).
     pub turret_seat: Option<u32>,
-    /// The manned cannon's clamped aim and ground point (`ingame::turret::Sight`): a fire skill
-    /// with a BallisticPos target goes out with this spot instead of the selected unit.
+    /// The manned cannon's turret aim and arc impact point (`ingame::turret::Sight`): a fire
+    /// skill with a BallisticPos target goes out with this spot instead of the selected unit, and
+    /// its `refusal` blocks the click (`FUN_390f3b20`).
     pub turret: Option<crate::ingame::turret::Sight>,
     /// The ranks of the learned skills (`Skills::known`), for the skill tooltips.
     pub skill_levels: std::collections::HashMap<u32, u8>,

@@ -131,12 +131,18 @@ Ships (merged after the checkpoint was written):
   passenger clip and helm pose, seat-taken feedback, helper spelling in the original, point 3+ (none in the data), and
   boarding while riding a mate - S11-C1..C5 in [units](aa-client-units.md).
 
-- **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1, camera aim
-  solved as the 1.2 ballistic arc (`FUN_394322f0`: `effect_speed`, `min(300, max_range)`, `item_hand_r`, 0.1 s
-  trace) and clamped to the `vehicle_models` turret block, the 200 ms change-only `CSTurretState` sent before the
-  click's fire, installed-turret key aim (`39425580`), the drawn `bone_yaw`/`bone_pitch` aim, remote type-8 posture
-  and the fire skill as `CSStartSkill` 0x052 with the `Mount` caster, the mount skill id and a `Position` target at
-  the arc impact (`rot` 0), with server refusals shown through `SKILL_MSG` (`docs/aa-client-units.md`, S12).
+- **S12 cannons and turrets.** Cannons and siege turrets (S12) are in: boarding at the slave's point 1 (`VehicleModel`
+  controller type 3, drivable catapults/tanks keep the cart path), the drawn camera's screen-centre aim ray over
+  `max(300, max_range)` (`FUN_3917dd80` / `FUN_394281b0`) stopped by terrain/static brushes, the sea and drawn
+  unit/ship bodies, the `FUN_393594c0` angle-cone clamp (`skills.target_angle`), the 1.2 ballistic arc
+  (`FUN_394322f0`: `effect_speed`, `item_hand_r` muzzle else the unit position, 0.1 s trace) clamped to the
+  `vehicle_models` turret block, the 200 ms change-only `CSTurretState` sent before the click's fire (no state or
+  fire when the ray misses or the range preview fails), installed-turret key aim (`39425580`, turning only, not the
+  shot direction), the drawn `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill as `CSStartSkill`
+  0x052 with the `Mount` caster, the mount skill id and a `Position` target at the arc impact (`rot` 0), with server
+  refusals shown through `SKILL_MSG` (`docs/aa-client-units.md`, S12; unit/ship bodies are bounding volumes, inland
+  water and mesh hitboxes are S12-C8). Follow-up #58: when child units land, `local_aim` should read
+  `units::current_transform` instead of the replicated `GlobalTransform` (TODO in `ingame/turret.rs`).
 
 Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
 the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk

@@ -1071,32 +1071,45 @@ the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not re
 
 * **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
   gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
-  slave is kind 7/8, the `vehicle_models` row parses to a non-zero turret range, and its `velocity`
-  is 0. The controller type `FUN_390b3750` returns (3 = turret) is not in the database copy, so
-  `velocity == 0` is the substitute (S12-C6); the trebuchets/tanks (velocity 2.5-3.5) and the
-  cotton-field cart (4.0) stay drivable, and the all-zero rows (vehicle_models 37/40) are not
-  turrets. `turret_seat_model` is the gate; a real-data test walks every kind-7/8 `slaves` row. So
-  `player::control_player` locks walking, `cart::drive_cart` and the mate driver path do not run, and
-  the player follows the server-placed cannon (`mount::drive_mount`). The seat pose is the cannon's
-  `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` / `fist_ac_ballista_idle` /
-  `fist_ba_siegeweapon_idle`), already handled by the mount code.
-* **Aim.** `turret::local_aim` takes the orbit camera direction in the cannon root's frame,
-  traces it from the `item_hand_r` muzzle over `min(300, skills.max_range)` (`FUN_394281b0`) and
-  solves the 1.2 arc (`FUN_394322f0`): `t = 3-D distance / effect_speed`,
-  `vz = dz/t + g/2*t`, pitch `atan2(vz, t*speed)` and the horizontal yaw in the model frame. It
-  clamps that solved aim to the model's min/max (or wraps a full-circle yaw), and sends
-  `CSTurretState` 0x036 with the slave's object id through `turret::TurretSend`: one global 200 ms
-  timer (`DAT_3a169940`), a packet only when the model aim changed, and a change inside the window
-  is **dropped** (not queued; `FUN_39356990` returns without sending). The state resets when the
-  local player mounts a gunner seat, so the same clamped aim is sent again.
-  `local_aim` runs before `hud::api::sync_hud` / `handle_requests`, so the state goes out before a
+  slave is kind 7/8 and its `models.sub_type = 'VehicleModel'` row parses to a non-zero turret
+  range. That is the 1.2 controller type 3 (`FUN_390b3750` = `X2::VehicleUnitModel`, S12-C6). A
+  drivable catapult or tank is a turret seat too and keeps driving through the cart path; the
+  all-zero rows (vehicle_models 37/40) are not turrets. `turret_seat_model` is the gate; a
+  real-data test walks every kind-7/8 `slaves` row. The gunner's `player::control_player` locks
+  walking, and the player follows the server-placed cannon (`mount::drive_mount`). The seat pose
+  is the cannon's `$driver` helper plus its `attach_anims` row (`fist_ac_cannon_idle` /
+  `fist_ac_ballista_idle` / `fist_ba_siegeweapon_idle`), already handled by the mount code.
+* **Aim.** `turret::local_aim` uses the drawn camera's screen-centre ray (`FUN_3917dd80` via
+  `FUN_394281b0`, from the camera matrix translation) over `max(300, skills.max_range)`
+  (`FUN_394322f0` @ `0x3943238c`: `comiss 300, range; ja keep 300`). The ray stops at terrain and
+  static brushes (`WorldCollision::raycast_mask`, the terrain height-march fallback outside the
+  built cells), the sea (`World::ocean_level`) and the drawn unit/ship bodies. Its hit is pulled
+  into the skill's horizontal angle cone (`FUN_393594c0`: half-angle `skills.target_angle / 2 - 1`
+  degrees around the slave's facing, keeping the height), so a gunner looking far off sends a point
+  inside the cone the server accepts instead of `OUTOF_ANGLE`. The arc is then solved from the
+  `item_hand_r` muzzle (the unit position `FUN_390b3850` when the bone is missing) at
+  `skills.effect_speed`: `t = 3-D distance / speed`, `vz = dz/t + g/2*t`, pitch `atan2(vz, len)`,
+  horizontal yaw in the model frame. It is traced in 0.1 s segments with the same world test
+  (`FUN_39429750`, mask 0x307; the first hit is the target, else the camera hit). A screen ray
+  that hits nothing is `NO_TARGET` (result 9, `FUN_394281b0` returns 0) and the click sends
+  nothing. The solved aim is clamped to the model's min/max (or a full-circle yaw wraps) and sent
+  as `CSTurretState` 0x036 with the slave's object id through `turret::TurretSend`: one global
+  200 ms timer (`DAT_3a169940`), a packet only when the model aim changed, and a change inside
+  the window is **dropped** (not queued; `FUN_39356990` returns without sending). The state resets
+  when the local player mounts a gunner seat, so the same clamped aim is sent again. The turret is
+  turned only when the aim preview passes (the ray and the range check, `CanUse` flags 0x442) or
+  by the installed-turret keys; `local_aim` runs before `hud::api::sync_hud` /
+  `handle_requests` and `api::handle_requests` is ordered after it, so the state goes out before a
   click's fire. `turret::aim_turrets` moves the drawn aim towards the target at
   `turret_yaw_angvel` / `turret_pitch_angvel` and writes `bone_yaw` (`R_z(yaw)`) and `bone_pitch`
   (`R_x(pitch)`) after the animation pass (`UpdateGunTurret` `FUN_390d14b0`).
 * **Key aim.** `FUN_39425580` runs only for `vehicle_models.installed_turret` models (8 rows):
   actions 0/1 (`moveforward`/`moveback`) pitch and 4/5 (`turnleft`/`turnright`) yaw step the
   persistent aim at `turret_pitch_angvel` / `turret_yaw_angvel`, then the same clamp (a full-circle
-  yaw wraps). A cannon 77 is not installed, so it aims by camera only, as in 1.2.
+  yaw wraps). Key aim only turns the turret; the click still sends the camera-arc point, so this
+  client does not use the key aim as the shot direction. The type-15 `ArtilleryPos` preview of
+  `FUN_394332d0` (path B, the Lua siege-weapon skill) is not reproduced. A cannon 77 is not
+  installed, so it aims by camera only, as in 1.2.
 * **Remote.** Posture type 8 (both `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail) is
   decoded into `Posture.turret` / `Unit.turret`; `turret::remote_targets` and `aim_turrets` apply it
   to another player's cannon (a late viewer reads the `SCUnitState` snapshot).
@@ -1113,30 +1126,41 @@ the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not re
   `FUN_39390900`; the decompile's other silent rule, `FUN_39182840` plus the skill's +0x19 flag, is
   not reproduced because that flag is not recovered). The server's
   `ship_cannon_gunner_seat_skill_and_leaving` sends the same Position shape, and a real-data test
-  covers the bar -> cast mapping for slaves 10/133/100.
+  covers the bar -> cast mapping for slaves 10/133/100. `Db::cannon_skill` takes the first
+  `BallisticPos` `slave_mount_skills` row (the siege thrower, slave 1, has three ammo throws that
+  share the ballistic data); `Db::cannon_skill_for` can select a row when a caller knows the slot.
 
 Capture-pending (case ids; every one has a capture step):
 
 * **S12-C1** The exact `Position` bytes of a live shot: the solve is from the decompile, but the
-  `item_hand_r` muzzle (the open item in the handoff) and the 0x80 option flag are inferred. When
-  the camera ray finds no terrain the client uses the ray's end; the original's
-  `FUN_394281b0` may answer `NO_TARGET` instead. Capture: record the CSStartSkill 0x052 body of a
-  cannon shot and the aimpoint when the target is on a hill, behind cover or over water.
+  `item_hand_r` muzzle (the open item in the handoff) and the 0x80 option flag are inferred. The
+  no-hit refusal is no longer open (`FUN_394281b0` returns 0 -> result 9). Capture: record the
+  CSStartSkill 0x052 body of a cannon shot and the aimpoint when the target is on a hill, behind
+  cover or over water.
 * **S12-C2** The `CSTurretState` unit id: the client sends the manned slave. Capture: compare the
   captured 0x036 object id with the cannon child, the gunner and the hull.
-* **S12-C3** The camera aim: the client uses the orbit camera's total yaw/pitch; 1.2 uses the
-  screen-centre ray. Capture the drawn `bone_yaw`/`bone_pitch` per frame while panning the mouse
-  and compare with the orbit angles.
+* **S12-C3** The camera aim: the client uses the drawn camera's screen-centre ray. The 1.2 camera
+  split above 50 degrees of pitch is not reproduced. Capture the drawn `bone_yaw`/`bone_pitch` per
+  frame while panning the mouse and compare with the camera ray.
 * **S12-C4** Installed-turret key aim (`39425580`): the actions (0/1 pitch, 4/5 yaw) and the rates
   are from the decompile; the `FUN_39094500` / `+0x74` gate before it and the "+0x74 <= 0" test
-  are not reproduced. Capture a tower cannon's keys. The decompile's `CanUse` in the camera path
-  reads the current unit target (`local_170` / `DAT_3a5a4d70`), not the solved Position as the
-  handoff section 2 step 7 says; the client therefore only blocks on the preview's ray failure and
-  leaves the angle checks to the server.
-* **S12-C6** The kind-7/8 gate for a turret seat: `vehicle_models.velocity == 0` substitutes for the
-  model controller type 3 (`FUN_390b3750`), which is not in the database copy. Capture the
-  controller type of a trebuchet and a tank and the attach point the original uses for a ground
-  cannon; if the controller type differs from velocity == 0, replace the gate.
+  are not reproduced. Capture a tower cannon's keys. The local `CanUse` preview is the ray and the
+  skill range; the decompile's `CanUse` reads the current unit target (`local_170` /
+  `DAT_3a5a4d70`) and its full check set is not recovered.
+* **S12-C6** The kind-7/8 gate for a turret seat: `models.sub_type = 'VehicleModel'` is the model
+  controller type 3 (`FUN_390b3750`), so a catapult or tank is a turret seat and keys turn its
+  installed turret. Capture the attach point the original uses for a ground cannon and whether a
+  drivable turret keeps the cart controls at the same time.
 * **S12-C7** A non-identity `bone_yaw` / `bone_pitch` bind: the galleon cannon's bones are identity
   bind, so the direct `R_z` / `R_x` composition is proven only there. Capture a model whose turret
   bones carry a bind rotation and compare.
+* **S12-C8** The ray obstructions are approximate where the game's own collision is not loaded:
+  units are bounding spheres, ship hulls are bounding spheres from the hull-floor bounds, and only
+  the ocean plane is tested (inland water volumes are not). Static/rigid brushes and terrain come
+  from `WorldCollision`; outside its built cells the terrain height-march is the fallback. The 1.2
+  entity flags (living 0x10, static/sleeping/rigid 7, water 0x200) are approximated by those
+  volumes. Capture a shot through a ship, a unit and a lake to check the stop points.
+
+TODO(#58 child units): when the `child-units` branch lands, `turret::local_aim` should read
+`units::current_transform` instead of the drawn `GlobalTransform`, so a cannon aboard a moving
+ship aims from its parent's transform (S12-C3). Until then it uses the replicated transform.

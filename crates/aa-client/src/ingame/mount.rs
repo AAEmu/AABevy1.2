@@ -1231,9 +1231,10 @@ impl LocalMount {
         self.0.filter(|s| s.turret).map(|s| s.mount)
     }
 
-    /// The slave cart the player drives from attach point 1.
+    /// The slave cart the player drives from attach point 1. A drivable turret (a catapult or a
+    /// tank) is both a cart and a turret seat: it drives and aims.
     pub fn cart_driver(&self) -> Option<u32> {
-        self.0.filter(|s| s.drives && s.cart && !s.turret).map(|s| s.mount)
+        self.0.filter(|s| s.drives && s.cart).map(|s| s.mount)
     }
 
     /// The ship the player drives from attach point 1 (the helm): the server simulates the hull.
@@ -1322,17 +1323,32 @@ pub fn track_local_mount(
                 (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
             });
             let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
-            // A cannon is a kind-7/8 slave with a turret block that cannot drive. The controller
-            // type 3 is not in the database copy, so `vehicle_models.velocity == 0` stands in
-            // (S12-C6); a trebuchet or tank stays drivable. A cart is kind 6.
+            // A cannon is a kind-7/8 slave with a `VehicleModel` turret block (`FUN_390b3750`'s
+            // controller type 3, S12-C6). A catapult or a tank is a turret seat too; it keeps
+            // driving through the cart path when its `vehicle_models.velocity` is positive.
             let turret = driver_seat(a.point)
                 && db.as_deref().is_some_and(|db| {
                     net.by_id
                         .get(&a.obj_id)
                         .is_some_and(|unit| super::turret::turret_seat(unit, db))
                 });
-            let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
+            let drivable = db
+                .as_deref()
+                .and_then(|db| db.turret_limits(model))
+                .is_some_and(|limits| limits.velocity > 0.0);
+            let speed = db
+                .as_deref()
+                .map_or_else(MountSpeed::default, |db| db.mount_speed(model));
+            LocalSeat {
+                mount: a.obj_id,
+                point: a.point,
+                drives: driver_seat(a.point),
+                cart: slave && !ship && (!turret || drivable),
+                ship,
+                turret,
+                speed,
+                lift: 0.0,
+            }
         });
         match attached {
             Some(a) => {

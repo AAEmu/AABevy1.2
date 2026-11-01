@@ -84,6 +84,14 @@ fn cannon_unit(id: u32, template_id: u32) -> aa_net::model::Unit {
 
 /// Press one driver-bar slot with a fresh world and return the commands it wrote.
 fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
+    press_driver_slot_details(state, slot).0
+}
+
+/// The same press, with the client-side refusals it published.
+fn press_driver_slot_details(
+    state: &Shared,
+    slot: usize,
+) -> (Vec<aa_net::Command>, Vec<crate::hud::alerts::UseFailed>) {
     use crate::hud::{
         alerts::UseFailed,
         usable::{Env, InFlight},
@@ -115,11 +123,16 @@ fn press_driver_slot(state: &Shared, slot: usize) -> Vec<aa_net::Command> {
         &mut failed,
     );
     drop(data);
-    world
+    let commands = world
         .resource_mut::<Messages<aa_net::NetCommand>>()
         .drain()
         .map(|command| command.0)
-        .collect()
+        .collect();
+    let failures = world
+        .resource_mut::<Messages<UseFailed>>()
+        .drain()
+        .collect();
+    (commands, failures)
 }
 
 fn runtime(loaded: bool) -> Result<(UiRuntime, Shared), Box<dyn std::error::Error>> {
@@ -548,10 +561,10 @@ fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// `driver_skills` on the same rows the real data has: the cart 73 keeps its mount skills, the
-/// cannon 10 shows the attached skill when the engine's seat flag names it or, before that flag
-/// arrives, when the template gate says it is a turret. A stale flag for another slave also
-/// falls back to the template gate.
+/// `driver_skills` on the same rows the real data has: the `VehicleModel` cart 73 is a turret
+/// seat (controller type 3, S12-C6) and shows its attached skill, and the cannon 10 does too when
+/// the engine's seat flag names it or, before that flag arrives, from the template gate. A stale
+/// flag for another slave also falls back to the template gate.
 #[test]
 fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
 -> Result<(), Box<dyn std::error::Error>> {
@@ -576,16 +589,16 @@ fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
         },
         None,
     );
-    assert_eq!(bar_skills(&state), [(15622, 15622), (17000, 17000)]);
+    assert_eq!(bar_skills(&state), [(15548, 15622), (17000, 17000)]);
     assert!(
-        !state
+        state
             .borrow()
             .game
             .get()
             .unwrap()
             .mode_actions
             .turret_slave(73),
-        "the velocity-4 cart is not in the template turret set"
+        "the velocity-4 VehicleModel cart is a turret seat too"
     );
 
     let cannon = schema_unit(20, 8, 10, 117);
@@ -709,6 +722,51 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
         (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
         (10473, 20, 16, 777)
     );
+    Ok(())
+}
+
+/// `FUN_390f3b20`: a preview refusal (`DAT_3a5a4ea4`, result 9 for a screen ray that hit
+/// nothing) shows the result and sends no packet.
+#[test]
+fn a_refused_cannon_preview_sends_nothing() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state) = runtime(false)?;
+    state.borrow().game.0.set(cannon_game()).ok().unwrap();
+    let mut own = crate::hud::expansion::fixture::spawn();
+    own.unit.buffs = vec![buff(5068, 9, BuffKind::Good)];
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(cannon_unit(20, 10))),
+        None,
+    );
+    state.borrow_mut().turret_seat = Some(20);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    state.borrow_mut().turret = Some(crate::ingame::turret::Sight {
+        slave: 20,
+        aim: aa_net::TurretAim::default(),
+        pos: aa_net::Pos::default(),
+        skill: 10473,
+        refusal: Some(aa_net::skill::result::NO_TARGET),
+    });
+    let (commands, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        commands.is_empty(),
+        "a refused preview sends nothing: {commands:?}"
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
     Ok(())
 }
 

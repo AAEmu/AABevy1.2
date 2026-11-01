@@ -15,26 +15,40 @@
 //!
 //! The fire packet follows path A of `FUN_390f3b20`: `CSStartSkill` with the mount skill's own
 //! skill id, a `Mount` caster (the cannon slave and `mount_skills.id`), a `Position` target at the
-//! impact point of the ballistic solve (`FUN_394322f0`) and `rot` 0. The solve launches from the
-//! `item_hand_r` muzzle at the skill's `effect_speed`, over `min(300, max_range)`, and traces the
-//! arc in 0.1 s steps; the point it sends is the first hit, or the camera hit when the arc hits
-//! nothing (the decompile leaves `local_24` unchanged).
+//! impact point of the ballistic solve (`FUN_394322f0`) and `rot` 0. The aim ray starts at the
+//! camera and runs through the screen centre over `max(300, max_range)`; its hit is pulled into
+//! the skill's horizontal angle cone (`FUN_393594c0`), then the arc is solved from the
+//! `item_hand_r` muzzle at the skill's `effect_speed` and traced in 0.1 s steps. The point it sends
+//! is the first trace hit, or the camera hit when the arc hits nothing (the decompile leaves
+//! `local_24` unchanged). A camera ray that hits nothing is refused with `NO_TARGET` (`result 9`)
+//! and the click sends nothing (`FUN_394281b0` returns 0).
+//!
+//! The camera ray and the arc trace stop at terrain, static brushes, the sea
+//! (`World::ocean_level`) and the drawn unit/ship bodies (`FUN_3917dd80` / `FUN_39429750`,
+//! mask 0x307). The unit and ship bodies are bounding volumes here, not mesh hitboxes.
+//!
+//! Key aim (`FUN_394332d0` -> `FUN_39425580`) only turns an installed turret; it never decides
+//! the click's target, which stays the camera-arc point. The type-15 `ArtilleryPos` preview of
+//! `FUN_394332d0` is not reproduced because path B (the Lua siege-weapon skill) does not use this
+//! client's click (S12-C4).
 //!
 //! Capture-pending (see `docs/aa-client-units.md`):
 //! * S12-C1: the exact `Position` bytes of a live shot (the solve is from the decompile; the
 //!   `item_hand_r` muzzle and the `0x80` option flag are inferred).
 //! * S12-C2: which unit `CSTurretState` names (the manned slave here).
-//! * S12-C3: the camera ray (the 1.2 screen-centre ray; this client uses the orbit camera).
+//! * S12-C3: the camera ray (this client uses the drawn camera's screen-centre ray; the 1.2
+//!   camera split past 50 degrees is not reproduced).
 //! * S12-C4: the `FUN_39094500` / `+0x74` gate before key aim; the actions are 0/1 pitch and
 //!   4/5 yaw.
 //! * S12-C7: the bind-relative bone composition when a turret bone has a non-identity bind.
 
 use aa_net::model::{Unit, UnitKind};
 use aa_net::{Event, NetCommand, NetEvent, Pos, TurretAim};
-use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
+use aa_world::collide::Mask;
+use aa_world::stream::WorldInfo;
+use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
 use bevy::prelude::{TransformSystems, *};
 
-use super::camera::OrbitCamera;
 use super::cart::wrap_angle;
 use super::data::Db;
 use super::mount::LocalMount;
@@ -43,7 +57,9 @@ use super::units::RemoteUnit;
 /// `FUN_39356990`: `DAT_3a169940 + 200 <= now` before one `CSTurretState`.
 pub const SEND_INTERVAL_MS: u64 = 200;
 
-/// `FUN_394322f0`: the aim range is `min(300, skills.max_range)` (`0x3999cfe0` = 300).
+/// `FUN_394322f0` @ `0x3943238c`: `comiss 300, range; ja keep 300` makes the aim range
+/// `max(300, skills.max_range)` (`0x3999cfe0` = 300), so the ray reaches the 300 m floor even
+/// when the skill is shorter ranged.
 pub const MAX_AIM_RANGE: f32 = 300.0;
 
 /// `0x399d8d40` = g*dt and `0x399d8d3c` = g*dt/2 with dt 0.1: g = 9.81 m/s².
@@ -53,13 +69,18 @@ pub const GRAVITY: f32 = 9.81;
 pub const TRACE_STEP: f32 = 0.1;
 
 /// The `mount_skills` -> `skills` row a gunner's slot fires: the mount skill's own skill id, its
-/// projectile speed and its maximum range (`FUN_396f6390(DAT_3a5a4eb0)` + `+0xbc` / `+0x1b0`).
+/// projectile speed, its range and the horizontal aim cone
+/// (`FUN_396f6390(DAT_3a5a4eb0)` + `+0xbc` / `+0x1b0`, and `FUN_393594c0`'s `+0x17c`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CannonSkill {
     pub id: u32,
     /// `skills.effect_speed` (`+0xbc`), m/s.
     pub speed: f32,
+    pub min_range: f32,
     pub max_range: f32,
+    /// `skills.target_angle`, degrees: the whole cone, so `target_angle / 2 - 1` is the
+    /// horizontal half-angle `FUN_393594c0` clamps the camera hit to.
+    pub target_angle: f32,
 }
 
 /// The `vehicle_models` turret block, radians and radians per second.
@@ -149,9 +170,11 @@ pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
 }
 
 /// Whether attaching at the driver point makes this slave a turret the gunner aims. The 1.2
-/// gate is the model controller type 3 (`FUN_390b3750`), which the database copy does not
-/// carry; `vehicle_models.velocity == 0` is the substitute (S12-C6). A trebuchet or tank
-/// (velocity > 0) stays a vehicle the player drives; an all-zero turret block is not a turret.
+/// gate is the model controller type 3 (`FUN_390b3750` = the `X2::VehicleUnitModel` class), i.e.
+/// `models.sub_type = 'VehicleModel'`, which `Db::turret_limits` already requires (S12-C6). The
+/// all-zero turret rows are not turrets. A drivable vehicle with a turret block (a catapult or a
+/// tank) is a turret seat too; it keeps driving through the cart path and aims with the keys when
+/// `vehicle_models.installed_turret` is set (`FUN_39425580`).
 pub fn turret_seat(unit: &Unit, db: &Db) -> bool {
     let UnitKind::Slave { id, .. } = unit.kind else {
         return false;
@@ -165,7 +188,7 @@ pub fn turret_seat_model(kind: u32, model_id: u32, db: &Db) -> bool {
     matches!(kind, 7 | 8)
         && db
             .turret_limits(model_id)
-            .is_some_and(|limits| limits.velocity == 0.0 && limits.is_aimable())
+            .is_some_and(|limits| limits.is_aimable())
 }
 
 /// A direction in the model's own Cry space as an aim: `+Y` is forward, `+X` right, `+Z` up.
@@ -186,16 +209,6 @@ pub fn aim_from_direction(direction: Vec3) -> Option<TurretAim> {
 pub fn camera_aim(root: &GlobalTransform, direction: Vec3) -> Option<TurretAim> {
     let local = root.rotation().inverse() * direction;
     aim_from_direction(bevy_to_cry(local))
-}
-
-/// The direction an aim points at, in the model's Cry space.
-pub fn aim_direction(aim: TurretAim) -> Vec3 {
-    let horizontal = aim.pitch.cos();
-    Vec3::new(
-        -aim.yaw.sin() * horizontal,
-        aim.yaw.cos() * horizontal,
-        aim.pitch.sin(),
-    )
 }
 
 /// `UpdateGunTurret`'s rate limit and wrap: `current` moves towards `target` by at most
@@ -345,12 +358,13 @@ impl Ballistic {
     }
 }
 
-/// The 1.2 trace (`FUN_394322f0` loop): 0.1 s segments until `flight`, the first ground hit, or
-/// the camera hit when nothing is hit (`local_24` is left unchanged then).
+/// The 1.2 trace (`FUN_394322f0` loop): 0.1 s segments until `flight`, the first hit of the
+/// segment test (`FUN_39429750`), or the camera hit when nothing is hit (`local_24` is left
+/// unchanged then).
 pub fn trace_impact(
     launch: &Ballistic,
     fallback: Vec3,
-    ground: impl Fn(Vec3) -> Option<f32>,
+    mut segment_hit: impl FnMut(Vec3, Vec3) -> Option<Vec3>,
 ) -> Vec3 {
     let horizontal = Vec3::new(launch.velocity.x, 0.0, launch.velocity.z);
     let mut point = launch.start;
@@ -360,18 +374,8 @@ pub fn trace_impact(
         let next = point
             + horizontal * TRACE_STEP
             + Vec3::Y * (climb * TRACE_STEP - 0.5 * GRAVITY * TRACE_STEP * TRACE_STEP);
-        if ground(next).is_some_and(|height| next.y <= height) {
-            // The segment crosses the surface: find the crossing, as the ray test does.
-            let (mut low, mut high) = (point, next);
-            for _ in 0..8 {
-                let middle = low.lerp(high, 0.5);
-                if ground(middle).is_some_and(|height| middle.y > height) {
-                    low = middle;
-                } else {
-                    high = middle;
-                }
-            }
-            return high;
+        if let Some(hit) = segment_hit(point, next) {
+            return hit;
         }
         point = next;
         climb -= GRAVITY * TRACE_STEP;
@@ -398,45 +402,267 @@ pub fn ballistic_aim(
     ))
 }
 
-/// The aim ray of `FUN_394281b0` / `DAT_3a5a4ed8`: from the muzzle along the camera direction,
-/// up to `range`. `None` only for a zero direction or range; when the terrain copy holds no
-/// ground on the way (a shot over water), the ray's end is the aim point (S12-C1).
-pub fn aim_hit(
-    start: Vec3,
-    direction: Vec3,
-    range: f32,
-    terrain: Option<&TerrainQuery>,
-) -> Option<Vec3> {
-    let direction = direction.normalize_or_zero();
-    if direction == Vec3::ZERO || range <= 0.0 {
-        return None;
+/// `FUN_393594c0`: pull the camera hit into the horizontal cone of half-angle
+/// `target_angle / 2 - 1 deg` around the slave's facing, keeping the hit's height. The 1.2 code
+/// rotates the facing by `min(acos(dot), half-angle)`, so a hit already inside the cone is kept
+/// and an outside hit lands on the cone edge at the same horizontal distance. `target_angle` 0
+/// or outside 0..=360 is the 1.2 early return (the hit unchanged).
+pub fn cone_clamp(origin: Vec3, forward: Vec3, hit: Vec3, target_angle: f32) -> Vec3 {
+    if !target_angle.is_finite() || !(0.0..=360.0).contains(&target_angle) || target_angle == 0.0 {
+        return hit;
     }
-    let end = start + direction * range;
-    let Some(terrain) = terrain else {
-        return Some(end);
+    let half = (target_angle * 0.5 - 1.0).to_radians();
+    if half <= 0.0 {
+        return hit;
+    }
+    let forward = Vec3::new(forward.x, 0.0, forward.z);
+    let delta = hit - origin;
+    let flat = Vec3::new(delta.x, 0.0, delta.z);
+    let length = flat.length();
+    if length <= 1e-4 {
+        return hit;
+    }
+    let Some(forward) = forward.try_normalize() else {
+        return hit;
     };
-    let step = 0.5;
-    let mut distance = step;
-    while distance <= range {
-        let point = start + direction * distance;
-        let cry = bevy_to_cry(point);
-        if terrain
-            .ground_at(cry.x, cry.y)
-            .is_some_and(|ground| point.y <= ground.height)
-        {
-            return Some(point);
-        }
-        distance += step;
+    let direction = flat / length;
+    let angle = forward.dot(direction).clamp(-1.0, 1.0).acos();
+    if angle <= half {
+        return hit;
     }
-    Some(end)
+    let side = forward.cross(direction).y;
+    let side = if side < 0.0 { -1.0 } else { 1.0 };
+    let turned = Quat::from_rotation_y(side * half) * forward;
+    origin + turned * length + Vec3::Y * delta.y
 }
 
-/// `FUN_394322f0` stores `pitch`/`yaw` in radians; the model limits are the data row.
+/// A drawn body the aim rays stop at (`FUN_3917dd80` living entities, `FUN_39429750` rigid
+/// objects). This client approximates units and hulls with bounding spheres (F2 still lacks
+/// mesh-accurate hitboxes).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimBody {
+    pub centre: Vec3,
+    pub radius: f32,
+}
+
+/// Where the camera ray and the arc trace stop: terrain and static brushes, the sea
+/// (`World::ocean_level`) and the drawn bodies. All points are Bevy world space.
+#[derive(Clone, Copy, Default)]
+pub struct AimWorld<'a> {
+    pub terrain: Option<&'a TerrainQuery>,
+    pub collision: Option<&'a WorldCollision>,
+    /// `World::ocean_level`; `None` for a world without a sea.
+    pub ocean: Option<f32>,
+    pub bodies: &'a [AimBody],
+}
+
+impl AimWorld<'_> {
+    /// The first point a ray segment touches (`FUN_3917dd80` / `FUN_39429750`).
+    pub fn segment(&self, from: Vec3, to: Vec3) -> Option<Vec3> {
+        let delta = to - from;
+        let length = delta.length();
+        if !length.is_finite() || length <= 1e-4 {
+            return None;
+        }
+        let direction = delta / length;
+        let mut best: Option<(f32, Vec3)> = None;
+        let mut offer = |distance: f32, point: Vec3| {
+            if distance >= 0.0 && distance <= length && best.is_none_or(|(best, _)| distance < best)
+            {
+                best = Some((distance, point));
+            }
+        };
+        if let Some(collision) = self.collision {
+            // The 1.2 ray masks are 0x307 (static/sleeping/rigid 7, terrain 0x100, water 0x200);
+            // `Mask::ALL` is this world's terrain plus its static brushes.
+            let origin = bevy_to_cry(from);
+            let dir = bevy_to_cry(direction);
+            if let Some(hit) = collision.raycast_mask(origin, dir, length, Mask::ALL) {
+                offer(hit.t, cry_to_bevy(hit.point));
+            }
+        }
+        if let Some(terrain) = self.terrain {
+            let (start, end) = (bevy_to_cry(from), bevy_to_cry(to));
+            if let Some(point) =
+                terrain_crossing(start, end, |x, y| terrain.ground_at(x, y).map(|g| g.height))
+            {
+                offer((cry_to_bevy(point) - from).length(), cry_to_bevy(point));
+            }
+        }
+        if let Some(level) = self.ocean {
+            let (start, end) = (bevy_to_cry(from), bevy_to_cry(to));
+            if let Some(point) = water_crossing(start, end, level) {
+                offer((cry_to_bevy(point) - from).length(), cry_to_bevy(point));
+            }
+        }
+        for body in self.bodies {
+            if let Some(distance) = sphere_hit(from, direction, length, body.centre, body.radius) {
+                offer(distance, from + direction * distance);
+            }
+        }
+        best.map(|(_, point)| point)
+    }
+
+    /// [`AimWorld::segment`] from `origin` along `direction` for `range` metres.
+    pub fn ray(&self, origin: Vec3, direction: Vec3, range: f32) -> Option<Vec3> {
+        let direction = direction.normalize_or_zero();
+        if direction == Vec3::ZERO || !range.is_finite() || range <= 0.0 {
+            return None;
+        }
+        self.segment(origin, origin + direction * range)
+    }
+}
+
+/// Where a game-space segment first passes under the terrain height `ground` (marching at 2 m
+/// and bisecting the crossing). The collision ray is exact where its cells are built; this is
+/// the fallback for terrain outside them.
+pub fn terrain_crossing(
+    from: Vec3,
+    to: Vec3,
+    ground: impl Fn(f32, f32) -> Option<f32>,
+) -> Option<Vec3> {
+    if !from.is_finite() || !to.is_finite() || from == to {
+        return None;
+    }
+    if ground(from.x, from.y).is_some_and(|height| from.z <= height) {
+        return Some(from);
+    }
+    let steps = ((from.distance(to) / 2.0).ceil() as usize).max(1);
+    let mut prev = from;
+    for step in 1..=steps {
+        let point = from.lerp(to, step as f32 / steps as f32);
+        if ground(point.x, point.y).is_some_and(|height| point.z <= height) {
+            let (mut low, mut high) = (0.0, 1.0);
+            for _ in 0..12 {
+                let middle = 0.5 * (low + high);
+                let probe = prev.lerp(point, middle);
+                if ground(probe.x, probe.y).is_some_and(|height| probe.z > height) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            return Some(prev.lerp(point, high));
+        }
+        prev = point;
+    }
+    None
+}
+
+/// Where a game-space segment crosses the sea plane, if it starts above it and ends at or below.
+pub fn water_crossing(from: Vec3, to: Vec3, level: f32) -> Option<Vec3> {
+    if !from.is_finite() || !to.is_finite() || from.z <= level || to.z > level {
+        return None;
+    }
+    let t = (level - from.z) / (to.z - from.z);
+    Some(from.lerp(to, t))
+}
+
+/// How far along a normalized `direction` a ray first meets a sphere. A ray that starts inside
+/// the sphere does not hit it (the caster's own body is not an obstacle).
+fn sphere_hit(origin: Vec3, direction: Vec3, max: f32, centre: Vec3, radius: f32) -> Option<f32> {
+    if radius <= 0.0 {
+        return None;
+    }
+    let offset = origin - centre;
+    let closest = offset.dot(direction);
+    let outside = offset.length_squared() - radius * radius;
+    if outside <= 0.0 {
+        return None;
+    }
+    let discriminant = closest * closest - outside;
+    if discriminant < 0.0 {
+        return None;
+    }
+    let distance = -closest - discriminant.sqrt();
+    (distance >= 0.0 && distance <= max).then_some(distance)
+}
+
+/// The preview's refusal (`CanUse` with flags 0x442): the ray failure is `NO_TARGET`; a solved
+/// point outside `skills.min_range ..= max_range` is the same range code the server uses.
+/// `origin` is the slave's position, the caster position the server measures from.
+pub fn range_refusal(hit: Option<Vec3>, origin: Vec3, cannon: Option<CannonSkill>) -> Option<u8> {
+    let hit = hit?;
+    let cannon = cannon?;
+    let distance = (hit - origin).length();
+    if distance < cannon.min_range {
+        Some(aa_net::skill::result::TOO_CLOSE_RANGE)
+    } else if cannon.max_range > 0.0 && distance > cannon.max_range {
+        Some(aa_net::skill::result::TOO_FAR_RANGE)
+    } else {
+        None
+    }
+}
+
+/// `FUN_394322f0` from the camera ray to the click's `Position`: the ray hit is cone-clamped,
+/// the arc is solved from the muzzle to it and traced, and the refusal is `FUN_394281b0`'s
+/// `NO_TARGET` or the range preview. `aim` is the clamped solved aim (camera aim otherwise).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimResult {
+    pub camera: TurretAim,
+    pub aim: TurretAim,
+    pub impact: Vec3,
+    pub hit: Option<Vec3>,
+    pub refusal: Option<u8>,
+}
+
+/// The whole 1.2 camera aim and ballistic solve, with no ECS: `local_aim` calls this with the
+/// drawn camera ray and the frame's world.
+#[allow(clippy::too_many_arguments)]
+pub fn solve_aim(
+    root: &GlobalTransform,
+    muzzle: Vec3,
+    ray_origin: Vec3,
+    ray_direction: Vec3,
+    limits: TurretLimits,
+    cannon: Option<CannonSkill>,
+    world: &AimWorld,
+) -> Option<AimResult> {
+    let camera = limits.clamp(camera_aim(root, ray_direction)?);
+    let range = cannon.map_or(MAX_AIM_RANGE, |cannon| aim_range(cannon.max_range));
+    let raw = world.ray(ray_origin, ray_direction, range);
+    let hit = raw.map(|hit| {
+        cannon.map_or(hit, |cannon| {
+            cone_clamp(
+                root.translation(),
+                *root.forward(),
+                hit,
+                cannon.target_angle,
+            )
+        })
+    });
+    let refusal = if raw.is_none() {
+        Some(aa_net::skill::result::NO_TARGET)
+    } else {
+        range_refusal(hit, root.translation(), cannon)
+    };
+    let (impact, solved) = match (refusal, hit, cannon) {
+        (None, Some(hit), Some(cannon)) => match ballistic_aim(root, muzzle, hit, cannon.speed) {
+            Some((ballistic, aim)) => (
+                trace_impact(&ballistic, hit, |from, to| world.segment(from, to)),
+                Some(aim),
+            ),
+            None => (hit, None),
+        },
+        (None, Some(hit), None) => (hit, None),
+        _ => (raw.unwrap_or(ray_origin), None),
+    };
+    Some(AimResult {
+        camera,
+        aim: solved.map_or(camera, |aim| limits.clamp(aim)),
+        impact,
+        hit,
+        refusal,
+    })
+}
+
+/// `FUN_394322f0`: the camera ray runs `max(300, skills.max_range)`, so the 300 m floor is kept
+/// when the skill is shorter ranged (`0x3943238c`).
 pub fn aim_range(max_range: f32) -> f32 {
     if max_range.is_finite() {
-        max_range.clamp(0.0, MAX_AIM_RANGE)
+        max_range.max(0.0).max(MAX_AIM_RANGE)
     } else {
-        0.0
+        MAX_AIM_RANGE
     }
 }
 
@@ -488,8 +714,14 @@ impl KeyAim {
 
 /// The queries of [`local_aim`], grouped so the system stays inside Bevy's parameter tuple limit.
 #[derive(bevy::ecs::system::SystemParam)]
+#[allow(clippy::type_complexity)]
 pub struct TurretQueries<'w, 's> {
-    cameras: Query<'w, 's, &'static OrbitCamera>,
+    views: Query<
+        'w,
+        's,
+        (&'static Camera, &'static GlobalTransform),
+        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
+    >,
     roots: Query<'w, 's, (Entity, &'static RemoteUnit, &'static GlobalTransform)>,
     children: Query<'w, 's, &'static Children>,
     animators: Query<'w, 's, &'static aa_anim::Animator>,
@@ -498,16 +730,27 @@ pub struct TurretQueries<'w, 's> {
     guns: Query<'w, 's, &'static mut TurretGun>,
 }
 
-/// The turret aim of the local gunner: every frame from the orbit camera, solved ballistically
-/// (`FUN_394322f0`), clamped to the cannon's `vehicle_models` limits, sent through the 200 ms
-/// change-only rule, and published as [`Sight`] for the HUD.
+/// The world resources of [`local_aim`], grouped to stay inside the system parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct AimResources<'w> {
+    terrain: Option<Res<'w, TerrainQuery>>,
+    collision: Option<Res<'w, WorldCollision>>,
+    /// `World::ocean_level` (`worlds/<name>/world.g`).
+    world: Option<Res<'w, WorldInfo>>,
+    player: Option<Res<'w, aa_net::state::Player>>,
+}
+
+/// The turret aim of the local gunner: every frame the drawn camera's screen-centre ray is
+/// traced and solved ballistically (`FUN_394322f0`), clamped to the cannon's
+/// `vehicle_models` limits, sent through the 200 ms change-only rule, and published as
+/// [`Sight`] for the HUD.
 #[allow(clippy::too_many_arguments)]
 pub fn local_aim(
     mut commands: Commands,
     seat: Res<LocalMount>,
     units: Res<aa_net::state::Units>,
     db: Option<Res<Db>>,
-    terrain: Option<Res<TerrainQuery>>,
+    world: AimResources,
     time: Res<Time>,
     actions: Option<Res<crate::settings::Actions>>,
     mut queries: TurretQueries,
@@ -537,9 +780,9 @@ pub fn local_aim(
     let Some(limits) = slave_turret(unit, db) else {
         return;
     };
-    let Ok(orbit) = queries.cameras.single() else {
-        return;
-    };
+    // TODO(#58 child units): use `units::current_transform` instead of the drawn
+    // `GlobalTransform` once the child-units branch lands, so a cannon aboard a moving ship
+    // aims from its parent's transform instead of the replicated one.
     let Some((entity, _, root)) = queries
         .roots
         .iter()
@@ -551,7 +794,7 @@ pub fn local_aim(
         return;
     };
     // The muzzle is the slave bone `item_hand_r` (`FUN_390b8210`); a model without it falls
-    // back to the prefab's 0.7 m aim point (S12-C1).
+    // back to the unit position `FUN_390b3850` returns (S12-C1).
     let bone = match *muzzle {
         Some((id, bone)) if id == slave => bone,
         _ => {
@@ -562,27 +805,56 @@ pub fn local_aim(
     };
     let start = bone
         .and_then(|bone| queries.globals.get(bone).ok())
-        .map_or_else(
-            || root.translation() + Vec3::Y * 0.7,
-            |bone| bone.translation(),
-        );
-    // camera_pose total pitch for the ordinary (< 50°) arm; a steeper view is capture-pending
-    let camera =
-        Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(orbit.pitch) * Vec3::NEG_Z;
-    let Some(camera) = camera_aim(root, camera) else {
+        .map_or_else(|| root.translation(), |bone| bone.translation());
+    // `FUN_394281b0` / `FUN_3917dd80`: the screen-centre ray starts at the camera matrix
+    // translation and runs over `max(300, max_range)`.
+    let Some((camera, view)) = queries.views.iter().find(|(camera, _)| camera.is_active) else {
         return;
     };
-    let camera = limits.clamp(camera);
+    let Some(viewport) = camera.logical_viewport_size() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(view, viewport * 0.5) else {
+        return;
+    };
+    let direction = *ray.direction;
+    let cannon = db.cannon_skill(template_id);
+    let mut skip = vec![slave];
+    if let Some(own) = world.player.as_ref().and_then(|p| p.spawn.as_ref()) {
+        skip.push(own.obj_id);
+    }
+    if let Some(parent) = unit.attached_to {
+        skip.push(parent.obj_id);
+    }
+    let bodies = aim_bodies(&units, &queries.roots, db, &skip);
+    let ocean = world
+        .world
+        .as_ref()
+        .map(|info| info.0.ocean_level)
+        .filter(|level| *level > 0.0);
+    let aim_world = AimWorld {
+        terrain: world.terrain.as_deref(),
+        collision: world.collision.as_deref(),
+        ocean,
+        bodies: &bodies,
+    };
+    let Some(solved) = solve_aim(
+        root, start, ray.origin, direction, limits, cannon, &aim_world,
+    ) else {
+        return;
+    };
     let pitch = actions.as_ref().map_or(0.0, |a| {
         f32::from(i8::from(a.pressed("moveforward", 0)) - i8::from(a.pressed("moveback", 0)))
     });
     let yaw = actions.as_ref().map_or(0.0, |a| {
         f32::from(i8::from(a.pressed("turnleft", 0)) - i8::from(a.pressed("turnright", 0)))
     });
+    // Key aim only turns an installed turret (`FUN_39425580`); the click's target stays the
+    // camera-arc point (S12-C4).
     let keyed = keys_apply(limits, pitch, yaw);
     let key = if keyed {
         let next = key_step(
-            key_aim.current(slave, camera),
+            key_aim.current(slave, solved.camera),
             limits,
             pitch,
             yaw,
@@ -593,64 +865,78 @@ pub fn local_aim(
     } else {
         None
     };
-    let direction = key.map_or_else(
-        || Quat::from_rotation_y(orbit.yaw) * Quat::from_rotation_x(orbit.pitch) * Vec3::NEG_Z,
-        |aim| root.rotation() * cry_to_bevy(aim_direction(aim)),
-    );
-    let cannon = db.cannon_skill(template_id);
-    let range = cannon.map_or(MAX_AIM_RANGE, |cannon| aim_range(cannon.max_range));
-    let hit = aim_hit(start, direction, range, terrain.as_deref());
-    let (impact, solve) = match (hit, cannon) {
-        (Some(hit), Some(cannon)) => match ballistic_aim(root, start, hit, cannon.speed) {
-            Some((ballistic, aim)) => (
-                trace_impact(&ballistic, hit, |point| {
-                    let cry = bevy_to_cry(point);
-                    terrain
-                        .as_deref()
-                        .and_then(|terrain| terrain.ground_at(cry.x, cry.y))
-                        .map(|ground| ground.height)
-                }),
-                Some(aim),
-            ),
-            None => (hit, None),
-        },
-        (Some(hit), None) => (hit, None),
-        (None, _) => (start + direction.normalize_or_zero() * range, None),
-    };
-    let aim = key.unwrap_or_else(|| solve.map_or(camera, |aim| limits.clamp(aim)));
-    // `FUN_394322f0` sets result 9 when its aim ray fails (`FUN_394281b0`). The aim itself is
-    // not refused here: the decompile's `CanUse` runs on the current unit target, not on the
-    // Position (see `local_170` / `DAT_3a5a4d70`), and the turret only clamps.
-    let refusal = hit.is_none().then_some(aa_net::skill::result::NO_TARGET);
-    match queries.targets.get_mut(entity) {
-        Ok(mut target) => target.0 = aim,
-        Err(_) => {
-            commands.entity(entity).insert(TurretTarget(aim));
+    let aim = key.unwrap_or(solved.aim);
+    // The turret is turned when the camera aim preview passes (`CanUse` 0x442), and always by
+    // the installed-turret keys. A failed preview publishes the refusal and sends no fire.
+    if solved.refusal.is_none() || keyed {
+        match queries.targets.get_mut(entity) {
+            Ok(mut target) => target.0 = aim,
+            Err(_) => {
+                commands.entity(entity).insert(TurretTarget(aim));
+            }
+        }
+        if queries.guns.get(entity).is_err() {
+            commands.entity(entity).insert(TurretGun {
+                limits,
+                bones: None,
+                bones_checked: false,
+            });
+        }
+        let now_ms = (time.elapsed_secs_f64() * 1000.0) as u64;
+        if send.observe(now_ms, slave, aim) {
+            out.write(NetCommand(aa_net::Command::TurretState {
+                unit_id: slave,
+                pitch: aim.pitch,
+                yaw: aim.yaw,
+            }));
         }
     }
-    if queries.guns.get(entity).is_err() {
-        commands.entity(entity).insert(TurretGun {
-            limits,
-            bones: None,
-            bones_checked: false,
-        });
-    }
-    let now_ms = (time.elapsed_secs_f64() * 1000.0) as u64;
-    if send.observe(now_ms, slave, aim) {
-        out.write(NetCommand(aa_net::Command::TurretState {
-            unit_id: slave,
-            pitch: aim.pitch,
-            yaw: aim.yaw,
-        }));
-    }
-    let cry = bevy_to_cry(impact);
+    let cry = bevy_to_cry(solved.impact);
     commands.insert_resource(Sight {
         slave,
         aim,
         pos: Pos::new(cry.x, cry.y, cry.z),
         skill: cannon.map_or(0, |cannon| cannon.id),
-        refusal,
+        refusal: solved.refusal,
     });
+}
+
+/// The drawn bodies (`FUN_3917dd80` living entities, `FUN_39429750` rigid objects) of the other
+/// units: a sphere over a unit, and a hull-bounds sphere for a ship. The manned slave, the local
+/// player and the slave's parent are skipped, as the 1.2 ray ignores its own caster.
+fn aim_bodies(
+    units: &aa_net::state::Units,
+    roots: &Query<(Entity, &RemoteUnit, &GlobalTransform)>,
+    db: &Db,
+    skip: &[u32],
+) -> Vec<AimBody> {
+    let mut bodies = Vec::new();
+    for (_, remote, root) in roots.iter() {
+        let Some(unit) = units.by_id.get(&remote.obj_id) else {
+            continue;
+        };
+        if skip.contains(&unit.obj_id) {
+            continue;
+        }
+        let scale = unit.scale.max(0.5);
+        if matches!(unit.kind, UnitKind::Slave { .. }) && db.is_ship(unit.model_id) {
+            let (min, max) = db
+                .ship_bounds(unit.model_id)
+                .unwrap_or((Vec2::splat(-2.0), Vec2::splat(2.0)));
+            let middle = Quat::from_rotation_z(unit.yaw())
+                * Vec3::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5, 0.0);
+            let centre =
+                cry_to_bevy(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z) + middle) + Vec3::Y * 3.0;
+            let radius = ((max - min).length() * 0.5).max(2.0) + 1.0;
+            bodies.push(AimBody { centre, radius });
+        } else {
+            bodies.push(AimBody {
+                centre: root.translation() + Vec3::Y * (0.9 * scale),
+                radius: 1.1 * scale,
+            });
+        }
+    }
+    bodies
 }
 
 /// Applies received posture type 8 to remote turrets (and to a local cannon nobody mans).
@@ -1067,12 +1353,12 @@ mod tests {
         );
     }
 
-    /// Every kind-7/8 slave row through the same gate `track_local_mount` uses: a model that can
-    /// drive (`velocity > 0`) stays a vehicle, a zero-velocity model with a non-zero turret range
-    /// is aimable, and an all-zero or unreadable row is neither.
+    /// Every kind-7/8 slave row through the same gate `track_local_mount` uses: a
+    /// `models.sub_type = 'VehicleModel'` row with a non-zero turret range is a turret seat,
+    /// drivable or not (the controller type 3, S12-C6); an all-zero or unreadable row is not.
     #[test]
     #[ignore = "requires AA_DB"]
-    fn the_real_kind_7_8_rows_split_into_drivable_vehicles_and_aimable_turrets() {
+    fn the_real_kind_7_8_vehicle_models_with_a_turret_block_are_seats() {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         if !std::path::Path::new(&path).exists() {
             return;
@@ -1105,22 +1391,14 @@ mod tests {
         let mut drivable = 0;
         for (id, name, kind, model, velocity) in rows {
             let seat = turret_seat_model(kind, model, &db);
-            if velocity.is_some_and(|v| v > 0.0) {
-                drivable += 1;
-                assert!(
-                    !seat,
-                    "slave {id} {name} (kind {kind}, model {model}) can drive"
-                );
-                continue;
-            }
-            if db
+            let has_block = db
                 .turret_limits(model)
-                .is_some_and(|limits| limits.is_aimable())
-            {
+                .is_some_and(|limits| limits.is_aimable());
+            if has_block {
                 aimable += 1;
                 assert!(
                     seat,
-                    "slave {id} {name} (kind {kind}, model {model}) is a gun turret"
+                    "slave {id} {name} (kind {kind}, model {model}) is a turret seat"
                 );
             } else {
                 assert!(
@@ -1128,27 +1406,34 @@ mod tests {
                     "slave {id} {name} (kind {kind}, model {model}) has no turret range"
                 );
             }
+            if velocity.is_some_and(|v| v > 0.0) {
+                drivable += 1;
+                assert!(
+                    seat == has_block,
+                    "slave {id} {name} (kind {kind}, model {model}) drives"
+                );
+            }
         }
         assert!(
             aimable >= 20 && drivable >= 15,
             "aimable {aimable}, drivable {drivable}"
         );
-        // The galleon cannons (kind 8 and ground kind 7) aim; the trebuchet, tank, cotton cart and
-        // an all-zero human cannon do not.
+        // The galleon cannons (kind 8 and ground kind 7) aim; the trebuchet and tank are turret
+        // seats too (they keep driving); an all-zero human cannon is not.
         assert!(turret_seat_model(8, 117, &db), "ship cannon");
         assert!(turret_seat_model(7, 117, &db), "ground cannon");
         assert!(turret_seat_model(7, 1535, &db), "galleon cannon model 61");
         assert!(
-            !turret_seat_model(7, 2, &db),
-            "trebuchet drives (velocity 2.5)"
+            turret_seat_model(7, 2, &db),
+            "trebuchet (installed, velocity 2.5)"
         );
         assert!(
-            !turret_seat_model(7, 892, &db),
-            "tank drives (velocity 3.5)"
+            turret_seat_model(7, 892, &db),
+            "tank (installed, velocity 3.5)"
         );
         assert!(
-            !turret_seat_model(7, 1008, &db),
-            "cotton cart drives (velocity 4)"
+            turret_seat_model(7, 1008, &db),
+            "cotton cart (VehicleModel)"
         );
         assert!(!turret_seat_model(7, 1005, &db), "all-zero turret row");
     }
@@ -1168,8 +1453,10 @@ mod tests {
         let end = ballistic.at(ballistic.flight);
         assert!((end.y - 50.0).abs() < 1e-2, "end {end:?}");
         assert!(end.x > 110.0, "the arc overshoots to {end:?}");
-        let slope = |point: Vec3| Some(0.5 * point.x);
-        let impact = trace_impact(&ballistic, hit, slope);
+        let slope = |x: f32, _y: f32| Some(0.5 * x);
+        let impact = trace_impact(&ballistic, hit, |from, to| {
+            terrain_crossing(bevy_to_cry(from), bevy_to_cry(to), slope).map(cry_to_bevy)
+        });
         assert!(
             impact.x > 101.0,
             "the impact must be the arc, not the 100 m camera hit: {impact:?}"
@@ -1195,13 +1482,171 @@ mod tests {
         assert!((end.x - 100.0).abs() < 1e-2, "{end:?}");
     }
 
-    /// `FUN_394322f0`: `min(300.0, FUN_39354310(skill, 2))`.
+    /// `FUN_394322f0` @ `0x3943238c`: `comiss 300, range; ja keep 300` makes the ray
+    /// `max(300, skills.max_range)`.
     #[test]
-    fn the_aim_range_is_the_skill_range_capped_at_300() {
-        assert_eq!(aim_range(100.0), 100.0);
-        assert_eq!(aim_range(1000.0), 300.0);
-        assert_eq!(aim_range(0.0), 0.0);
-        assert_eq!(aim_range(f32::NAN), 0.0);
+    fn the_aim_range_is_the_skill_range_with_a_300_metre_floor() {
+        assert_eq!(aim_range(100.0), 300.0);
+        assert_eq!(aim_range(1000.0), 1000.0);
+        assert_eq!(aim_range(0.0), 300.0);
+        assert_eq!(aim_range(f32::NAN), 300.0);
+    }
+
+    /// `FUN_393594c0`: the camera hit is pulled into the horizontal cone of half-angle
+    /// `target_angle / 2 - 1 deg`; a hit inside the cone is left exactly as it was, and the
+    /// height is kept.
+    #[test]
+    fn the_camera_hit_is_pulled_into_the_skill_angle_cone() {
+        let origin = Vec3::ZERO;
+        let forward = Vec3::NEG_Z;
+        let direction = Quat::from_rotation_y((-60f32).to_radians()) * forward;
+        let original = origin + direction * 100.0 + Vec3::Y * 7.0;
+        let clamped = cone_clamp(origin, forward, original, 50.0);
+        assert!((clamped.y - 7.0).abs() < 1e-5, "the height is kept");
+        let flat = Vec3::new(clamped.x, 0.0, clamped.z);
+        assert!(
+            (flat.length() - 100.0).abs() < 1e-3,
+            "the horizontal distance is kept"
+        );
+        let angle = forward
+            .dot(flat.normalize())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees();
+        assert!((angle - 24.0).abs() < 1e-3, "clamped to {angle} deg");
+        assert!(angle < 25.0);
+
+        // 10 degrees off is already inside the 24 degree half-cone and is not moved.
+        let inside = origin + (Quat::from_rotation_y((-10f32).to_radians()) * forward) * 30.0;
+        assert_eq!(cone_clamp(origin, forward, inside, 50.0), inside);
+        // 0 disables the clamp (the 1.2 early return).
+        assert_eq!(cone_clamp(origin, forward, original, 0.0), original);
+    }
+
+    /// `FUN_3917dd80` / `FUN_39429750`: the sea is an obstacle for the camera ray.
+    #[test]
+    fn the_aim_ray_stops_at_the_ocean() {
+        let world = AimWorld {
+            ocean: Some(5.0),
+            ..AimWorld::default()
+        };
+        let hit = world
+            .ray(Vec3::new(0.0, 20.0, 0.0), Vec3::NEG_Y, 100.0)
+            .expect("the ray reaches the sea");
+        assert!((hit.y - 5.0).abs() < 1e-4, "{hit:?}");
+        assert!(
+            world
+                .ray(Vec3::new(0.0, 20.0, 0.0), Vec3::Y, 100.0)
+                .is_none(),
+            "upward"
+        );
+    }
+
+    /// The arc trace uses the same segment test: it stops at the sea, not at the fallback.
+    #[test]
+    fn the_arc_trace_stops_at_the_ocean() {
+        let world = AimWorld {
+            ocean: Some(5.0),
+            ..AimWorld::default()
+        };
+        let ballistic = Ballistic {
+            start: Vec3::new(0.0, 20.0, 0.0),
+            velocity: Vec3::new(10.0, 0.0, 0.0),
+            flight: 10.0,
+            len: 100.0,
+        };
+        let fallback = Vec3::new(100.0, 100.0, 0.0);
+        let impact = trace_impact(&ballistic, fallback, |from, to| world.segment(from, to));
+        assert!((impact.y - 5.0).abs() < 1e-3, "{impact:?}");
+        assert!(impact.x > 0.0 && impact.x < 100.0, "{impact:?}");
+    }
+
+    /// `FUN_394281b0` returns 0 when the screen ray hits nothing: result 9 and no solved point.
+    #[test]
+    fn a_screen_ray_that_hits_nothing_is_no_target() {
+        let root = GlobalTransform::default();
+        let cannon = CannonSkill {
+            id: 17742,
+            speed: 25.0,
+            min_range: 10.0,
+            max_range: 100.0,
+            target_angle: 50.0,
+        };
+        let world = AimWorld::default();
+        let result = solve_aim(
+            &root,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 10.0, 0.0),
+            Vec3::new(0.0, -1.0, -1.0),
+            vm10(),
+            Some(cannon),
+            &world,
+        )
+        .expect("a horizontal camera direction");
+        assert_eq!(
+            result.refusal,
+            Some(aa_net::skill::result::NO_TARGET),
+            "FUN_394281b0 answers 0"
+        );
+        assert_eq!(result.impact, Vec3::new(0.0, 10.0, 0.0));
+        assert!(result.hit.is_none());
+    }
+
+    /// The published `Position` is the traced arc impact, not the camera hit: a body on the arc
+    /// before the camera's target is the impact.
+    #[test]
+    fn local_aim_publishes_the_traced_impact_not_the_camera_hit() {
+        let root = GlobalTransform::default();
+        let muzzle = Vec3::new(0.0, 10.0, 0.0);
+        let camera = Vec3::new(0.0, 100.0, 0.0);
+        let target = Vec3::new(100.0, 50.0, 0.0);
+        let camera_hit =
+            camera + (target - camera).normalize() * ((target - camera).length() - 1.0);
+        let along_arc = Vec3::new(50.0, 35.6, 0.0);
+        let bodies = [
+            AimBody {
+                centre: target,
+                radius: 1.0,
+            },
+            AimBody {
+                centre: along_arc,
+                radius: 2.0,
+            },
+        ];
+        let world = AimWorld {
+            bodies: &bodies,
+            ..AimWorld::default()
+        };
+        let cannon = CannonSkill {
+            id: 17742,
+            speed: 50.0,
+            min_range: 0.0,
+            max_range: 500.0,
+            target_angle: 0.0,
+        };
+        let result = solve_aim(
+            &root,
+            muzzle,
+            camera,
+            (target - camera).normalize(),
+            vm10(),
+            Some(cannon),
+            &world,
+        )
+        .expect("a camera ray");
+        assert!(
+            (result.hit.expect("the camera ray hit") - camera_hit).length() < 0.2,
+            "the camera ray hit the far body"
+        );
+        assert!(
+            (result.impact - along_arc).length() <= 2.5,
+            "the impact is the arc's body, not the camera hit: {:?}",
+            result.impact
+        );
+        assert!(
+            (result.impact - camera_hit).length() > 20.0,
+            "a code that published the camera hit would fail here"
+        );
     }
 
     /// `FUN_39425580`: only `vehicle_models.installed_turret` models aim with keys (actions 0/1
@@ -1251,16 +1696,29 @@ mod tests {
         let sample = db.cannon_skill(77).expect("slave 77 fires 17742");
         assert_eq!(sample.id, 17742);
         assert!((sample.speed - 25.0).abs() < 1e-4);
+        assert!((sample.min_range - 10.0).abs() < 1e-4);
         assert!((sample.max_range - 100.0).abs() < 1e-4);
+        assert!((sample.target_angle - 50.0).abs() < 1e-4);
         let galleon = db.cannon_skill(10).expect("slave 10 fires 10473");
         assert_eq!(galleon.id, 10473);
         assert!((galleon.speed - 35.0).abs() < 1e-4);
+        assert!((galleon.min_range - 4.0).abs() < 1e-4);
         assert!((galleon.max_range - 120.0).abs() < 1e-4);
+        assert!((galleon.target_angle - 60.0).abs() < 1e-4);
         let mole = db
             .cannon_skill(70)
             .expect("slave 70 fires 15748 without a point-1 rider");
         assert_eq!(mole.id, 15748);
         assert!((mole.max_range - 22.0).abs() < 1e-4);
+        assert!((mole.target_angle - 60.0).abs() < 1e-4);
+        // The siege thrower (slave 1) has three ammo throws; the first gunner row wins, and a
+        // caller that knows the slot can ask for it. All three share the ballistic data here.
+        let first = db.cannon_skill(1).expect("slave 1 throws");
+        assert_eq!((first.id, first.target_angle), (15515, 45.0));
+        let water = db.cannon_skill_for(1, Some(63)).expect("mount skill 63");
+        assert_eq!(water.id, 15580);
+        assert!((water.speed - first.speed).abs() < 1e-4);
+        assert!((water.max_range - first.max_range).abs() < 1e-4);
         assert!(
             db.cannon_skill(100).is_none(),
             "the tower deployment 20160 is target type 0, not a shot"

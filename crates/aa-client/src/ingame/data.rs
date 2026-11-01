@@ -538,35 +538,59 @@ impl Db {
 
     /// The shot a gunner's seat fires for slave template `template`: the mount skill's own
     /// `skills` row (`slave_mount_skills` -> `mount_skills.skill_id`) with `target_type_id` 11
-    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc) and `max_range`. The bar casts
-    /// the same row (a point-1 `mount_attached_skills` skill is only the displayed one); rows of
-    /// other types (the tower deployment, the drums) are not shots.
+    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc), its range and the
+    /// `target_angle` cone (`FUN_393594c0` +0x17c). The bar casts the same row (a point-1
+    /// `mount_attached_skills` skill is only the displayed one); rows of other types (the tower
+    /// deployment, the drums) are not shots. A slave with several BallisticPos rows (the siege
+    /// thrower, slave 1, has three ammo throws) takes its first BallisticPos row; those rows
+    /// share the ballistic data here, and a caller that knows the slot can use
+    /// [`Db::cannon_skill_for`].
     pub fn cannon_skill(&self, template: u32) -> Option<super::turret::CannonSkill> {
+        self.cannon_skill_for(template, None)
+    }
+
+    /// [`Db::cannon_skill`] for a specific `slave_mount_skills` row when the caller knows the
+    /// slot it will cast, else the first BallisticPos row.
+    pub fn cannon_skill_for(
+        &self,
+        template: u32,
+        mount_skill: Option<u32>,
+    ) -> Option<super::turret::CannonSkill> {
         let mut l = self.lookups.lock().unwrap();
-        if let Some(skill) = l.cannon_skills.get(&template) {
+        if mount_skill.is_none()
+            && let Some(skill) = l.cannon_skills.get(&template)
+        {
             return *skill;
         }
-        let skill = l
-            .conn
-            .query_row(
-                "SELECT ms.skill_id, s.effect_speed, s.max_range
+        let skill = {
+            let mut query = match l.conn.prepare(
+                "SELECT ms.skill_id, s.effect_speed, s.min_range, s.max_range, s.target_angle
                  FROM slave_mount_skills sm
                  JOIN mount_skills ms ON ms.id = sm.mount_skill_id
                  JOIN skills s ON s.id = ms.skill_id
                  WHERE sm.slave_id = ?1 AND s.target_type_id = 11
                      AND s.effect_speed > 0 AND s.max_range > 0
+                     AND (?2 IS NULL OR sm.mount_skill_id = ?2)
                  ORDER BY sm.id LIMIT 1",
-                params![template],
-                |r| {
+            ) {
+                Ok(query) => query,
+                Err(_) => return None,
+            };
+            query
+                .query_row(params![template, mount_skill], |r| {
                     Ok(super::turret::CannonSkill {
                         id: r.get(0)?,
                         speed: r.get(1)?,
-                        max_range: r.get(2)?,
+                        min_range: r.get(2)?,
+                        max_range: r.get(3)?,
+                        target_angle: r.get(4)?,
                     })
-                },
-            )
-            .ok();
-        l.cannon_skills.insert(template, skill);
+                })
+                .ok()
+        };
+        if mount_skill.is_none() {
+            l.cannon_skills.insert(template, skill);
+        }
         skill
     }
 

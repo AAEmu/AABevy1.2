@@ -9602,7 +9602,9 @@ the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.
   (`{cannon slave, mount_skills.id}`), the mount skill's own `skills.id` (17742 for slave 77's
   `mount_skills` 116, 10473 for slave 10's 16) and `SkillCastTarget::Position` (wire kind 1;
   `long_position`, `rot` 0, two empty object ids). The `pos` is the impact point of 1.2's
-  ballistic solve (`FUN_394322f0`: muzzle `item_hand_r`, `effect_speed`, `min(300, max_range)`,
-  0.1 s trace), not the camera hit. The final flag byte is 0 (no skill object). The server's
+  ballistic solve (`FUN_394322f0`: muzzle `item_hand_r`, `effect_speed`, the screen ray over
+  `max(300, max_range)`, the `FUN_393594c0` angle cone, 0.1 s trace), not the camera hit; a ray
+  that hits nothing is `NO_TARGET` and sends no packet. The final flag byte is 0 (no skill
+  object). The server's
   `ship_cannon_gunner_seat_skill_and_leaving` uses the same target shape, and the body is
   byte-tested against `skill::write_start_skill` and the server reader.

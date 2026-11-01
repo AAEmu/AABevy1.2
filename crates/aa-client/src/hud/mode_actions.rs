@@ -60,10 +60,10 @@ pub(crate) struct Tables {
     slave_skills: HashMap<u32, Vec<SlaveSkill>>,
     /// `(slave template, mount skill)` -> its point-1 `mount_attached_skills.skill_id`.
     attached_point1: HashMap<(u32, u32), u32>,
-    /// Slave templates whose point-1 seat is a turret (kind 7/8, `vehicle_models.velocity == 0`
-    /// and a non-zero turret range): only their rows show the point-1 attached skill. This is
-    /// the same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a
-    /// bar without the engine's seat resource.
+    /// Slave templates whose point-1 seat is a turret (kind 7/8, a `VehicleModel` with a
+    /// non-zero turret range): only their rows show the point-1 attached skill. This is the
+    /// same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a bar
+    /// without the engine's seat resource.
     turret_slaves: HashSet<u32>,
 }
 
@@ -125,15 +125,15 @@ impl Tables {
             let (slave, mount_skill, skill) = row?;
             out.attached_point1.insert((slave, mount_skill), skill);
         }
-        // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a numeric
-        // `vehicle_models.velocity` of 0, and a non-zero parsed pitch/yaw range. The text
-        // `f`/`t` values in other columns are not angles and are excluded by `typeof`.
+        // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a
+        // `models.sub_type = 'VehicleModel'` row (the controller type 3), and a non-zero parsed
+        // pitch/yaw range. A drivable catapult or tank is included (S12-C6). The text `f`/`t`
+        // values in other columns are not angles and are excluded by `typeof`.
         let mut query = db.prepare(
             "SELECT s.id FROM slaves s
              JOIN models m ON m.id = s.model_id
              JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
              WHERE s.slave_kind_id IN (7, 8)
-               AND typeof(v.velocity) IN ('integer', 'real') AND v.velocity = 0
                AND typeof(v.turret_pitch_angle_min) IN ('integer', 'real')
                AND typeof(v.turret_pitch_angle_max) IN ('integer', 'real')
                AND typeof(v.turret_yaw_angle_min) IN ('integer', 'real')
@@ -636,10 +636,9 @@ pub(super) fn use_slot(
             .get()
             .and_then(|game| game.skills.get(&cast_skill))
             .is_some_and(|info| info.target_type == 11);
-        // `FUN_394322f0` sets `DAT_3a5a4ea4` when its aim ray fails (`FUN_394281b0`); the click
-        // (`FUN_390f3b20`) then shows that result and sends nothing. The solved aim is not
-        // refused here: the decompile's `CanUse` reads the current unit target
-        // (`local_170` / `DAT_3a5a4d70`), not the Position.
+        // `FUN_394322f0` sets `DAT_3a5a4ea4` when its aim preview fails (the screen ray
+        // `FUN_394281b0`, result 9, or the skill's range); the click (`FUN_390f3b20`) then
+        // shows that result and sends nothing.
         if ballistic
             && let Some(result) = data
                 .turret
