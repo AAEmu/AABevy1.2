@@ -27,7 +27,8 @@ fn snapshot(owner_id: u32, all: i32, current: i32) -> HouseSnapshot {
 }
 
 fn setup() -> (UiRuntime, State) {
-    setup_with(super::super::data::GameData::default())
+    let (rt, state, _) = setup_shared();
+    (rt, state)
 }
 
 fn setup_with(game: super::super::data::GameData) -> (UiRuntime, State) {
@@ -35,7 +36,11 @@ fn setup_with(game: super::super::data::GameData) -> (UiRuntime, State) {
     (rt, state)
 }
 
-fn setup_with_bridge(game: super::super::data::GameData) -> (UiRuntime, State, super::super::api::Shared) {
+fn setup_shared() -> (UiRuntime, State, Shared) {
+    setup_with_bridge(super::super::data::GameData::default())
+}
+
+fn setup_with_bridge(game: super::super::data::GameData) -> (UiRuntime, State, Shared) {
     let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
     let bridge = Rc::new(RefCell::new(super::super::api::HudData::default()));
     assert!(bridge.borrow().game.0.set(game).is_ok());
@@ -212,7 +217,10 @@ fn a_house_for_sale_is_bought_at_its_price() -> mlua::Result<()> {
     rt.lua.load("local s = X2House:GetHouseSaleInfo() assert(s.onSale and s.canBuy and s.gold == 3) X2House:BuyHouse()").exec()?;
     // 3 gold is more than the 2 gold the player has
     assert!(state.0.borrow().commands.is_empty());
-    assert_eq!(state.0.borrow().notices, vec!["HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY".to_string()]);
+    assert_eq!(
+        state.0.borrow().notices,
+        vec![Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY", arg: None }]
+    );
     state.0.borrow_mut().money = 30_000;
     rt.lua.load("X2House:BuyHouse()").exec()?;
     assert_eq!(format!("{:?}", state.0.borrow().commands), format!("{:?}", vec![Command::House(HouseCommand::Buy { tl: 7, money_amount: 30_000 })]));
@@ -228,6 +236,70 @@ fn the_build_window_buttons_reach_the_builder() -> mlua::Result<()> {
     Ok(())
 }
 
+/// The Start button (`NextStepFromBuildCheck`) through `sync` to the wire: the captured
+/// `CSCreateHouse` at the snapped (15328, 14632), item 16777230, tax 450000.
+#[test]
+fn the_start_button_sends_the_captured_create_house() -> mlua::Result<()> {
+    let (rt, _state, bridge) = setup_shared();
+    rt.lua.load("X2House:NextStepFromBuildCheck()").exec()?;
+    let mut builder = Builder::default();
+    builder.build = Some(crate::ingame::housing::placement::Build::confirmed(
+        171,
+        16_777_230,
+        21_165,
+        Vec3::new(15328.0, 14632.0, 173.051_62),
+        0.0,
+        450_000,
+    ));
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_message::<NetCommand>()
+        .add_message::<NetEvent>()
+        .add_message::<BuilderSignal>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<HudPointerOverUi>()
+        .insert_resource(Units::default())
+        .insert_resource(Houses::default())
+        .insert_resource(Doodads::default())
+        .insert_resource(Inventory::default())
+        .insert_resource(builder)
+        .insert_non_send(HudBridge(bridge))
+        .insert_non_send(rt)
+        .add_systems(Update, sync);
+    app.update();
+    let commands: Vec<_> = app.world_mut().resource_mut::<Messages<NetCommand>>().drain().collect();
+    assert_eq!(commands.len(), 1, "{commands:?}");
+    let NetCommand(Command::House(HouseCommand::CreateHouse { design_id, x, y, z, z_rot, item_id, money_amount, ht, auto_use_aa_point })) = &commands[0] else {
+        panic!("not a create house: {commands:?}");
+    };
+    assert_eq!(
+        (*design_id, *x, *y, *z, *z_rot, *item_id, *money_amount, *ht, *auto_use_aa_point),
+        (171, 15328.0, 14632.0, 173.051_62, 0.0, 16_777_230, 450_000, 0, false)
+    );
+    let mut w = aa_net::wire::Writer::new();
+    aa_net::housing::HouseCommand::CreateHouse {
+        design_id: *design_id,
+        x: *x,
+        y: *y,
+        z: *z,
+        z_rot: *z_rot,
+        item_id: *item_id,
+        money_amount: *money_amount,
+        ht: *ht,
+        auto_use_aa_point: *auto_use_aa_point,
+    }
+    .write(&mut w);
+    assert_eq!(
+        w.finish(),
+        [
+            0xab, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xbe, 3, 0, 0, 0, 0, 0, 0x80, 0x92, 3, 0x37, 0x0d, 0x2d, 0x43,
+            0, 0, 0, 0, 0x0e, 0, 0, 1, 0, 0, 0, 0, 0xd0, 0xdd, 6, 0, 0, 0, 0, 0, 0,
+        ]
+    );
+    assert!(app.world().resource::<Builder>().build.is_none());
+    Ok(())
+}
+
 #[test]
 fn the_stage_material_decides_the_build_action() {
     use crate::ingame::housing::data::Step;
@@ -240,10 +312,24 @@ fn the_stage_material_decides_the_build_action() {
         ..default()
     };
     let mut inventory = Inventory::default();
-    assert_eq!(build_action(&design, 3, &inventory), Some((14575, false)));
+    assert_eq!(
+        build_action(&design, 3, &inventory),
+        Some(BuildAction { skill: 14575, material: Some(Material { item: 17684, in_bag: false, equipped: false }) })
+    );
     inventory.bag.push(Some(aa_net::model::Item { template_id: 17685, count: 2, ..default() }));
-    assert_eq!(build_action(&design, 10, &inventory), Some((14641, true)));
+    assert_eq!(
+        build_action(&design, 10, &inventory),
+        Some(BuildAction { skill: 14641, material: Some(Material { item: 17685, in_bag: true, equipped: false }) })
+    );
     assert_eq!(build_action(&design, 15, &inventory), None);
+    // the 2026-10-31 capture: a bundle equipped in the backpack slot is not seen by the bag check
+    let mut inventory = Inventory::default();
+    inventory.equipment.slots[aa_net::model::slot::BACKPACK] =
+        Some(aa_net::model::Item { template_id: 17684, count: 1, ..default() });
+    assert_eq!(
+        build_action(&design, 3, &inventory),
+        Some(BuildAction { skill: 14575, material: Some(Material { item: 17684, in_bag: false, equipped: true }) })
+    );
 }
 
 #[test]
@@ -365,7 +451,10 @@ fn permission_clicks_pass_the_native_gates_and_go_out_once_as_the_server_enum() 
     assert!(state.0.borrow().commands.is_empty(), "no membership: nothing goes out");
     assert_eq!(
         state.0.borrow().notices,
-        vec!["CHAT_NOT_IN_EXPEDITION".to_string(), "FAMILY_NOT_EXIST".to_string()]
+        vec![
+            Notice { name: "CHAT_NOT_IN_EXPEDITION", arg: None },
+            Notice { name: "FAMILY_NOT_EXIST", arg: None },
+        ]
     );
 
     let mut game = super::super::data::GameData::default();
@@ -400,7 +489,10 @@ fn an_always_public_design_refuses_every_permission_click() -> mlua::Result<()> 
     open(&state, 42, 0, 0);
     rt.lua.load("X2House:SetHousePermission(3)").exec()?;
     assert!(state.0.borrow().commands.is_empty());
-    assert_eq!(state.0.borrow().notices, vec!["HOUSE_CANNOT_CHANGE_PERMISSION".to_string()]);
+    assert_eq!(
+        state.0.borrow().notices,
+        vec![Notice { name: "HOUSE_CANNOT_CHANGE_PERMISSION", arg: None }]
+    );
     Ok(())
 }
 
