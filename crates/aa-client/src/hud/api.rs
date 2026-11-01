@@ -110,9 +110,10 @@ pub struct HudData {
     pub player_entity: Option<Entity>,
     pub pos: Vec3,
     pub yaw: f32,
-    /// The slave whose point-1 seat is a turret (`ingame::LocalMount::turret_seat`): its bar
-    /// shows the point-1 attached skill. `None` on foot; a drivable catapult/tank has one too
-    /// (it aims while the cart path moves it).
+    /// The slave whose point-1 seat is a turret (`ingame::LocalMount::turret_seat`): the
+    /// engine's general `VehicleModel` seat flag, which also covers drivable catapults and tanks.
+    /// The bar is narrower (a stationary turret shows the point-1 attached skill; a cart keeps
+    /// its mount skills), and the camera aim needs a `BallisticPos`/`ArtilleryPos` skill.
     pub turret_seat: Option<u32>,
     /// The manned cannon's turret aim and arc impact point (`ingame::turret::Sight`): a fire
     /// skill with a BallisticPos target goes out with this spot instead of the selected unit, and

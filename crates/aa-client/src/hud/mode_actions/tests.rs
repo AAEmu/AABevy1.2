@@ -67,6 +67,9 @@ fn cannon_game() -> crate::hud::data::GameData {
         .slave_skills
         .insert(10, vec![SlaveSkill::new(10473, 16)]);
     game.mode_actions.attached_point1.insert((10, 16), 14372);
+    // `cannon_game` bypasses `Tables::load`; slave 10 is the stationary cannon row whose
+    // bar shows its point-1 attached skill (the old `velocity == 0` rule).
+    game.mode_actions.turret_slaves.insert(10);
     game
 }
 
@@ -561,12 +564,12 @@ fn bar_skills(state: &Shared) -> Vec<(u32, u32)> {
         .collect()
 }
 
-/// `driver_skills` on the same rows the real data has: the `VehicleModel` cart 73 is a turret
-/// seat (controller type 3, S12-C6) and shows its attached skill, and the cannon 10 does too when
-/// the engine's seat flag names it or, before that flag arrives, from the template gate. A stale
-/// flag for another slave also falls back to the template gate.
+/// `driver_skills` on the same rows the real data has: the drivable `VehicleModel` cart 73 keeps
+/// its mount skills (the old bar rule: a cart is not a gunner seat), and the cannon 10 shows its
+/// attached skill from the template gate, with the engine's seat flag and a stale flag for
+/// another slave not changing it.
 #[test]
-fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
+fn driver_skills_keeps_a_drivable_cart_on_its_mount_skills()
 -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("AA_PAK").is_err() {
         eprintln!("skip: no client pak");
@@ -589,16 +592,16 @@ fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
         },
         None,
     );
-    assert_eq!(bar_skills(&state), [(15548, 15622), (17000, 17000)]);
+    assert_eq!(bar_skills(&state), [(15622, 15622), (17000, 17000)]);
     assert!(
-        state
+        !state
             .borrow()
             .game
             .get()
             .unwrap()
             .mode_actions
             .turret_slave(73),
-        "the velocity-4 VehicleModel cart is a turret seat too"
+        "the velocity-4 cart is not in the template turret set"
     );
 
     let cannon = schema_unit(20, 8, 10, 117);
@@ -643,7 +646,8 @@ fn driver_skills_uses_the_engine_seat_or_the_template_fallback()
 
 /// A cannon gunner's bar shows the point-1 attached skill (14372) but casts the linked mount
 /// skill (10473). With a published sight that BallisticPos cast goes to the aimed spot; without
-/// one it keeps the ordinary unit target. This is the real 1.2 split: the bar skill has
+/// one it is refused locally with `NO_TARGET` and sends nothing (a Unit fallback would be read
+/// as the caster's own position). This is the real 1.2 split: the bar skill has
 /// `target_type_id` 0, the mount skill it casts has 11.
 #[test]
 fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::error::Error>> {
@@ -704,24 +708,18 @@ fn a_manned_cannon_slot_fires_at_the_aimed_spot() -> Result<(), Box<dyn std::err
     assert_eq!(*pos, aa_net::Pos::new(130.25, 131.5, 100.0));
     assert_eq!(*rot, 0.0, "FUN_390f3b20 writes rot 0");
 
-    // Not manning the cannon (no sight): the same cast keeps the selected unit.
+    // No sight (the camera or the cannon root is not ready): a BallisticPos cast must not fall
+    // back to a Unit target, which the server reads as the caster's own position and refuses as
+    // too close. It is the same local NO_TARGET as a ray that hit nothing.
     state.borrow_mut().turret = None;
-    let sent = press_driver_slot(&state, 0);
-    let [
-        aa_net::Command::UseMateSkill {
-            skill_id,
-            mate_obj_id,
-            mount_skill_id,
-            target_obj_id,
-        },
-    ] = &sent[..]
-    else {
-        panic!("{sent:?}")
-    };
-    assert_eq!(
-        (*skill_id, *mate_obj_id, *mount_skill_id, *target_obj_id),
-        (10473, 20, 16, 777)
+    let (sent, failures) = press_driver_slot_details(&state, 0);
+    assert!(
+        sent.is_empty(),
+        "a cast without a sight sends nothing: {sent:?}"
     );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].result, aa_net::skill::result::NO_TARGET);
+    assert!(!failures[0].server);
     Ok(())
 }
 
@@ -1671,11 +1669,12 @@ fn the_real_gunner_bars_cast_the_aimed_fire_skill() {
     }
 }
 
-/// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a turret seat a row with
-/// a point-1 attached skill shows that skill and casts the mount skill; every other row shows
-/// and casts its mount skill. This is the regression that dropped rows (tank 53's 14332, slave
-/// 54's 14344, ladder 5's 21723, harpoons 37/48/90's 13750) and gave the cotton cart 73 the
-/// attached 15548 instead of its mount skill 15622.
+/// Every kind-7/8 slave keeps all of its `slave_mount_skills` rows. On a stationary turret seat
+/// (the old bar rule: `vehicle_models.velocity == 0`) a row with a point-1 attached skill shows
+/// that skill and casts the mount skill; every other row shows and casts its mount skill. This
+/// is the regression that dropped rows (tank 53's 14332, slave 54's 14344, ladder 5's 21723,
+/// harpoons 37/48/90's 13750) and gave the cotton cart 73 the attached 15548 instead of its
+/// mount skill 15622.
 #[test]
 #[ignore = "requires AA_DB"]
 fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills() {
@@ -1686,30 +1685,18 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
     let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .expect("read the game database");
     let tables = Tables::load(&conn).expect("mode action tables");
-    let Some(db) = crate::ingame::data::Db::open() else {
-        return;
-    };
     let mut query = conn
-        .prepare(
-            "SELECT id, name, slave_kind_id, model_id FROM slaves WHERE slave_kind_id IN (7, 8)",
-        )
+        .prepare("SELECT id, name FROM slaves WHERE slave_kind_id IN (7, 8)")
         .expect("slave query");
     let rows = query
-        .query_map([], |r| {
-            Ok((
-                r.get::<_, u32>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, u32>(2)?,
-                r.get::<_, u32>(3)?,
-            ))
-        })
+        .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))
         .expect("query slaves")
         .collect::<rusqlite::Result<Vec<_>>>()
         .expect("read slaves");
     let mut checked = 0;
-    for (id, name, kind, model) in rows {
+    for (id, name) in rows {
         let mounts = tables.slave_skills.get(&id).cloned().unwrap_or_default();
-        let turret = crate::ingame::turret::turret_seat_model(kind, model, &db);
+        let turret = tables.turret_slave(id);
         let bar = tables.bar(id, turret).unwrap_or_default();
         assert_eq!(bar.len(), mounts.len(), "slave {id} {name} keeps every row");
         for (entry, mount) in bar.iter().zip(&mounts) {
@@ -1735,6 +1722,15 @@ fn every_real_kind_7_8_bar_keeps_its_rows_and_only_turrets_show_attached_skills(
 
     let cart = tables.bar(73, false).expect("cotton cart bar");
     assert_eq!(cart[0].skill, 15622, "the cart keeps its mount skill");
+    assert!(
+        !tables.turret_slave(73),
+        "the drivable cotton cart is not a bar turret seat"
+    );
+    assert!(tables.turret_slave(10), "the stationary galleon cannon is");
+    assert!(
+        !tables.turret_slave(53),
+        "the drivable tank 53 keeps its mount skills"
+    );
     let tank = tables.bar(53, false).expect("tank 53 bar");
     assert!(
         tank.iter().any(|row| row.skill == 14332),

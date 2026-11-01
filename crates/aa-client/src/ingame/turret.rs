@@ -13,6 +13,11 @@
 //! 200 ms. `FUN_390d14b0` (`UpdateGunTurret`) rate-limits the drawn aim with the
 //! `turret_yaw_angvel` / `turret_pitch_angvel` columns and writes `bone_yaw` / `bone_pitch`.
 //!
+//! The camera aim runs only for a slave whose mount skill is `BallisticPos` (target type 11) or
+//! `ArtilleryPos` (15), the stand-in for the native mode 8; a drivable cart with a turret block
+//! but only cart skills is not a gunner seat. It uses the game's `OrbitCamera`, never a prewarm
+//! or cinema camera.
+//!
 //! The fire packet follows path A of `FUN_390f3b20`: `CSStartSkill` with the mount skill's own
 //! skill id, a `Mount` caster (the cannon slave and `mount_skills.id`), a `Position` target at the
 //! impact point of the ballistic solve (`FUN_394322f0`) and `rot` 0. The aim ray starts at the
@@ -21,16 +26,18 @@
 //! `item_hand_r` muzzle at the skill's `effect_speed` and traced in 0.1 s steps. The point it sends
 //! is the first trace hit, or the camera hit when the arc hits nothing (the decompile leaves
 //! `local_24` unchanged). A camera ray that hits nothing is refused with `NO_TARGET` (`result 9`)
-//! and the click sends nothing (`FUN_394281b0` returns 0).
+//! and the click sends nothing (`FUN_394281b0` returns 0); a `BallisticPos` click with no
+//! published `Sight` is refused locally with the same code.
 //!
 //! The camera ray and the arc trace stop at terrain, static brushes, the sea
 //! (`World::ocean_level`) and the drawn unit/ship bodies (`FUN_3917dd80` / `FUN_39429750`,
-//! mask 0x307). The unit and ship bodies are bounding volumes here, not mesh hitboxes.
+//! mask 0x307). Units are bounding spheres; a ship hull is an oriented box from its hull-floor
+//! bounds and the `ship_models` mass box's keel-to-deck/rail height.
 //!
 //! Key aim (`FUN_394332d0` -> `FUN_39425580`) only turns an installed turret; it never decides
-//! the click's target, which stays the camera-arc point. The type-15 `ArtilleryPos` preview of
-//! `FUN_394332d0` is not reproduced because path B (the Lua siege-weapon skill) does not use this
-//! client's click (S12-C4).
+//! the click's target, which stays the camera-arc point, and it does not need a cannon skill. The
+//! type-15 `ArtilleryPos` preview of `FUN_394332d0` is not reproduced because path B (the Lua
+//! siege-weapon skill) does not use this client's click (S12-C4).
 //!
 //! Capture-pending (see `docs/aa-client-units.md`):
 //! * S12-C1: the exact `Position` bytes of a live shot (the solve is from the decompile; the
@@ -45,6 +52,7 @@
 use aa_net::model::{Unit, UnitKind};
 use aa_net::{Event, NetCommand, NetEvent, Pos, TurretAim};
 use aa_world::collide::Mask;
+use aa_world::coords::cry_rot_to_bevy;
 use aa_world::stream::WorldInfo;
 use aa_world::{TerrainQuery, WorldCollision, bevy_to_cry, cry_to_bevy};
 use bevy::prelude::{TransformSystems, *};
@@ -92,9 +100,9 @@ pub struct TurretLimits {
     pub yaw_max: f32,
     pub yaw_rate: f32,
     pub pitch_rate: f32,
-    /// `vehicle_models.velocity`: a substitute for the model controller type `FUN_390b3750`
-    /// returns (3 = turret, 4 = ship). That type is not in the database copy; a model that can
-    /// drive (`velocity > 0`) is not a turret seat (S12-C6).
+    /// `vehicle_models.velocity`: the old HUD bar rule uses `velocity == 0` to show the point-1
+    /// attached skill; a drivable cart keeps its mount skills. It is not the camera-aim gate:
+    /// that is a `BallisticPos`/`ArtilleryPos` mount skill (S12-C6).
     pub velocity: f32,
     /// `vehicle_models.installed_turret`: the model aims with keys at a rate (`39425580`).
     pub installed: bool,
@@ -174,7 +182,9 @@ pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
 /// `models.sub_type = 'VehicleModel'`, which `Db::turret_limits` already requires (S12-C6). The
 /// all-zero turret rows are not turrets. A drivable vehicle with a turret block (a catapult or a
 /// tank) is a turret seat too; it keeps driving through the cart path and aims with the keys when
-/// `vehicle_models.installed_turret` is set (`FUN_39425580`).
+/// `vehicle_models.installed_turret` is set (`FUN_39425580`). The camera aim is narrower: it also
+/// needs a `BallisticPos`/`ArtilleryPos` mount skill (`Db::has_cannon_skill`), so a cart with
+/// only Honk horn is a seat but not a mode-8 gunner.
 pub fn turret_seat(unit: &Unit, db: &Db) -> bool {
     let UnitKind::Slave { id, .. } = unit.kind else {
         return false;
@@ -437,12 +447,19 @@ pub fn cone_clamp(origin: Vec3, forward: Vec3, hit: Vec3, target_angle: f32) -> 
 }
 
 /// A drawn body the aim rays stop at (`FUN_3917dd80` living entities, `FUN_39429750` rigid
-/// objects). This client approximates units and hulls with bounding spheres (F2 still lacks
-/// mesh-accurate hitboxes).
+/// objects). Units are spheres; a ship hull is the oriented box of its hull floor (the deck
+/// footprint) with the `ship_models` mass box's vertical range, keel to deck/rail (S12-C8).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct AimBody {
-    pub centre: Vec3,
-    pub radius: f32,
+pub enum AimBody {
+    Sphere {
+        centre: Vec3,
+        radius: f32,
+    },
+    Box {
+        centre: Vec3,
+        half: Vec3,
+        rotation: Quat,
+    },
 }
 
 /// Where the camera ray and the arc trace stop: terrain and static brushes, the sea
@@ -500,7 +517,17 @@ impl AimWorld<'_> {
             }
         }
         for body in self.bodies {
-            if let Some(distance) = sphere_hit(from, direction, length, body.centre, body.radius) {
+            let distance = match *body {
+                AimBody::Sphere { centre, radius } => {
+                    sphere_hit(from, direction, length, centre, radius)
+                }
+                AimBody::Box {
+                    centre,
+                    half,
+                    rotation,
+                } => box_hit(from, direction, length, centre, half, rotation),
+            };
+            if let Some(distance) = distance {
                 offer(distance, from + direction * distance);
             }
         }
@@ -580,6 +607,47 @@ fn sphere_hit(origin: Vec3, direction: Vec3, max: f32, centre: Vec3, radius: f32
     }
     let distance = -closest - discriminant.sqrt();
     (distance >= 0.0 && distance <= max).then_some(distance)
+}
+
+/// How far along a normalized `direction` a ray first meets an oriented box. A ray that starts
+/// inside the box does not hit it (the caster's own body is not an obstacle), as for spheres.
+fn box_hit(
+    origin: Vec3,
+    direction: Vec3,
+    max: f32,
+    centre: Vec3,
+    half: Vec3,
+    rotation: Quat,
+) -> Option<f32> {
+    let half = half.abs().max(Vec3::splat(1e-3));
+    let inverse = rotation.inverse();
+    let local_origin = inverse * (origin - centre);
+    let local_direction = inverse * direction;
+    if local_origin.abs().cmple(half).all() {
+        return None;
+    }
+    let (mut near, mut far) = (0.0f32, max);
+    for axis in 0..3 {
+        let offset = local_origin[axis];
+        let direction = local_direction[axis];
+        let half = half[axis];
+        if direction.abs() < 1e-6 {
+            if offset < -half || offset > half {
+                return None;
+            }
+            continue;
+        }
+        let (mut first, mut second) = ((-half - offset) / direction, (half - offset) / direction);
+        if first > second {
+            std::mem::swap(&mut first, &mut second);
+        }
+        near = near.max(first);
+        far = far.min(second);
+        if near > far {
+            return None;
+        }
+    }
+    (near >= 0.0 && near <= max).then_some(near)
 }
 
 /// The preview's refusal (`CanUse` with flags 0x442): the ray failure is `NO_TARGET`; a solved
@@ -724,7 +792,11 @@ pub struct TurretQueries<'w, 's> {
         'w,
         's,
         (&'static Camera, &'static GlobalTransform),
-        (With<Camera3d>, Without<crate::hud::ModelViewCamera>),
+        (
+            With<Camera3d>,
+            With<crate::ingame::camera::OrbitCamera>,
+            Without<crate::hud::ModelViewCamera>,
+        ),
     >,
     roots: Query<'w, 's, (Entity, &'static RemoteUnit, &'static GlobalTransform)>,
     children: Query<'w, 's, &'static Children>,
@@ -744,10 +816,11 @@ pub struct AimResources<'w> {
     player: Option<Res<'w, aa_net::state::Player>>,
 }
 
-/// The turret aim of the local gunner: every frame the drawn camera's screen-centre ray is
+/// The turret aim of the local gunner: every frame the game camera's screen-centre ray is
 /// traced and solved ballistically (`FUN_394322f0`), clamped to the cannon's
 /// `vehicle_models` limits, sent through the 200 ms change-only rule, and published as
-/// [`Sight`] for the HUD.
+/// [`Sight`] for the HUD. The camera half runs only for a `BallisticPos`/`ArtilleryPos` mount
+/// skill (mode 8); the installed-turret keys run independently and send no [`Sight`].
 #[allow(clippy::too_many_arguments)]
 pub fn local_aim(
     mut commands: Commands,
@@ -797,71 +870,96 @@ pub fn local_aim(
     let UnitKind::Slave { template_id, .. } = unit.kind else {
         return;
     };
-    // The muzzle is the slave bone `item_hand_r` (`FUN_390b8210`); a model without it falls
-    // back to the unit position `FUN_390b3850` returns (S12-C1).
-    let bone = match *muzzle {
-        Some((id, bone)) if id == slave => bone,
-        _ => {
-            let bone = find_muzzle(entity, &queries.children, &queries.animators);
-            *muzzle = Some((slave, bone));
-            bone
-        }
-    };
-    let start = bone
-        .and_then(|bone| queries.globals.get(bone).ok())
-        .map_or_else(|| root.translation(), |bone| bone.translation());
-    // `FUN_394281b0` / `FUN_3917dd80`: the screen-centre ray starts at the camera matrix
-    // translation and runs over `max(300, max_range)`.
-    let Some((camera, view)) = queries.views.iter().find(|(camera, _)| camera.is_active) else {
-        return;
-    };
-    let Some(viewport) = camera.logical_viewport_size() else {
-        return;
-    };
-    let Ok(ray) = camera.viewport_to_world(view, viewport * 0.5) else {
-        return;
-    };
-    // `FUN_3917dd80` reads the camera matrix translation, not the near-plane point
-    // `viewport_to_world` returns; the range is measured from here.
-    let ray_origin = view.translation();
-    let direction = *ray.direction;
-    let cannon = db.cannon_skill(template_id);
-    let mut skip = vec![slave];
-    if let Some(own) = world.player.as_ref().and_then(|p| p.spawn.as_ref()) {
-        skip.push(own.obj_id);
-    }
-    if let Some(parent) = unit.attached_to {
-        skip.push(parent.obj_id);
-    }
-    let bodies = aim_bodies(&units, &queries.roots, db, &skip);
-    let ocean = world
-        .world
-        .as_ref()
-        .map(|info| info.0.ocean_level)
-        .filter(|level| *level > 0.0);
-    let aim_world = AimWorld {
-        terrain: world.terrain.as_deref(),
-        collision: world.collision.as_deref(),
-        ocean,
-        bodies: &bodies,
-    };
-    let Some(solved) = solve_aim(
-        root, start, ray_origin, direction, limits, cannon, &aim_world,
-    ) else {
-        return;
-    };
     let pitch = actions.as_ref().map_or(0.0, |a| {
         f32::from(i8::from(a.pressed("moveforward", 0)) - i8::from(a.pressed("moveback", 0)))
     });
     let yaw = actions.as_ref().map_or(0.0, |a| {
         f32::from(i8::from(a.pressed("turnleft", 0)) - i8::from(a.pressed("turnright", 0)))
     });
-    // Key aim only turns an installed turret (`FUN_39425580`); the click's target stays the
-    // camera-arc point (S12-C4).
+    // Key aim only turns an installed turret (`FUN_39425580`, the `VehicleModel` controller
+    // type 3 with `installed_turret`); it is independent of the camera-aim mode.
     let keyed = keys_apply(limits, pitch, yaw);
+    // The camera aim is the native mode 8, entered by a `BallisticPos` (11) or `ArtilleryPos`
+    // (15) mount skill. A drivable VehicleModel with a turret block but only cart skills (the
+    // cotton wagon) is not a gunner seat: it must not aim or send `CSTurretState`.
+    let camera_seat = db.has_cannon_skill(template_id);
+    if !camera_seat && !keyed {
+        return;
+    }
+    let cannon = db.cannon_skill(template_id);
+    let mut solved = None;
+    if camera_seat {
+        // The muzzle is the slave bone `item_hand_r` (`FUN_390b8210`); a model without it falls
+        // back to the unit position `FUN_390b3850` returns (S12-C1).
+        let bone = match *muzzle {
+            Some((id, bone)) if id == slave => bone,
+            _ => {
+                let bone = find_muzzle(entity, &queries.children, &queries.animators);
+                *muzzle = Some((slave, bone));
+                bone
+            }
+        };
+        let start = bone
+            .and_then(|bone| queries.globals.get(bone).ok())
+            .map_or_else(|| root.translation(), |bone| bone.translation());
+        // `FUN_394281b0` / `FUN_3917dd80`: the screen-centre ray starts at the camera matrix
+        // translation and runs over `max(300, max_range)`.
+        let Some((camera, view)) = queries.views.iter().find(|(camera, _)| camera.is_active) else {
+            return;
+        };
+        let Some(viewport) = camera.logical_viewport_size() else {
+            return;
+        };
+        let Ok(ray) = camera.viewport_to_world(view, viewport * 0.5) else {
+            return;
+        };
+        // `FUN_3917dd80` reads the camera matrix translation, not the near-plane point
+        // `viewport_to_world` returns; the range is measured from here.
+        let ray_origin = view.translation();
+        let direction = *ray.direction;
+        let mut skip = vec![slave];
+        if let Some(own) = world.player.as_ref().and_then(|p| p.spawn.as_ref()) {
+            skip.push(own.obj_id);
+        }
+        if let Some(parent) = unit.attached_to {
+            skip.push(parent.obj_id);
+        }
+        let bodies = aim_bodies(&units, &queries.roots, db, &skip);
+        let ocean = world
+            .world
+            .as_ref()
+            .map(|info| info.0.ocean_level)
+            .filter(|level| *level > 0.0);
+        let aim_world = AimWorld {
+            terrain: world.terrain.as_deref(),
+            collision: world.collision.as_deref(),
+            ocean,
+            bodies: &bodies,
+        };
+        let Some(result) = solve_aim(
+            root, start, ray_origin, direction, limits, cannon, &aim_world,
+        ) else {
+            return;
+        };
+        solved = Some(result);
+    }
+    // A key-only installed turret starts from its current aim; a camera seat starts from the
+    // clamped camera aim.
+    let initial = solved.map_or_else(
+        || {
+            queries
+                .targets
+                .get(entity)
+                .ok()
+                .map(|target| target.0)
+                .or(unit.turret)
+                .unwrap_or_default()
+        },
+        |solved| solved.camera,
+    );
     let key = if keyed {
         let next = key_step(
-            key_aim.current(slave, solved.camera),
+            key_aim.current(slave, initial),
             limits,
             pitch,
             yaw,
@@ -872,10 +970,13 @@ pub fn local_aim(
     } else {
         None
     };
-    let aim = key.unwrap_or(solved.aim);
+    let aim = key
+        .or_else(|| solved.map(|solved| solved.aim))
+        .unwrap_or(initial);
     // The turret is turned when the camera aim preview passes (`CanUse` 0x442), and always by
     // the installed-turret keys. A failed preview publishes the refusal and sends no fire.
-    if solved.refusal.is_none() || keyed {
+    let refused = solved.is_some_and(|solved| solved.refusal.is_some());
+    if !refused || keyed {
         match queries.targets.get_mut(entity) {
             Ok(mut target) => target.0 = aim,
             Err(_) => {
@@ -898,18 +999,20 @@ pub fn local_aim(
             }));
         }
     }
-    let cry = bevy_to_cry(solved.impact);
-    commands.insert_resource(Sight {
-        slave,
-        aim,
-        pos: Pos::new(cry.x, cry.y, cry.z),
-        skill: cannon.map_or(0, |cannon| cannon.id),
-        refusal: solved.refusal,
-    });
+    if let Some(solved) = solved {
+        let cry = bevy_to_cry(solved.impact);
+        commands.insert_resource(Sight {
+            slave,
+            aim,
+            pos: Pos::new(cry.x, cry.y, cry.z),
+            skill: cannon.map_or(0, |cannon| cannon.id),
+            refusal: solved.refusal,
+        });
+    }
 }
 
 /// The drawn bodies (`FUN_3917dd80` living entities, `FUN_39429750` rigid objects) of the other
-/// units: a sphere over a unit, and a hull-bounds sphere for a ship. The manned slave, the local
+/// units: a sphere over a unit, and an oriented hull box for a ship. The manned slave, the local
 /// player and the slave's parent are skipped, as the 1.2 ray ignores its own caster.
 fn aim_bodies(
     units: &aa_net::state::Units,
@@ -925,25 +1028,47 @@ fn aim_bodies(
         if skip.contains(&unit.obj_id) {
             continue;
         }
-        let scale = unit.scale.max(0.5);
-        if matches!(unit.kind, UnitKind::Slave { .. }) && db.is_ship(unit.model_id) {
-            let (min, max) = db
-                .ship_bounds(unit.model_id)
-                .unwrap_or((Vec2::splat(-2.0), Vec2::splat(2.0)));
-            let middle = Quat::from_rotation_z(unit.yaw())
-                * Vec3::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5, 0.0);
-            let centre =
-                cry_to_bevy(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z) + middle) + Vec3::Y * 3.0;
-            let radius = ((max - min).length() * 0.5).max(2.0) + 1.0;
-            bodies.push(AimBody { centre, radius });
-        } else {
-            bodies.push(AimBody {
-                centre: root.translation() + Vec3::Y * (0.9 * scale),
-                radius: 1.1 * scale,
-            });
-        }
+        bodies.push(aim_body(unit, root.translation(), db));
     }
     bodies
+}
+
+/// The aim volume of one drawn unit. A ship hull uses its hull-floor XY bounds (the deck
+/// footprint) and the `ship_models` mass box's vertical extent (keel to deck/rail), both in the
+/// ship frame and turned by the unit's yaw. The old bounding sphere reached about ten metres past
+/// the hull side, so a broadside shot's `Position` landed short of the server's small hit area
+/// (S12-C8).
+fn aim_body(unit: &Unit, root: Vec3, db: &Db) -> AimBody {
+    let scale = unit.scale.max(0.5);
+    if !(matches!(unit.kind, UnitKind::Slave { .. }) && db.is_ship(unit.model_id)) {
+        return AimBody::Sphere {
+            centre: root + Vec3::Y * (0.9 * scale),
+            radius: 1.1 * scale,
+        };
+    }
+    let (min, max) = db
+        .ship_bounds(unit.model_id)
+        .unwrap_or((Vec2::splat(-2.0), Vec2::splat(2.0)));
+    // `ship_models.mass_center_z +/- mass_box_size_z / 2`, the hull's keel-to-rail range
+    // relative to the hull root; a row without a box keeps a conservative 2 m below / 4 m above.
+    let (low, high) = db.ship_hull_height(unit.model_id).unwrap_or((-2.0, 4.0));
+    let yaw = Quat::from_rotation_z(unit.yaw());
+    let middle = yaw * Vec3::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5, 0.0);
+    let centre = cry_to_bevy(
+        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z) + middle + Vec3::Z * ((low + high) * 0.5),
+    );
+    let half = cry_to_bevy(Vec3::new(
+        (max.x - min.x) * 0.5,
+        (max.y - min.y) * 0.5,
+        (high - low) * 0.5,
+    ))
+    .abs()
+    .max(Vec3::splat(0.5));
+    AimBody::Box {
+        centre,
+        half,
+        rotation: cry_rot_to_bevy(yaw),
+    }
 }
 
 /// Applies received posture type 8 to remote turrets (and to a local cannon nobody mans).
@@ -1628,11 +1753,11 @@ mod tests {
             camera + (target - camera).normalize() * ((target - camera).length() - 1.0);
         let along_arc = Vec3::new(50.0, 35.6, 0.0);
         let bodies = [
-            AimBody {
+            AimBody::Sphere {
                 centre: target,
                 radius: 1.0,
             },
-            AimBody {
+            AimBody::Sphere {
                 centre: along_arc,
                 radius: 2.0,
             },
@@ -1778,6 +1903,7 @@ mod tests {
         });
         app.world_mut().spawn((
             Camera3d::default(),
+            crate::ingame::camera::OrbitCamera::default(),
             camera,
             camera_pose,
             GlobalTransform::from(camera_pose),
@@ -1827,6 +1953,337 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// A temporary database with one kind-7/8 slave row and its point-1 mount skill. `target`
+    /// is the `skills.target_type_id` (11 `BallisticPos`, 15 `ArtilleryPos`, 0 a cart skill).
+    struct FixtureDb {
+        path: std::path::PathBuf,
+        db: Db,
+    }
+
+    impl FixtureDb {
+        fn new(template: u32, model: u32, target: u32, velocity: f32, installed: bool) -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static NEXT: AtomicU32 = AtomicU32::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "aa-cannon-seat-{}-{}.sqlite3",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_file(&path);
+            {
+                let conn = rusqlite::Connection::open(&path).expect("fixture database");
+                conn.execute_batch(&format!(
+                    "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+                     CREATE TABLE vehicle_models(id INTEGER PRIMARY KEY,
+                         turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
+                         turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
+                         turret_yaw_angvel REAL, turret_pitch_angvel REAL,
+                         velocity REAL, installed_turret TEXT);
+                     CREATE TABLE slave_mount_skills(id INTEGER PRIMARY KEY, slave_id INTEGER, mount_skill_id INTEGER);
+                     CREATE TABLE mount_skills(id INTEGER PRIMARY KEY, skill_id INTEGER);
+                     CREATE TABLE skills(id INTEGER PRIMARY KEY, effect_speed REAL, min_range REAL,
+                         max_range REAL, target_angle REAL, target_type_id INTEGER);
+                     INSERT INTO models VALUES ({model}, 'VehicleModel', 10);
+                     INSERT INTO vehicle_models VALUES (10, -20, 35, -22, 22, 35, 20, {velocity}, '{installed}');
+                     INSERT INTO slave_mount_skills VALUES (72, {template}, 116);
+                     INSERT INTO mount_skills VALUES (116, 17742);
+                     INSERT INTO skills VALUES (17742, 25, 10, 100, 50, {target});"
+                ))
+                .expect("fixture rows");
+            }
+            let db =
+                Db::open_path(path.to_str().expect("utf-8 temp path")).expect("fixture database");
+            Self { path, db }
+        }
+    }
+
+    impl Drop for FixtureDb {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    /// The `local_aim` app of a manned slave and a far unit the camera ray can hit.
+    fn aim_app(db: &Db, cannon: &Unit, orbit: bool) -> (App, Entity) {
+        let gunner = crate::hud::fixture_spawn().unit;
+        let mut far = gunner;
+        far.obj_id = 1;
+        far.kind = UnitKind::Npc {
+            template_id: 1,
+            owner_id: 0,
+        };
+        far.pos = Pos::new(0.0, 30.0, 30.0);
+        let far_transform = Transform::from_xyz(0.0, 30.0, -30.0);
+        let root = Transform::from_translation(cry_to_bevy(Vec3::new(
+            cannon.pos.x,
+            cannon.pos.y,
+            cannon.pos.z,
+        )));
+        let camera_pose = Transform::from_translation(Vec3::new(0.0, 50.0, 20.0))
+            .looking_at(Vec3::new(0.0, 30.9, -30.0), Vec3::Y);
+        let mut camera = Camera {
+            viewport: Some(bevy::camera::Viewport {
+                physical_position: UVec2::ZERO,
+                physical_size: UVec2::new(1280, 720),
+                depth: 0.0..1.0,
+            }),
+            ..Default::default()
+        };
+        camera.computed.clip_from_view = Mat4::IDENTITY;
+        camera.computed.target_info = Some(bevy::camera::RenderTargetInfo {
+            physical_size: UVec2::new(1280, 720),
+            scale_factor: 1.0,
+        });
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(250),
+            ))
+            .init_resource::<aa_net::state::Units>()
+            .init_resource::<LocalMount>()
+            .init_resource::<TurretSend>()
+            .init_resource::<KeyAim>()
+            .init_resource::<crate::settings::Actions>()
+            .insert_resource(db.clone())
+            .add_message::<NetCommand>()
+            .add_systems(Update, local_aim);
+        {
+            let mut units = app.world_mut().resource_mut::<aa_net::state::Units>();
+            units.by_id.insert(cannon.obj_id, cannon.clone());
+            units.by_id.insert(far.obj_id, far.clone());
+        }
+        let mut camera_commands = app.world_mut().spawn((
+            Camera3d::default(),
+            camera,
+            camera_pose,
+            GlobalTransform::from(camera_pose),
+        ));
+        if orbit {
+            camera_commands.insert(crate::ingame::camera::OrbitCamera::default());
+        }
+        let camera_entity = camera_commands.id();
+        app.world_mut().spawn((
+            RemoteUnit::announced(cannon),
+            root,
+            GlobalTransform::from(root),
+        ));
+        app.world_mut().spawn((
+            RemoteUnit::announced(&far),
+            far_transform,
+            GlobalTransform::from(far_transform),
+        ));
+        app.world_mut()
+            .insert_resource(LocalMount(Some(crate::ingame::mount::LocalSeat {
+                mount: cannon.obj_id,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: true,
+                speed: Default::default(),
+                lift: 0.0,
+            })));
+        (app, camera_entity)
+    }
+
+    fn turret_sends(app: &mut App) -> Vec<(f32, f32)> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter_map(|NetCommand(command)| match command {
+                aa_net::Command::TurretState { pitch, yaw, .. } => Some((pitch, yaw)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn cannon_unit(obj_id: u32, template: u32, model: u32) -> Unit {
+        let mut unit = crate::hud::fixture_spawn().unit;
+        unit.obj_id = obj_id;
+        unit.kind = UnitKind::Slave {
+            id: 7,
+            tl_id: 1,
+            template_id: template,
+            summoner_id: 0,
+        };
+        unit.model_id = model;
+        unit.pos = Pos::new(0.0, 0.0, 0.0);
+        unit.scale = 1.0;
+        unit
+    }
+
+    /// A hull box built from the deck footprint and the keel-to-rail range: a broadside ray at
+    /// deck height hits the side, a downward ray hits the deck, and the arc trace stops at the
+    /// same side. The old hull sphere stopped about ten metres short of the side and fifteen
+    /// metres above the deck.
+    #[test]
+    fn a_ship_hull_aims_as_an_oriented_box() {
+        use crate::ingame::ship::floor::ShipFloor;
+
+        const MODEL: u32 = 900;
+        let quad = [
+            [
+                Vec3::new(-4.0, -10.0, 2.0),
+                Vec3::new(4.0, -10.0, 2.0),
+                Vec3::new(4.0, 10.0, 2.0),
+            ],
+            [
+                Vec3::new(-4.0, -10.0, 2.0),
+                Vec3::new(4.0, 10.0, 2.0),
+                Vec3::new(-4.0, 10.0, 2.0),
+            ],
+        ];
+        let Some(db) = Db::ship_floor_fixture(MODEL, std::sync::Arc::new(ShipFloor::new(quad)))
+        else {
+            return;
+        };
+        db.seed_ship_hull_height(MODEL, -3.0, 2.0);
+        let ship = cannon_unit(5, 15, MODEL);
+        let body = aim_body(&ship, Vec3::ZERO, &db);
+        let world = AimWorld {
+            bodies: std::slice::from_ref(&body),
+            ..AimWorld::default()
+        };
+
+        // A broadside ray at deck height hits the hull side (x = 4) within half a metre.
+        let hit = world
+            .ray(Vec3::new(20.0, 1.5, 0.0), Vec3::NEG_X, 40.0)
+            .expect("the hull side");
+        assert!(
+            (hit.x - 4.0).abs() < 0.5,
+            "the hull side is at x 4, got {hit:?}"
+        );
+        assert!(
+            hit.x < 10.0,
+            "a hull sphere would stop ten metres out: {hit:?}"
+        );
+
+        // A downward ray hits the deck (y = 2), not the air above it.
+        let hit = world
+            .ray(Vec3::new(0.0, 20.0, 0.0), Vec3::NEG_Y, 40.0)
+            .expect("the deck");
+        assert!((hit.y - 2.0).abs() < 0.5, "the deck is at y 2, got {hit:?}");
+        assert!(
+            hit.y < 5.0,
+            "a hull sphere would stop above the mast: {hit:?}"
+        );
+
+        // The arc trace uses the same segment test and stops at the hull side.
+        let ballistic = Ballistic {
+            start: Vec3::new(20.0, 0.0, 0.0),
+            velocity: Vec3::new(-20.0, 4.0, 0.0),
+            flight: 1.0,
+            len: 21.0,
+        };
+        let impact = trace_impact(&ballistic, Vec3::new(-100.0, 0.0, 0.0), |from, to| {
+            world.segment(from, to)
+        });
+        assert!(
+            (impact.x - 4.0).abs() < 0.5,
+            "the trace stops at the hull side, got {impact:?}"
+        );
+
+        // The box is turned by the unit yaw: a quarter turn puts the 8 m width across Bevy z,
+        // so a ray down +z hits the side at z 4, not at the unrotated 10 m length.
+        let mut turned = ship;
+        turned.rotation[2] = std::f32::consts::FRAC_PI_2;
+        let body = aim_body(&turned, Vec3::ZERO, &db);
+        let world = AimWorld {
+            bodies: std::slice::from_ref(&body),
+            ..AimWorld::default()
+        };
+        let hit = world
+            .ray(Vec3::new(0.0, 1.5, 20.0), Vec3::NEG_Z, 40.0)
+            .expect("the turned hull side");
+        assert!(
+            (hit.z - 4.0).abs() < 0.5,
+            "a quarter turn keeps the hull side at 4, got {hit:?}"
+        );
+    }
+
+    /// The cotton wagon (a drivable `VehicleModel` with a turret block but only Honk horn) is
+    /// not a native mode-8 gunner seat: no `Sight`, no `CSTurretState`. Without the cannon-skill
+    /// gate the camera ray hits the far body and both appear.
+    #[test]
+    fn a_drivable_cart_does_not_aim_or_send_turret_state() {
+        let fixture = FixtureDb::new(73, 1008, 0, 4.0, false);
+        let wagon = cannon_unit(73, 73, 1008);
+        let (mut app, _) = aim_app(&fixture.db, &wagon, true);
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_none(),
+            "a cart with only a Honk horn skill is not a gunner seat"
+        );
+        assert!(
+            turret_sends(&mut app).is_empty(),
+            "the cart driver sends no CSTurretState"
+        );
+    }
+
+    /// `ArtilleryPos` (15, a tank's skill) is the other mode-8 entry: it runs the camera aim
+    /// and sends turret state even though `Db::cannon_skill` only names the BallisticPos shot.
+    #[test]
+    fn an_artillery_pos_skill_runs_the_camera_aim() {
+        let fixture = FixtureDb::new(53, 892, 15, 3.5, true);
+        let tank = cannon_unit(53, 53, 892);
+        let (mut app, _) = aim_app(&fixture.db, &tank, true);
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_some(),
+            "an ArtilleryPos mount skill enters the camera aim"
+        );
+        assert!(
+            !turret_sends(&mut app).is_empty(),
+            "the camera aim sends CSTurretState"
+        );
+    }
+
+    /// A prewarm/cinema camera is not the aim camera: only the game's `OrbitCamera` is.
+    #[test]
+    fn only_the_orbiting_game_camera_aims_the_cannon() {
+        let fixture = FixtureDb::new(77, 117, 11, 0.0, false);
+        let cannon = cannon_unit(77, 77, 117);
+        let (mut app, camera) = aim_app(&fixture.db, &cannon, false);
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_none(),
+            "a prewarm or cinema camera must not be picked"
+        );
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(crate::ingame::camera::OrbitCamera::default());
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_some(),
+            "the game camera aims the cannon"
+        );
+    }
+
+    /// Key aim stays the `VehicleModel`/`installed_turret` path: a model without a cannon skill
+    /// still turns and sends `CSTurretState`, but publishes no camera `Sight`.
+    #[test]
+    fn an_installed_turret_without_a_cannon_skill_still_key_aims() {
+        let fixture = FixtureDb::new(2, 2, 0, 2.5, true);
+        let turret = cannon_unit(2, 2, 2);
+        let (mut app, _) = aim_app(&fixture.db, &turret, true);
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .hold_for_test("moveforward");
+        // The first update has a zero delta in Bevy; the second steps at the model rate.
+        app.update();
+        app.update();
+        assert!(
+            app.world().get_resource::<Sight>().is_none(),
+            "no BallisticPos/ArtilleryPos skill, no camera aim"
+        );
+        let sends = turret_sends(&mut app);
+        let send = sends.last().unwrap_or_else(|| panic!("{sends:?}"));
+        assert!(
+            send.0 > 0.0,
+            "the key stepped the pitch at the model rate: {sends:?}"
+        );
+    }
+
     /// `FUN_39425580`: only `vehicle_models.installed_turret` models aim with keys (actions 0/1
     /// pitch, 4/5 yaw) and the step is the row's angular speed.
     #[test]
@@ -1862,6 +2319,24 @@ mod tests {
         let clamped = limits.clamp(TurretAim::new(1.0, 1.0));
         assert!((clamped.pitch - limits.pitch_max).abs() < 1e-6);
         assert!((clamped.yaw - limits.yaw_max).abs() < 1e-6);
+    }
+
+    /// The native mode-8 stand-in: a `BallisticPos` (11) or `ArtilleryPos` (15) mount skill
+    /// makes a slave a camera-aim gunner seat. The cotton wagon 73 only has Honk horn (type 0);
+    /// the trebuchet 2 and the tower cannon 100 have no gunner skill (their key aim stays).
+    #[test]
+    #[ignore = "requires AA_DB"]
+    fn the_real_cannon_skill_gate_excludes_carts_and_plain_vehicles() {
+        let Some(db) = Db::open() else { return };
+        assert!(db.has_cannon_skill(10), "ship cannon 10 is BallisticPos");
+        assert!(db.has_cannon_skill(77), "cannon 77 is BallisticPos");
+        assert!(db.has_cannon_skill(53), "tank 53 is ArtilleryPos");
+        assert!(!db.has_cannon_skill(73), "the cotton wagon only honks");
+        assert!(!db.has_cannon_skill(2), "the trebuchet is not a shot slot");
+        assert!(
+            !db.has_cannon_skill(100),
+            "the tower deployment is not a shot"
+        );
     }
 
     /// The real gunner rows: slave 77's cannon fires `mount_skills` 116 -> skill 17742

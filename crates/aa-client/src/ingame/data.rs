@@ -48,9 +48,14 @@ struct Lookups {
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
     /// `slaves.id` -> the `BallisticPos` gunner skill its point-1 seat fires.
     cannon_skills: HashMap<u32, Option<super::turret::CannonSkill>>,
+    /// `slaves.id` -> whether any of its mount skills is `BallisticPos` (11) or `ArtilleryPos`
+    /// (15), the skills whose use enters the native camera-aim mode (8).
+    cannon_seats: HashMap<u32, bool>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
+    /// The hull's vertical extent from `ship_models.mass_center_z` and `mass_box_size_z`.
+    ship_hull: HashMap<u32, Option<(f32, f32)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -272,8 +277,10 @@ impl Lookups {
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
             cannon_skills: HashMap::new(),
+            cannon_seats: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
+            ship_hull: HashMap::new(),
         }
     }
 }
@@ -362,6 +369,17 @@ impl Db {
             l.ship_floors.insert(model_id, Some(floor));
         }
         Some(db)
+    }
+
+    /// The hull's vertical range for the aim box, on a fixture whose `ship_models` row has no
+    /// mass box columns.
+    #[cfg(test)]
+    pub(crate) fn seed_ship_hull_height(&self, model_id: u32, low: f32, high: f32) {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_hull
+            .insert(model_id, Some((low, high)));
     }
 
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
@@ -477,6 +495,55 @@ impl Db {
             .get(&model_id)
             .copied()
             .flatten()
+    }
+
+    /// The ship hull's vertical extent relative to the hull root: `ship_models.mass_center_z`
+    /// +/- `mass_box_size_z / 2`, the physics box's keel to deck/rail range. `None` for a
+    /// non-ship, a missing row or a non-positive box.
+    pub fn ship_hull_height(&self, model_id: u32) -> Option<(f32, f32)> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(height) = l.ship_hull.get(&model_id) {
+            return *height;
+        }
+        let height = l
+            .conn
+            .query_row(
+                "SELECT s.mass_center_z, s.mass_box_size_z FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?)),
+            )
+            .ok()
+            .and_then(|(centre, size)| {
+                let (centre, size) = (centre as f32, size as f32);
+                (centre.is_finite() && size.is_finite() && size > 0.0)
+                    .then(|| (centre - size * 0.5, centre + size * 0.5))
+            });
+        l.ship_hull.insert(model_id, height);
+        height
+    }
+
+    /// Whether the slave has a mount skill whose `skills.target_type_id` is `BallisticPos` (11)
+    /// or `ArtilleryPos` (15). Using such a skill is what enters the native camera-aim mode 8;
+    /// a drivable VehicleModel with a turret block but no such skill is not a gunner seat.
+    pub fn has_cannon_skill(&self, template: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(seat) = l.cannon_seats.get(&template) {
+            return *seat;
+        }
+        let seat = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id IN (11, 15)
+                 LIMIT 1",
+                params![template],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.cannon_seats.insert(template, seat);
+        seat
     }
 
     /// The turret block of a vehicle model: its `vehicle_models` pitch/yaw range and rates, or

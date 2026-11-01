@@ -60,10 +60,10 @@ pub(crate) struct Tables {
     slave_skills: HashMap<u32, Vec<SlaveSkill>>,
     /// `(slave template, mount skill)` -> its point-1 `mount_attached_skills.skill_id`.
     attached_point1: HashMap<(u32, u32), u32>,
-    /// Slave templates whose point-1 seat is a turret (kind 7/8, a `VehicleModel` with a
-    /// non-zero turret range): only their rows show the point-1 attached skill. This is the
-    /// same rule as `ingame::turret::turret_seat_model`, kept here so the HUD can build a bar
-    /// without the engine's seat resource.
+    /// Slave templates whose point-1 seat shows the attached skill: kind 7/8, a `VehicleModel`
+    /// that does not drive (`velocity == 0`) with a non-zero turret range. A drivable cart with
+    /// a turret block (the cotton wagon) keeps its mount skills; the engine's camera-aim gate is
+    /// a separate `BallisticPos`/`ArtilleryPos` skill check (S12-C6).
     turret_slaves: HashSet<u32>,
 }
 
@@ -125,15 +125,17 @@ impl Tables {
             let (slave, mount_skill, skill) = row?;
             out.attached_point1.insert((slave, mount_skill), skill);
         }
-        // The same gate as `ingame::turret::turret_seat_model`: kind 7/8, a
-        // `models.sub_type = 'VehicleModel'` row (the controller type 3), and a non-zero parsed
-        // pitch/yaw range. A drivable catapult or tank is included (S12-C6). The text `f`/`t`
-        // values in other columns are not angles and are excluded by `typeof`.
+        // The old bar rule: kind 7/8, a `models.sub_type = 'VehicleModel'` row (the controller
+        // type 3) that does not drive, and a non-zero parsed pitch/yaw range. A cart with a
+        // turret block keeps its mount skills (the cotton wagon's 15622); the camera-aim gate is
+        // the separate cannon-skill check in `ingame::local_aim`. The text `f`/`t` values in
+        // other columns are not angles and are excluded by `typeof`.
         let mut query = db.prepare(
             "SELECT s.id FROM slaves s
              JOIN models m ON m.id = s.model_id
              JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
              WHERE s.slave_kind_id IN (7, 8)
+               AND typeof(v.velocity) IN ('integer', 'real') AND v.velocity = 0
                AND typeof(v.turret_pitch_angle_min) IN ('integer', 'real')
                AND typeof(v.turret_pitch_angle_max) IN ('integer', 'real')
                AND typeof(v.turret_yaw_angle_min) IN ('integer', 'real')
@@ -275,16 +277,15 @@ fn current(data: &HudData, exclude: u32) -> Option<Vec<u32>> {
 /// The slave skill bar of the slave the local player drives, from `slave_mount_skills`; `None` on foot, on a
 /// passenger seat, for a mate, or with the catalog not loaded yet.
 fn driver_skills(data: &HudData) -> Option<Vec<SlaveSkill>> {
-    let (slave, template, kind) = data.mounted.driver_slave_kind()?;
+    let (_, template, kind) = data.mounted.driver_slave_kind()?;
     let tables = &data.game.get()?.mode_actions;
-    // A turret seat is this slave when the engine's seat flag names it, or, before that flag
-    // reaches the HUD (the attach event can arrive first), when the template passes the same
-    // kind/velocity/range gate as `turret_seat_model`.
-    let turret = match data.turret_seat {
-        Some(seated) if seated == slave => true,
-        _ => tables.turret_slave(template),
-    };
-    tables.bar(template, matches!(kind, 7 | 8) && turret)
+    // The bar's turret rule is the template's: a gunner seat that does not drive. The engine's
+    // more general seat flag (any `VehicleModel` turret block) is not enough here, or a drivable
+    // cart with a turret block would show its point-1 attached skill instead of its mount skill.
+    tables.bar(
+        template,
+        matches!(kind, 7 | 8) && tables.turret_slave(template),
+    )
 }
 
 /// The mode bar's skills this frame: the driven slave's in its row order, else the received buff skills.
@@ -638,20 +639,29 @@ pub(super) fn use_slot(
             .is_some_and(|info| info.target_type == 11);
         // `FUN_394322f0` sets `DAT_3a5a4ea4` when its aim preview fails (the screen ray
         // `FUN_394281b0`, result 9, or the skill's range); the click (`FUN_390f3b20`) then
-        // shows that result and sends nothing.
-        if ballistic
-            && let Some(result) = data
-                .turret
-                .filter(|sight| sight.slave == slave)
-                .and_then(|sight| sight.refusal)
-        {
-            failed.write(super::alerts::UseFailed {
-                skill,
-                result,
-                value: 0,
-                server: false,
-            });
-            return;
+        // shows that result and sends nothing. Without a published sight (the camera or the
+        // cannon root is not ready) a `BallisticPos` cast would name a Unit target, which the
+        // server reads as the caster's own position and refuses as too close: refuse it locally
+        // with the same `NO_TARGET` as a ray that hit nothing.
+        if ballistic {
+            let Some(sight) = data.turret.filter(|sight| sight.slave == slave) else {
+                failed.write(super::alerts::UseFailed {
+                    skill,
+                    result: aa_net::skill::result::NO_TARGET,
+                    value: 0,
+                    server: false,
+                });
+                return;
+            };
+            if let Some(result) = sight.refusal {
+                failed.write(super::alerts::UseFailed {
+                    skill,
+                    result,
+                    value: 0,
+                    server: false,
+                });
+                return;
+            }
         }
         if let Some(fail) = env.mount_cooldown(slave, cast_skill) {
             failed.write(super::alerts::UseFailed {
