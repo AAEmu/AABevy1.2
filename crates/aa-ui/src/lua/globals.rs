@@ -81,6 +81,7 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
             u.animations.set_ui_scale(s);
             if changed {
                 u.ui_scale = s;
+                super::widget::textbox::all_scales_changed(&mut u);
                 u.tree.repaint();
                 // Font/geometry propagation also reaches hidden native buttons.
                 // Opted-out roots retain their scale and therefore their cache.
