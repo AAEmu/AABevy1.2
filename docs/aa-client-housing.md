@@ -14,10 +14,18 @@ Code:
 | `ingame/housing/render.rs` | house units drawn at the model of their construction stage |
 | `ingame/housing/placement.rs` | the builder: ghost, rotation, the placement checks, `CSConstructHouseTax` / `CSCreateHouse` |
 | `crates/aa-client/src/hud/housing.rs` | `X2House`, the housing events, opening the windows at a house, own houses on the map |
+| `crates/aa-client/src/hud/housing/fixture.rs` | the owner-menu self-check: original scripts over synthetic `SCMyHouse` / `SCHouseTaxInfo` |
+| `crates/aa-client/examples/house_owner.rs` | runs the self-check (`--state paid|due|overdue`, headless with `--mute`) |
 
 Tests: `cargo test -p aa-client housing` (land polygons, zone origins, the design / step / prefab tables of the real
-database, prefab parsing, the placement checks, the `X2House` getters and setters, taxes and sale certificates, the
-build action of a stage, the map icons, and that no housing system has conflicting parameters).
+database, prefab parsing, the placement checks (the rotated model box and lowest terrain sample, an existing house as
+0x70, unrestricted and zero-footprint designs, the player's own units and house-attached doodads), the locks with
+their seconds, the `X2House` getters and setters, taxes and sale certificates, the build action of a stage, the map
+icons, the interaction view type, the permission gates, the deco/actability counters, the raw tax weeks, and that no
+housing system has conflicting parameters). The owner menu has a self-check
+example: `cargo run -p aa-client --example house_owner -- --headless --mute --state paid --exit-after 2` (needs
+`AA_PAK` and `AA_DB`; it asserts the `HOUSE_INTERACTION_START` / `HOUSE_TAX_INFO` tuples with a Lua spy, the one
+`CSChangeHousePermission`, `GetHouseDecoCount`, and the paid/due/overdue `contentTaxInfo` texts).
 
 ## Data
 
@@ -66,27 +74,67 @@ Using a design item does not cast: `placement::start` reads the `SkillPressed` o
    `CSConstructHouseTax`), unless the spot is refused: then the refusal is shown (`39428370`) and nothing is sent.
 3. `SCConstructHouseTax` raises `HOUSE_BUILD_INFO(design, baseTax, totalTax, heavyCount, normalCount, heavy, deposit,
    item)`; the build window shows it. Start calls `X2House:NextStepFromBuildCheck` (`3932FE60`: `CSCreateHouse` with
-   the quoted tax, at most once per 5 s, else `CANNOT_LOCATE_DOODAD_NOW`) and the builder ends; Cancel
-   (`PrevStepFromBuildCheck`) returns to Position.
+   the quoted tax, at most once per 5 s; a second press shows `CANNOT_LOCATE_DOODAD_NOW` with the remaining seconds)
+   and the builder ends; Cancel (`PrevStepFromBuildCheck`) returns to Position.
+
+The end of a world load or instance load (`FUN_39426520`, including `SCLoadInstance`) arms the 30 s placement lock
+(`FUN_393a6de0`, `_DAT_39ac7748` = 30000 ms; teleport.rs raises `WorldLoadFinished` then): using a design item during
+it shows `CANNOT_LOCATE_DOODAD_NOW` with the seconds left (the recapture2 "22 second(s)") and does not start the
+builder. The house builder reads the same `plant::PlantLock` as the seed builder, so the two can never disagree. It arms
+only at the end of a world or instance load (`WorldLoadFinished` / `OnEnter(InGame)`), not on a short
+`SCTeleportUnit` (`FUN_39426520` is the only caller of `FUN_393a6de0`); planting keeps its separate 2 s
+post-send cooldown (`0x163`).
 
 A right click goes back a step (Rotate -> Position, Position -> end), Escape ends it. `BUILDER_STEP` (`0x224`) is raised
 on every step, `BUILDER_END` (`0x225`) when it ends (the build window closes with it).
 
-The checks (`39333E20`, `39334060` natively) follow the server's `systems/housing/placement.rs`: housing land, its
-group's categories, the houseless / existing-category rules against the account's other houses, and the garden squares
-of other houses (`garden_radius` sum, axis-aligned). The refused ghost wears the red of
-`materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land rules are left
-to the server.
+The spot is first snapped to the 4 m grid (`39325e30`: the footprint's lower left corner to a whole cell). The
+checks (`39333E20`, `39334060`, `39335860` natively) are the original client's, with the server's
+`systems/housing/placement.rs` as the cross-check:
+
+* a restricted category (1 and 7..=13, 15..=18) needs the centre's area group to allow the design's category; a
+  centre outside every polygon is `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` ("Building doesn't fit in this
+  area."). Unrestricted categories skip this check, as the client and the server do;
+* every 4 m cell of the `n x n` footprint (`n = int((2r + 3) / 4)`, `r` the garden radius) must lie in one
+  housing polygon and be free of an existing house, else `HOUSE_CANNOT_LOCATE_INVALID_AREA` ("You can't construct
+  a building here."). An existing house on the spot answers 0x70, not the 0x71 house-overlap error (recapture2);
+  the placement-mode cell query runs before that test. `n = 0` designs have no footprint and pass; `n >= 12` is
+  refused as "house too big" (capture-pending);
+* the footprint must not contain a unit or doodad (`HOUSE_CANNOT_LOCATE_OVERLAP_UNIT`; the exact collision shapes
+  of mask `0x1f` are capture-pending). The player's own mount, mate and slave are skipped (the server's
+  `player_owned`), and so is every doodad attached to a house;
+* terrain over the ghost's rotated model box (its four corners and centre, `FUN_39326c10`) may vary by at most
+  6 m (`HOUSE_CANNOT_LOCATE_TERRAIN_TOO_LOW`), and the spot's z is the lowest of those samples. `CSConstructHouseTax`
+  and `CSCreateHouse` both carry that one z; the capture shows 173.05162 (`37 0d 2d 43`) in both.
+
+The houseless / existing-category rules against the account's other houses are the server's. The refused ghost wears
+the red of `materials/special/housing_build_invalid` (Diffuse 0.737, 0.013, 0.013, glow 2). Siege and castle land
+rules are left to the server.
+
+The 2026-10-31 original-client capture settles the refusal texts: `HOUSE_CANNOT_LOCATE_INVALID_AREA` is "You can't
+construct a building here." and `HOUSE_CANNOT_LOACATE_INVALID_CATEGORY_AREA` is "Building doesn't fit in this area."
+The spot Bevy used to accept, (15338.53, 14632.33), crosses area 338's south-east notch; the captured valid spot is
+(15328.4, 14631.8), snapped to (15328, 14632).
 
 ## Construction
 
 A right click on a house within 6 m starts the interaction (`393BEFD0`): `CSRequestHouseTax`, then
-`HOUSE_INTERACTION_START("housing", ..)`; `housing_manager.lua` opens the construction window while the house is being
-built, the house window once it stands. Walking 10 m away ends it (`HOUSE_INTERACTION_END`). On a house under
-construction the right click also casts the stage's build skill (`housing_build_steps.skill_id`, target type
-Building) when the bag holds the stage material, else `NOT_ENOUGH_REQUIRED_ITEM`; the server takes the item and the
-labor and answers `SCHouseBuildProgress` -> `HOUSE_STEP_INFO_UPDATED`. The construction window's step list comes
-from `GetHouseConstructionStepInfo` (`consumeItemStack`, `isLaborPower`, `step`, `needActions`).
+`HOUSE_INTERACTION_START("housing", viewType, alwaysPublic)`; `viewType` comes from `housings.category_id` (7
+`"seafarm"`, 8/16/17 `"farm"`, 9/10/11/12/15/18 `"house"`, else nil, `DEC:780640-780672`). `housing_manager.lua` opens
+the construction window while the house is being built, the house window once it stands. Walking 10 m away ends it
+(`HOUSE_INTERACTION_END`). On a house under construction the right click also casts the stage's build skill
+(`housing_build_steps.skill_id`): the captured `CSStartSkill` is 13 bytes with a plain unit target (kind 0 and the
+house object id; no BC-house target type), cast time 20.99 s, 25 labor and one stage material per action; the server
+answers `SCHouseBuildProgress` -> `HOUSE_STEP_INFO_UPDATED`. The construction window's step list comes from
+`GetHouseConstructionStepInfo` (`consumeItemStack`, `isLaborPower`, `step`, `needActions`).
+
+The client's local material check looks only at the bag, as in the capture: without a bag stack it shows
+`NOT_ENOUGH_REQUIRED_ITEM` ("Not enough <item>."), but the same click still casts when the material is equipped in
+the backpack slot (the server pays it then). One click sends at most one `Command::UseSkill`; the cast bar and labor
+bar follow the ordinary `SCSkillStarted` / `SCCharacterLaborPowerChanged` path. The capture covered action 1 only:
+actions 2-20, the 10/5/5 boundaries, completion, the cast-bar text and the wrong-skill/out-of-range negatives remain
+capture-pending (a second capture is running); the stage models in the example come from `housing_build_steps` and
+the finished model from `housings.main_model_id`.
 
 ## `X2House`
 
@@ -95,16 +143,19 @@ interacted with) they answer for the current house.
 
 | Group | Methods |
 |---|---|
-| House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` |
-| Owner | `SetHouseName`, `SetHousePermission` (sent only when it changed), `SetHouseAllowRecover` (a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
+| House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` (`placed - housing_binding_doodads`, `absolute_deco_limit - housing_binding_doodads`, `FUN_394796B0`) |
+| Actability | `GetActabilityDecoCount`, `GetDecoActabilityPoint(i)` (`name`, `decoPoint`), `GetDecoActabilityByType(i)` (totals `type`/`totalDecoPoint`/`totalPoint`, item rows `name`/`decoPoint`), `GetDecoActabilityLimitGroup()` (`name`, `arrangeCount`, `maxCount` from `housing_deco_limit_elems`, or nil without a limit list, `FUN_3947A310`); the house entries group `housing_decorations.actability_group_id` and sum `actability_up`, but only for a design with a limit list and a decoration with a `deco_actability_group_id` (`FUN_3932FD00`); the limit rows count `deco_actability_group_id` |
+| Owner | `SetHouseName`, `SetHousePermission` (owner only; one `CSChangeHousePermission` with the server enum, none for an always-public design 0x80, family needs a family 0x178, guild needs an expedition 0x137), `SetHouseAllowRecover` (owner; a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
 | Construction | `GetHousingModelName`, `GetHousingModelConstructionInfo`, `GetHouseConstructionStepInfo`, `NextStepFromBuildCheck`, `PrevStepFromBuildCheck` |
 | Tax | `CountTaxItemForTax` (one certificate 31891 / 31892 per gold, rounded up; `featureSet.taxItem`), the `HOUSE_TAX_INFO` event |
 | Sale | `GetHouseSaleInfo`, `GetHouseSaleItemInfo` (one appraisal certificate 28085 per 100 gold, at least one), `SetHouseForSale`, `CancelHouseForSale`, `BuyHouse` (refused with `HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY` locally) |
 
-Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO`, `HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`,
-`BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`, `HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`,
-`HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`, `HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`,
-`HOUSE_DECO_UPDATED`.
+Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO` (raw `weeksWithoutPay`, the native order),
+`HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`, `BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`,
+`HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`, `HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`,
+`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (raised here when
+the received actability points change; native `0x23c` is raised by `FUN_3907BA10`, which only resets the struct at
+`DAT_39aff990`, so this trigger is capture-pending C7).
 
 ## Map
 
@@ -120,19 +171,34 @@ cursor ray).
 
 ## Not done
 
-* Furniture (`CSDecorateHouse`): the decoration tables are loaded, the window's actability calls answer empty. The
-  server attaches the doodad to the house; whether the position is house-local is not verified.
+* Furniture placement (`CSDecorateHouse`): the decoration and actability tables are loaded and the owner menu's
+  counters answer; the placement builder (ghost, surface/garden/overlap checks, `CSDecorateHouse`) is slice 7a and
+  not implemented. The server attaches the doodad to the house; whether the position is house-local is not verified.
+* The actability list order is the attached-doodad object-id order (the doodad store is a map); the native keeps
+  placement order. `GetDecoActabilityByType`'s `totalPoint` is the received proficiency point (the native adds its
+  equipment bonus too).
 * Planting on farms is `ingame/ground_target/plant.rs` (`CSCreateDoodad`).
 * Siege / castle land rules, the house's door and stair models, house HP and repair.
 
-## Recovery live check (2026-10-23)
+## Examples
+
+* `house_build --shot` (needs `AA_PAK` and `AA_DB`): the real area-338 rules refuse (15338.53, 14632.33) and accept
+  (15328.4, 14631.8), the Start button's `CSCreateHouse` is the captured 45 bytes, and the stage-0 captured
+  `SCMyHouse`/`SCHouseState` body is drawn through `SCHouseBuildProgress` 1083 -> 1084 -> 1085 -> 1082 with the model
+  ids asserted, no blank frame and no respawn for a same-model progress.
+* `house_cast --mute` (needs `AA_DB` and the pak for the UI): one click sends one captured `CSStartSkill`; without
+  the bag material it sends none and shows "Not enough Stone Pack.", and an equipped backpack still casts.
+
+## Recovery live check (2026-10-23, superseded)
 
 On the bevy lane, Salonbevy uses Thatched Farmhouse Design 21165 (design 171), pins its ghost at
 housing area 338 in zone 179, `(15338.53, 14632.33)`, and advances through position and rotation.
 The original Start Construction window receives the server's tax quote: deposit 30, base tax 15,
 total 45 certificates, plus the three material stages (10/5/5 actions). Cancel returns to placement,
-Escape ends it, and the test character is restored to its starting position. No create-house request
-is sent in this check; construction, sale/tax settlement and furniture remain unverified live.
+Escape ends it, and the test character is restored to its starting position. That spot is the one the
+2026-10-31 capture shows the original client refusing (the south-east notch of area 338); the builder
+checks above now refuse it too. The check sent no create-house request; the 2026-10-31 capture and the
+`house_build` example cover the create and stage progress.
 
 The script passes all 20 commands with zero server errors, zero logged errors and the existing allowed
 `tab_language` Lua error. Inspected captures are `shots/resume/housing/{before,ghost,quote}.png`;

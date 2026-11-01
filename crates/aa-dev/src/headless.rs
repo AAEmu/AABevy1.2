@@ -65,7 +65,7 @@ fn take(commands: &mut Commands, target: &OffscreenTarget, path: &str) {
     if let Some(dir) = std::path::Path::new(path).parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    commands.spawn(Screenshot::image(target.0.clone())).observe(save_to_disk(path.to_string()));
+    commands.spawn(Screenshot::image(target.0.clone())).observe(save_to_disk(std::path::PathBuf::from(path)));
     info!("aa-dev: offscreen screenshot -> {path}");
 }
 

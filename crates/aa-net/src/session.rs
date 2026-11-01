@@ -1046,6 +1046,18 @@ async fn recv_stream(c: &mut Option<StreamConn>) -> net::Result<stream::ServerMs
     }
 }
 
+/// The `CSStartSkill` message of [`Command::UseSkill`]: a unit caster, a unit target and no
+/// skill object (`target_obj_id` 0 means the caster).
+pub fn use_skill_message(skill_id: u32, self_obj_id: u32, target_obj_id: u32) -> game::ClientMsg {
+    let target_obj_id = if target_obj_id == 0 { self_obj_id } else { target_obj_id };
+    game::ClientMsg::StartSkill { skill_id, self_obj_id, caster: StartCaster::Unit, target: SkillTarget::unit(target_obj_id) }
+}
+
+/// The wire body [`Command::UseSkill`] sends, through the same message the session encodes.
+pub fn use_skill_body(skill_id: u32, self_obj_id: u32, target_obj_id: u32) -> Vec<u8> {
+    use_skill_message(skill_id, self_obj_id, target_obj_id).encode_body()
+}
+
 impl Session {
     fn new(evt: UnboundedSender<Event>, options: ClientOptions) -> Self {
         let mut native_records=crate::NativeItemRecords::default();
@@ -1824,8 +1836,7 @@ impl Session {
                 }
             }
             Command::UseSkill { skill_id, target_obj_id } => {
-                let target = SkillTarget::unit(if target_obj_id == 0 { self.self_obj } else { target_obj_id });
-                self.start_skill(skill_id, StartCaster::Unit, target).await;
+                self.use_skill(skill_id, target_obj_id).await;
             }
             Command::UseDoodadSkill { skill_id, doodad_obj_id } => {
                 let target = if skill_id == 0 { Err("interaction skill ID must be nonzero") } else { SkillTarget::doodad(doodad_obj_id) };
@@ -2439,6 +2450,14 @@ impl Session {
         if let Err(message)=command.validate(){self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:message.into()}));}
         else if self.send_game(game::ClientMsg::Auction(command.clone())).await{self.emit(Event::Auction(crate::auction::AuctionEvent::Requested(command)));}
         else{self.emit(Event::Auction(crate::auction::AuctionEvent::RequestRejected{command,message:"auction request was not sent".into()}));}
+    }
+
+    async fn use_skill(&mut self, skill_id: u32, target_obj_id: u32) {
+        if self.phase != Phase::InWorld {
+            tracing::warn!("skill {skill_id} ignored: not in the world");
+            return;
+        }
+        self.send_game(use_skill_message(skill_id, self.self_obj, target_obj_id)).await;
     }
 
     async fn start_skill(&mut self, skill_id: u32, caster: StartCaster, target: SkillTarget) {
@@ -5906,4 +5925,43 @@ mod tests {
         assert!(r.is_empty());
     }
 
+    /// Path A of `FUN_390f3b20`: skill 17742 (`mount_skills` 116), the cannon slave as the
+    /// `Mount` caster, a `Position` target at the solved impact point, `posRot` 0 and the flag
+    /// byte 0 (no skill object).
+    #[test]
+    fn a_cannon_shot_is_the_mount_skill_at_a_position_with_rot_zero() {
+        use crate::buff::caster_kind;
+        use crate::skill::target_kind;
+        let pos = Pos::new(24163.5, 15512.25, 82.5);
+        let message = mate_skill_at_message(17742, 0x11_2233, 0x00_0077, 116, pos, 0.0);
+        let body = message.encode_body();
+        assert_eq!(
+            body,
+            [
+                0x4e, 0x45, 0, 0, // skill 17742
+                3, 0x77, 0, 0, // Mount caster, slave 77
+                116, 0, 0, 0, // mount_skills.id
+                1, // Position target
+                0, 0, 0, 0, 0, 0x38, 0xe6, 0x05, // x
+                0, 0, 0, 0, 0, 0x84, 0xc9, 0x03, // y
+                0, 0, 0xa5, 0x42, // z 82.5
+                0, 0, 0, 0, // posRot 0
+                0, 0, 0, // objId1 invalid
+                0, 0, 0, // objId2 invalid
+                0, // no skill object
+            ]
+        );
+        let mut r = crate::wire::Reader::new(&body);
+        assert_eq!(r.u32().unwrap(), 17742);
+        assert_eq!(r.u8().unwrap(), caster_kind::MOUNT);
+        assert_eq!(r.bc().unwrap(), 0x77);
+        assert_eq!(r.u32().unwrap(), 116);
+        assert_eq!(r.u8().unwrap(), target_kind::POSITION);
+        assert_eq!(r.long_position().unwrap(), pos);
+        assert_eq!(r.f32().unwrap(), 0.0);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.bc().unwrap(), 0);
+        assert_eq!(r.u8().unwrap(), 0);
+        assert!(r.is_empty());
+    }
 }

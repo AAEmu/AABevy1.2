@@ -58,6 +58,7 @@ pub(crate) mod enter;
 mod flow;
 mod gear_refresh;
 pub(crate) mod glide;
+pub(crate) mod linked_skill;
 #[allow(dead_code)]
 pub(crate) fn gear_refresh_fixture() { gear_refresh::fixture::run(); }
 pub(crate) mod ground_target;
@@ -168,6 +169,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::VehicleCamera>()
+            .init_resource::<vehicle::VehicleSwaps>()
             .init_resource::<camera::CameraFollowed>()
             .init_resource::<quest_camera::QuestShot>()
             .init_resource::<quest_camera::QuestTalkCamera>()
@@ -178,6 +180,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(ground_target::plugin)
             .add_plugins(skill_motion::plugin)
             .add_plugins(sounds::plugin)
+            .add_plugins(vehicle::VehiclePlugin)
             .add_plugins(stealth::plugin)
             .add_plugins(tools::plugin)
             .add_plugins(flow::plugin)
@@ -226,6 +229,7 @@ impl Plugin for InGamePlugin {
                         player::control_player.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         cart::drive_cart.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         ship::reset_on_teleport.run_if(in_state(Screen::InGame)),
+                        glide::reset_on_teleport.run_if(in_state(Screen::InGame)),
                         ship::drive_ship.run_if(in_state(Screen::InGame)).run_if(teleport::idle),
                         (mount::drive_mount, mount::pose_local_rider).chain().after(units::move_units),
                         camera::follow_player,
@@ -233,11 +237,16 @@ impl Plugin for InGamePlugin {
                         .chain()
                         .after(crate::hud::HudInputReady),
                     (units::sync_views, units::move_units, units::cull_units, glide::track_remote_gliders).chain(),
+                    (
+                        vehicle::update_damage
+                            .after(units::sync_views)
+                            .after(units::move_units),
+                        vehicle::finish_damage_swaps.after(vehicle::update_damage),
+                    ),
                     vehicle::track_motion
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
-                    vehicle::steer_spindles.after(vehicle::track_motion),
                     (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
@@ -319,6 +328,7 @@ fn leave_game(
     commands.insert_resource(warm::Warm::default());
     // a logout mid-Dash or mid-jump must not carry its state (the end-of-Dash FOV fade) into the next world
     commands.insert_resource(sprint::Sprint::default());
+    commands.insert_resource(glide::Gliding::default());
     commands.insert_resource(mount::LocalMount::default());
     commands.remove_resource::<turret::Sight>();
     commands.insert_resource(camera::VehicleCamera::default());
@@ -421,7 +431,34 @@ fn log_chat(mut events: MessageReader<aa_net::NetEvent>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::mesh::skinning::SkinnedMeshInverseBindposes;
+
+    /// A logout mid-flight must not carry the flight (or its end clip) into the next character.
+    #[test]
+    fn leaving_the_game_forgets_the_flight() {
+        let mut app = App::new();
+        app.init_resource::<glide::Gliding>();
+        {
+            let mut gliding = app.world_mut().resource_mut::<glide::Gliding>();
+            gliding.active = Some(glide::Active {
+                flight: glide::Flight::start(glide::GlideParams::EXPERIMENTAL),
+                buff_id: 1029,
+                buff_index: 9,
+                pose: glide::Pose::Start,
+                touched: false,
+                touched_for: 0.0,
+                missing: 0.0,
+                water: false,
+                deck: None,
+            });
+            gliding.ending = 0.3;
+        }
+        app.world_mut().run_system_once(leave_game).expect("leave_game");
+        let gliding = app.world().resource::<glide::Gliding>();
+        assert!(gliding.active.is_none(), "the flight survives the logout");
+        assert_eq!(gliding.ending, 0.0, "the end clip survives the logout");
+    }
 
     /// Adds the in-game and world plugins without a window or GPU and runs a few frames: every
     /// system parameter is initialized, so Bevy reports conflicting access (B0001/B0002) here.

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aa_anim::GameDb;
+use crate::hud::formula::Formula;
 use bevy::prelude::*;
 use rusqlite::{Connection, OpenFlags, params};
 
@@ -50,9 +51,25 @@ struct Lookups {
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
+    /// `slaves.id` -> the `BallisticPos` gunner skill its point-1 seat fires.
+    cannon_skills: HashMap<u32, Option<super::turret::CannonSkill>>,
+    /// `slaves.id` -> whether any of its mount skills is `BallisticPos` (11) or `ArtilleryPos`
+    /// (15), the skills whose use enters the native camera-aim mode (8).
+    cannon_seats: HashMap<u32, bool>,
+    /// `models.id` -> the normal and per-state prefab refs of a vehicle or ship.
+    vehicle_variants: HashMap<u32, Option<VehicleVariants>>,
+    /// `(slaves.id, level)` -> the unit attribute 6 (`MaxHealth`) of the template.
+    slave_max_hp: HashMap<(u32, u8), Option<i32>>,
     ship_floors: HashMap<u32, Option<Arc<super::ship::floor::ShipFloor>>>,
     /// XY bounds of the cached hull floors, for the deck range gate.
     ship_bounds: HashMap<u32, Option<(Vec2, Vec2)>>,
+    /// `skills.link_equip_slot_id` >= 0: the equip slot a skill is cast through (`FUN_393925c0`).
+    skill_links: HashMap<u32, Option<SkillLink>>,
+    /// `item_backpacks` of an item template: its backpack type and the skill using it casts.
+    backpack_items: HashMap<u32, Option<ItemBackpack>>,
+
+    /// The hull's vertical extent from `ship_models.mass_center_z` and `mass_box_size_z`.
+    ship_hull: HashMap<u32, Option<(f32, f32)>>,
 }
 
 /// Names of one `model_attach_point_strings` row: the actor bone creatures use and the prefab helper vehicle models use
@@ -204,6 +221,23 @@ pub struct Glider {
     pub use_skill: u32,
 }
 
+/// `skills.link_equip_slot_id` / `skills.link_backpack_type_id` of a skill cast through an equipped item
+/// (`FUN_393925c0`): the equip slot index and the `item_backpacks.backpack_type_id` the item there must have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SkillLink {
+    pub slot: usize,
+    pub backpack_type: i64,
+}
+
+/// An item template's `item_backpacks` row (when it has one: `backpack_type`) and the skill using it casts
+/// (`items.use_skill_id`). `FUN_393925c0` accepts an item with no `item_backpacks` row; only a row of another type
+/// refuses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ItemBackpack {
+    pub backpack_type: Option<i64>,
+    pub use_skill: u32,
+}
+
 /// How a weapon item is drawn (`item_weapons` + its `item_assets` row).
 #[derive(Clone, Debug)]
 pub struct Weapon {
@@ -323,8 +357,15 @@ impl Lookups {
             ships: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
+            cannon_skills: HashMap::new(),
+            cannon_seats: HashMap::new(),
+            vehicle_variants: HashMap::new(),
+            slave_max_hp: HashMap::new(),
             ship_floors: HashMap::new(),
             ship_bounds: HashMap::new(),
+            skill_links: HashMap::new(),
+            backpack_items: HashMap::new(),
+            ship_hull: HashMap::new(),
         }
     }
 }
@@ -355,6 +396,40 @@ impl Db {
             game: Arc::new(Mutex::new(game)),
             lookups: Arc::new(Mutex::new(Lookups::new(conn))),
         })
+    }
+
+    /// The linked-item rows the skill-use tests need, with the real 1.2 ids: glider 14901 -> slot 26 / type 2,
+    /// glider item 14677 (use skill 12373), instrument 14900 -> slot 18 / type 1 with the row-less lute 20480
+    /// (use skill 11951), trade-pack skill 14902 -> type 3 and item 23605, and a plain skill.
+    #[cfg(test)]
+    pub(crate) fn skill_link_fixture() -> Option<Db> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "aa-client-skill-link-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        Connection::open(&path)
+            .ok()?
+            .execute_batch(
+                "CREATE TABLE skills(id INTEGER PRIMARY KEY, link_equip_slot_id INTEGER, link_backpack_type_id INTEGER);
+                 CREATE TABLE items(id INTEGER PRIMARY KEY, use_skill_id INTEGER);
+                 CREATE TABLE item_backpacks(item_id INTEGER, backpack_type_id INTEGER);
+                 INSERT INTO skills VALUES(14900, 18, 1);
+                 INSERT INTO skills VALUES(14901, 26, 2);
+                 INSERT INTO skills VALUES(14902, 26, 3);
+                 INSERT INTO skills VALUES(18132, -1, 1);
+                 INSERT INTO items VALUES(14677, 12373);
+                 INSERT INTO items VALUES(20480, 11951);
+                 INSERT INTO items VALUES(19742, 19903);
+                 INSERT INTO items VALUES(23605, 0);
+                 INSERT INTO item_backpacks VALUES(14677, 2);
+                 INSERT INTO item_backpacks VALUES(23605, 3);",
+            )
+            .ok()?;
+        Db::open_path(path.to_str()?)
     }
 
     /// A catalog with just one ship model row (the tests use the real pak
@@ -413,6 +488,17 @@ impl Db {
             l.ship_floors.insert(model_id, Some(floor));
         }
         Some(db)
+    }
+
+    /// The hull's vertical range for the aim box, on a fixture whose `ship_models` row has no
+    /// mass box columns.
+    #[cfg(test)]
+    pub(crate) fn seed_ship_hull_height(&self, model_id: u32, low: f32, high: f32) {
+        self.lookups
+            .lock()
+            .unwrap()
+            .ship_hull
+            .insert(model_id, Some((low, high)));
     }
 
     /// The model file (`.cdf` / `.chr`) of an actor model (`models.id`), lower case, `/` separators; for a prefab, vehicle
@@ -609,6 +695,55 @@ impl Db {
             .flatten()
     }
 
+    /// The ship hull's vertical extent relative to the hull root: `ship_models.mass_center_z`
+    /// +/- `mass_box_size_z / 2`, the physics box's keel to deck/rail range. `None` for a
+    /// non-ship, a missing row or a non-positive box.
+    pub fn ship_hull_height(&self, model_id: u32) -> Option<(f32, f32)> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(height) = l.ship_hull.get(&model_id) {
+            return *height;
+        }
+        let height = l
+            .conn
+            .query_row(
+                "SELECT s.mass_center_z, s.mass_box_size_z FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| Ok((r.get::<_, f64>(0)?, r.get::<_, f64>(1)?)),
+            )
+            .ok()
+            .and_then(|(centre, size)| {
+                let (centre, size) = (centre as f32, size as f32);
+                (centre.is_finite() && size.is_finite() && size > 0.0)
+                    .then(|| (centre - size * 0.5, centre + size * 0.5))
+            });
+        l.ship_hull.insert(model_id, height);
+        height
+    }
+
+    /// Whether the slave has a mount skill whose `skills.target_type_id` is `BallisticPos` (11)
+    /// or `ArtilleryPos` (15). Using such a skill is what enters the native camera-aim mode 8;
+    /// a drivable VehicleModel with a turret block but no such skill is not a gunner seat.
+    pub fn has_cannon_skill(&self, template: u32) -> bool {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(seat) = l.cannon_seats.get(&template) {
+            return *seat;
+        }
+        let seat = l
+            .conn
+            .query_row(
+                "SELECT 1 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id IN (11, 15)
+                 LIMIT 1",
+                params![template],
+                |_| Ok(()),
+            )
+            .is_ok();
+        l.cannon_seats.insert(template, seat);
+        seat
+    }
+
     /// The turret block of a vehicle model: its `vehicle_models` pitch/yaw range and rates, or
     /// `None` when the model is no vehicle or the row is incomplete (a text value in an angle
     /// column; skip the row rather than treat it as zero).
@@ -666,6 +801,64 @@ impl Db {
         limits
     }
 
+    /// The shot a gunner's seat fires for slave template `template`: the mount skill's own
+    /// `skills` row (`slave_mount_skills` -> `mount_skills.skill_id`) with `target_type_id` 11
+    /// (`BallisticPos`), its `effect_speed` (`FUN_394322f0` +0xbc), its range and the
+    /// `target_angle` cone (`FUN_393594c0` +0x17c). The bar casts the same row (a point-1
+    /// `mount_attached_skills` skill is only the displayed one); rows of other types (the tower
+    /// deployment, the drums) are not shots. A slave with several BallisticPos rows (the siege
+    /// thrower, slave 1, has three ammo throws) takes its first BallisticPos row; those rows
+    /// share the ballistic data here, and a caller that knows the slot can use
+    /// [`Db::cannon_skill_for`].
+    pub fn cannon_skill(&self, template: u32) -> Option<super::turret::CannonSkill> {
+        self.cannon_skill_for(template, None)
+    }
+
+    /// [`Db::cannon_skill`] for a specific `slave_mount_skills` row when the caller knows the
+    /// slot it will cast, else the first BallisticPos row.
+    pub fn cannon_skill_for(
+        &self,
+        template: u32,
+        mount_skill: Option<u32>,
+    ) -> Option<super::turret::CannonSkill> {
+        let mut l = self.lookups.lock().unwrap();
+        if mount_skill.is_none()
+            && let Some(skill) = l.cannon_skills.get(&template)
+        {
+            return *skill;
+        }
+        let skill = {
+            let mut query = match l.conn.prepare(
+                "SELECT ms.skill_id, s.effect_speed, s.min_range, s.max_range, s.target_angle
+                 FROM slave_mount_skills sm
+                 JOIN mount_skills ms ON ms.id = sm.mount_skill_id
+                 JOIN skills s ON s.id = ms.skill_id
+                 WHERE sm.slave_id = ?1 AND s.target_type_id = 11
+                     AND s.effect_speed > 0 AND s.max_range > 0
+                     AND (?2 IS NULL OR sm.mount_skill_id = ?2)
+                 ORDER BY sm.id LIMIT 1",
+            ) {
+                Ok(query) => query,
+                Err(_) => return None,
+            };
+            query
+                .query_row(params![template, mount_skill], |r| {
+                    Ok(super::turret::CannonSkill {
+                        id: r.get(0)?,
+                        speed: r.get(1)?,
+                        min_range: r.get(2)?,
+                        max_range: r.get(3)?,
+                        target_angle: r.get(4)?,
+                    })
+                })
+                .ok()
+        };
+        if mount_skill.is_none() {
+            l.cannon_skills.insert(template, skill);
+        }
+        skill
+    }
+
     /// The look of a vehicle or ship model (`models.sub_type` `VehicleModel` / `ShipModel`: airships, carts, boats,
     /// siege weapons): its `normal` model reference and its two wheel models, if any.
     pub fn vehicle_look(&self, model_id: u32) -> Option<VehicleLook> {
@@ -684,6 +877,127 @@ impl Db {
         let normal = normal.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())?;
         let file = |w: Option<String>| w.as_deref().and_then(model_file);
         Some(VehicleLook { normal, wheels: [file(wheel), file(wheel2)] })
+    }
+
+    /// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`):
+    /// state 2 is `damaged25`, 3 `damaged50`, 4 `damaged75`, 5 `dying` (the vehicle column only; a ship has
+    /// none), 6 `dead` ([`VehicleVariants::for_state`]).
+    pub fn vehicle_variants(&self, model_id: u32) -> Option<VehicleVariants> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(variants) = l.vehicle_variants.get(&model_id) {
+            return variants.clone();
+        }
+        let variants = l
+            .conn
+            .query_row(
+                "SELECT COALESCE(v.normal, s.normal), v.damaged25, s.damaged25, v.damaged50, s.damaged50,
+                        v.damaged75, s.damaged75, v.dead, s.dead, v.dying
+                 FROM models m
+                 LEFT JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'
+                 LEFT JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel'
+                 WHERE m.id = ?1",
+                params![model_id],
+                |r| {
+                    let text = |index: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(r.get::<_, Option<String>>(index)?
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty()))
+                    };
+                    let variant = |vehicle: usize, ship: usize| -> rusqlite::Result<Option<String>> {
+                        Ok(text(vehicle)?.or(text(ship)?))
+                    };
+                    Ok(VehicleVariants {
+                        normal: text(0)?.unwrap_or_default(),
+                        damaged25: variant(1, 2)?,
+                        damaged50: variant(3, 4)?,
+                        damaged75: variant(5, 6)?,
+                        dying: text(9)?,
+                        dead: variant(7, 8)?,
+                    })
+                },
+            )
+            .ok()
+            .filter(|v: &VehicleVariants| !v.normal.is_empty());
+        l.vehicle_variants.insert(model_id, variants.clone());
+        variants
+    }
+
+    /// `models.dying_time` in seconds: the template field at +0x14 that `FUN_390eaac0` compares with the elapsed
+    /// time since the dying start (+0x274). 0 (no dying window) when the row is missing or negative.
+    pub fn vehicle_dying_time(&self, model_id: u32) -> f32 {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT dying_time FROM models WHERE id = ?1",
+                params![model_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .ok()
+            .flatten()
+            .filter(|time| time.is_finite())
+            .map_or(0.0, |time| time.max(0.0) as f32)
+    }
+
+    /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
+    /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
+    /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
+    ///
+    /// The base comes from `FUN_398a0d60`'s `case 6: 0xe`, the `MaxHealth` formula (kind 14) of the slave owner
+    /// type (2). Its primary attributes are their own formulas (kind 24 is `Sta`; both are parsed, not hardcoded).
+    /// The unit's maximum is not on the wire, so this is the only source for every template, including the ones
+    /// without a `unit_modifiers` row (their base alone).
+    pub fn slave_max_hp(&self, template_id: u32, level: u8) -> Option<i32> {
+        let key = (template_id, level);
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(hp) = l.slave_max_hp.get(&key) {
+            return *hp;
+        }
+        let base = {
+            let max_health = unit_formula(&l.conn, SLAVE_OWNER, MAX_HEALTH)?;
+            let mut vars = HashMap::from([("level", f64::from(level))]);
+            for (name, kind) in PRIMARY_STAT_FORMULAS {
+                if let Some(formula) = unit_formula(&l.conn, SLAVE_OWNER, kind) {
+                    let value = formula.eval(&vars) as i32;
+                    vars.insert(name, f64::from(value));
+                }
+            }
+            max_health.eval(&vars) as i32
+        };
+        let mut flat = 0i32;
+        let mut percent = 0f32;
+        {
+            let row = l.conn.prepare(
+                "SELECT unit_modifier_type_id, value, linear_level_bonus FROM unit_modifiers
+                 WHERE owner_type = 'Slave' AND owner_id = ?1 AND unit_attribute_id = 6 ORDER BY id",
+            );
+            if let Ok(mut stmt) = row
+                && let Ok(rows) = stmt.query_map(params![template_id], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })
+            {
+                for row in rows.flatten() {
+                    let value = i32::try_from(row.1).unwrap_or(0);
+                    let linear = i32::try_from(row.2).unwrap_or(0);
+                    // `FUN_3989fde0`: value + linear_level_bonus * level / 100, truncated
+                    let value =
+                        value.wrapping_add((linear as f32 * f32::from(level) * 0.01) as i32);
+                    if row.0 == 1 {
+                        percent += value as f32;
+                    } else {
+                        flat = flat.wrapping_add(value);
+                    }
+                }
+            }
+        }
+        // `FUN_398a0bc0` multiplies the sum by one 0.01-scaled multiplier (`local_8 = 100 + percent`)
+        let hp = (((base.wrapping_add(flat)) as f32) * (100.0 + percent) * 0.01) as i32;
+        let hp = Some(hp.max(0));
+        l.slave_max_hp.insert(key, hp);
+        hp
     }
 
     /// The clip (`.cal` entry name, lower case) of an animation action (`anim_actions.anim_name`): the idle pose of an NPC.
@@ -923,6 +1237,56 @@ impl Db {
         glider
     }
 
+    /// The equip slot a skill is cast through (`skills.link_equip_slot_id` >= 0) and the backpack type the item there
+    /// must have (`skills.link_backpack_type_id`). `None` for every other skill (`FUN_393925c0` returns at once).
+    pub fn skill_link(&self, skill_id: u32) -> Option<SkillLink> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(link) = l.skill_links.get(&skill_id) {
+            return *link;
+        }
+        let link = l
+            .conn
+            .query_row(
+                "SELECT link_equip_slot_id, link_backpack_type_id FROM skills WHERE id = ?1",
+                params![skill_id],
+                |r| {
+                    let slot = r.get::<_, Option<i64>>(0)?.unwrap_or(-1);
+                    let backpack_type = r.get::<_, Option<i64>>(1)?.unwrap_or(0);
+                    Ok((slot >= 0).then(|| SkillLink { slot: slot as usize, backpack_type }))
+                },
+            )
+            .ok()
+            .flatten();
+        l.skill_links.insert(skill_id, link);
+        link
+    }
+
+    /// An item template's `item_backpacks` row (`backpack_type_id`) and its `items.use_skill_id`: what a skill cast
+    /// through the item needs to check its type and send (`FUN_393925c0`, `FUN_397cf7a0`). The join is a LEFT one:
+    /// an item without an `item_backpacks` row (`backpack_type` `None`) is accepted by the decompile, not refused.
+    pub fn item_backpack(&self, item_id: u32) -> Option<ItemBackpack> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(item) = l.backpack_items.get(&item_id) {
+            return *item;
+        }
+        let item = l
+            .conn
+            .query_row(
+                "SELECT b.backpack_type_id, i.use_skill_id
+                 FROM items i LEFT JOIN item_backpacks b ON b.item_id = i.id WHERE i.id = ?1",
+                params![item_id],
+                |r| {
+                    Ok(ItemBackpack {
+                        backpack_type: r.get::<_, Option<i64>>(0)?,
+                        use_skill: r.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0) as u32,
+                    })
+                },
+            )
+            .ok();
+        l.backpack_items.insert(item_id, item);
+        item
+    }
+
     /// The model a backpack / glider item template wears on the back (`item_backpacks`): its stowed look when it has one
     /// (`asset2_id`: a glider's folded `_back.cgf`), else `asset_id`. [`Weapon::code`] is `backpack`. A glider without a stowed look
     /// (`glider_bx.chr`, 5 items) is only its flying model, a 6 m canopy: nothing is drawn for it.
@@ -1147,16 +1511,53 @@ impl Db {
     }
 }
 
-/// The `ParticleEffect` entities (the `<export>` list) of a prefab element path.
-fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+/// `UnitFormulaOwnerType::Slave` (`unit_formulas.owner_type_id`).
+const SLAVE_OWNER: u8 = 2;
+/// `UnitFormulaKind::MaxHealth`.
+const MAX_HEALTH: u8 = 14;
+/// The primary attribute formulas a pool formula may read: `Str`..`Fai` (kinds 22..27).
+const PRIMARY_STAT_FORMULAS: [(&str, u8); 6] = [
+    ("str", 22),
+    ("dex", 23),
+    ("sta", 24),
+    ("int", 25),
+    ("spi", 26),
+    ("fai", 27),
+];
+
+/// The parsed `unit_formulas` row of an owner type and formula kind (the first row of an id).
+fn unit_formula(conn: &Connection, owner: u8, kind: u8) -> Option<Formula> {
+    let text: Option<String> = conn
+        .query_row(
+            "SELECT formula FROM unit_formulas WHERE owner_type_id = ?1 AND kind_id = ?2 ORDER BY id LIMIT 1",
+            params![owner, kind],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    text.as_deref().and_then(|text| Formula::parse(text).ok())
+}
+
+/// The named `ParticleEffect` entities (the `<Objects>` list) of a prefab element path; inactive ones are kept
+/// (a vehicle's `_spawn_effect` elements are authored `bActive="0"` and played on a state change).
+pub(crate) fn prefab_effects_named(path: &str) -> Vec<aa_world::placement::NamedEffect> {
     let Some((file, name)) = path.strip_prefix("prefab://").and_then(|r| r.rsplit_once('/')) else { return Vec::new() };
     let Ok(xml) = aa_pak::Pak::global().read_string(&norm(file)) else { return Vec::new() };
     let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
     let tail = &xml[from..];
     let prefab = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
-    let Some(start) = prefab.find("<export>") else { return Vec::new() };
-    let export = &prefab[start..prefab[start..].find("</export>").map_or(prefab.len(), |e| start + e + "</export>".len())];
-    aa_world::placement::parse_effect_entities(export).into_iter().filter(|e| !e.effect.to_ascii_lowercase().starts_with("x2_sounds.")).collect()
+    // the `<Objects>` list carries every entity's Pos (the `<export>` list omits a zero one)
+    let Some(start) = prefab.find("<Objects>") else { return Vec::new() };
+    let objects = &prefab[start..prefab[start..].find("</Objects>").map_or(prefab.len(), |e| start + e + "</Objects>".len())];
+    aa_world::placement::parse_named_effect_entities(objects)
+        .into_iter()
+        .filter(|e| !e.effect.effect.to_ascii_lowercase().starts_with("x2_sounds."))
+        .collect()
+}
+
+/// The active `ParticleEffect` entities (the `<Objects>` list) of a prefab element path.
+fn prefab_effects_of(path: &str) -> Vec<aa_world::placement::PlacedEffect> {
+    prefab_effects_named(path).into_iter().filter(|e| e.active).map(|e| e.effect).collect()
 }
 
 /// The model file of a prefab element path (`prefab://prefabs/interaction_e.xml/scarecrow.learning_scarecrow_02`): the first `object_Model`
@@ -1193,6 +1594,49 @@ pub struct VehicleLook {
     pub normal: String,
     /// The wheel models (pak paths): `wheel` for the `wheelN` mounts, `wheel2` for the `wheel_type2N` ones.
     pub wheels: [Option<String>; 2],
+}
+
+/// The normal and per-state prefab / model refs of a vehicle or ship (`vehicle_models` / `ship_models`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VehicleVariants {
+    pub normal: String,
+    pub damaged25: Option<String>,
+    pub damaged50: Option<String>,
+    pub damaged75: Option<String>,
+    /// The `vehicle_models.dying` prefab (5). Ships have no such column.
+    pub dying: Option<String>,
+    pub dead: Option<String>,
+}
+
+impl VehicleVariants {
+    /// The model ref for a model state, walking down to the next lower non-empty row as `FUN_397a7980` /
+    /// `FUN_397a7810` do: 6 `dead`, 5 `dying`, 4 `damaged75`, 3 `damaged50`, 2 `damaged25`, else `normal`.
+    /// A state with no row takes the next lower one (so a vehicle without a `dying` prefab shows its
+    /// `damaged75` one while dying, and a ship, which has no dying column, does the same).
+    pub fn for_state(&self, state: u8) -> &str {
+        let wanted = match state {
+            0 | 1 => 1,
+            2 => 2,
+            3 => 3,
+            4 => 4,
+            5 => 5,
+            _ => 6,
+        };
+        for step in (1..=wanted).rev() {
+            let variant = match step {
+                2 => self.damaged25.as_deref(),
+                3 => self.damaged50.as_deref(),
+                4 => self.damaged75.as_deref(),
+                5 => self.dying.as_deref(),
+                6 => self.dead.as_deref(),
+                _ => None,
+            };
+            if let Some(variant) = variant {
+                return variant;
+            }
+        }
+        &self.normal
+    }
 }
 
 /// Lower case with `/` separators, as the pak wants paths.
@@ -1333,6 +1777,102 @@ mod tests {
         assert!(
             Arc::ptr_eq(&floor, &again),
             "the cache keeps the loaded floor"
+        );
+    }
+
+    /// `FUN_397a7980` / `FUN_397a7810`: a state with no row uses the next lower one; 5 reads `dying`.
+    #[test]
+    fn a_variant_falls_back_to_the_next_lower_state() {
+        let all = VehicleVariants {
+            normal: "normal".into(),
+            damaged25: None,
+            damaged50: Some("damaged50".into()),
+            damaged75: Some("damaged75".into()),
+            dying: Some("dying".into()),
+            dead: None,
+        };
+        assert_eq!(all.for_state(1), "normal");
+        assert_eq!(all.for_state(2), "normal", "no damaged25 row");
+        assert_eq!(all.for_state(3), "damaged50");
+        assert_eq!(all.for_state(4), "damaged75");
+        assert_eq!(all.for_state(5), "dying");
+        assert_eq!(all.for_state(6), "dying", "no dead row: down through 5");
+        let no_dying = VehicleVariants {
+            dying: None,
+            ..all.clone()
+        };
+        assert_eq!(no_dying.for_state(5), "damaged75", "no dying row");
+        assert_eq!(no_dying.for_state(6), "damaged75", "no dead row");
+        let none = VehicleVariants {
+            normal: "normal".into(),
+            ..VehicleVariants::default()
+        };
+        for state in 0..=6 {
+            assert_eq!(none.for_state(state), "normal", "state {state}");
+        }
+    }
+
+    /// The 1.2 Eznan Cutter, the Farm Wagon and the airship as the real catalog has them.
+    #[test]
+    fn the_database_holds_the_vehicle_variants() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        let galleon = db.vehicle_variants(393).expect("the Eznan Cutter");
+        assert!(galleon.for_state(1).ends_with("galleon.step_10galleon_normal"), "{}", galleon.for_state(1));
+        assert!(galleon.for_state(2).ends_with("galleon.damaged25"), "{}", galleon.for_state(2));
+        assert!(galleon.for_state(3).ends_with("galleon.damaged25"), "{}", galleon.for_state(3));
+        assert!(galleon.for_state(4).ends_with("galleon.damaged75"), "{}", galleon.for_state(4));
+        assert_eq!(galleon.for_state(5), galleon.for_state(4), "a ship has no dying column");
+        assert!(galleon.for_state(6).ends_with("galleon.dead"), "{}", galleon.for_state(6));
+
+        let tractor = db.vehicle_variants(1008).expect("the Farm Wagon");
+        assert!(tractor.for_state(4).ends_with("vehicle_tractor.tractor_body_damage75"));
+        assert!(
+            tractor.for_state(5).ends_with("vehicle_tractor.tractor_body_dying"),
+            "{}",
+            tractor.for_state(5)
+        );
+        assert!(tractor.for_state(6).ends_with("vehicle_tractor.tractor_body_dead"));
+        assert_eq!(db.vehicle_dying_time(1008), 3.3, "models.dying_time");
+        assert_eq!(db.vehicle_dying_time(129), 0.0, "the rowboat has no dying window");
+
+        // the airship has only `normal`, so every state keeps it
+        let airship = db.vehicle_variants(657).expect("the airship");
+        assert_eq!(airship.for_state(1), airship.normal);
+        assert_eq!(airship.for_state(5), airship.normal);
+        assert_eq!(airship.for_state(6), airship.normal);
+        assert_eq!(db.vehicle_variants(139), None, "a mount is no vehicle");
+    }
+
+    /// Unit attribute 6 is the formula base plus the `unit_modifiers` rows: the Eznan Cutter (21), the Farm
+    /// Wagon (60, 2500 flat), and template 105 with no row (the formula alone, 4796 at level 50).
+    #[test]
+    fn slave_max_health_comes_from_the_formula_and_the_unit_modifiers() {
+        let Some(db) = Db::open() else {
+            eprintln!("skip: no client database");
+            return;
+        };
+        assert_eq!(
+            db.slave_max_hp(21, 50),
+            Some(52_216),
+            "Eznan Cutter template 21: 4796 + 47420"
+        );
+        assert_eq!(
+            db.slave_max_hp(60, 50),
+            Some(7_296),
+            "Farm Wagon template 60: 4796 + 2500"
+        );
+        assert_eq!(
+            db.slave_max_hp(105, 50),
+            Some(4_796),
+            "template 105 has no MaxHealth row"
+        );
+        assert_eq!(
+            db.slave_max_hp(91, 10),
+            Some(1_126),
+            "level 10: 700 + (10 + 9 * 2) * 12 + 90 flat"
         );
     }
 

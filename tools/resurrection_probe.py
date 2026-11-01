@@ -436,7 +436,7 @@ def start_bevy(args: argparse.Namespace, script: str, log_path: Path, offscreen:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     handle = open(log_path, "w", encoding="utf-8")
     command = [
-        str(Path(args.bevy)), "--headless", "--mute",
+        str(Path(args.bevy)), "--headless", "--mute", "--require-wall-clock",
         "--account", args.bevy_account, "--login", args.bevy_login,
         "--password-file", str(args.bevy_password_file or args.password_file),
         "--character", args.bevy_character, "--script", str(log_path.with_suffix(".txt")),

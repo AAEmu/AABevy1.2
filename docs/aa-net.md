@@ -3707,6 +3707,14 @@ zero `all/current` actions for a finished house (`current_step == -1`) and
 `base_action + num_action` otherwise. Raw permission values, signed sale bits and raw
 fixed-point XY are retained.
 
+The 2026-10-31 original-client capture pins two golden bodies: `CSCreateHouse` design
+171 at (15328, 14632) is 45 bytes (`design, x i64, y i64, z f32, z_rot f32, item u64,
+money i32, ht i32, bool auto`), and the stage-0 `SCMyHouse`/`SCHouseState` body is the
+100-byte house body (model 1083, 0 of 20 actions). A build action sends a 13-byte
+`CSStartSkill`: skill 14575, caster kind 0 + unit, target kind 0 + the house BC object id,
+no skill object; the server answers `SCSkillStarted` with 20990 ms. `session::use_skill_body`
+is the same message `Command::UseSkill` sends (unit caster and target, 0 = the caster).
+
 `Houses` applies deltas only to a known timeline. A full body replaces the TL record,
 resets `demolished`, and drops any other TL with the same runtime object id. Character
 selection, world leave and disconnect clear the table and the quote. `UnitsRemoved`
@@ -9634,8 +9642,13 @@ the `a_idle` row has both facings at pi/2, so primary 0 and aux `z` 32.
   `SCUnitModelPostureChanged` 0x103 and the `SCUnitState` tail (server writer
   `systems/npcs/npc/packets.rs`). `Posture.turret` and `Unit.turret` keep the stored aim;
   `Event::UnitPosture` carries it to the app. The bytes are the server's own `turret_posture` test.
-* A cannon fires with `Command::UseMateSkillAt`: `CSStartSkill` with `SkillCaster::Mount` and
-  `SkillCastTarget::Position` (wire kind 1; `long_position`, `rot`, two empty object ids). The
-  server's `ship_cannon_gunner_seat_skill_and_leaving` uses that target shape for skill 10473.
-  The aim point is capture-pending S12-C1; the packet shape is byte-tested against
-  `skill::write_start_skill` and the server reader.
+* A cannon fires with `Command::UseMateSkillAt`: `CSStartSkill` with `SkillCaster::Mount`
+  (`{cannon slave, mount_skills.id}`), the mount skill's own `skills.id` (17742 for slave 77's
+  `mount_skills` 116, 10473 for slave 10's 16) and `SkillCastTarget::Position` (wire kind 1;
+  `long_position`, `rot` 0, two empty object ids). The `pos` is the impact point of 1.2's
+  ballistic solve (`FUN_394322f0`: muzzle `item_hand_r`, `effect_speed`, the screen ray over
+  `max(300, max_range)`, the `FUN_393594c0` angle cone, 0.1 s trace), not the camera hit; a ray
+  that hits nothing is `NO_TARGET` and sends no packet. The final flag byte is 0 (no skill
+  object). The server's
+  `ship_cannon_gunner_seat_skill_and_leaving` uses the same target shape, and the body is
+  byte-tested against `skill::write_start_skill` and the server reader.
