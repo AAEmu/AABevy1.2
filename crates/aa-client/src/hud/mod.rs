@@ -36,7 +36,7 @@ mod achievement;
 mod alerts;
 pub(crate) use alerts::{ShowError, UseFailed};
 mod auction;
-mod housing;
+pub(crate) mod housing;
 mod battlefield;
 mod breath;
 mod map_overlays;

@@ -140,16 +140,32 @@ fn announce_error(rt: &UiRuntime, code: i16) {
 
 /// `X2Locale:LocalizeUiText(<group constant>, key)`, `None` for a key without a text.
 pub(super) fn localized(rt: &UiRuntime, group: &str, key: &str) -> Option<String> {
-    localized_lua(&rt.lua, group, key)
+    localized_args(rt, group, key, &[])
+}
+
+/// [`localized`] with the `$1`.. arguments of the text (`Not enough $1.`).
+pub(super) fn localized_args(rt: &UiRuntime, group: &str, key: &str, args: &[String]) -> Option<String> {
+    localized_args_lua(&rt.lua, group, key, args)
 }
 
 /// [`localized`] for native calls that only hold the Lua state.
 pub(super) fn localized_lua(lua: &Lua, group: &str, key: &str) -> Option<String> {
+    localized_args_lua(lua, group, key, &[])
+}
+
+fn localized_args_lua(lua: &Lua, group: &str, key: &str, args: &[String]) -> Option<String> {
     let globals = lua.globals();
     let locale: Table = globals.get("X2Locale").ok()?;
     let f: Function = locale.get("LocalizeUiText").ok()?;
     let group: i64 = globals.get(group).ok()?;
-    let text: String = f.call((locale, group, key)).ok()?;
+    let mut call = mlua::MultiValue::new();
+    call.push_back(mlua::Value::Table(locale));
+    call.push_back(mlua::Value::Integer(group));
+    call.push_back(mlua::Value::String(lua.create_string(key).ok()?));
+    for arg in args {
+        call.push_back(mlua::Value::String(lua.create_string(arg).ok()?));
+    }
+    let text: String = f.call(call).ok()?;
     (!text.is_empty() && text != key).then_some(text)
 }
 

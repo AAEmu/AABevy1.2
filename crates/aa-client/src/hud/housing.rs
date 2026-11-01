@@ -23,6 +23,7 @@ use bevy::window::PrimaryWindow;
 use mlua::{Lua, ObjectLike, Table, Value};
 
 use super::api::{HudBridge, Shared};
+use super::data::SharedGameData;
 use super::input::HudPointerOverUi;
 use crate::Screen;
 use crate::ingame::housing::data::{self as house_data, Design};
@@ -92,6 +93,13 @@ enum Signal {
     Deco,
 }
 
+/// A refused action to show (`ERROR_MSG` name and the `$1` argument, usually the item).
+#[derive(Clone, Debug, PartialEq)]
+struct Notice {
+    name: &'static str,
+    arg: Option<String>,
+}
+
 #[derive(Default)]
 struct View {
     current: Option<Current>,
@@ -103,7 +111,7 @@ struct View {
     appraisals: i64,
     commands: Vec<Command>,
     signals: Vec<Signal>,
-    notices: Vec<String>,
+    notices: Vec<Notice>,
     builder_next: bool,
     builder_prev: bool,
     /// Dev hooks: a scripted interaction, a pinned builder spot and clicks.
@@ -141,11 +149,44 @@ fn copper(gold: &Value, silver: &Value, copper: &Value) -> i64 {
     amount(gold) * 10_000 + amount(silver) * 100 + amount(copper)
 }
 
-/// The stage of a construction `actions` build actions in, and whether that stage's material is in the bag.
-fn build_action(design: &Design, actions: i32, inventory: &Inventory) -> Option<(u32, bool)> {
+/// The material of a construction stage and where the inventory holds it.
+#[derive(Clone, Debug, PartialEq)]
+struct Material {
+    item: u32,
+    in_bag: bool,
+    /// The client's local check only looks at the bag; an equipped backpack still casts (the
+    /// 2026-10-31 capture: "Not enough Stone Pack." but `CSStartSkill` went out and the server
+    /// paid with the equipped bundle).
+    equipped: bool,
+}
+
+/// The stage of a construction `actions` build actions in, and the material it needs.
+#[derive(Clone, Debug, PartialEq)]
+struct BuildAction {
+    skill: u32,
+    material: Option<Material>,
+}
+
+fn held(inventory: &Inventory, item: u32, count: i32) -> (bool, bool) {
+    let total = |items: &mut dyn Iterator<Item = &aa_net::model::Item>| -> i64 {
+        items.filter(|i| i.template_id == item).map(|i| i64::from(i.count)).sum()
+    };
+    let bag = total(&mut inventory.bag.iter().flatten()) >= i64::from(count);
+    let equipped = total(&mut inventory.equipment.slots.iter().flatten()) >= i64::from(count);
+    (bag, equipped)
+}
+
+fn build_action(design: &Design, actions: i32, inventory: &Inventory) -> Option<BuildAction> {
     let step = design.steps.get(design.step_at(actions)?)?;
-    let have = step.item == 0 || inventory.bag.iter().flatten().filter(|i| i.template_id == step.item).map(|i| i64::from(i.count)).sum::<i64>() >= i64::from(step.count.max(1));
-    Some((step.skill, have))
+    if step.item == 0 {
+        return Some(BuildAction { skill: step.skill, material: None });
+    }
+    let count = step.count.max(1);
+    let (in_bag, equipped) = held(inventory, step.item, count);
+    Some(BuildAction {
+        skill: step.skill,
+        material: Some(Material { item: step.item, in_bag, equipped }),
+    })
 }
 
 /// The construction steps of `design` as the windows list them: each stage's material (the item's tooltip table plus
@@ -421,7 +462,7 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
             let price = copper(&g, &sv, &c);
             let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) else { return Ok(()) };
             if !(1..=i64::from(i32::MAX)).contains(&price) {
-                v.notices.push("HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE".into());
+                v.notices.push(Notice { name: "HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE", arg: None });
                 return Ok(());
             }
             v.commands.push(Command::House(HouseCommand::Sell { tl, money_amount: price as u32, sell_to: name.unwrap_or_default() }));
@@ -446,9 +487,9 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
             let mut v = s.0.borrow_mut();
             let Some((tl, price)) = v.current.as_ref().and_then(|c| c.snapshot.as_ref().map(|s| (c.tl_id, s.sell_price.max(0) as u32))) else { return Ok(()) };
             if price == 0 {
-                v.notices.push("HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE".into());
+                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE", arg: None });
             } else if i64::from(price) > v.money {
-                v.notices.push("HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY".into());
+                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY", arg: None });
             } else {
                 v.commands.push(Command::House(HouseCommand::Buy { tl, money_amount: price }));
             }
@@ -481,8 +522,9 @@ fn install_dev(lua: &Lua, state: &State) -> mlua::Result<()> {
     Ok(())
 }
 
-fn notice(rt: &UiRuntime, name: &str) {
-    let text = super::alerts::localized(rt, "ERROR_MSG", name).unwrap_or_else(|| name.to_owned());
+fn notice(rt: &UiRuntime, notice: &Notice) {
+    let args: Vec<String> = notice.arg.iter().cloned().collect();
+    let text = super::alerts::localized_args(rt, "ERROR_MSG", notice.name, &args).unwrap_or_else(|| notice.name.to_owned());
     rt.fire_event("SYSMSG", text);
 }
 
@@ -579,7 +621,7 @@ fn current_of(obj_id: u32, units: &Units, houses: &Houses, doodads: &Doodads, me
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct Pointer<'w, 's> {
+pub(crate) struct Pointer<'w, 's> {
     mouse: Res<'w, ButtonInput<MouseButton>>,
     over_ui: Res<'w, HudPointerOverUi>,
     windows: Query<'w, 's, &'static Window, With<PrimaryWindow>>,
@@ -607,7 +649,7 @@ impl Pointer<'_, '_> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn sync(
+pub(crate) fn sync(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     time: Res<Time>,
@@ -653,7 +695,8 @@ fn sync(
         match signal {
             BuilderSignal::Step => v.signals.push(Signal::BuilderStep),
             BuilderSignal::End => v.signals.push(Signal::BuilderEnd),
-            BuilderSignal::Refused(name) => v.notices.push((*name).to_string()),
+            BuilderSignal::Refused(name) => v.notices.push(Notice { name, arg: None }),
+            BuilderSignal::Locked(seconds) => v.notices.push(Notice { name: "CANNOT_LOCATE_DOODAD_NOW", arg: Some(seconds.to_string()) }),
         }
     }
     if let Some((x, y, yaw)) = v.pin.take() {
@@ -720,7 +763,8 @@ fn sync(
         }
     }
 
-    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax);
+    let game = bridge.0.borrow().game.clone();
+    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax, &game);
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -732,6 +776,7 @@ fn interact_and_refresh(
     (units, houses, doodads, inventory): (&Units, &Houses, &Doodads, &Inventory),
     (pos, me): (Vec3, u32),
     last_tax: &mut Option<HouseTaxInfo>,
+    game: &SharedGameData,
 ) {
     // the interaction: a right click or the dev hook on a house in reach
     let picked = v.interact.take().or(picked);
@@ -760,19 +805,30 @@ fn interact_and_refresh(
             if let (Some(s), Some(design)) = (
                 snapshot.filter(|s| s.all_actions > 0 && s.current_actions < s.all_actions),
                 house_data::get().and_then(|d| d.designs.get(&template_id)),
-            ) && let Some((skill, have)) = build_action(design, s.current_actions, inventory)
+            ) && let Some(action) = build_action(design, s.current_actions, inventory)
             {
-                if have {
+                let mut cast = true;
+                if let Some(material) = action.material {
+                    if !material.in_bag {
+                        let name = game
+                            .get()
+                            .and_then(|g| g.items.get(&material.item))
+                            .map(|i| i.named.name.clone())
+                            .unwrap_or_default();
+                        v.notices.push(Notice { name: "NOT_ENOUGH_REQUIRED_ITEM", arg: Some(name) });
+                        // the local check looks at the bag only; an equipped backpack still casts
+                        cast = material.equipped;
+                    }
+                }
+                if cast {
                     info!(
-                        "hud: build action {skill} on house {obj_id} ({} of {} done)",
-                        s.current_actions, s.all_actions
+                        "hud: build action {} on house {obj_id} ({} of {} done)",
+                        action.skill, s.current_actions, s.all_actions
                     );
                     v.commands.push(Command::UseSkill {
-                        skill_id: skill,
+                        skill_id: action.skill,
                         target_obj_id: obj_id,
                     });
-                } else {
-                    v.notices.push("NOT_ENOUGH_REQUIRED_ITEM".into());
                 }
             }
         }
@@ -832,8 +888,8 @@ fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>
     for signal in signals {
         fire(rt, state, signal);
     }
-    for name in notices {
-        notice(rt, &name);
+    for item in notices {
+        notice(rt, &item);
     }
     for command in commands {
         net.write(NetCommand(command));
@@ -865,6 +921,7 @@ fn pointer_interaction(
     if blocked || picked.is_none() {
         return;
     }
+    let game = bridge.0.borrow().game.clone();
     let mut v = state.0.borrow_mut();
     let mut last_tax = v.last_tax.take();
     interact_and_refresh(
@@ -873,6 +930,7 @@ fn pointer_interaction(
         (&units, &houses, &doodads, &inventory),
         (pos, me),
         &mut last_tax,
+        &game,
     );
     v.last_tax = last_tax;
     drop(v);

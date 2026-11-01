@@ -26,9 +26,12 @@ pub fn plugin(app: &mut App) {
     data::load_in_background(super::WORLD);
     app.add_message::<BuilderSignal>()
         .init_resource::<placement::Builder>()
+        .init_resource::<crate::ingame::ground_target::plant::PlantLock>()
         .init_resource::<placement::GhostJobs>()
         .init_resource::<render::DrawnHouses>()
         .add_systems(PreUpdate, placement::input.in_set(crate::hud::cinema::CinemaInputRead).after(bevy::input::InputSystems).run_if(in_state(Screen::InGame)))
+        .add_systems(OnEnter(Screen::InGame), placement::arm_on_entry.run_if(resource_exists::<crate::ingame::teleport::Teleport>))
+        .add_systems(Update, placement::arm_on_world_load.before(placement::start).run_if(in_state(Screen::InGame)))
         .add_systems(Update, (placement::start, placement::follow, placement::ghost).chain().run_if(in_state(Screen::InGame)))
         .add_systems(Update, render::sync_houses.run_if(super::world_screens))
         .add_systems(OnExit(Screen::InGame), (render::clear, placement::clear));
@@ -48,6 +51,8 @@ mod tests {
         let mut world = World::new();
         init(&mut world, placement::input);
         init(&mut world, placement::start);
+        init(&mut world, placement::arm_on_entry);
+        init(&mut world, placement::arm_on_world_load);
         init(&mut world, placement::follow);
         init(&mut world, placement::ghost);
         init(&mut world, placement::clear);
