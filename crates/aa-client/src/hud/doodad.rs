@@ -971,37 +971,63 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    // the hover follows the same order as the click: a unit or the hull in front hides the
-    // doodad (a ladder parented to the picked slave beats that slave's loose box)
-    let unit_hit = ray.and_then(|r| {
-        let (entry, id) = super::pick::pick_unit_hit(
-            &r,
-            &units,
-            own,
-            None,
-            |_| true,
-            |unit, ray| {
-                (
-                    poses.get(unit, &units).map(|(pos, _)| pos),
-                    boxes.get_near(unit, ray),
-                )
-            },
-        )?;
-        let unit = units.get(id)?;
-        let (at, model) = (
-            poses.get(unit, &units).map(|(pos, _)| pos),
-            boxes.get_near(unit, &r),
-        );
-        let along = super::pick::unit_compare_hit(&r, unit, at, model).unwrap_or(entry);
-        Some((along, id))
+    // Only a ladder is unit-ordered on click (a non-ladder doodad is used directly), so only a
+    // ladder hover applies the unit/hull ordering. A ladder parented to the picked slave beats
+    // that slave's loose box.
+    let hover_is_ladder = nearest.is_some_and(|(_, id)| {
+        db.as_deref().is_some_and(|db| {
+            doodads
+                .by_id
+                .get(&id)
+                .is_some_and(|o| db.ladder_kind(o.func_group_id).is_some())
+        })
     });
+    let ridden = player
+        .spawn
+        .as_ref()
+        .and_then(|s| s.unit.attached_to.map(|a| a.obj_id));
+    let unit_hit = if hover_is_ladder {
+        ray.and_then(|r| {
+            let (entry, id) = super::pick::pick_unit_hit(
+                &r,
+                &units,
+                own,
+                ridden,
+                |u| {
+                    matches!(
+                        u.kind,
+                        aa_net::model::UnitKind::Npc { .. }
+                            | aa_net::model::UnitKind::Slave { .. }
+                    )
+                },
+                |unit, ray| {
+                    (
+                        poses.get(unit, &units).map(|(pos, _)| pos),
+                        boxes.get_near(unit, ray),
+                    )
+                },
+            )?;
+            let unit = units.get(id)?;
+            let (at, model) = (
+                poses.get(unit, &units).map(|(pos, _)| pos),
+                boxes.get_near(unit, &r),
+            );
+            let along = super::pick::unit_compare_hit(&r, unit, at, model).unwrap_or(entry);
+            Some((along, id))
+        })
+    } else {
+        None
+    };
     let hover = nearest
         .filter(|(_, id)| {
-            let parent = db.as_deref().and_then(|db| {
-                let o = doodads.by_id.get(id)?;
-                (db.ladder_kind(o.func_group_id).is_some() && o.parent_obj_id != 0)
-                    .then_some(o.parent_obj_id)
-            });
+            if !hover_is_ladder {
+                return true;
+            }
+            let parent = doodads
+                .by_id
+                .get(id)
+                .map(|o| o.parent_obj_id)
+                .filter(|parent| *parent != 0);
             super::pick::doodad_beats_unit(nearest, unit_hit, parent)
         })
         .map(|(_, id)| id)

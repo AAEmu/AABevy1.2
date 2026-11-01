@@ -396,10 +396,11 @@ auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote 
   was not found in the decompile, so proximity grab is not implemented. The fixed-frame kinds
   (1/4/5/8/9) stand on the `$ladder` helper's front (+Y) side in the doodad's world frame, so a
   ladder parented to a hull uses the hull transform and a grab from the deck puts the body outside
-  the wall, not between the rungs and the deck; kinds 2/3/6/7/10 keep the player's own side
-  (`FUN_3916c520`). A picked ladder lights up (`use_target_highlight`) and only takes the click
-  when it is the nearest hit along the ray (a nearer unit, hull or doodad keeps it); an out-of-reach
-  ladder click is left to that path instead of being swallowed. The grab is refused on a seat,
+  the wall, not between the rungs and the deck; kinds 2/3/6/7/10 take the side from the player's
+  facing (`FUN_3916c520`). A picked ladder lights up (`use_target_highlight`) and only takes the
+  click when it is the nearest hit along the ray; a ladder parented to the picked slave beats that
+  slave's loose box (the masts/sails entry), while a nearer unit or doodad keeps the click; an
+  out-of-reach ladder click is left to that path instead of being swallowed. The grab is refused on a seat,
   glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its seat `+0x3af4`,
   `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck does not refuse
   it, and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates

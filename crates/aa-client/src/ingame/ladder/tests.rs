@@ -777,18 +777,18 @@ fn a_ship_ladder_hangs_on_its_front_side_and_jumps_outboard() {
 }
 
 #[test]
-fn only_the_fixed_frame_kinds_use_the_helper_front_side() {
-    // Native FUN_3916c520: kinds 1/4/5/8/9 keep the identity hang rotation, so the body sits on
-    // the helper's front; 2/3/6/7/10 build the rotation from the player's own quaternion and
-    // stay on the player's side.
-    let grab = |kind: u8| {
+fn the_relative_kinds_take_the_side_from_the_players_facing() {
+    // Native FUN_3916c520: kinds 1/4/5/8/9 keep the identity hang rotation (the helper front);
+    // 2/3/6/7/10 build it from the player's quaternion. The player stands on the helper's back
+    // (-X): facing away (west, +pi/2) makes position and facing disagree, so a regression to
+    // the position rule would put the relative kinds at -X.
+    let grab = |kind: u8, facing: f32| {
         let mut app = app_with(kind, 0);
         {
             let mut q = app.world_mut().query::<&mut Mover>();
-            // the helper faces +X; stand on its back (-X) facing the ladder (+X)
             let mut mover = q.single_mut(app.world_mut()).unwrap();
             mover.pos = Vec3::new(-0.5, 0.0, 0.0);
-            mover.facing = -std::f32::consts::FRAC_PI_2;
+            mover.facing = facing;
         }
         tap(&mut app, "do_interaction_1");
         app.update();
@@ -797,15 +797,20 @@ fn only_the_fixed_frame_kinds_use_the_helper_front_side() {
         q.single(app.world()).unwrap().pos
     };
     for kind in [1u8, 4, 5, 8, 9] {
-        let pos = grab(kind);
+        let pos = grab(kind, std::f32::consts::FRAC_PI_2);
         assert!(pos.x > 0.25, "kind {kind} is on the helper front: {pos:?}");
     }
     for kind in [2u8, 3, 6, 7, 10] {
-        let pos = grab(kind);
+        let pos = grab(kind, std::f32::consts::FRAC_PI_2);
         assert!(
-            pos.x < -0.25,
-            "kind {kind} keeps the player's side: {pos:?}"
+            pos.x > 0.25,
+            "kind {kind} follows the facing away, not the standing side: {pos:?}"
         );
+    }
+    // facing the ladder from the back keeps the relative kinds behind it
+    for kind in [2u8, 3, 6, 7, 10] {
+        let pos = grab(kind, -std::f32::consts::FRAC_PI_2);
+        assert!(pos.x < -0.25, "kind {kind} faces the ladder: {pos:?}");
     }
 }
 

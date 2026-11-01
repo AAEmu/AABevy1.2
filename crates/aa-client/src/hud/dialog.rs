@@ -673,6 +673,17 @@ fn nearest_npc(
         .map(|(_, n)| n)
 }
 
+/// The parent slave of the right-clicked ladder, if any (a ship's side ladder).
+fn parent_of_climb(doodads: &Doodads, climb: Option<(f32, u32)>) -> Option<u32> {
+    climb.and_then(|(_, id)| {
+        doodads
+            .by_id
+            .get(&id)
+            .map(|o| o.parent_obj_id)
+            .filter(|parent| *parent != 0)
+    })
+}
+
 /// A right click on an NPC or F near one starts the talk; D / F / G drive the dialog while it is up.
 #[allow(clippy::too_many_arguments)]
 pub fn talk_input(
@@ -771,13 +782,7 @@ pub fn talk_input(
         blocked,
         &mut pick,
     );
-    let ladder_parent = over_climb.and_then(|(_, id)| {
-        doodads
-            .by_id
-            .get(&id)
-            .map(|o| o.parent_obj_id)
-            .filter(|parent| *parent != 0)
-    });
+    let ladder_parent = parent_of_climb(&doodads, over_climb);
     let ladder_wins = super::pick::doodad_beats_unit(over_climb, unit, ladder_parent);
     if ladder_wins
         && let Some((_, id)) = over_climb
@@ -1335,10 +1340,40 @@ mod tests {
             "the ladder is in front of the box middle (ladder {ladder_along}, middle {unit_along})"
         );
         // a ladder behind the box middle still beats the hull it is attached to
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(
+            77,
+            aa_net::model::Doodad {
+                obj_id: 77,
+                template_id: 1187,
+                owner_obj_id: 0,
+                parent_obj_id: 20,
+                attach_point: 24,
+                pos: aa_net::Pos::new(0.0, 0.0, 0.0),
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: 1.0,
+                has_loot_item: false,
+                func_group_id: 15013,
+                owner_id: 0,
+                ucc_id: 0,
+                item_template_id: 0,
+                type2: 0,
+                time_left: 0,
+                plant_time: 0,
+                quest_glow: 0,
+                family: 0,
+                puzzle_group: 0,
+                owner_type: 0,
+                owner_db_id: 0,
+                data: 0,
+            },
+        );
+        let parent = parent_of_climb(&doodads, Some((30.0, 77)));
+        assert_eq!(parent, Some(20), "the ladder parent comes from Doodads");
         assert!(crate::hud::pick::doodad_beats_unit(
             Some((30.0, 77)),
             Some((unit_along, 20)),
-            Some(20)
+            parent
         ));
         // the same click away from the ladder has no doodad hit: the ship stays the pick
         assert!(!crate::hud::pick::doodad_beats_unit(
