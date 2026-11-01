@@ -14,9 +14,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use aa_net::housing::{ConstructHouseTax, HouseCommand, HouseSnapshot, HouseTaxInfo, HousingEvent};
-use aa_net::model::UnitKind;
+use aa_net::model::{Unit, UnitKind};
 use aa_net::state::{Doodads, Inventory, Units};
-use aa_net::{Command, Event, Houses, NetCommand, NetEvent};
+use aa_net::{Command, Event, Houses, NetCommand, NetEvent, Shipyards};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -26,8 +26,11 @@ use super::api::{HudBridge, Shared};
 use super::data::SharedGameData;
 use super::input::HudPointerOverUi;
 use crate::Screen;
+use crate::ingame::data::Db;
 use crate::ingame::housing::data::{self as house_data, Design};
 use crate::ingame::housing::placement::{Builder, BuilderSignal};
+use crate::ingame::player::placement;
+use crate::ingame::shipyard::DrawnShipyards;
 
 /// The demolition skill (`interaction_effects.wi_id` 94, `WI_DEMOLISH`) `X2House:Demolish` casts at the house.
 const DEMOLISH_SKILL: u32 = 11404;
@@ -45,6 +48,10 @@ const REACH: f32 = 6.0;
 const LEAVE: f32 = 10.0;
 /// How near the view ray has to pass a house's middle for a right click to pick it, as a share of its garden.
 const PICK_SHARE: f32 = 0.8;
+/// The least half-size of a shipyard's hull pick (m); the drawn stage model's bounds are usually larger.
+const SHIPYARD_PICK_MIN: f32 = 3.0;
+/// The half-size a shipyard that is not drawn yet is picked and held by (m).
+const SHIPYARD_DEFAULT_HALF: f32 = 6.0;
 /// A press and release further apart than this (logical pixels) is a drag, not a click.
 const CLICK_SLOP: f32 = 6.0;
 
@@ -109,6 +116,18 @@ fn furniture_of(attachments: &[aa_net::housing::HousingAttachment], tables: Opti
         .collect()
 }
 
+/// The shipyard the player last interacted with (`X2House`'s getters answer for it, as for a house).
+#[derive(Clone, Debug, PartialEq)]
+struct CurrentShipyard {
+    obj_id: u32,
+    id: u64,
+    owner_name: String,
+    /// `GetShipyardBaseProgress`: all build actions of the template.
+    base: i32,
+    /// `GetShipyardRemainProgress`: the build actions still to do.
+    remain: i32,
+}
+
 impl Current {
     fn under_construction(&self) -> bool {
         self.snapshot.as_ref().is_some_and(|s| s.all_actions > 0 && s.current_actions < s.all_actions)
@@ -170,6 +189,8 @@ struct View {
     last_tax: Option<HouseTaxInfo>,
     /// The received actability points the last frame compared; a difference raises the event.
     actability: Vec<(u32, Option<i32>)>,
+    /// The shipyard the current interaction is with; the housing material window is not raised for it yet.
+    shipyard: Option<CurrentShipyard>,
 }
 
 #[derive(Clone, Default)]
@@ -314,11 +335,12 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
     // no castles, no sieges in 1.2's housing land
     getter!("IsCastle", |_v| false);
     getter!("IsSiegePeriod", |_v| false);
-    // shipyards are not built here; their window is never raised
-    getter!("GetShipyardOwnerName", |_v| String::new());
+    // The shipyard material window is not raised here yet (it needs `GetShipyardConstructionStepInfo`);
+    // these answer from the last shipyard the player interacted with, as the original does.
+    getter!("GetShipyardOwnerName", |v| v.shipyard.as_ref().map(|s| s.owner_name.clone()).unwrap_or_default());
     getter!("GetShipyardProtectionPeriod", |_v| 0);
-    getter!("GetShipyardRemainProgress", |_v| 0);
-    getter!("GetShipyardBaseProgress", |_v| 0);
+    getter!("GetShipyardRemainProgress", |v| v.shipyard.as_ref().map_or(0, |s| s.remain));
+    getter!("GetShipyardBaseProgress", |v| v.shipyard.as_ref().map_or(0, |s| s.base));
     let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetHousePermission",
@@ -789,26 +811,102 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
     }
 }
 
-/// The house a right click released over the 3D view picked: the nearest whose middle the view ray passes within its
-/// garden (not a drag, not on the HUD).
-fn pick(ray: Ray3d, units: &Units) -> Option<u32> {
-    let data = house_data::get()?;
+/// The house or shipyard a right click released over the 3D view picked: the nearest whose middle the view ray
+/// passes within its garden, or whose hull the ray enters (not a drag, not on the HUD).
+fn pick(ray: Ray3d, units: &Units, drawn: Option<&DrawnShipyards>) -> Option<u32> {
+    let data = house_data::get();
     let mut best: Option<(f32, u32)> = None;
     for u in units.iter() {
-        let UnitKind::Housing { template_id, .. } = u.kind else { continue };
-        let radius = data.designs.get(&template_id).map_or(5.0, |d| d.garden_radius.max(3.0)) * PICK_SHARE;
-        // the house's middle: a few metres over its floor
-        let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
-        let along = (centre - ray.origin).dot(*ray.direction);
-        if along <= 0.0 {
-            continue;
-        }
-        let miss = (ray.origin + *ray.direction * along).distance(centre);
-        if miss <= radius && best.is_none_or(|(a, _)| along < a) {
+        let along = match u.kind {
+            UnitKind::Housing { template_id, .. } => {
+                let radius = data
+                    .and_then(|d| d.designs.get(&template_id))
+                    .map_or(5.0, |d| d.garden_radius.max(3.0))
+                    * PICK_SHARE;
+                // the house's middle: a few metres over its floor
+                let centre = aa_world::cry_to_bevy(Vec3::new(u.pos.x, u.pos.y, u.pos.z + 3.0));
+                let along = (centre - ray.origin).dot(*ray.direction);
+                if along <= 0.0 {
+                    continue;
+                }
+                let miss = (ray.origin + *ray.direction * along).distance(centre);
+                if miss > radius {
+                    continue;
+                }
+                along
+            }
+            UnitKind::Shipyard { .. } => {
+                // A hull-sized pick, not the drydock's `build_radius`: the drawn stage model's bounds.
+                let bounds = drawn.and_then(|d| d.bounds(u.obj_id)).unwrap_or((
+                    -Vec3::splat(SHIPYARD_DEFAULT_HALF),
+                    Vec3::splat(SHIPYARD_DEFAULT_HALF),
+                ));
+                let Some(along) = shipyard_hit(&ray, u, bounds) else {
+                    continue;
+                };
+                along
+            }
+            _ => continue,
+        };
+        if best.is_none_or(|(a, _)| along < a) {
             best = Some((along, u.obj_id));
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// The horizontal half-extents of a stage model's bounds, each at least [`SHIPYARD_PICK_MIN`] metres.
+fn half_extents((lo, hi): (Vec3, Vec3)) -> Vec2 {
+    Vec2::new(lo.x.abs().max(hi.x.abs()), lo.y.abs().max(hi.y.abs()))
+        .max(Vec2::splat(SHIPYARD_PICK_MIN))
+}
+
+/// The distance at which the view ray enters the drawn stage model's bounds (unit-local cry metres).
+fn shipyard_hit(ray: &Ray3d, unit: &Unit, bounds: (Vec3, Vec3)) -> Option<f32> {
+    let scale = unit.scale.max(0.01);
+    let transform = placement(
+        Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
+        unit.yaw(),
+        scale,
+    );
+    let inverse = transform.compute_affine().inverse();
+    let origin = aa_world::bevy_to_cry(inverse.transform_point3(ray.origin));
+    let direction = aa_world::bevy_to_cry(inverse.transform_vector3(*ray.direction));
+    // a metre of slack around the authored bounds
+    let (lo, hi) = bounds;
+    ray_box(
+        origin,
+        direction,
+        lo - Vec3::splat(1.0),
+        hi + Vec3::splat(1.0),
+    )
+    // the local direction keeps the 1/scale length of the inverse, so `t` is already the world
+    // distance along the ray
+}
+
+/// The first distance at which the ray enters the axis-aligned box, if it does.
+fn ray_box(origin: Vec3, direction: Vec3, lo: Vec3, hi: Vec3) -> Option<f32> {
+    let mut tmin = f32::NEG_INFINITY;
+    let mut tmax = f32::INFINITY;
+    for i in 0..3 {
+        let d = direction[i];
+        if d.abs() < 1e-6 {
+            if origin[i] < lo[i] || origin[i] > hi[i] {
+                return None;
+            }
+            continue;
+        }
+        let (mut t1, mut t2) = ((lo[i] - origin[i]) / d, (hi[i] - origin[i]) / d);
+        if t1 > t2 {
+            std::mem::swap(&mut t1, &mut t2);
+        }
+        tmin = tmin.max(t1);
+        tmax = tmax.min(t2);
+        if tmin > tmax {
+            return None;
+        }
+    }
+    (tmax >= 0.0).then(|| tmin.max(0.0))
 }
 
 fn garden(template_id: u32) -> f32 {
@@ -879,6 +977,9 @@ pub(crate) fn sync(
     houses: Res<Houses>,
     doodads: Res<Doodads>,
     inventory: Res<Inventory>,
+    shipyards: Res<Shipyards>,
+    db: Option<Res<Db>>,
+    drawn_yards: Option<Res<DrawnShipyards>>,
     pointer: Pointer,
     // the builder's signals are read and written here: a reader and a writer of one message conflict
     (mut builder, mut builder_signals): (ResMut<Builder>, ParamSet<(MessageWriter<BuilderSignal>, MessageReader<BuilderSignal>)>),
@@ -901,7 +1002,9 @@ pub(crate) fn sync(
         (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
-    let picked = pointer.right_click(&mut pressed_at, blocked).and_then(|ray| pick(ray, &units));
+    let picked = pointer
+        .right_click(&mut pressed_at, blocked)
+        .and_then(|ray| pick(ray, &units, drawn_yards.as_deref()));
     let mut v = state.0.borrow_mut();
     let mut last_tax = v.last_tax.take();
     v.pointer_picked = picked;
@@ -997,7 +1100,17 @@ pub(crate) fn sync(
     }
 
     let game = bridge.0.borrow().game.clone();
-    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax, &game);
+    interact_and_refresh(
+        &mut v,
+        None,
+        (&units, &houses, &doodads, &inventory),
+        (pos, me),
+        &mut last_tax,
+        &game,
+        &shipyards,
+        db.as_deref(),
+        drawn_yards.as_deref(),
+    );
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -1010,6 +1123,9 @@ fn interact_and_refresh(
     (pos, me): (Vec3, u32),
     last_tax: &mut Option<HouseTaxInfo>,
     game: &SharedGameData,
+    shipyards: &Shipyards,
+    db: Option<&Db>,
+    drawn: Option<&DrawnShipyards>,
 ) {
     // the interaction: a right click or the dev hook on a house in reach
     let picked = v.interact.take().or(picked);
@@ -1031,6 +1147,7 @@ fn interact_and_refresh(
                 *last_tax = None;
                 v.commands
                     .push(Command::House(HouseCommand::RequestTax { tl: tl_id }));
+                v.shipyard = None;
                 started = Some(obj_id);
             }
             // a house under construction: the build action of its stage when the bag has the material
@@ -1064,6 +1181,27 @@ fn interact_and_refresh(
                     });
                 }
             }
+        }
+    }
+    if let Some(obj_id) = picked
+        && let Some(unit) = units.get(obj_id)
+        && let UnitKind::Shipyard { id, template_id } = unit.kind
+        && let Some(state) = shipyards.of(id)
+    {
+        let (base, remain) = db
+            .and_then(|d| d.shipyard_template(template_id))
+            .map_or((0, 0), |t| crate::ingame::shipyard::progress(&t, state));
+        v.shipyard = Some(CurrentShipyard {
+            obj_id,
+            id,
+            owner_name: state.owner_name.clone(),
+            base,
+            remain,
+        });
+        // switching from a house closes its window, as the house-to-house switch below does
+        if v.current.take().is_some() {
+            *last_tax = None;
+            v.signals.insert(0, Signal::End);
         }
     }
     if let Some(obj_id) = started {
@@ -1112,6 +1250,31 @@ fn interact_and_refresh(
             }
         }
     }
+    if let Some(current) = v.shipyard.as_mut() {
+        let yard = current.obj_id;
+        // the same hull half-size as the pick, taken to its farthest corner: walking away is radial
+        let half = drawn
+            .and_then(|d| d.bounds(yard))
+            .map(half_extents)
+            .unwrap_or(Vec2::splat(SHIPYARD_DEFAULT_HALF));
+        let radius = half.length();
+        let near = units
+            .get(yard)
+            .filter(|u| matches!(u.kind, UnitKind::Shipyard { .. }))
+            .is_some_and(|u| {
+                Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= radius + LEAVE
+            });
+        if !near {
+            v.shipyard = None;
+        } else if let Some(state) = shipyards.of(current.id) {
+            current.owner_name = state.owner_name.clone();
+            if let Some(UnitKind::Shipyard { template_id, .. }) = units.get(yard).map(|u| u.kind.clone())
+                && let Some(template) = db.and_then(|d| d.shipyard_template(template_id))
+            {
+                (current.base, current.remain) = crate::ingame::shipyard::progress(&template, state);
+            }
+        }
+    }
 }
 
 fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>) {
@@ -1133,6 +1296,7 @@ fn flush_view(rt: &UiRuntime, state: &State, net: &mut MessageWriter<NetCommand>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pointer_interaction(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -1140,6 +1304,9 @@ fn pointer_interaction(
     houses: Res<Houses>,
     doodads: Res<Doodads>,
     inventory: Res<Inventory>,
+    shipyards: Res<Shipyards>,
+    db: Option<Res<Db>>,
+    drawn_yards: Option<Res<DrawnShipyards>>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else { return };
@@ -1168,6 +1335,9 @@ fn pointer_interaction(
         (pos, me),
         &mut last_tax,
         &game,
+        &shipyards,
+        db.as_deref(),
+        drawn_yards.as_deref(),
     );
     v.last_tax = last_tax;
     drop(v);

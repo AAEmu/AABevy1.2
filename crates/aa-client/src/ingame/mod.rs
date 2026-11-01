@@ -74,6 +74,7 @@ pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
 mod ship;
+pub(crate) mod shipyard;
 mod skill_motion;
 mod sounds;
 mod stealth;
@@ -196,6 +197,7 @@ impl Plugin for InGamePlugin {
             .add_plugins(trace::plugin)
             .add_plugins(teleport::plugin)
             .add_plugins(housing::plugin)
+            .add_plugins(shipyard::plugin)
             .add_systems(Startup, fix_window)
             .add_systems(Last, report_anim.run_if(resource_exists::<aa_world::profile::Timers>))
             .add_systems(OnExit(Screen::InGame), leave_game)

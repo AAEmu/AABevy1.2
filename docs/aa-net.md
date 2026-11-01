@@ -530,9 +530,11 @@ spell results are messages in `skill::result`.
 
 Skill results arrive in `DD04` batches (raw DEFLATE blocks of `[u16 0][u16 opcode][body]`). The
 session unpacks them and reports every packet as if it had come alone, in order: `Event::UnitDamaged`
-after `PlotEvent`s and so on. A packet in a batch this client cannot decode ends the batch (the
-rest cannot be found: the bodies have no length). Stored and Huffman-compressed streams are
-supported with bounded inflation and complete-stream validation (see "Compressed packet batches").
+after `PlotEvent`s and so on. A packet in a batch this client cannot decode is reported as
+`Unhandled` and the batch resynchronises at the next `[00 00][opcode]` from which the rest decodes
+(the bodies have no length; see "Compressed packet batches"); only an ambiguous or absent start
+ends the batch. Stored and Huffman-compressed streams are supported with bounded inflation and
+complete-stream validation (see "Compressed packet batches").
 
 **Quests: `Quests`** (`aa_net::state::Quests`, `aa_net::quest`)
 
@@ -7837,6 +7839,39 @@ character's own shown (active) title. The layouts are the server's (`packets/wor
 
 Tests: `cargo test -p aa-net appellation` (6).
 
+## Shipyard state (`SCShipyardState 0x1aa`)
+
+`shipyard.rs` decodes the packet into `ShipyardEvent::State(ShipyardState)` (`ServerMsg::Shipyard` /
+`Event::Shipyard`) and `Shipyards` folds it by `ShipyardData.Id` (`state.rs`, `plugin.rs`). The layout is the
+AAEmu writer (`packets/world_objects.rs::SCShipyardStatePacket::write` +
+`models/shipyard.rs::ShipyardData::write`):
+
+| field | wire |
+|---|---|
+| `id`, `template_id` | `u64`, `u32` |
+| `x`, `y`, `z`, `z_rot` | `i64` (`convert_long`), `i64`, `f32`, `f32` |
+| `money_amount`, `actions` | `i32`, `i32` |
+| `kind`, `kind2`, `owner_name`, `kind3` | `u32`, `u32`, `u16`-length UTF-8 string, `u32` |
+| `spawned`, `obj_id`, `hp`, `step` | `i64` (unix seconds), `bc` (3 bytes), `i32`, `i32` |
+
+The server's own `shipyard_state_layout` test pins the bytes (`encode(..) == frame(0x1aa, &b)`). The 1.2
+client reads the same fields (`FUN_397afbf0` -> `ShipyardData` reader `FUN_3961ef40`, then the `i32` at
+`+0xe8`; registered at `this + 4 + 4 * 0x1aa` by `FUN_391eb9d0`). The template (`FUN_3982dc10`) keeps
+`main_model_id` at `tpl+0x18` and `ceremony_model_id` at `tpl+0x10`; `FUN_394d8600` appends one
+`(step, main_model_id)` entry after the steps, so `step == steps.len()` is the finished hull, and
+`FUN_394d5140`'s 1000 branch swaps to the ceremony model and plays `ceremony_anim_key` (`tpl+8`). Any
+other out-of-range step changes nothing. `ingame::shipyard` draws the unit's prefab at that stage model
+and derives `GetShipyardBaseProgress` / `GetShipyardRemainProgress` as the template's total `num_actions`
+and the packet's `actions`. A shipyard unit gets no unit view (`units.rs` skips it, like houses), so
+`Views::unit_entity` is `None` for one; nothing visible (portal fx, speech, poses, mounts) applies. The HUD
+picks it by the drawn stage model's bounds (not `build_radius`) and its shipyard getters answer for the
+last shipyard right-clicked; the material window itself is not raised yet because it needs
+`GetShipyardConstructionStepInfo` (the step's material list), which is still open.
+
+Tests: `cargo test -p aa-net shipyard` (7) and `cargo test -p aa-client shipyard` (client stage/progress
+and model-at-step tests; template 5 is main 680 / ceremony 683); `examples/shipyard_stages` runs the real
+template 5 through three stages, the last-stage hull and the ceremony model.
+
 ## Small server messages, lobby replies and quest cinemas (2026-10-23)
 
 ### Coverage method
@@ -7858,10 +7893,11 @@ function 391eb9d0, each `OnX` handler stores into `this + 4 + 4 * opcode`):
 Fixed transport receipts 0x06d/0x07a/0x137/0x138 now use `TransportReceipt`;
 0x139/0x13a already use the separate complete doodad-bond carrier. Transport
 control, movement and physical/visual integration remain separate work.
-Still deferred: `SCShipyardState` 0x1aa (concrete blob boundary remains open), and
-`SCCharDetail` 0x053 (only the answer of `CSCharDetail`, which is not sent; its body is the full
-character with every equipment item). `SCDiceValue` 0x134 and the salon packets 0x1f1 / 0x1f3 are
-decoded by `chat_command` / `salon`.
+`SCShipyardState` 0x1aa is decoded by `shipyard` (see "Shipyard state" above).
+Still deferred: `SCCharDetail` 0x053 (only the answer of `CSCharDetail`, which this client does
+not send; its body is the full character with every equipment item, a 28-slot `Item.Write` tail
+that is not small). `SCDiceValue` 0x134 and the salon packets 0x1f1 / 0x1f3 are decoded by
+`chat_command` / `salon`.
 
 Lane layouts that differ from the client's reader (decoded here as the client reads them; fixed by
 the server PR "fix/net-wire-layouts"):
@@ -9162,8 +9198,8 @@ suffix, and actual Session-to-Bevy forwarding with unchanged resource data and
 change detection. No network thread, server, GPU or device is started by these
 new tests.
 
-Shipyard metadata/types/decoding remain excluded because the blob primitive is
-unresolved. Outbound transport/controller creation, Movement/MoveCommand,
+Shipyard decoding is covered by `shipyard.rs` (0x1aa); the historical transport note below keeps
+its fixed-receive scope. Outbound transport/controller creation, Movement/MoveCommand,
 native/lane movement dialect/math, existing frozen APIs and every existing
 literal remain unchanged. Root owns any later controller, glider, hanging,
 physical or visual fold using these received observations.

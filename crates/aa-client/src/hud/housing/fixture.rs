@@ -48,6 +48,7 @@ pub(crate) fn run() {
         .insert_non_send(HudBridge(bridge))
         .insert_resource(units)
         .insert_resource(houses)
+        .init_resource::<aa_net::Shipyards>()
         .insert_resource(doodads)
         .insert_resource(inventory)
         .insert_resource(Step::default())

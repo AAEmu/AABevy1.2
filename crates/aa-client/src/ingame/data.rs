@@ -24,6 +24,10 @@ pub struct Db {
 struct Lookups {
     conn: Connection,
     actor_files: HashMap<u32, Option<String>>,
+    /// `models.id` -> the `prefab://` element of its first (alive) state.
+    prefab_references: HashMap<u32, Option<String>>,
+    /// `shipyards.id` -> its template and stages.
+    shipyard_templates: HashMap<u32, Option<ShipyardTemplate>>,
     doodad_models: HashMap<u32, Option<String>>,
     /// `(template, func group)` -> the phase model.
     doodad_phase_models: HashMap<(u32, u32), Option<String>>,
@@ -123,6 +127,54 @@ impl CameraDistance {
     pub fn for_mode(self, mode: i64) -> Option<f32> {
         let value = if mode == 1 { self.wide } else { self.normal };
         (value > 0.0).then_some(value)
+    }
+}
+
+/// One construction stage of a shipyard (`shipyard_steps`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardStep {
+    pub step: i32,
+    pub model_id: u32,
+    pub num_actions: i32,
+}
+
+/// A shipyard template (`shipyards`) and its `shipyard_steps`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ShipyardTemplate {
+    /// `shipyards.main_model_id`: the finished hull at `step == steps.len()`, the extra entry
+    /// `FUN_394d8600` appends after the steps (`tpl+0x18`).
+    pub main_model_id: u32,
+    /// `shipyards.ceremony_model_id` (`tpl+0x10`): the launch ceremony model step 1000 swaps to.
+    pub ceremony_model_id: u32,
+    /// `shipyards.ceremony_anim_key` (`tpl+8`): the animation the 1.2 client plays with the ceremony
+    /// model (`FUN_394d5140`). Kept for the ceremony; the prefab is drawn statically today.
+    pub ceremony_anim_key: Option<String>,
+    /// `shipyards.build_radius` (metres): the drydock footprint the server uses for build skills.
+    pub build_radius: i32,
+    /// The construction stages, in `step` order.
+    pub steps: Vec<ShipyardStep>,
+}
+
+impl ShipyardTemplate {
+    /// `ShipyardSteps.Values.Sum(NumActions)` (`ShipyardTemplate.all_actions` on the server).
+    pub fn all_actions(&self) -> i32 {
+        self.steps.iter().map(|s| s.num_actions).sum()
+    }
+
+    /// The model of `step` as `FUN_394d5140` picks it from the vector `FUN_394d8600` fills: the
+    /// stages by position, `steps.len()` is the appended `main_model_id`, and 1000 is the ceremony
+    /// model. Any other out-of-range step changes nothing (`None`).
+    pub fn model_at_step(&self, step: i32) -> Option<u32> {
+        let model = if step == 1000 {
+            self.ceremony_model_id
+        } else if step >= 0 && (step as usize) < self.steps.len() {
+            self.steps[step as usize].model_id
+        } else if step >= 0 && step as usize == self.steps.len() {
+            self.main_model_id
+        } else {
+            0
+        };
+        (model != 0).then_some(model)
     }
 }
 
@@ -284,6 +336,8 @@ impl Lookups {
         Lookups {
             conn,
             actor_files: HashMap::new(),
+            prefab_references: HashMap::new(),
+            shipyard_templates: HashMap::new(),
             doodad_models: HashMap::new(),
             doodad_phase_models: HashMap::new(),
             doodad_shapes: HashMap::new(),
@@ -480,6 +534,85 @@ impl Db {
             });
         l.actor_files.insert(model_id, file.clone());
         file
+    }
+
+    /// The `prefab://` element of a prefab model's first (alive) state: the complete authored layout
+    /// (`models.sub_type = PrefabModel`), for the models 1.2 draws as prefabs (houses, shipyards, doodads).
+    pub fn prefab_reference(&self, model_id: u32) -> Option<String> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(p) = l.prefab_references.get(&model_id) {
+            return p.clone();
+        }
+        let prefab = l
+            .conn
+            .query_row(
+                "SELECT e.file_path FROM models m JOIN prefab_elements e ON e.prefab_model_id = m.sub_id AND m.sub_type = 'PrefabModel' WHERE m.id = ?1 ORDER BY e.state_id LIMIT 1",
+                params![model_id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        l.prefab_references.insert(model_id, prefab.clone());
+        prefab
+    }
+
+    /// A shipyard template and its stages (`shipyards` / `shipyard_steps`, the server's
+    /// `ShipyardTemplate.ShipyardSteps`). `None` while the rows or the database are missing.
+    pub fn shipyard_template(&self, template_id: u32) -> Option<ShipyardTemplate> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(t) = l.shipyard_templates.get(&template_id) {
+            return t.clone();
+        }
+        let template_row = l
+            .conn
+            .query_row(
+                "SELECT main_model_id, ceremony_model_id, ceremony_anim_key, build_radius FROM shipyards WHERE id = ?1",
+                params![template_id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<i64>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<i64>>(3)?,
+                    ))
+                },
+            )
+            .ok();
+        let main_model_id = template_row
+            .as_ref()
+            .and_then(|(m, ..)| *m)
+            .map_or(0, |m| m.max(0) as u32);
+        let ceremony_model_id = template_row
+            .as_ref()
+            .and_then(|(_, c, ..)| *c)
+            .map_or(0, |c| c.max(0) as u32);
+        let ceremony_anim_key = template_row
+            .as_ref()
+            .and_then(|(_, _, k, _)| k.as_deref())
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_owned);
+        let build_radius = template_row
+            .as_ref()
+            .and_then(|(.., b)| *b)
+            .map_or(0, |b| b.max(0) as i32);
+        let template = template_row.is_some().then(|| {
+            let mut steps = Vec::new();
+            if let Ok(mut q) = l.conn.prepare(
+                "SELECT step, model_id, num_actions FROM shipyard_steps WHERE shipyard_id = ?1 ORDER BY step",
+            ) && let Ok(mut rows) = q.query(params![template_id]) {
+                while let Ok(Some(row)) = rows.next() {
+                    steps.push(ShipyardStep {
+                        step: row.get::<_, i64>(0).unwrap_or(0) as i32,
+                        model_id: row.get::<_, i64>(1).unwrap_or(0).max(0) as u32,
+                        num_actions: row.get::<_, i64>(2).unwrap_or(0) as i32,
+                    });
+                }
+            }
+            ShipyardTemplate { main_model_id, ceremony_model_id, ceremony_anim_key, build_radius, steps }
+        });
+        l.shipyard_templates.insert(template_id, template.clone());
+        template
     }
 
     /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
@@ -1572,6 +1705,61 @@ mod tests {
         assert_eq!(db.ship_steer_vel(129), 6.0, "rowboat");
         assert_eq!(db.ship_steer_vel(393), 1.0, "galleon");
         assert_eq!(db.ship_steer_vel(u32::MAX), DEFAULT_SHIP_STEER_VEL, "no ship row");
+    }
+
+    /// `FUN_394d5140` indexes the vector `FUN_394d8600` fills: the stages by position, one
+    /// appended entry for `steps.len()` (the main model) and the 1000 ceremony branch.
+    #[test]
+    fn shipyard_model_at_step_includes_the_appended_main_model() {
+        let template = ShipyardTemplate {
+            main_model_id: 680,
+            ceremony_model_id: 683,
+            ceremony_anim_key: Some("ceremony".into()),
+            build_radius: 25,
+            steps: vec![
+                ShipyardStep {
+                    step: 0,
+                    model_id: 673,
+                    num_actions: 2,
+                },
+                ShipyardStep {
+                    step: 1,
+                    model_id: 674,
+                    num_actions: 3,
+                },
+            ],
+        };
+        assert_eq!(template.model_at_step(0), Some(673));
+        assert_eq!(template.model_at_step(1), Some(674));
+        assert_eq!(template.model_at_step(2), Some(680), "the appended entry");
+        assert_eq!(
+            template.model_at_step(3),
+            None,
+            "out of range changes nothing"
+        );
+        assert_eq!(template.model_at_step(-1), None);
+        assert_eq!(
+            template.model_at_step(1000),
+            Some(683),
+            "the ceremony model"
+        );
+    }
+
+    /// The real template 5: the last-stage form is the main hull 680; the launch ceremony is 683
+    /// (`galleon.step_09ceremony`), the same ceremony model as templates 1 and 11.
+    #[test]
+    fn shipyard_template_5_separates_the_ceremony_model_from_the_hull() {
+        let Some(db) = Db::open() else { return };
+        let Some(template) = db.shipyard_template(5) else {
+            return;
+        };
+        assert_eq!(
+            (template.main_model_id, template.ceremony_model_id),
+            (680, 683)
+        );
+        assert_eq!(template.ceremony_anim_key.as_deref(), Some("ceremony"));
+        assert_eq!(template.model_at_step(7), Some(680));
+        assert_eq!(template.model_at_step(1000), Some(683));
     }
 
     /// The load drops the `lookups` guard; the cache then returns the inserted

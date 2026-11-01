@@ -835,6 +835,7 @@ pub enum Event {
     ItemOperationError(crate::items::ItemOperationError),
     Gimmick(crate::gimmick::GimmickEvent),
     Housing(crate::housing::HousingEvent),
+    Shipyard(crate::shipyard::ShipyardEvent),
     Farm(crate::farm::FarmEvent),
     Coffer(crate::coffer::CofferEvent),
     Radar(crate::radar::RadarEvent),
@@ -2349,6 +2350,7 @@ impl Session {
             M::ItemOperationError(e) => self.emit(Event::ItemOperationError(e)),
             M::Gimmick(e) => self.emit(Event::Gimmick(e)),
             M::Housing(e) => self.emit(Event::Housing(e)),
+            M::Shipyard(e) => self.emit(Event::Shipyard(e)),
             M::Farm(e) => self.emit(Event::Farm(e)),
             M::Coffer(e) => self.emit(Event::Coffer(e)),
             M::Radar(e) => self.emit(Event::Radar(e)),
@@ -3311,6 +3313,24 @@ mod tests {
         ]))).await;
         for _ in 0..2 { assert!(matches!(events.try_recv(), Ok(Event::Housing(actual)) if actual == expected)); }
         assert!(matches!(events.try_recv(), Ok(Event::Housing(HousingEvent::Demolished { tl_id: 7 }))));
+        assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn shipyard_state_reaches_the_bridge_in_order() {
+        use crate::shipyard::ShipyardEvent;
+        let (evt, mut events) = unbounded_channel();
+        let mut session = Session::new(evt, ClientOptions::default());
+        let expected = ShipyardEvent::State(crate::shipyard::tests::snapshot());
+        session.game_msg(Ok(game::ServerMsg::Batch(vec![
+            game::ServerMsg::Shipyard(expected.clone()),
+            game::ServerMsg::Shipyard(expected.clone()),
+            game::ServerMsg::Snow(true),
+        ]))).await;
+        for _ in 0..2 {
+            assert!(matches!(events.try_recv(), Ok(Event::Shipyard(actual)) if actual == expected));
+        }
         assert!(matches!(events.try_recv(), Ok(Event::Snow(true))));
         assert!(events.try_recv().is_err());
     }
