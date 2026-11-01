@@ -90,6 +90,7 @@ impl UiRuntime {
             cooldown_captions: Default::default(),
             auto_clip_widgets: Default::default(),
             auto_textbox_scales: Default::default(),
+            auto_textbox_dirty: Default::default(),
             stub_calls: Default::default(),
             hover: None,
             entered: Vec::new(),

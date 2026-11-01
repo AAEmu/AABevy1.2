@@ -1,5 +1,134 @@
 # ArcheAge 1.2 feature parity
 
+## Vehicle interaction, engine and cinema checkpoint, 2026-11-01
+
+The 1.2 mode bar is filled natively (`FUN_39204500` / `FUN_392045f0`), not by Lua. The 2026-11-01
+original-client session (the driver's `client_mode_actions`) captured the Farm Wagon driver's bar:
+slots 1-5 are 20704/20291/15622/15450/15546, slot 6's tooltip is "Disembark from current device." and
+slot 7's is "Check details on a summon."; clicking slot 6 sent `CSDiscardSlave` 0x032 and the Grab
+Machine F prompt sent `CSBindSlave`; the dismount and the seat that followed are our server's replies
+(`unbind_slave` reason 5, `SCSlaveBound`). Decompile-only, not captured: the same "unbind" function
+slot appears for any slave seat (a passenger gets it too) and its click sends `CSDiscardSlave` 0x032
+(captured for the driver), refused above 5 m/s with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67; the driver's slot 7 raises UI event `SHOW_SLAVE_INFO` 0x60
+with no packet; a mate's first slot is `command_unmount` (the stub pushes pet command 9; the command
+itself was not traced). The Bevy bar still holds skill ids only (`hud/mode_actions.rs`,
+`View.actions: Vec<u32>`) and builds a bar only for the point-1 driver, so a Farm Wagon driver has no
+UI way off, a seated passenger has no bar, and nothing fires `SHOW_SLAVE_INFO` (the unmerged
+`fix/wagon-retail` branch adds an Info key trigger). This corrects the earlier reading that 1.2 has
+no dismount button: it has one, and a passenger gets it too (decompile-only)
+(`handoff/2026-11-01-disembark-and-wagon-seat.md` §1-§2).
+
+The Farm Wagon (slave 60, model 1008) has no attach point 2: `model_bindings` for model 1008 lists
+points 1, 35 and 9-12 only (point 2 is `$passenger0`). [I] That record is the client's attach-point
+list (`model_bindings` is the only per-model attach list; model 450 shows points 1/2), so the 1.2
+client never offers skill 13863 on the wagon. Our server offers and accepts point 2
+(`slave_interaction_skill` ignores the model; `bind_slave` accepts any point). That is a server bug,
+being fixed; the Bevy seat presentation needs no change
+(`handoff/2026-11-01-disembark-and-wagon-seat.md` §3).
+
+The slave's F prompt is skill 12076 ("Grab the machine to control it.") on the native dynamic action
+bar (`x2ui/dynamic_action_bar.alb`, `DYNAMIC_ACTION_BAR_SHOW("npc", id)`). [I] 12076 is the constant
+0x39ac789c in the interaction builder (the .data dword was not read); the tooltip text the owner saw
+supports it. [I] The bar sits low-centre (it is positioned from the screen's centre, not anchored to
+the unit). F runs `do_interaction_1` and ends in `CSBindSlave`. Bevy publishes the bar from doodads
+only (`hud/dynamic_actions.rs`, `Source::Npc` is dead and has no slave producer), so right-click
+boards a cart but F shows nothing on foot at 2 m
+(`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §b).
+
+The wagon body's `fist_ba_relaxed_idle` clip is the engine loop: `X2::PrefabUnitModel::UpdateIdleAnim`
+(`FUN_390d6690`) starts it on any unit model with an animation id whose kind is not 5 or 6, on model
+init/refresh, with no driver or speed condition. Bevy already spawns the `.chr` body through
+`creature::spawn` and starts that clip, but the owner sees no engine motion; the cause is not
+measured (a live `Bone_engine01` transform over time decides it). No engine sound is played: 1.2
+uses `sound_packs` 176 "run_tractor", item `run` -> sound 950 (`sounds/x2vehicles:trailer:run`),
+`yaw` -> 950, through `VehicleUnitModel::UpdateSound`
+(`handoff/2026-11-01-engine-anim-and-grab-prompt.md` §a).
+
+The 1.2 client has no quest-cinema skip. In the 2026-10-31 original-client run,
+`X2Quest:LeaveQuestDirectingMode()`, `X2Quest:DeclineDirectingQuest()` and Esc all did nothing and
+cinema 54 ran its natural 16.49 s; the compiled quest-directing script only closes the quest dialog.
+A key still held when input resumes moves the character at about +1.8 s by the client clock. The
+2.419 s figure is unproven: the capture timed packets by server-log read time, and the cause may be
+our server's visible-object resend on `CSCompletedCinema` or a fade/loading step (capture pending).
+A key released during the movie does not stick. The main-branch cinema gate replays held keys
+(`hud/cinema.rs`, `a_held_key_comes_back_after_the_movie`); PR #61 (in review) refines the replay to
+the 1.2 input window. Prologue `id_300_*` sequences live under
+`instance_prologue`, so in `main_world` the client sends `CSStartedCinema` + `CSCompletedCinema` in
+the same second (`handoff/2026-10-31-cinemacap.md`).
+
+The 1.2 client sends `CSStartSkill` 15307 at a trade-pack storage with an empty back slot - no
+client-side check and no local text; the response is the server's. Bevy keeps the same send; the
+refusal is AAEmu #30 (in review; the same PR gates the unpaid rider skills). Furl Sails 11545 is
+likewise sent from the deck away from the helm with no local gate
+(`handoff/2026-10-31-cinemacap.md` cases 2 and 3).
+
+## Glider skill-use checkpoint, 2026-10-31
+
+G9 is fixed at the shared skill-use path rather than in the action-bar button. The 1.2 rule `FUN_393925c0`
+(`x2game.dll.c` 743817-743862) casts a skill whose `skills.link_equip_slot_id` is not -1 through the item equipped in
+that slot: an empty slot or an `item_backpacks.backpack_type_id` other than `skills.link_backpack_type_id` returns 0,
+and the shared planner raises `0x146` (326 `MUST_EQUIP_PROPER_ITEM`) at line 748897 before the send at 748908. On a
+match `FUN_397cf7a0` replaces the skill id with the item's use skill, and `FUN_39044360` (65784-65810) builds the Item
+caster from the equipped item (owner, item id, template, grade, `made_unit_id`), the same CS052 body documented in
+`aa-net.md`. Thus skill 14901 "Use Glider" with glider 14677 equipped becomes `CSStartSkill` 12373 cast as item
+16777259/14677 (self target); without a glider the client shows the local 326 and sends nothing. The action bar,
+hotkeys, the skill book's slots, `/skill` and the script runner all reach `ingame::linked_skill::resolve`, so this is
+not a per-button fix. The same rule covers 14902 (trade pack, type 3) and the instrument skill 14900. An item template
+the client does not know is a refusal (`FUN_39695dc0` returns 0, 743838-743839), while a known item with no
+`item_backpacks` row is accepted (`FUN_396a6e40` returns 0), so 14900 with lute 20480/19742 converts; a row of
+another type is also refused. A matching row whose `use_skill_id` is 0 converts to skill 0, which is not a 326: the
+slot goes dark (`FUN_3943fa10` looks the converted id up, `FUN_396f6390(0) == 0`) and the press is refused locally with
+no packet, never an Item cast with skill 0.
+`FUN_397cf7a0`'s grade-specific reagent selection is not modeled (the static `use_skill_id` is used). The HUD bar
+resolves the same rule for its dark state and cooldown (`FUN_393f61c0`/`FUN_3943f310`, `FUN_3943fa10` sets
+`skillUsable=0`; `link_equip_slot_id` NULL is no link, not slot 0), so a missing or skill-0 item darkens the slot and a
+linked slot shows the converted skill's timer (14900 -> 11951, 45 s).
+
+The checkpoint also ends an active flight and removes `DeckRide` when a teleport's loading screen starts, and resets
+`Gliding` on `leave_game`: the paused glide/deck systems otherwise resumed with the old `Active` contact and pulled
+the player back to the ship (or carried the flight into the next character). The teleport keeps `Gliding::ended` at the
+active buff id, like the death and mount branches, so a buff the server does not remove replays nothing after the load.
+Tests: `linked_skill` (no item, glider, wrong type, unknown template, no backpack row, use skill 0), `ground_target` (the real
+`SkillPressed` route, local 326, skill 0 and no packet), `usable`/`panels` (dark slot and the converted 45 s cooldown), `glide`
+(teleport ends flight/deck ride and does not restart a still-listed buff) and `ingame` (logout forgets the flight);
+`cargo run -p aa-client --example glider_skill_press -- --mute` asserts the bar press against the real database. The old "gliders (S14) open" row below is the dated 2026-10-29
+checkpoint; glider flight itself landed in #49 and this closes the bar-press G9 gap. Remaining capture-pending:
+S14-C1 A/D/S move flags, S14-C2 the look button, S14-C6 the live speed attributes, S14-C7 ceilings and S14-C8 the
+leaving tolerances.
+
+## Vehicle idle ownership and engine sound checkpoint, 2026-11-01
+
+The Farm Wagon (slave 60 -> model 1008 -> `vehicle_models` 38) draws the prefab body
+`objects/env/06_unit/05_carriage/transfers_trailer_a_body.chr`; its `.cal` loops `fist_ba_relaxed_idle`, whose tracks
+drive `Bone_engine01..03`. 1.2 starts that loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init
+and refresh, with no driver or speed condition. Its callers skip it while the model's prefab damage state
+(`model+0x1f0`, `param_1[0x7c]`) is 5 (dying) or 6 (dead): `FUN_390e69d0` (DEC 184925), `FUN_390eb7d0` (DEC 187546),
+`FUN_390ebaa0` (DEC 187601) and the interaction "opened" path `FUN_390d64a0` (DEC 173191). Those are damage states,
+not model kinds (the kind is the template's `+0x30`); a revive back to 1..4 resumes the idle. Upstream
+already looped the idle as a side effect of the generic creature spawn (`creature.rs:174`); this work moves that
+ownership to the vehicle path, where 1.2 puts it: a `VehicleIdle` on the body started by
+`vehicle::start_vehicle_idle` (`VehiclePlugin`), so every rigged prefab vehicle/ship body with the idle loops it, and
+`creature::spawn_with_idle` no longer starts a vehicle body's creature idle. Measured 2026-11-01: the clip binds (19 of
+21 tracks) and `Bone_engine01` rotates in a bare `vehicle::spawn` and in a live GM-spawned wagon on lane `owner-test`;
+the 22 vehicle models and 3 fishboats with this idle are listed in
+[units](aa-client-units.md#engine-idle-and-engine-sound-vehicleidle-start_vehicle_idle-vehiclesound).
+
+The same checkpoint adds the 1.2 engine sound (`VehicleUnitModel::UpdateSound`, `FUN_390c6780`; `FUN_390ebaa0` calls it
+outside its 5/6 gate at DEC 187611). While the prefab damage state is 1..4, `engine` starts and stays updated, with the
+`speed`/`volume1`/`pitch1`/`volume2`/`pitch2` parameters (normalized by
+`vehicle_models.velocity` / `ship_models.velocity`), and `run` starts only while the model moves (either velocity
+vector above 0.0003). In state 5/6 `UpdateSound` stops the `run`, `yaw` and `pitch` handles (+0x410/414/418) and jumps
+to the end: the `engine` handle (+0x41c) is neither started nor updated, but it is not explicitly stopped. The Bevy
+client has no dying state yet (PR #69 adds it), so it gates on `Dead` (state 6) and stops both sounds there - a
+deviation to revisit with #69. A destroyed vehicle also stops its idle and plays the body's `dead_01`, which
+`combat::ensure_corpses` missed because the prefab body's `Animator` is a child of the root with `Dead`.
+`steer_spindles` now runs after `AnimSet`, over the sampled idle pose, so the permanent idle no longer overwrites the
+front axle every frame. The self-checking `vehicle_idle` example and the wagon tests (`the_wagon_body_idles_its_engine`,
+`the_idle_does_not_overwrite_the_steered_front_axle`, `a_destroyed_wagon_stops_its_idle_and_plays_dead_01`) fail when
+their rule is disabled. Not read: the exact second velocity vector and the throttle term in `volume1` (the speed ratio
+stands in; capture-pending); the ships use the same idle path but only the fishboats have the clip (the
+galleon/rowboat hulls are `.cgf` parts).
+
 ## Mount-walk checkpoint, 2026-10-31
 
 `X2Mate:MountMate()` now matches the 1.2 mount controller as read in the 1.2
@@ -161,9 +290,11 @@ Ships (merged after the checkpoint was written):
   `bone_yaw`/`bone_pitch` aim, remote type-8 posture and the fire skill sent at the aimed ground spot
   (`docs/aa-client-units.md`, S12).
 
-Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
-the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
-to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
+Still open across these slices: hanging (S13), vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, the
+copper boiler colour, the mode-bar function slots (unbind / Summon Info, G13), the slave F board prompt (G14) and the
+vehicle engine idle and sound (G15/A3); PR #58 (ship cannons drawn and manned at the parent's attach point) is in
+review; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures,
+and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
 [units](aa-client-units.md) and the PR
 descriptions. Cart terrain following (#42), the ship summon space check (#43) and the vehicle camera distance and driver
 action bar (#44) followed with their own captures.
@@ -647,9 +778,17 @@ The 2026-10-30 farm/cinema capture settles the quest cinema cases. Report: 0x0d0
 its u32) when the directing dialog opens, 0x0cf on G, the movie, 0x0ce, then
 `CSCompleteQuestContext` (row `C1-run3`: 22.22 s); Esc is ignored, input events are dropped at the
 source while physics/reporting continue (C1/C4), and the talk window is hidden and closed at the end
-(C5). A before-bubble Start sends 0x0d0 and 0x0cf in the same second and keeps the accept panel over
-the movie (C2). Progress component 5320 starts cinema 49 only from its live update, not a relog
-`QuestsLoaded`, without 0x0d0 (C6). C3 auto-complete/item rows send no cinema or 0x0d0. The
+(C5). The 2026-10-31 capture (`2026-10-31-cinemacap` cases 1c/1b) adds the post-movie block: a key
+still held when cinema 132 ended moved the character only at end+2.419 s, while a key released at
+end+1.2 s never moved, so held keys are replayed as held actions after a ~2.4 s window
+(capture-measured; no matching x2game timer was found) and releases during it are dropped. Held
+mouse buttons (RMB mouselook, LMB+RMB forward) are tracked and replayed the same way; the capture
+held only W, so mouse replay is inferred, not captured. The same case shows the original still on
+its ending/loading screen at end+0.7 s and the full HUD at end+11 s, so when the original restores
+the HUD relative to the block is unverified; Bevy restores it at the movie end. A before-bubble Start
+sends 0x0d0 and 0x0cf in the same second and keeps the accept panel over the movie (C2). Progress
+component 5320 starts cinema 49 only from its live update, not a relog `QuestsLoaded`, without 0x0d0
+(C6). C3 auto-complete/item rows send no cinema or 0x0d0. The
 `cinema_report` example drives the real dialog, UiRuntime, keyboard/mouse messages and packet order
 in shot mode for C1/C2/C4/C5/C6; C1b close/X and C7 the cinema17 dialog-session inference remain
 capture-pending. The full aa-client suite passes 1185 tests with 114 ignored, and aa-net's suite
@@ -940,32 +1079,32 @@ not turn it into a current completion claim.
 
 | Area | Evidence at those checkpoints | Remaining work at those checkpoints |
 |---|---|---|
-| World selection and login | Live Trion login, world list/queue, connect; original Lua, zero-error captures | Other regional authentication, premium/house lobby info, reconnect policy |
+| World selection and login | Live Trion login, world list/queue, connect; original Lua, zero-error captures; later (code-only): the character list builds each character's `SCLoginCharInfoHouse` houses and per-character premium grade, and a dropped connection returns to idle with the original dialog while return to world select uses `SCReconnectAuth` (by design, as 1.2) | Other regional authentication (Korean / Mail.Ru / Tencent); the old "premium/house lobby info" item is wired, without an original-client check |
 | Character selection and creation | All four 1.2 races and both genders; appearance controls and server creation/re-entry; real captures; all eight preview heads use authored facial idle overlays | Remaining appearance/material differences, hat/beard variants, training-field animation/wind |
 | Loading and screen lifecycle | Full flow, prebuilt HUD, return-to-list/logout/disconnect, spawn focus tests | Broader interruption/race coverage and persistent driver pipeline cache |
-| Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit |
+| Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit; later: PR #60 (stacked on #58, in review) fixes vehicle targeting, where a 1.1 m sphere misses most of a ~4 m wagon |
 | Water and mounted movement | Wading/swimming/diving; original breath bar on underwater reports/corrections and calculated capacity; remote mount/rider placement and movement packets | Natural live breath/drowning QA, local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
 | World geometry | Terrain with native heightmap-distance alpha order, exterior and visarea interior brushes, vegetation with native vertex AO/authored group brightness, roads, forward and deferred/wrapped diffuse decals including interior placements, authored static entity props/local lights/projectors, verified rigid CGA windmills, streaming, native baked-colour cave base geometry and seven compiled cave collision proxies with verified surfaces/transforms and unload; reference captures | Remaining voxel cover/detail/atlas variants; portal/area receiver lighting; decal normal/specular accumulation and receiver variants; other animated entities/controllers/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
 | Environment | Native Bezier curves and 147-slot defaults/ranges, spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Area/relic overrides and legacy XML color migration, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored body-clock facial overlays/blinks for all eight playable local-player/preview heads and supported NPC heads, source-verified facial bone controllers, explicit received NPC body slots and rigid CDF bone attachments; creature and resolved-part CDF effects with visibility/unload lifetime; authored static UCC composition/native default, iris color and conservative alpha cutouts | Voice lip sync; appearance-change rebuilding, full-world selected remote facial and attachment QA, CDF entity bindings; further render reference checks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |
-| Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting |
+| Combat and HUD | Skill/cast and native combat-widget timelines, projected moving-unit text, native fall/drown reports and acknowledged Bloodlust icons/toggle, hits/projectiles/buffs, dark/restricted slots, target/range/mana gates, death/resurrection. The 2026-10-26 side-by-side's cast mismatch was a **time-base artefact** (`--headless-fps 120` with `--feel-fps 60`, a 1/60 s manual clock, recorded as 1.562x in 561ebd1b); its 10 s weapon/stance hold is an **open bug** because the client ignores `CombatChanged`/combat-cleared (`aa-client-combat.md`, Time base and Weapon draw). The native 0.861 s is the flip after its `SCCombatCleared` packet, not a stance timer, and whether the 10 s hold matches the decompiled 10 s engaged deadline needs a check. Later: cannon/turret fire (#55). | Force-mode protected/team eligibility; broad skill-by-skill reference verification; FX decals/material flashes/lights/forces; special mounted/flying/ship casting; later: the slave F board prompt 12076 (G14), and impulse/PvP-point/idle-status events are decoded but have no `aa-client` consumer |
 | Skill progression | Real skill tree/tooltips, learn/passives/reset/swap; server requests/state; frame-advanced received skill/all-descriptor-tag and admitted stop-duration cooldowns/preflight, superseding stale DB estimates; original equipment constant-button sweeps preserve item icons/actions; native localized slot captions and actual account option82 visibility | Full native TL lifetimes, Fired cooldown/default/custom GCD producers, explicit slot GCD state and modifiers; generic raw-snapshot lifetime; broader progression/live coverage; lane cooldown emitter/re-entry verification, tooltip corner cases and damage breakdown option |
 | Inventory and equipment | Real bag/equipment/actions, drag/drop/split/merge/destroy, item tooltips, bank transfers/money, independent saved bag/bank tabs; original expansion confirmation/150-slot pool, received auto-AA setting, native view sorting and repair controls/quotes/durability notifier with physical-slot actions; original enchant mode controls, received physical selection/native compatibility, costs/ratios and socket/gem effect rows; receipt-ordered grade/socket/gem result dialogs | Natural repair service routing/live repair and expansion, native premium repair payment, item-enchant protected planning/shared pending/request/continuation, dye/look/temper workflows and missing tooltip fields |
 | NPC interactions and commerce | Quest NPC dialogs; real catalog, buy/sell/buyback and bank in original UI, live transactions; original stablehand quote/confirmation over received Bag+Bank summon details; original player-trade controls bound; the auctioneer NPC opens the original auction house ([aa-client-auction](aa-client-auction.md)) | Quest/service choice on multi-service NPCs, repair, ability services, priest/teleport, specialty |
-| Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays |
+| Quests and map | Accept/talk/hand-in/drop, dialogs/rewards/tracker/log; NPC/service/party map icons; completed ship/transport/fish radar snapshots drive original map symbols/tooltips, removal and channel clear with original-script probes/captures; later: quest cinemas play and end on `CSCompletedCinema` (#51, original-client capture 2026-10-31) | Native radar effective expedition/custom relations, area circles/fog/instance masks and live QA; objective areas/notifier icons, more requirement kinds, cross-zone icons, live housing/public-farm icons, climate/conflict overlays; later: a key held through a cinema must resume (1.2 has no skip); the only capture puts the first held-key move at about +1.8 s by the client clock, and the 2.4 s window is unproven - it was timed by server-log read time, and our server's object resend on `CSCompletedCinema` or a fade/loading step may be the cause (capture pending); the quest failure/requirement notices are still undecoded |
 | Chat | Live channels/whispers, original chat input/link insertion, clickable item/quest links, native transport escaping and message decoding, system/combat messages; eight native local tab IDs, filters/full palette/font, numeric selection/input method, hover/idle opacity and owner-window locks persist per world/character; original settings Save/Cancel/Reset, context Lock/Unlock, blocked drag warning, first-tab window movement and full Reset Chat with independent extras reload; native pending trial method at actual chat open and source-ordered trial receipt producers | Native send-size overflow policy, window position persistence, other-tab splitting/reparenting, provider-specific extra name filter, full command set, moderation/social integrations and less common channel events |
 | Party and raid | Original invite/decline/accept/leave/kick/leader/convert/role/drag-move/loot controls and native group-loot prompts; sparse slots, offline/rejoin, unit-frame marks and authoritative map pings; live two-client coverage | Natural paired live loot settlement,3D overhead marks, party buff/combat indicators; broader raid UI coverage and instance-specific ping surfaces |
 | Social/community | Original friend/block tabs, acknowledged commands, status/list refresh and blocked chat; original family roster/count/offline rows, native callbacks, feature/owner-guarded actions and captured invitation/ignore controls; original guild roster/location/offline rows, permission/title editing, invite/reply, leave/disband, kick/rank and received-siege-guarded leadership transfer; guild-service preconfirmation/sponsors/Create and actual received Task35 Rename | Paired live family/guild settlement, overhead family/guild titles and broader interruption coverage; live unblock/offline/restart checks; lane political-system/rename completion gaps, guild web/siege controls, nation and remaining management |
 | Mail, trade and auctions | Original mailbox read/claim/write/send and player-trade carts/money/locks/confirm/cancel bound; original-stage fixtures; mail/trade protocols live-tested in aa-net before the lane stall; original auction house search, bid, buy-out, listing, cancel and bid history, driven live between two accounts | Paired live original mail/trade and restart checks; native trade eligibility/window bounds; auction settlement mails claimed through the window, bid/buy-out chat notices of other players |
-| Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F with the "Gather" cast bar and phase 4513->4514, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; legacy ore/rock/shear capture-pending) | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows |
-| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open) |
-| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls |
+| Crafting, gathering and trade packs | Original Folio browses7,010 real recipes, groups/categories/search/materials/products/higher-tier links; received physical materials/raw grades and native labor rounding; static workbench maps and batch controls; original proficiency grades, caps, upgrade/downgrade/certificate expansion controls/events with pointer probes and captures; natural gathering func-to-skill mapping with the ordinary cast/tool/anim/labor/loot/phase path (1.2 capture 2026-10-30: herb 13990 on F sends `CSStartSkill`, fake-use lamp 13166, local no-labor refusal, bar on at 3 m and off at 4.5 m, cast not gated by a full bag; the 4000 ms cast, 1 LP and phase 4513->4514 in that capture are our server's values - `SCSkillStarted`, `SCCharacterLaborPowerChanged`, `SCDoodadPhaseChanged`; legacy ore/rock/shear capture-pending); later: seed placement 30 m / yaw / 6 m spread / the two locks per #56; trade-pack storage sends 15307 with no client pre-check, as the 1.2 client does | Natural workbench input/range/permissions, remaining execution/live validation, premium proficiency payment configuration and housing bonuses, legacy ore/rock/shear gathering capture, gathered-item delivery into free bag space (every captured herb gather had a full bag), processing/workbenches, specialty/trade pack flows; later: the trade-pack storage refusal is server-side (AAEmu #30 in review) |
+| Housing and territory | Static placed world data/map icons; received house snapshots/progress/permission/demolition flags, parent/TL decoration joins and aligned housing unit tails/posture; seed/sapling placement rules from the 1.2 builder (30 m 3D inclusive per F1/F2, group yaw per F4, 6 m terrain spread and its exemptions per F7, water, sphere overlap, refusal texts, 30 s world-load lock and the 2 s post-send cooldown per F13; the same seed again cancels the aim under either lock) with an offscreen self-check; later: the housing builder (ghost, rotation, land/category/garden checks, tax quote, `CSConstructHouseTax` / `CSCreateHouse`) and the build/construction windows are on main (3de58d05, fd986eba), houses render at their stage model, and a Bevy live check received the 45-certificate Start Construction quote without sending the create | Housing/placement/farms/permissions, ownership/tax, territory/siege/dominion, construction and interaction flows; farm planting F1-F18 (F1/F2/F4/F7/F13 settled; box shapes, water site, house/zone rules, crop bar/harvest open); later: furniture/decoration (`CSDecorateHouse` empty), live create/construction/tax/sale settlement, the original-client comparison, door/stair models and house HP/repair |
+| Pets, slaves and transport | Remote units/support motion rendered; owned mate/slave metadata, original current-pet frame/bar and information panel with native received-level/equipment/buff attributes, pool maxima and modifier colors; original pack-specific equipment icons and own-item hover tooltips with tag29/received pet level cap; filtered skill presentation/capabilities, received-XP getter, original rename and behavior controls; stablehand revival requests and raw equipment transactions decoded; vehicle and prefab engine idle loop (`VehicleIdle` from `UpdateIdleAnim`), the speed-keyed `engine` loop and movement-gated `run` sound, dead stop, and spindle steering after the animation pose; later: remote vehicle movement (#52), glider casting (#49), passenger seats (#54), cannons and turrets (#55), shipping helm request type 4 and deck support movement | Native speed-component getter, equipment cursor/confirmation/transaction controls, general skill usability/planner/auto-use, cap-aware XP delta folding, mount/dismiss eligibility, summon/unsummon/equipment/skills, slave UI and ships/cannons/transport controls; later: the mode-bar function slots (unbind / Summon Info, G13), the slave F board prompt (G14), hanging (S13) and vehicle damage/FX (S15); the Farm Wagon has no point 2 in 1.2, so its passenger seat is a server bug |
 | Child slave units (cannons) | `SCUnitState`'s parent object id and first attach point resolve a child slave's parent-local position/rotation through the parent; `unit_world_pose` composes the drawn root's current `Transform` chain (so a parent moved in `Update` and a freshly spawned root do not lag a frame) or the parent-composed packet pose and feeds the draw radius/census, manning distance, get-on/follow mover, seat pose, plates/speech/combat positions/marks/overhead/target panel/combat text/loot; the drawn root is `ChildOf` the parent root, a detach restores a world root, a parent despawn takes the child with it and a known-unbuildable parent fails the child once; the `child_units` example drives the real `receive_moves`/`sync_views` and checks the 90 degree yaw offset and the hierarchy | The parent model's attach-point pose is not reimplemented (the server's `slave_attach_points` local offset is used, matching `Unit::AttachTo`'s parent-entity attachment); the right-click and tab-target pick sites (`hud/dialog.rs`, `hud/targeting.rs`) are owned by slave-pick and still use the raw point (capture-pending) |
 | Battlefields | Original recruiter, queue/cancel, three-choice invitation, received match phases/timers/score/results and leave controls; native slot244 skill identity/tag/enable gates; controlled original-script probes and captures | Natural lane matchmaking/live match QA; lane Pong/start timer-origin mismatch; protected native ordinary skill eligibility and actor planner/casting; queue errors and remaining scheduled-event presentation |
 | Duels | Challenge from the target popup, challenge prompt (default dialog with the original `locale.duel` texts), accept/refuse, `STARTED_DUEL`/`ENDED_DUEL`, start text and result notice, temporary team factions on plates/target | Retail placement of the countdown text (system message here); the AAEmu server now sends `SCDuelStartCountdownPacket` at acceptance (NickMesser/AAEmu#15), so the countdown shows live; `SCAreaChatBubble` 0x153 (type 543, ignored) |
 | Achievements, ranking and trials | Original achievement UI over all1,743 descriptors, received native progress/rewards, six tracing slots and ordered completion/recent callbacks; guarded native type5 tracing hydration/save-before-leave; original physical controls passed; received crime/jury headers, queue request, original labels/hover/waiting tooltip and dishonor glyph; native19-key trial data, record pages, callback snapshots/ticks and actual Task6/7/8, Confirm/Cancel/Verdict controls; original ranking tabs/records/rewards over static catalog, received boards, independent streamed names, native calendar/locks and typed controls; bounty getters/setup/empty bulletin | English summary/description data, unsupported UI-data grammar and live achievement save/re-entry validation; ranking reward-mail formatter and live settlement, original nonempty bounty asset defect/payment lane gaps, trial spatial strings and mixed-subsystem ordering, crime reporting/prison and racing flows; paired live crime/jury settlement |
 | Music and other special systems | Audio playback and original music UI assets | Bard/song instruments, composition/playback UI, books/UCC/crest, portals, premium/shop services and other original content groups |
-| Options and UI toolkit | Applied account-local options/sound/key bindings (middle and side mouse buttons bind too) and bag persistence; the original screen and quality pages apply resolution, screen mode, vsync, gamma, draw distance, object/vegetation distance, shadows, clouds, effect quality, HDR, anti-aliasing and camera mode (`graphics.rs`); original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, the quality page's texture / terrain detail / character / water / DoF items (no renderer knob) and native global far clipping, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods |
+| Options and UI toolkit | Applied account-local options/sound/key bindings (middle and side mouse buttons bind too) and bag persistence; the original screen and quality pages apply resolution, screen mode, vsync, gamma, draw distance, object/vegetation distance, shadows, clouds, effect quality, HDR, anti-aliasing and camera mode (`graphics.rs`); original Apply/Cancel/Default Keys plus restart/action-dispatch tests; native clipped chat captions and fixed/auto tab layout, flat/tree listboxes, state/separator art, row tooltips, dropdown mouse selection/layers, widget animation, Unicode clipboard, IME and keyboard capture | Native binding blob/character synchronization, remaining mode/action consumers, the quality page's texture / terrain detail / character / water / DoF items (no renderer knob) and native global far clipping, scaled clipping/font calibration/layout persistence, listbox template/line-border variants and other native methods; later: opening Options blocks the main thread 54-77 s (`textbox::refit_scales`, H20; PR #57 in review) |
 
 ## Active ownership
 
