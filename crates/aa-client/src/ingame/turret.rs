@@ -472,16 +472,20 @@ impl AimWorld<'_> {
                 best = Some((distance, point));
             }
         };
+        let mut collision_hit = false;
         if let Some(collision) = self.collision {
             // The 1.2 ray masks are 0x307 (static/sleeping/rigid 7, terrain 0x100, water 0x200);
             // `Mask::ALL` is this world's terrain plus its static brushes.
             let origin = bevy_to_cry(from);
             let dir = bevy_to_cry(direction);
             if let Some(hit) = collision.raycast_mask(origin, dir, length, Mask::ALL) {
+                collision_hit = true;
                 offer(hit.t, cry_to_bevy(hit.point));
             }
         }
-        if let Some(terrain) = self.terrain {
+        // The height-march is the fallback for terrain outside the collision cells (and for a
+        // world built without collision); a collision hit already covers the built terrain.
+        if let Some(terrain) = self.terrain.filter(|_| !collision_hit) {
             let (start, end) = (bevy_to_cry(from), bevy_to_cry(to));
             if let Some(point) =
                 terrain_crossing(start, end, |x, y| terrain.ground_at(x, y).map(|g| g.height))
@@ -1515,6 +1519,22 @@ mod tests {
             .to_degrees();
         assert!((angle - 24.0).abs() < 1e-3, "clamped to {angle} deg");
         assert!(angle < 25.0);
+        // The other side keeps its sign: the hit moves to the other cone edge.
+        let other = origin + (Quat::from_rotation_y(60f32.to_radians()) * forward) * 100.0;
+        let other = cone_clamp(origin, forward, other, 50.0);
+        let side = forward
+            .cross(Vec3::new(other.x, 0.0, other.z).normalize())
+            .y;
+        assert!(side > 0.0, "the other side stays on its side");
+        assert!(
+            (forward
+                .dot(Vec3::new(other.x, 0.0, other.z).normalize())
+                .acos()
+                .to_degrees()
+                - 24.0)
+                .abs()
+                < 1e-3
+        );
 
         // 10 degrees off is already inside the 24 degree half-cone and is not moved.
         let inside = origin + (Quat::from_rotation_y((-10f32).to_radians()) * forward) * 30.0;
