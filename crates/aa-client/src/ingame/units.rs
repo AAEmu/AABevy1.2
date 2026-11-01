@@ -927,7 +927,13 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
             let _t = aa_cry::prof::scope("unit.spawn_creature");
             creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
         }
-        UnitBuild::Vehicle { pieces, state, variant, max_hp } => {
+        UnitBuild::Vehicle {
+            pieces,
+            state,
+            variant,
+            max_hp,
+            dying_time,
+        } => {
             let _t = aa_cry::prof::scope("unit.spawn_vehicle");
             let root = super::vehicle::spawn(commands, cry, clips, pieces, transform);
             commands.entity(root).insert(super::vehicle::VehicleDamage {
@@ -935,6 +941,9 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
                 variant: variant.clone(),
                 max_hp,
                 requested: None,
+                dying_start: None,
+                dying_time,
+                death_seen: state == 5,
             });
             super::vehicle::spawn_state_effects(commands, root, &variant, false);
             root
