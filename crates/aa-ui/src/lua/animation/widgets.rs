@@ -5,6 +5,7 @@ use super::positive;
 use crate::lua::{Ui, method, none, ret, ui};
 use crate::tree::{Id, Point, Rect, Tree};
 use mlua::{Lua, Table, Value};
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,6 +42,8 @@ pub(super) struct Widgets {
     active: BTreeSet<Id>,
     ui_scale: f32,
     offsets: HashMap<Id, [f32; 2]>,
+    /// Effective scale per widget; invalidated for a subtree when its ancestor scale changes.
+    effective: RefCell<HashMap<Id, f32>>,
 }
 
 struct State {
@@ -62,6 +65,7 @@ impl Default for Widgets {
             active: Default::default(),
             ui_scale: 1.0,
             offsets: Default::default(),
+            effective: Default::default(),
         }
     }
 }
@@ -204,14 +208,30 @@ impl Widgets {
         self.states.remove(&id);
         self.active.remove(&id);
         self.offsets.remove(&id);
+        self.effective.get_mut().remove(&id);
     }
 
     pub(super) fn effective_scale(&self, tree: &Tree, id: Id) -> f32 {
+        if let Some(&scale) = self.effective.borrow().get(&id) {
+            return scale;
+        }
         let own = self.states.get(&id).map(|s| s.raw_scale(self.ui_scale));
-        match tree.get(id).parent {
+        let scale = match tree.get(id).parent {
             Some(parent) => own.unwrap_or(1.0) * self.effective_scale(tree, parent),
             None => own.unwrap_or(self.ui_scale),
-        }
+        };
+        self.effective.borrow_mut().insert(id, scale);
+        scale
+    }
+
+    /// A widget's own scale changed: its cached effective scale and every
+    /// descendant's are stale until the caller visits that subtree.
+    pub(super) fn invalidate_scale(&self, id: Id) {
+        self.effective.borrow_mut().remove(&id);
+    }
+
+    pub(super) fn clear_scale_cache(&self) {
+        self.effective.borrow_mut().clear();
     }
 
     pub fn sample(&self, id: Id) -> WidgetSample {
@@ -238,6 +258,7 @@ impl Widgets {
     pub fn set_ui_scale(&mut self, value: f32) {
         if self.ui_scale != value {
             self.ui_scale = value;
+            self.effective.get_mut().clear();
             for s in self
                 .states
                 .values_mut()
@@ -334,6 +355,9 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 visible
             };
             let running = state.running();
+            if active_scale {
+                u.animations.clear_widget_scale_cache();
+            }
             u.tree.get_mut(id).alpha = new_visible;
             if running {
                 u.animations.widgets.active.insert(id);
@@ -374,6 +398,7 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
             if s.sample(ui_scale) != before && u.tree.visible(id) {
                 u.tree.repaint();
             }
+            u.animations.clear_widget_scale_cache();
             // Native SetScale dispatches event 42 (OnScale), even for an identical value.
             super::super::auto_clip::changed(&mut u, id, true);
             drop(u);
@@ -458,10 +483,14 @@ pub(super) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 state.scale.running = false;
             }
             let changed = state.sample(ui_scale) != before;
-            if state.running() {
+            let running = state.running();
+            if running {
                 u.animations.widgets.active.insert(id);
             } else {
                 u.animations.widgets.active.remove(&id);
+            }
+            if scale_callback {
+                u.animations.clear_widget_scale_cache();
             }
             if changed && u.tree.visible(id) {
                 u.tree.repaint();
@@ -568,6 +597,7 @@ pub(super) fn tick(lua: &Lua, id: Id, dt_ms: f32) {
                 if changed && u.tree.visible(id) {
                     u.tree.repaint();
                 }
+                u.animations.clear_widget_scale_cache();
                 super::super::auto_clip::changed(&mut u, id, true);
                 true
             } else {
