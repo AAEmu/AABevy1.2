@@ -78,10 +78,15 @@ as the player instead of waiting for cells around a different saved spawn.
   clips are authored with the body 1.3 m over the origin, `fist_mo_swim_f` lies horizontally with the pelvis at 1.34 m, `fist_ba_idle_swim` treads water
   upright with the head at 1.83 m). Stops below 1.1 m (`LEAVE_MARGIN` hysteresis). The depth threshold is the part not traced in the binary
   (`CActor::UpdateSwimStats` keeps the same `relativeWaterLevel`): change `ActorParams::swim_depth` when a capture of the real client says otherwise.
-* Direction: the swim movement mode takes a 3-D movement request (`FUN_3912c640` copies its x/y/z into the controller; `FUN_3912ce00`
-  builds the velocity from them), so the vertical is part of the direction rather than buoyancy: **W / S follow the camera pitch** - look down
-  and swim forward to dive, look up to rise, and a level camera keeps the depth while moving. X (`default_binding.g`: `x down`, the UI's
-  "Dive") and Space still dive / rise on their own. Only a swimmer pressing nothing floats up, at 2.0 m/s (`swim_buoy_speed`).
+* Direction: the swim movement mode (`FUN_3912ce00`) rotates the request by the view quaternion at `param_2 + 0x2d0`
+  (`x2game.dll.c:230934-230966`) and takes its z as the vertical, so the vertical is part of the direction rather than buoyancy: **W / S
+  follow the camera pitch** - look down and swim forward to dive, look up to rise, and a level camera keeps the depth while moving. X
+  (`default_binding.g`: `x down`, the UI's "Dive") and Space still dive / rise on their own. Only a swimmer pressing nothing floats up,
+  at 2.0 m/s (`swim_buoy_speed`).
+* Surface hold (`x2game.dll.c:230972-230995`, `231050-231074`): `local_c = (1 - clamp((|desired_z| - 0.3) * 2.5, 0, 1)) *
+  (1 - clamp(|relWaterLevel|, 0, 1))` (`DAT_3999ccd0` / `DAT_399a323c` read from `x2game_unpacked.dll` `.rdata`). While it is positive
+  the vertical speed is blended toward the water-level offset, so a gentle course at the surface stays there and cannot lift the body
+  above the resting height; a steep dive (`|vz| >= 0.7 m/s`) or more than 1 m of depth is not held.
 * Speeds: 3.0 m/s along the swim direction (the `.lmg` MoveDir), x 0.8 backwards (`swim_back_speed_mul`), up x 0.7, down x 0.5 (`swim_up/down_speed_mul`),
   a diver floats up at 2.0 m/s (`swim_buoy_speed`); Space within 0.2 m of the surface jumps out (`swim_jump_permission_range`).
 * Sea cells at the map edge can have no terrain. A swimmer there has no floor (`support_at` is `None`), so the `floor_at` fallback that keeps a
@@ -92,7 +97,8 @@ as the player instead of waiting for cells around a different saved spawn.
   leaves the animator alone) and calls `Locomotion::invalidate` when the swim ends. `anim.rs` is not touched: a combat action on the whole body
   (`Acting`, not layered) takes the clip over.
 * Packets: stance `SWIM` (2), no ground flag (`MoveState::Fall`), the velocity with its vertical part, `delta_movement` `[right, forward, up]`, one packet at
-  once when swimming starts or stops, and one per 0.1 s while moving, diving or bobbing.
+  once when swimming starts or stops, and one per 0.1 s while moving, diving or bobbing. The camera pitch is applied inside the movement code, so the
+  wire `delta_movement` is the unrotated pressed direction (as on land); **capture-pending**: no pitched-swim capture yet.
 
 ## Gliders (`glide.rs`, S14)
 

@@ -338,6 +338,14 @@ pub(super) fn floor_at(
     })
 }
 
+/// The floor under a swimmer: the support when there is one; over a hole in a loaded cell the height they are at (the
+/// terrain has no surface there and the collision under the water may still be missing, so dropping the floor would sink
+/// them through the seabed and pop them back up); and no floor at all where the cell has no terrain (the open sea at the
+/// map edge), so a dive there is not clamped.
+fn swim_floor(support: Option<f32>, hole: Option<bool>, current: f32) -> f32 {
+    support.unwrap_or(if hole == Some(true) { current } else { f32::NEG_INFINITY })
+}
+
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn control_player(
@@ -646,10 +654,9 @@ pub fn control_player(
 
     // what is under the feet and the water around
     let step_up = if mover.grounded || swimming { STEP_UP } else { 0.05 };
-    // a swimmer over the map edge (a sea cell with no terrain) must not be clamped to the height they are at: only a body
-    // that stands keeps its saved height when nothing is under it
     let ground = if swimming {
-        support_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up).unwrap_or(f32::NEG_INFINITY)
+        let support = support_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up);
+        swim_floor(support, terrain.is_hole_at(pos.x, pos.y), old.z)
     } else {
         floor_at(&terrain, &collision, Vec3::new(pos.x, pos.y, old.z), step_up)
     };
@@ -683,11 +690,17 @@ pub fn control_player(
         } else {
             // forward with the camera pitched is a dive or a rise; holding it with the camera level keeps the depth
             let course = (local_dir != Vec2::ZERO).then_some(swim_aim.z);
-            let wanted = swim::wanted_vz(vertical, course, pos.z, rest);
+            let wanted = swim::wanted_vz(vertical, course, pos.z, rest, dt);
             mover.vz = swim::approach(mover.vz, wanted, swim::WATER_DRAG, dt);
             pos.z = (pos.z + mover.vz * dt).max(ground + 0.05);
             if pos.z <= ground + 0.05 {
                 mover.vz = mover.vz.max(0.0);
+            }
+            // the aimed course never lifts a swimming body above the floating height; a body that just fell in is not
+            // clamped on its entry frame (it dives to the floating height instead)
+            if swimming && vertical == 0.0 && course.is_some() && pos.z > rest {
+                pos.z = rest;
+                mover.vz = mover.vz.min(0.0);
             }
             mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: local_vel.length(), vertical, deep: rest - pos.z > swim::DEEP });
         }
@@ -784,14 +797,10 @@ pub fn control_player(
     let stance_changed = swimming != state.swimming;
     if (active && due) || (!active && state.was_active) || first || landed.is_some() || stance_changed {
         let to_wire = |v: f32| (v * 1024.0).round().clamp(-32767.0, 32767.0) as i16;
-        // pressed direction relative to the facing, [right, forward, up]; forward is [0, 127, 0]
-        let delta = if swimming && vertical == 0.0 && local_dir != Vec2::ZERO {
-            // the 3-D swim request: forward/back follow the camera pitch, the direction itself is unit length
-            let d = swim_aim.normalize_or_zero();
-            [(d.x * 127.0).round() as i8, (d.y * 127.0).round() as i8, (d.z * 127.0).round() as i8]
-        } else {
-            [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, if swimming { (vertical * 127.0) as i8 } else { 0 }]
-        };
+        // pressed direction relative to the facing, [right, forward, up]; forward is [0, 127, 0].
+        // Capture-pending: 1.2 rotates the request inside the movement code (FUN_3912ce00), so the wire is probably the
+        // unrotated pressed direction, as on land; no pitched-swim capture yet. The camera pitch only shows in the position.
+        let delta = [(local_dir.x * 127.0).round() as i8, (local_dir.y * 127.0).round() as i8, if swimming { (vertical * 127.0) as i8 } else { 0 }];
         // rising after a jump, falling otherwise in the air (and swimming: nothing under the feet), on the ground when standing
         let move_state = if mover.grounded {
             MoveState::Ground
@@ -1572,6 +1581,13 @@ mod dive_tests {
     const SEA: Vec3 = Vec3::new(15_678.0, 15_382.0, 100.0);
 
     #[test]
+    fn a_swimmer_keeps_the_floor_over_a_hole_and_only_loses_it_without_terrain() {
+        assert_eq!(swim_floor(Some(91.0), Some(false), 98.7), 91.0);
+        assert_eq!(swim_floor(None, Some(true), 98.7), 98.7, "a hole keeps the previous floor");
+        assert_eq!(swim_floor(None, None, 98.7), f32::NEG_INFINITY, "the open sea has no floor");
+    }
+
+    #[test]
     fn diving_moves_below_the_surface() {
         let Some(mut f) = SwimApp::new(SEA) else {
             return;
@@ -1610,11 +1626,36 @@ mod dive_tests {
             "the packet still reports the surface: {:?}",
             last.pos
         );
-        assert!(
-            last.delta_movement[2] < 0,
-            "no dive in the movement packets: {:?}",
-            last.delta_movement
-        );
+        assert_eq!(last.delta_movement, [0, 127, 0], "the wire keeps the unrotated pressed direction");
+        assert!(last.velocity[2] < 0, "no dive in the movement packet velocity: {:?}", last.velocity);
+    }
+
+    #[test]
+    fn a_gentle_course_at_the_surface_does_not_bob_out() {
+        let Some(mut f) = SwimApp::new(SEA) else {
+            return;
+        };
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        let rest = SEA.z - 1.3;
+        // looking 10 degrees up and swimming forward must not lift the body out of the water
+        f.pitch(10f32.to_radians());
+        f.hold("moveforward");
+        for _ in 0..180 {
+            f.tick(1.0 / 60.0);
+        }
+        let m = f.mover();
+        assert!(m.swim.is_some(), "the swimmer left the water looking up: {:?}", m.pos);
+        assert!(m.pos.z <= rest + 0.02, "the course lifted the body above the rest height: {}", m.pos.z);
+        // a small downward pitch holds the surface too, within a hand's width
+        f.pitch(-10f32.to_radians());
+        for _ in 0..180 {
+            f.tick(1.0 / 60.0);
+        }
+        let m = f.mover();
+        assert!(m.swim.is_some(), "the gentle downward course left the water: {:?}", m.pos);
+        assert!((m.pos.z - rest).abs() < 0.15, "a gentle downward course left the surface: {}", m.pos.z);
     }
 
     #[test]
