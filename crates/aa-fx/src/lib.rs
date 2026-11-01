@@ -268,6 +268,21 @@ fn keeps_finished(def: Option<&EffectDef>) -> bool {
     def.is_some_and(|def| def.one_shot())
 }
 
+/// Start a simulation: a continuing effect is primed, a burst starts at t=0 (`Effect::primes`). Used by
+/// [`resolve`] for both the first start and a loop restart, so tests call this same decision.
+pub(crate) fn start_simulation(
+    effect: &Effect,
+    def: &EffectDef,
+    sim: &mut EffectSim,
+    ctx: &StepCtx,
+) {
+    if effect.primes(def) {
+        sim.prime(ctx);
+    } else {
+        sim.primed = true;
+    }
+}
+
 /// Runtime state of an [`Effect`] (inserted with it).
 #[derive(Component, Default)]
 pub struct FxRun {
@@ -570,7 +585,8 @@ fn classify(view: Res<FxView>, queue: Res<FxQueue>, settings: Res<FxSettings>, m
         let d = gt.translation().distance(view.pos);
         let active = run.sim.is_some();
         let over_budget = beyond.contains(&e);
-        if ((!active && !run.finished && d < run.radius && !over_budget) || (active || run.finished) && (d > run.radius * 1.15 || over_budget))
+        if ((!active && !run.finished && d < run.radius && !over_budget)
+            || (active && (d > run.radius * 1.15 || over_budget)))
             && let Ok(mut v) = queue.0.lock()
         {
             v.push((d, e, !active && !run.finished));
@@ -906,12 +922,8 @@ fn simulate(
                     SlotState::Ready => {}
                 }
             }
-            if ready {
-                if run.def.as_ref().is_some_and(|def| effect.primes(def)) {
-                    sim.prime(&ctx);
-                } else {
-                    sim.primed = true;
-                }
+            if ready && let Some(def) = run.def.as_deref() {
+                start_simulation(effect, def, &mut sim, &ctx);
             }
             run.sim = Some(sim);
             return;
@@ -938,10 +950,8 @@ fn simulate(
                 if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
                     sim.reset();
                     run.wind.restart(time.elapsed_secs_f64());
-                    if run.def.as_ref().is_some_and(|def| effect.primes(def)) {
-                        sim.prime(&ctx);
-                    } else {
-                        sim.primed = true;
+                    if let Some(def) = run.def.as_deref() {
+                        start_simulation(effect, def, &mut sim, &ctx);
                     }
                 } else {
                     run.finished = true;
@@ -1227,5 +1237,89 @@ mod tests {
         assert!(keeps_finished(Some(burst)));
         assert!(!keeps_finished(Some(fire)));
         assert!(!keeps_finished(None));
+    }
+
+    #[test]
+    fn a_finished_placed_burst_does_not_replay_when_the_view_returns() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use bevy::asset::AssetPlugin;
+        use bevy::transform::TransformPlugin;
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            TransformPlugin,
+            FxPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera3d::default(),
+                Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ))
+            .id();
+        let effect = app
+            .world_mut()
+            .spawn((
+                Effect {
+                    despawn_when_finished: false,
+                    no_body: true,
+                    ..Effect::new("X2_EFFECTS.housing_test.small_ship_exp")
+                },
+                Transform::default(),
+            ))
+            .id();
+        // run the burst quickly; it stays placed (no despawn)
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .set_relative_speed(30.0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut was_active = false;
+        while !app
+            .world()
+            .get::<FxRun>(effect)
+            .expect("the placed burst")
+            .is_finished()
+        {
+            assert!(std::time::Instant::now() < deadline, "the burst never finished");
+            app.update();
+            was_active |= app
+                .world()
+                .get::<FxRun>(effect)
+                .expect("the placed burst")
+                .is_active();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(was_active, "the burst ran at least once");
+        // leave the radius: the finished run deactivates but stays finished
+        app.world_mut()
+            .get_mut::<Transform>(camera)
+            .expect("the camera")
+            .translation = Vec3::new(1000.0, 0.0, 0.0);
+        for _ in 0..10 {
+            app.update();
+        }
+        let run = app.world().get::<FxRun>(effect).expect("the placed burst");
+        assert!(!run.is_active(), "out of range");
+        assert!(run.is_finished(), "a placed burst stays finished");
+        // return: it must not start again
+        app.world_mut()
+            .get_mut::<Transform>(camera)
+            .expect("the camera")
+            .translation = Vec3::new(0.0, 0.0, 5.0);
+        for _ in 0..30 {
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let run = app.world().get::<FxRun>(effect).expect("the placed burst");
+        assert!(!run.is_active(), "the finished burst does not replay");
+        assert!(run.is_finished());
+        assert!(app.world().get_entity(effect).is_ok(), "it stays placed");
     }
 }

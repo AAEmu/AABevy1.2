@@ -2614,12 +2614,8 @@ mod tests {
         assert!(!effect.primes(def), "the burst is not primed");
         let mut s = tree_sim(xml);
         let c = ctx(&budget);
-        // the real priming decision: a burst starts at t=0, not advanced by `EffectSim::prime`
-        if effect.primes(def) {
-            s.prime(&c);
-        } else {
-            s.primed = true;
-        }
+        // the production start decision: a burst starts at t=0, not advanced by `EffectSim::prime`
+        crate::start_simulation(&effect, def, &mut s, &c);
         s.step(&c);
         assert!(s.alive() > 0, "the burst's first frame is visible");
     }
