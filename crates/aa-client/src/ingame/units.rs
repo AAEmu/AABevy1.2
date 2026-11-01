@@ -709,7 +709,7 @@ pub(crate) fn unit_world_pose_in(unit: &Unit, units: &Units) -> Option<(Vec3, f3
     ))
 }
 
-fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
+pub(crate) fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
     let Some(parent_id) = unit_parent(unit) else {
         return Some(placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), unit_scale(unit)));
     };

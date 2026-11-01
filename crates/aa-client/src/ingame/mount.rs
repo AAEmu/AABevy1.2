@@ -1276,11 +1276,42 @@ pub struct Drawn<'w, 's> {
     views: Res<'w, Views>,
     transforms: Query<'w, 's, &'static Transform>,
     parents: Query<'w, 's, &'static ChildOf>,
+    mounts: Query<'w, 's, (Option<&'static Animator>, Option<&'static super::vehicle::SeatHelpers>)>,
 }
 
 impl Drawn<'_, '_> {
     fn pose(&self, unit: &aa_net::model::Unit, units: &Units) -> Option<(Vec3, f32)> {
         super::units::unit_world_pose(unit, units, &self.views, &self.transforms, &self.parents)
+    }
+
+    /// The unit's full world transform this frame: its drawn root's `Transform` chain (a child
+    /// slave composes its parent's transform), else the parent-composed snapshot.
+    fn transform(&self, unit: &aa_net::model::Unit, units: &Units) -> Option<Transform> {
+        if let Some(entity) = self.views.unit_entity(unit.obj_id)
+            && let Some(transform) =
+                super::units::current_transform(entity, &self.transforms, &self.parents)
+        {
+            return Some(transform);
+        }
+        super::units::unit_world_transform(unit, units, 0)
+    }
+
+    /// The world point of `seat` on `unit` in this frame, composed through the unit's transform
+    /// chain exactly as [`pose_local_rider`] draws it. `None` when the unit has no drawn root.
+    fn seat(&self, unit: &aa_net::model::Unit, seat: &Seat) -> Option<Vec3> {
+        let entity = self.views.unit_entity(unit.obj_id)?;
+        let (animator, helpers) = self.mounts.get(entity).ok()?;
+        let mut missing = std::collections::HashSet::new();
+        Some(seat_world(
+            entity,
+            unit.model_id,
+            animator,
+            helpers,
+            seat,
+            &self.transforms,
+            &self.parents,
+            &mut missing,
+        ))
     }
 }
 
@@ -1342,8 +1373,8 @@ pub fn track_local_mount(
             }
         }
         seat_state.0 = attached.map(|a| {
-            let (model, slave) = net.by_id.get(&a.obj_id).map_or((0, false), |u| {
-                (u.model_id, matches!(u.kind, UnitKind::Slave { .. }))
+            let (model, slave, parented) = net.by_id.get(&a.obj_id).map_or((0, false, false), |u| {
+                (u.model_id, matches!(u.kind, UnitKind::Slave { .. }), super::units::unit_parent(u).is_some())
             });
             let ship = slave && db.as_deref().is_some_and(|db| db.is_ship(model));
             // A cannon is a kind-7/8 slave with a turret block that cannot drive. The controller
@@ -1356,7 +1387,9 @@ pub fn track_local_mount(
                         .is_some_and(|unit| super::turret::turret_seat(unit, db))
                 });
             let speed = db.as_deref().map_or_else(MountSpeed::default, |db| db.mount_speed(model));
-            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret, ship, turret, speed, lift: 0.0 }
+            // A slave attached to another slave (a cannon on a ship) carries parent-local packet
+            // positions: `cart::drive_cart` would move the player to that offset as if it were world.
+            LocalSeat { mount: a.obj_id, point: a.point, drives: driver_seat(a.point), cart: slave && !ship && !turret && !parented, ship, turret, speed, lift: 0.0 }
         });
         match attached {
             Some(a) => {
@@ -1386,7 +1419,12 @@ pub fn track_local_mount(
                         9
                     }
                 };
-                let mount = mover.pos;
+                // The mount's world pose and the rider's world seat this frame. A child slave's
+                // packet position is parent-local, so neither the mover nor the packet point may
+                // stand in for the world pose once the seat is let go.
+                let mount_unit = old.and_then(|s| net.by_id.get(&s.mount));
+                let world_mount = mount_unit.and_then(|u| drawn.transform(u, &net));
+                let mount = world_mount.map_or(mover.pos, |t| bevy_to_cry(t.translation));
                 // a vehicle seat (a `$` helper: a cart's bench, a carriage's back seat) is well off the vehicle's origin
                 // and the 1.5 m horse probe does not fit its body: the rider gets off where it sits (unverified)
                 let vehicle = rider.is_some_and(|r| matches!(r.seat, Seat::Helper(_)));
@@ -1413,12 +1451,29 @@ pub fn track_local_mount(
                     settle_vector(mover.facing)
                 };
                 let lift = old.map_or(0.0, |s| s.lift);
-                // the visual seat `pose_local_rider` last drew; a horse's seat is over its origin
-                let from = if vehicle {
-                    bevy_to_cry(shown.translation)
-                } else {
-                    mount + Vec3::Z * lift
-                };
+                // The seat `pose_local_rider` drew: the mount's transform chain (a ship x a cannon's
+                // local attach) with the seat bone/helper. The player's drawn Transform is the same
+                // pose; keep it as the fallback when the seat cannot be resolved.
+                let seated = old
+                    .and_then(|s| {
+                        rider
+                            .filter(|r| (r.mount, r.point) == (s.mount, s.point))
+                            .map(|r| r.seat.clone())
+                    })
+                    .and_then(|seat| mount_unit.and_then(|u| drawn.seat(u, &seat)));
+                let posed = shown.translation != Vec3::ZERO || shown.rotation != Quat::IDENTITY;
+                let from = seated
+                    .map(bevy_to_cry)
+                    .or_else(|| (vehicle || posed).then(|| bevy_to_cry(shown.translation)))
+                    .unwrap_or_else(|| {
+                        // no rider pose (a system test): the mover is a world point only when it
+                        // is already at the mount; a parent-local offset never is
+                        if mover.pos.distance(mount) <= 4.0 {
+                            mover.pos + Vec3::Z * lift
+                        } else {
+                            mount + Vec3::Z * lift
+                        }
+                    });
                 let ship_landing = old.filter(|s| s.ship).and_then(|seat| {
                     db.as_deref().and_then(|db| {
                         let drawn = drawn.views
@@ -2020,7 +2075,7 @@ mod tests {
         anim
     }
 
-    fn riding() -> RiderAnim {
+    pub(super) fn riding() -> RiderAnim {
         RiderAnim::new(durations(), RidePhase::Riding)
     }
 
@@ -3034,7 +3089,7 @@ mod tests {
 
     /// A rider of the test durations on an empty skeleton, and the animator [`Rider::step`] drives; the clip names
     /// are the [`RiderClip`] variants in snake case.
-    fn stepped_rider(anim: RiderAnim) -> (Rider, Animator) {
+    pub(super) fn stepped_rider(anim: RiderAnim) -> (Rider, Animator) {
         let rig = std::sync::Arc::new(Rig::new(aa_cry::Skeleton::default()));
         let bound = |name: &str, seconds: f32| {
             BoundClip::new(
@@ -3148,6 +3203,14 @@ mod tests {
 mod child_seat_tests {
     use super::*;
     use aa_net::model::UnitStateAttachments;
+    use aa_net::{Command, MoveCommand, NetCommand};
+    use aa_world::WaterQuery;
+    use bevy::input::mouse::AccumulatedMouseMotion;
+    use crate::ingame::anim::LocalJump;
+    use crate::ingame::player::{PlayerInput, control_player};
+    use crate::ingame::sprint::Sprint;
+    use crate::ingame::swim::ActorParams;
+    use crate::ingame::units::unit_local_transform;
 
     fn slave(id: u32, pos: Vec3, parent: Option<u32>) -> aa_net::model::Unit {
         let mut unit = crate::ingame::seating::fixture_unit(id, 42, None);
@@ -3232,6 +3295,302 @@ mod child_seat_tests {
             mover.pos
         );
         assert!(mover.pos.distance(local) > 1.0, "the local offset was used");
+    }
+
+    fn tick(app: &mut App, dt: f32) {
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(dt));
+        app.update();
+    }
+
+    /// The real `track_local_mount` + `control_player` for a get-off from the slave `mount`
+    /// (`parented`: a cannon on a ship). `mover` starts at the wrong point the reported run sent
+    /// (the child's parent-local offset), and the shipped reason 5 leaves the rider standing.
+    fn detach_app(parented: bool) -> (App, Entity, Vec3, Vec3) {
+        use aa_net::session::PlayerSpawn;
+        use aa_net::state::Player;
+
+        const SHIP: u32 = 60;
+        const MOUNT: u32 = 7;
+        const PLAYER: u32 = 1;
+        let ship_at = Vec3::new(12008.8, 9022.7, 105.1);
+        let ship_yaw = 0.63;
+        let local = Vec3::new(-4.5703, -3.6836, 4.8404);
+        let seat = Vec3::new(0.0, -0.8, 0.0);
+        let ship_unit = slave(SHIP, ship_at, None);
+        let mut mount_unit = slave(
+            MOUNT,
+            if parented { local } else { ship_at },
+            parented.then_some(SHIP),
+        );
+        mount_unit.rotation = [0.0, 0.0, 0.35];
+        let mount_transform = if parented {
+            placement(ship_at, ship_yaw, 1.0).mul_transform(unit_local_transform(&mount_unit, 1.0))
+        } else {
+            placement(ship_at, ship_yaw, 1.0)
+        };
+        let expected = bevy_to_cry(mount_transform.transform_point(cry_to_bevy(seat)));
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<crate::settings::Actions>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<PlayerInput>()
+            .init_resource::<SendState>()
+            .init_resource::<Sprint>()
+            .init_resource::<LocalJump>()
+            .init_resource::<crate::ingame::DevOptions>()
+            .init_resource::<ClipLibrary>()
+            .init_resource::<MountReason>()
+            .insert_resource(LocalMount(Some(LocalSeat {
+                mount: MOUNT,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: true,
+                speed: MountSpeed::default(),
+                lift: 0.0,
+            })))
+            .insert_resource(Player::default())
+            .insert_resource(Views::default())
+            .insert_resource(Units::default())
+            .insert_resource(TerrainQuery::new("test"))
+            .insert_resource(WorldCollision::new("test", TerrainQuery::new("test")))
+            .insert_resource(WaterQuery::new("test"))
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .add_systems(Update, track_local_mount);
+        let ship_entity = app
+            .world_mut()
+            .spawn(placement(ship_at, ship_yaw, 1.0))
+            .id();
+        let mount_entity = if parented {
+            app.world_mut()
+                .spawn((unit_local_transform(&mount_unit, 1.0), ChildOf(ship_entity)))
+                .id()
+        } else {
+            app.world_mut()
+                .spawn(placement(ship_at, ship_yaw, 1.0))
+                .id()
+        };
+        let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        helpers
+            .0
+            .insert("driver".into(), bevy::math::Affine3A::from_translation(seat));
+        app.world_mut().entity_mut(mount_entity).insert(helpers);
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.fixture_actor(&ship_unit, Some(ship_entity));
+            views.fixture_actor(&mount_unit, Some(mount_entity));
+        }
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            units.by_id.insert(SHIP, ship_unit);
+            units.by_id.insert(MOUNT, mount_unit.clone());
+        }
+        let mut player_unit = crate::ingame::seating::fixture_unit(PLAYER, 42, None);
+        player_unit.pos = aa_net::Pos::new(local.x, local.y, local.z);
+        player_unit.attached_to = None;
+        app.world_mut().resource_mut::<Player>().spawn = Some(PlayerSpawn {
+            obj_id: PLAYER,
+            state: Default::default(),
+            unit: player_unit,
+        });
+        let (mut rider, animator) = super::tests::stepped_rider(super::tests::riding());
+        rider.unit = PLAYER;
+        rider.mount = MOUNT;
+        rider.point = 1;
+        rider.seat = Seat::Helper("driver".into());
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: PLAYER },
+                Mover {
+                    pos: local,
+                    facing: ship_yaw,
+                    vz: 0.0,
+                    grounded: true,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                Motion::default(),
+                ActorParams::default(),
+                rider,
+                animator,
+            ))
+            .id();
+        app.world_mut().resource_mut::<SendState>().settle_for_test();
+        app.world_mut().spawn(OrbitCamera::default());
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitDetached { obj_id: PLAYER, reason: 5 }));
+        (app, player, expected, local)
+    }
+
+    fn first_move(app: &mut App) -> Option<MoveCommand> {
+        for _ in 0..30 {
+            tick(app, 0.1);
+            let moves: Vec<_> = app
+                .world_mut()
+                .resource_mut::<Messages<NetCommand>>()
+                .drain()
+                .filter_map(|NetCommand(command)| match command {
+                    Command::Move(m) => Some(m),
+                    _ => None,
+                })
+                .collect();
+            if let Some(m) = moves.into_iter().next() {
+                return Some(m);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_gunner_leaving_a_ship_cannon_keeps_the_world_seat() {
+        if !aa_cry::pak_available() {
+            eprintln!("child seat: skipped, no game pak");
+            return;
+        }
+        let (mut app, player, expected, local) = detach_app(true);
+        tick(&mut app, 0.1);
+        let mover = app.world().get::<Mover>(player).unwrap().pos;
+        assert!(
+            mover.distance(expected) < 0.1,
+            "the get-off starts at {mover:?}, not the world seat {expected:?} (local {local:?})"
+        );
+        app.add_systems(Update, (step_dismounts, control_player).chain());
+        let first = first_move(&mut app).expect("the first CSMoveUnit");
+        let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
+        assert!(
+            pos.truncate().distance(expected.truncate()) < 0.1,
+            "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
+        );
+        assert!(
+            pos.distance(local) > 1000.0,
+            "the first CSMoveUnit sent the cannon's parent-local offset"
+        );
+    }
+
+    #[test]
+    fn a_rider_leaving_a_plain_slave_keeps_the_world_seat() {
+        if !aa_cry::pak_available() {
+            eprintln!("child seat: skipped, no game pak");
+            return;
+        }
+        let (mut app, player, expected, local) = detach_app(false);
+        tick(&mut app, 0.1);
+        let mover = app.world().get::<Mover>(player).unwrap().pos;
+        assert!(
+            mover.distance(expected) < 0.1,
+            "the get-off starts at {mover:?}, not the world seat {expected:?}"
+        );
+        app.add_systems(Update, (step_dismounts, control_player).chain());
+        let first = first_move(&mut app).expect("the first CSMoveUnit");
+        let pos = Vec3::new(first.pos.x, first.pos.y, first.pos.z);
+        assert!(
+            pos.truncate().distance(expected.truncate()) < 0.1,
+            "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
+        );
+    }
+
+    /// Another player leaving a cannon sees the same world seat: `pose_riders` keeps the remote
+    /// rider at the mount's composed world pose, and the detach seeds its walk from there.
+    #[test]
+    fn a_remote_rider_leaving_a_child_cannon_keeps_the_world_seat() {
+        const SHIP: u32 = 60;
+        const CANNON: u32 = 7;
+        const RIDER: u32 = 1;
+        let ship_at = Vec3::new(12008.8, 9022.7, 105.1);
+        let ship_yaw = 0.63;
+        let local = Vec3::new(-4.5703, -3.6836, 4.8404);
+        let seat = Vec3::new(0.0, -0.8, 0.0);
+        let mut cannon = slave(CANNON, local, Some(SHIP));
+        cannon.rotation = [0.0, 0.0, 0.35];
+        let expected = bevy_to_cry(
+            placement(ship_at, ship_yaw, 1.0)
+                .mul_transform(unit_local_transform(&cannon, 1.0))
+                .transform_point(cry_to_bevy(seat)),
+        );
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .init_resource::<Units>()
+            .init_resource::<ClipLibrary>()
+            .add_systems(Update, (pose_riders, start_stop_riding).chain());
+        let ship_entity = app
+            .world_mut()
+            .spawn(placement(ship_at, ship_yaw, 1.0))
+            .id();
+        let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        helpers.0.insert(
+            "driver".into(),
+            bevy::math::Affine3A::from_translation(seat),
+        );
+        let cannon_entity = app
+            .world_mut()
+            .spawn((
+                unit_local_transform(&cannon, 1.0),
+                ChildOf(ship_entity),
+                RemoteUnit::announced(&cannon),
+                helpers,
+            ))
+            .id();
+        {
+            let mut views = app.world_mut().resource_mut::<Views>();
+            views.track_unit_entity(CANNON, cannon_entity);
+        }
+        let mut rider_unit = crate::ingame::seating::fixture_unit(RIDER, 42, None);
+        rider_unit.pos = aa_net::Pos::new(local.x, local.y, local.z);
+        rider_unit.attached_to = Some(Attachment {
+            obj_id: CANNON,
+            point: 1,
+            reason: 5,
+        });
+        let (mut rider, animator) = super::tests::stepped_rider(super::tests::riding());
+        rider.unit = RIDER;
+        rider.mount = CANNON;
+        rider.point = 1;
+        rider.seat = Seat::Helper("driver".into());
+        let rider_entity = app
+            .world_mut()
+            .spawn((
+                RemoteUnit::announced(&rider_unit),
+                Transform::default(),
+                rider,
+                animator,
+            ))
+            .id();
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            units.by_id.insert(SHIP, slave(SHIP, ship_at, None));
+            units.by_id.insert(CANNON, cannon);
+            units.by_id.insert(RIDER, rider_unit);
+        }
+        tick(&mut app, 0.1);
+        let shown = app.world().get::<RemoteUnit>(rider_entity).unwrap().pos;
+        assert!(
+            shown.distance(expected) < 1e-3,
+            "the remote rider is drawn at {shown:?}, not the world seat {expected:?}"
+        );
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .get_mut(&RIDER)
+            .unwrap()
+            .attached_to = None;
+        tick(&mut app, 0.1);
+        let unit = app.world().get::<RemoteUnit>(rider_entity).unwrap();
+        assert_eq!(unit.pos, expected, "the detach left the world seat");
+        assert_eq!(
+            unit.latest(),
+            expected,
+            "the walk restarted from the cannon's local offset"
+        );
     }
 }
 
