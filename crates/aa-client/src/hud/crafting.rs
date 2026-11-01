@@ -61,6 +61,18 @@ pub(super) fn proficiency(data: &HudData, group: u32) -> Option<(i32, u8)> {
     received.loaded.then_some((0, 0))
 }
 
+/// The localized `actability_groups` name of a proficiency group (the house actability getters read it).
+pub(super) fn actability_group_name(data: &HudData, group: u32) -> Option<&str> {
+    data.game.get()?.crafting.groups.get(&group).map(|g| g.name.as_str())
+}
+
+/// The received actability points, as `CHANGE_ACTABILITY_DECO_NUM` compares them (order independent).
+pub(super) fn actability_signature(data: &HudData) -> Vec<(u32, Option<i32>)> {
+    let mut entries: Vec<_> = data.crafting.actabilities.entries.iter().map(|a| (a.id, a.point)).collect();
+    entries.sort_unstable_by_key(|e| e.0);
+    entries
+}
+
 pub(super) fn music_grades(data: &HudData) -> Vec<(u8, &str)> {
     let Some(game) = data.game.get() else { return Vec::new() };
     game.crafting.grades.iter().enumerate().filter_map(|(grade, id)| {

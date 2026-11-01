@@ -27,20 +27,103 @@ fn snapshot(owner_id: u32, all: i32, current: i32) -> HouseSnapshot {
 }
 
 fn setup() -> (UiRuntime, State) {
+    setup_with(super::super::data::GameData::default())
+}
+
+fn setup_with(game: super::super::data::GameData) -> (UiRuntime, State) {
+    let (rt, state, _) = setup_with_bridge(game);
+    (rt, state)
+}
+
+fn setup_with_bridge(game: super::super::data::GameData) -> (UiRuntime, State, super::super::api::Shared) {
     let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
     let bridge = Rc::new(RefCell::new(super::super::api::HudData::default()));
-    assert!(bridge.borrow().game.0.set(super::super::data::GameData::default()).is_ok());
+    assert!(bridge.borrow().game.0.set(game).is_ok());
     bridge.borrow_mut().character_id = 42;
     super::super::api::install(&mut rt, &bridge).unwrap();
     let state = rt.lua.app_data_ref::<State>().unwrap().clone();
-    (rt, state)
+    (rt, state, bridge)
+}
+
+fn design(id: u32, always_public: bool) -> super::super::data::housing::HousingTemplate {
+    super::super::data::housing::HousingTemplate {
+        id,
+        category_id: 18,
+        absolute_deco_limit: 51,
+        deco_limit: 40,
+        housing_deco_limit_id: 10,
+        binding_doodads: 2,
+        always_public,
+        ..default()
+    }
 }
 
 fn open(state: &State, owner: u32, all: i32, current: i32) {
     let mut v = state.0.borrow_mut();
     v.me = 42;
     v.money = 50_000;
-    v.current = Some(Current { obj_id: 900, tl_id: 7, design: 171, snapshot: Some(snapshot(owner, all, current)), name: "Farm".into(), mine: owner == 42, tax: None, decorations: 2 });
+    v.current = Some(Current {
+        obj_id: 900,
+        tl_id: 7,
+        design: 171,
+        snapshot: Some(snapshot(owner, all, current)),
+        name: "Farm".into(),
+        mine: owner == 42,
+        tax: None,
+        decorations: 2,
+        furniture: Vec::new(),
+        view_type: Some("house"),
+        always_public: false,
+    });
+}
+
+fn spawn(owner: u32, family: u32, expedition: u32) -> Box<aa_net::PlayerSpawn> {
+    Box::new(aa_net::PlayerSpawn {
+        obj_id: 100,
+        state: aa_net::model::CharacterState {
+            character: aa_net::Character { id: owner, family, expedition_id: expedition, ..default() },
+            ..default()
+        },
+        unit: aa_net::Unit {
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            obj_id: 100,
+            name: "Self".into(),
+            kind: aa_net::model::UnitKind::Character { char_id: owner },
+            owner_name: String::new(),
+            pos: default(),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 30,
+            model_id: 0,
+            equipment: default(),
+            model_params: default(),
+            hp: 100,
+            mp: 100,
+            max_hp: 100,
+            max_mp: 100,
+            dead: false,
+            race_gender: 1,
+            movement: None,
+            faction_id: 0,
+            expedition_id: expedition,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            skills: vec![],
+            passive_buffs: vec![],
+            ability_exp: vec![],
+            active_abilities: vec![],
+            buffs: vec![],
+            anim_action: 0,
+            house_posture: None,
+            turret: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        },
+    })
 }
 
 #[test]
@@ -188,4 +271,180 @@ fn only_the_players_standing_houses_are_on_the_map() {
     assert_eq!((icons[0].0, icons[0].1, icons[0].3.as_str()), (15339.5, 14632.0, "Farm"));
     assert!(own_house_icons(&houses, 0).is_empty());
     assert_eq!([map_icon_kind(7), map_icon_kind(18), map_icon_kind(1)], ["housing_fishfarm", "housing_farm", "housing_house"]);
+}
+
+
+#[test]
+fn the_interaction_view_type_follows_the_design_category() {
+    assert_eq!(
+        [7, 8, 16, 17, 9, 10, 11, 12, 15, 18, 1].map(view_type),
+        [Some("seafarm"), Some("farm"), Some("farm"), Some("farm"), Some("house"), Some("house"), Some("house"), Some("house"), Some("house"), Some("house"), None]
+    );
+}
+
+#[test]
+fn deco_counts_exclude_the_built_in_furniture_and_use_the_absolute_limit() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state) = setup_with(game);
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().current.as_mut().unwrap().decorations = 5;
+    rt.lua
+        .load(
+            r#"
+            local count, limit = X2House:GetHouseDecoCount()
+            assert(count == 3, tostring(count))
+            assert(limit == 49, tostring(limit))
+            "#,
+        )
+        .exec()?;
+    Ok(())
+}
+
+#[test]
+fn the_actability_getters_read_the_house_groups_and_the_limit_table() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    game.housing.deco_actability_groups.insert(1, "Specialty furniture".into());
+    game.housing.deco_actability_groups.insert(5, "Storage".into());
+    game.housing.deco_limit_elems.push(super::super::data::housing::DecoLimitElem {
+        id: 8,
+        housing_deco_limit_id: 10,
+        deco_actability_group_id: 1,
+        count: 3,
+    });
+    game.housing.deco_limit_elems.push(super::super::data::housing::DecoLimitElem {
+        id: 15,
+        housing_deco_limit_id: 10,
+        deco_actability_group_id: 5,
+        count: 3,
+    });
+    game.items.insert(
+        107,
+        super::super::data::ItemInfo { named: super::super::data::Named { name: "Pot".into(), icon: String::new() }, ..default() },
+    );
+    let (rt, state) = setup_with(game);
+    open(&state, 42, 0, 0);
+    state.0.borrow_mut().current.as_mut().unwrap().furniture = vec![
+        Furniture { item: 107, actability_group: 1, points: 100, deco_group: 1 },
+        Furniture { item: 107, actability_group: 1, points: 50, deco_group: 1 },
+        Furniture { item: 108, actability_group: 5, points: 30, deco_group: 5 },
+        Furniture { item: 0, actability_group: 0, points: 0, deco_group: 0 },
+    ];
+    rt.lua
+        .load(
+            r#"
+            assert(X2House:GetActabilityDecoCount() == 2)
+            local first = X2House:GetDecoActabilityPoint(1)
+            assert(first.decoPoint == 150, tostring(first.decoPoint))
+            local second = X2House:GetDecoActabilityPoint(2)
+            assert(second.decoPoint == 30, tostring(second.decoPoint))
+            assert(X2House:GetDecoActabilityPoint(3) == nil)
+            local totals, items = X2House:GetDecoActabilityByType(1)
+            assert(totals.type == 1 and totals.totalDecoPoint == 150 and totals.totalPoint == 0)
+            assert(#items == 2 and items[1].name == 'Pot' and items[1].decoPoint == 100)
+            local groups = X2House:GetDecoActabilityLimitGroup()
+            assert(#groups == 2)
+            assert(groups[1].name == 'Specialty furniture' and groups[1].arrangeCount == 2 and groups[1].maxCount == 3)
+            assert(groups[2].name == 'Storage' and groups[2].arrangeCount == 1 and groups[2].maxCount == 3)
+            "#,
+        )
+        .exec()?;
+    Ok(())
+}
+
+#[test]
+fn permission_clicks_pass_the_native_gates_and_go_out_once_as_the_server_enum() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state) = setup_with(game);
+    open(&state, 42, 0, 0);
+
+    // `SetHousePermission`'s 2 is the server's guild enum (1) and 4 the family enum (3).
+    rt.lua.load("X2House:SetHousePermission(2) X2House:SetHousePermission(4)").exec()?;
+    assert!(state.0.borrow().commands.is_empty(), "no membership: nothing goes out");
+    assert_eq!(
+        state.0.borrow().notices,
+        vec!["CHAT_NOT_IN_EXPEDITION".to_string(), "FAMILY_NOT_EXIST".to_string()]
+    );
+
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, false));
+    let (rt, state, bridge) = setup_with_bridge(game);
+    let spawn = spawn(42, 12, 900);
+    super::super::family::dispatch(None, &bridge, &Event::PlayerSpawn(spawn.clone()));
+    super::super::expedition::dispatch(None, &bridge, &Event::PlayerSpawn(spawn));
+    open(&state, 42, 0, 0);
+    rt.lua
+        .load("X2House:SetHousePermission(2) X2House:SetHousePermission(3) X2House:SetHousePermission(4)")
+        .exec()?;
+    let commands = std::mem::take(&mut state.0.borrow_mut().commands);
+    assert_eq!(
+        format!("{commands:?}"),
+        format!("{:?}", vec![
+            Command::House(HouseCommand::ChangePermission { tl: 7, permission: 1 }),
+            Command::House(HouseCommand::ChangePermission { tl: 7, permission: 2 }),
+            Command::House(HouseCommand::ChangePermission { tl: 7, permission: 3 }),
+        ]),
+        "one packet per changed radio, carrying the server enum"
+    );
+    assert!(state.0.borrow().notices.is_empty());
+    Ok(())
+}
+
+#[test]
+fn an_always_public_design_refuses_every_permission_click() -> mlua::Result<()> {
+    let mut game = super::super::data::GameData::default();
+    game.housing.housings.insert(171, design(171, true));
+    let (rt, state) = setup_with(game);
+    open(&state, 42, 0, 0);
+    rt.lua.load("X2House:SetHousePermission(3)").exec()?;
+    assert!(state.0.borrow().commands.is_empty());
+    assert_eq!(state.0.borrow().notices, vec!["HOUSE_CANNOT_CHANGE_PERMISSION".to_string()]);
+    Ok(())
+}
+
+#[test]
+fn the_tax_event_keeps_the_native_order_and_raw_weeks() -> mlua::Result<()> {
+    let (rt, state) = setup();
+    rt.lua
+        .load(
+            r#"
+            local w = UIParent:CreateWidget('emptywidget', 'taxSpy', 'UIParent')
+            w:RegisterEvent('HOUSE_TAX_INFO')
+            w:SetHandler('OnEvent', function(self, event, ...) TAX = {...} end)
+            "#,
+        )
+        .exec()?;
+    open(&state, 42, 0, 0);
+    let fire_tax = |weeks: i32, paid: bool| {
+        state.0.borrow_mut().current.as_mut().unwrap().tax = Some(HouseTaxInfo {
+            tl_id: 7,
+            dominion_tax_rate: 17,
+            money_amount: 150_000,
+            money_amount2: 450_000,
+            due: 1_700_000_000,
+            is_already_paid: paid,
+            weeks_without_pay: weeks,
+            is_heavy_tax_house: true,
+        });
+        fire(&rt, &state, Signal::Tax);
+    };
+    fire_tax(1, false);
+    rt.lua
+        .load(
+            r#"
+            assert(TAX[1] == 17, tostring(TAX[1]))
+            assert(TAX[2] == '450000', tostring(TAX[2]))
+            assert(type(TAX[3]) == 'table')
+            assert(TAX[4] == 1, tostring(TAX[4]))
+            assert(TAX[5] == false)
+            assert(TAX[6] == true)
+            assert(TAX[7] == '150000', tostring(TAX[7]))
+            "#,
+        )
+        .exec()?;
+    fire_tax(-1, true);
+    rt.lua.load("assert(TAX[4] == -1, tostring(TAX[4])) assert(TAX[5] == true)").exec()?;
+    Ok(())
 }

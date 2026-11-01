@@ -14,10 +14,16 @@ Code:
 | `ingame/housing/render.rs` | house units drawn at the model of their construction stage |
 | `ingame/housing/placement.rs` | the builder: ghost, rotation, the placement checks, `CSConstructHouseTax` / `CSCreateHouse` |
 | `crates/aa-client/src/hud/housing.rs` | `X2House`, the housing events, opening the windows at a house, own houses on the map |
+| `crates/aa-client/src/hud/housing/fixture.rs` | the owner-menu self-check: original scripts over synthetic `SCMyHouse` / `SCHouseTaxInfo` |
+| `crates/aa-client/examples/house_owner.rs` | runs the self-check (`--state paid|due|overdue`, headless with `--mute`) |
 
 Tests: `cargo test -p aa-client housing` (land polygons, zone origins, the design / step / prefab tables of the real
 database, prefab parsing, the placement checks, the `X2House` getters and setters, taxes and sale certificates, the
-build action of a stage, the map icons, and that no housing system has conflicting parameters).
+build action of a stage, the map icons, the interaction view type, the permission gates, the deco/actability
+counters, the raw tax weeks, and that no housing system has conflicting parameters). The owner menu has a self-check
+example: `cargo run -p aa-client --example house_owner -- --headless --mute --state paid --exit-after 2` (needs
+`AA_PAK` and `AA_DB`; it asserts the `HOUSE_INTERACTION_START` / `HOUSE_TAX_INFO` tuples with a Lua spy, the one
+`CSChangeHousePermission`, `GetHouseDecoCount`, and the paid/due/overdue `contentTaxInfo` texts).
 
 ## Data
 
@@ -68,8 +74,9 @@ to the server.
 ## Construction
 
 A right click on a house within 6 m starts the interaction (`393BEFD0`): `CSRequestHouseTax`, then
-`HOUSE_INTERACTION_START("housing", ..)`; `housing_manager.lua` opens the construction window while the house is being
-built, the house window once it stands. Walking 10 m away ends it (`HOUSE_INTERACTION_END`). On a house under
+`HOUSE_INTERACTION_START("housing", viewType, alwaysPublic)`; `viewType` comes from `housings.category_id` (7
+`"seafarm"`, 8/16/17 `"farm"`, 9/10/11/12/15/18 `"house"`, else nil, `DEC:780640-780672`). `housing_manager.lua` opens
+the construction window while the house is being built, the house window once it stands. Walking 10 m away ends it (`HOUSE_INTERACTION_END`). On a house under
 construction the right click also casts the stage's build skill (`housing_build_steps.skill_id`, target type
 Building) when the bag holds the stage material, else `NOT_ENOUGH_REQUIRED_ITEM`; the server takes the item and the
 labor and answers `SCHouseBuildProgress` -> `HOUSE_STEP_INFO_UPDATED`. The construction window's step list comes
@@ -82,16 +89,18 @@ interacted with) they answer for the current house.
 
 | Group | Methods |
 |---|---|
-| House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` |
-| Owner | `SetHouseName`, `SetHousePermission` (sent only when it changed), `SetHouseAllowRecover` (a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
+| House | `IsMyHouse`, `IsHouseUnderConstruction`, `GetHouseName`, `GetHouseOwnerName`, `GetHouseBaseProgress`, `GetHouseRemainProgress`, `GetHousePermission` (server enum + 1, always-public), `GetHouseAllowRecover`, `IsCastle`, `GetHouseDecoCount` (`placed - housing_binding_doodads`, `absolute_deco_limit - housing_binding_doodads`, `FUN_394796B0`) |
+| Actability | `GetActabilityDecoCount`, `GetDecoActabilityPoint(i)` (`name`, `decoPoint`), `GetDecoActabilityByType(i)` (totals `type`/`totalDecoPoint`/`totalPoint`, item rows `name`/`decoPoint`), `GetDecoActabilityLimitGroup()` (`name`, `arrangeCount`, `maxCount` from `housing_deco_limit_elems`); the house entries group `housing_decorations.actability_group_id` and sum `actability_up`, the limit rows count `deco_actability_group_id` |
+| Owner | `SetHouseName`, `SetHousePermission` (owner only; one `CSChangeHousePermission` with the server enum, none for an always-public design 0x80, family needs a family 0x178, guild needs an expedition 0x137), `SetHouseAllowRecover` (owner; a toggle, only when it differs), `Demolish` (skill 11404 on the house) |
 | Construction | `GetHousingModelName`, `GetHousingModelConstructionInfo`, `GetHouseConstructionStepInfo`, `NextStepFromBuildCheck`, `PrevStepFromBuildCheck` |
 | Tax | `CountTaxItemForTax` (one certificate 31891 / 31892 per gold, rounded up; `featureSet.taxItem`), the `HOUSE_TAX_INFO` event |
 | Sale | `GetHouseSaleInfo`, `GetHouseSaleItemInfo` (one appraisal certificate 28085 per 100 gold, at least one), `SetHouseForSale`, `CancelHouseForSale`, `BuyHouse` (refused with `HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY` locally) |
 
-Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO`, `HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`,
-`BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`, `HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`,
-`HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`, `HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`,
-`HOUSE_DECO_UPDATED`.
+Events raised: `HOUSE_INTERACTION_START/END`, `HOUSE_TAX_INFO` (raw `weeksWithoutPay`, the native order),
+`HOUSE_STEP_INFO_UPDATED`, `HOUSE_BUILD_INFO`, `BUILDER_STEP`, `BUILDER_END`, `UNIT_NAME_CHANGED`,
+`HOUSE_PERMISSION_UPDATED`, `HOUSE_INFO_UPDATED`, `HOUSE_SET_SELL_SUCCESS`, `HOUSE_CANCEL_SELL_SUCCESS`,
+`HOUSE_BUY_SUCCESS`, `HOUSE_SALE_SUCCESS`, `HOUSE_DECO_UPDATED`, `CHANGE_ACTABILITY_DECO_NUM` (a change of the
+received actability points, native `0x23c`, raised by `FUN_3907BA10`).
 
 ## Map
 
@@ -107,8 +116,12 @@ cursor ray).
 
 ## Not done
 
-* Furniture (`CSDecorateHouse`): the decoration tables are loaded, the window's actability calls answer empty. The
-  server attaches the doodad to the house; whether the position is house-local is not verified.
+* Furniture placement (`CSDecorateHouse`): the decoration and actability tables are loaded and the owner menu's
+  counters answer; the placement builder (ghost, surface/garden/overlap checks, `CSDecorateHouse`) is slice 7a and
+  not implemented. The server attaches the doodad to the house; whether the position is house-local is not verified.
+* The actability list order is the attached-doodad object-id order (the doodad store is a map); the native keeps
+  placement order. `GetDecoActabilityByType`'s `totalPoint` is the received proficiency point (the native adds its
+  equipment bonus too).
 * Planting on farms is `ingame/ground_target/plant.rs` (`CSCreateDoodad`).
 * Siege / castle land rules, the house's door and stair models, house HP and repair.
 

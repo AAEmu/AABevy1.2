@@ -289,6 +289,9 @@ pub(crate) fn expedition_fixture() { expedition::fixture::run(); }
 pub(crate) fn territory_fixture() { territory::fixture::run(); }
 
 #[allow(dead_code)]
+pub(crate) fn house_owner_fixture() { housing::fixture::run(); }
+
+#[allow(dead_code)]
 pub(crate) fn npc_fixture() { dialog::npc_fixture(); }
 
 #[allow(dead_code)]

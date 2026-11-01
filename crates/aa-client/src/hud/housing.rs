@@ -47,6 +47,19 @@ const PICK_SHARE: f32 = 0.8;
 /// A press and release further apart than this (logical pixels) is a drag, not a click.
 const CLICK_SLOP: f32 = 6.0;
 
+/// One decoration placed on the house (`housing_decorations` resolved through its item).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Furniture {
+    /// The furniture item (`item_housing_decorations.item_id`).
+    item: u32,
+    /// `housing_decorations.actability_group_id` (the player's proficiency group, 0 for none).
+    actability_group: u32,
+    /// `housing_decorations.actability_up` (`GetDecoActabilityPoint`'s `decoPoint`).
+    points: u32,
+    /// `housing_decorations.deco_actability_group_id` (the furniture limit group).
+    deco_group: u32,
+}
+
 /// What the window shows of the house interacted with (refreshed by [`sync`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Current {
@@ -58,7 +71,41 @@ struct Current {
     name: String,
     mine: bool,
     tax: Option<HouseTaxInfo>,
+    /// Every doodad attached to the house, the built-in furniture included.
     decorations: u32,
+    /// The placed furniture the decoration tables know, in attachment order.
+    furniture: Vec<Furniture>,
+    /// The design's category as `HOUSE_INTERACTION_START` names it.
+    view_type: Option<&'static str>,
+    always_public: bool,
+}
+
+/// `HOUSE_INTERACTION_START`'s view type from `housings.category_id` (`393BEFD0`, `DEC:780640-780672`).
+fn view_type(category_id: u32) -> Option<&'static str> {
+    match category_id {
+        7 => Some("seafarm"),
+        8 | 16 | 17 => Some("farm"),
+        9 | 10 | 11 | 12 | 15 | 18 => Some("house"),
+        _ => None,
+    }
+}
+
+/// The furniture of `attachments` the decoration tables know (`FUN_3932FD00`'s house list).
+fn furniture_of(attachments: &[aa_net::housing::HousingAttachment], tables: Option<&super::data::housing::Tables>) -> Vec<Furniture> {
+    let Some(tables) = tables else { return Vec::new() };
+    attachments
+        .iter()
+        .filter_map(|a| {
+            let design = tables.decoration_design_for_item(a.item_template_id)?;
+            let d = tables.decorations.get(&design)?;
+            Some(Furniture {
+                item: a.item_template_id,
+                actability_group: d.actability_group_id,
+                points: d.actability_up,
+                deco_group: d.deco_actability_group_id,
+            })
+        })
+        .collect()
 }
 
 impl Current {
@@ -78,6 +125,7 @@ enum Signal {
     Start,
     End,
     Tax,
+    ChangeActability,
     Step,
     BuildInfo(ConstructHouseTax),
     BuilderStep,
@@ -112,6 +160,8 @@ struct View {
     clicks: u32,
     pointer_picked: Option<u32>,
     last_tax: Option<HouseTaxInfo>,
+    /// The player's actability points, as `CHANGE_ACTABILITY_DECO_NUM` sees them change.
+    actability: Vec<(u32, Option<i32>)>,
 }
 
 #[derive(Clone, Default)]
@@ -248,16 +298,42 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
             Ok(())
         })?,
     )?;
-    let s = state.clone();
+    let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "SetHousePermission",
         lua.create_function(move |_, (_, permission): (Value, i64)| {
             let mut v = s.0.borrow_mut();
-            let Some(c) = v.current.as_ref().filter(|c| c.mine) else { return Ok(()) };
-            if permission != c.permission() && (1..=4).contains(&permission) {
-                let tl = c.tl_id;
-                v.commands.push(Command::House(HouseCommand::ChangePermission { tl, permission: (permission - 1) as u8 }));
+            let Some((tl, design, current, mine)) = v
+                .current
+                .as_ref()
+                .map(|c| (c.tl_id, c.design, c.permission(), c.mine))
+            else {
+                return Ok(());
+            };
+            // `FUN_3932BF90`: an always-public design refuses every change (0x80), before the owner test.
+            if template(&b, design, |t| t.always_public) {
+                v.notices.push("HOUSE_CANNOT_CHANGE_PERMISSION".into());
+                return Ok(());
             }
+            if !mine || permission == current || !(1..=4).contains(&permission) {
+                return Ok(());
+            }
+            // `SetHousePermission` passes the radio's 1-based value; the packet carries the server enum.
+            let permission = (permission - 1) as u8;
+            if permission == 3 {
+                // `FUN_39300000`: the family permission needs a family (0x178).
+                if b.borrow().family.own_id() == 0 {
+                    v.notices.push("FAMILY_NOT_EXIST".into());
+                    return Ok(());
+                }
+            } else if permission == 1 {
+                // `FUN_392F80E0`: the guild permission needs an expedition (0x137).
+                if b.borrow().expedition.own_id() == 0 {
+                    v.notices.push("CHAT_NOT_IN_EXPEDITION".into());
+                    return Ok(());
+                }
+            }
+            v.commands.push(Command::House(HouseCommand::ChangePermission { tl, permission }));
             Ok(())
         })?,
     )?;
@@ -286,38 +362,116 @@ fn install_house(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::
             Ok(())
         })?,
     )?;
-    // furniture: the count against the design's limit; no decoration proficiency in this data
+    // `FUN_394796B0`: both counts exclude the design's built-in furniture (`housing_binding_doodads`).
     let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetHouseDecoCount",
         lua.create_function(move |_, _: Value| {
             let v = s.0.borrow();
-            let limit = v.current.as_ref().map_or(0, |c| template(&b, c.design, |t| t.deco_limit));
-            Ok((v.current.as_ref().map_or(0, |c| c.decorations), limit))
+            let (attached, builtins, absolute) = v.current.as_ref().map_or((0, 0, 0), |c| {
+                let (builtins, absolute) = template(&b, c.design, |t| (t.binding_doodads, t.absolute_deco_limit));
+                (c.decorations, builtins, absolute)
+            });
+            Ok((i64::from(attached) - i64::from(builtins), i64::from(absolute) - i64::from(builtins)))
         })?,
     )?;
-    h.set("GetActabilityDecoCount", lua.create_function(|_, _: Value| Ok(0))?)?;
-    h.set("GetDecoActabilityLimitGroup", lua.create_function(|lua, _: Value| lua.create_table())?)?;
+    let s = state.clone();
+    h.set(
+        "GetActabilityDecoCount",
+        lua.create_function(move |_, _: Value| {
+            let v = s.0.borrow();
+            Ok(v.current.as_ref().map_or(0, |c| actability_entries(&c.furniture).len() as i64))
+        })?,
+    )?;
+    let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetDecoActabilityPoint",
-        lua.create_function(|lua, _: Value| {
+        lua.create_function(move |lua, (_, index): (Value, i64)| {
+            let v = s.0.borrow();
+            let Some(c) = v.current.as_ref() else { return Ok(Value::Nil) };
+            let entries = actability_entries(&c.furniture);
+            let Some(&(group, points)) = usize::try_from(index - 1).ok().and_then(|i| entries.get(i)) else {
+                return Ok(Value::Nil);
+            };
+            let name = {
+                let data = b.borrow();
+                crate::hud::crafting::actability_group_name(&data, group).unwrap_or("").to_owned()
+            };
             let t = lua.create_table()?;
-            t.set("decoPoint", 0)?;
-            t.set("name", "")?;
-            Ok(t)
+            t.set("name", name)?;
+            t.set("decoPoint", points)?;
+            Ok(Value::Table(t))
         })?,
     )?;
+    let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "GetDecoActabilityByType",
-        lua.create_function(|lua, (_, index): (Value, i64)| {
-            let t = lua.create_table()?;
-            t.set("totalDecoPoint", 0)?;
-            t.set("totalPoint", 0)?;
-            t.set("type", index)?;
-            Ok((t, lua.create_table()?))
+        lua.create_function(move |lua, (_, index): (Value, i64)| {
+            let v = s.0.borrow();
+            let Some(c) = v.current.as_ref() else { return Ok((Value::Nil, Value::Nil)) };
+            let entries = actability_entries(&c.furniture);
+            let Some(&(group, points)) = usize::try_from(index - 1).ok().and_then(|i| entries.get(i)) else {
+                return Ok((Value::Nil, Value::Nil));
+            };
+            let data = b.borrow();
+            let totals = lua.create_table()?;
+            totals.set("type", group)?;
+            totals.set("totalDecoPoint", points)?;
+            totals.set("totalPoint", crate::hud::crafting::proficiency(&data, group).map_or(0, |(point, _)| point))?;
+            let items = lua.create_table()?;
+            for (i, f) in c.furniture.iter().filter(|f| f.actability_group == group).enumerate() {
+                let row = lua.create_table()?;
+                let name = data.game.get().and_then(|g| g.items.get(&f.item)).map(|i| i.named.name.clone()).unwrap_or_default();
+                row.set("name", name)?;
+                row.set("decoPoint", f.points)?;
+                items.set(i + 1, row)?;
+            }
+            Ok((Value::Table(totals), Value::Table(items)))
+        })?,
+    )?;
+    let (s, b) = (state.clone(), bridge.clone());
+    h.set(
+        "GetDecoActabilityLimitGroup",
+        lua.create_function(move |lua, _: Value| {
+            let v = s.0.borrow();
+            let Some(c) = v.current.as_ref() else { return lua.create_table() };
+            let tables = b.borrow();
+            let Some(game) = tables.game.get() else { return lua.create_table() };
+            let out = lua.create_table()?;
+            let Some(design) = game.housing.housings.get(&c.design) else { return Ok(out) };
+            let mut row = 1;
+            for elem in game.housing.deco_limit_elems(design.housing_deco_limit_id) {
+                let Some(name) = game.housing.deco_actability_groups.get(&elem.deco_actability_group_id) else {
+                    continue;
+                };
+                if name.is_empty() {
+                    continue;
+                }
+                let arrange = c.furniture.iter().filter(|f| f.deco_group == elem.deco_actability_group_id).count();
+                let entry = lua.create_table()?;
+                entry.set("name", name.as_str())?;
+                entry.set("arrangeCount", arrange)?;
+                entry.set("maxCount", elem.count)?;
+                out.set(row, entry)?;
+                row += 1;
+            }
+            Ok(out)
         })?,
     )?;
     Ok(())
+}
+
+/// `FUN_39325EC0`'s house list: one entry per decoration actability group, in placement order, with the
+/// `actability_up` of its furniture summed.
+fn actability_entries(furniture: &[Furniture]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for f in furniture.iter().filter(|f| f.actability_group != 0) {
+        match out.iter_mut().find(|(group, _)| *group == f.actability_group) {
+            Some((_, points)) => *points += f.points,
+            None => out.push((f.actability_group, f.points)),
+        }
+    }
+    out
 }
 
 /// What the HUD's static housing tables (localized names, taxes, limits) say of `design`, once loaded.
@@ -489,8 +643,20 @@ fn notice(rt: &UiRuntime, name: &str) {
 fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
     let lua = &rt.lua;
     match signal {
-        Signal::Start => rt.fire_event("HOUSE_INTERACTION_START", ("housing", "housing")),
+        Signal::Start => {
+            let (view_type, always_public) = state
+                .0
+                .borrow()
+                .current
+                .as_ref()
+                .map_or((None, false), |c| (c.view_type, c.always_public));
+            rt.fire_event(
+                "HOUSE_INTERACTION_START",
+                ("housing", view_type.map(str::to_owned), always_public),
+            );
+        }
         Signal::End => rt.fire_event("HOUSE_INTERACTION_END", ()),
+        Signal::ChangeActability => rt.fire_event("CHANGE_ACTABILITY_DECO_NUM", ()),
         Signal::Tax => {
             let tax = state.0.borrow().current.as_ref().and_then(|c| c.tax.clone());
             let Some(tax) = tax else { return };
@@ -502,7 +668,7 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
                     tax.dominion_tax_rate,
                     tax.money_amount2.to_string(),
                     due,
-                    tax.weeks_without_pay.max(0),
+                    tax.weeks_without_pay,
                     tax.is_already_paid,
                     tax.is_heavy_tax_house,
                     tax.money_amount.to_string(),
@@ -566,16 +732,31 @@ fn garden(template_id: u32) -> f32 {
     house_data::get().and_then(|d| d.designs.get(&template_id)).map_or(5.0, |d| d.garden_radius)
 }
 
-/// The facts of house unit `obj_id` the window reads.
-fn current_of(obj_id: u32, units: &Units, houses: &Houses, doodads: &Doodads, me: u32, tax: Option<HouseTaxInfo>) -> Option<Current> {
+/// The facts of house unit `obj_id` the window reads; `tables` is the HUD's static housing data, when loaded.
+fn current_of(
+    obj_id: u32,
+    units: &Units,
+    houses: &Houses,
+    doodads: &Doodads,
+    me: u32,
+    tax: Option<HouseTaxInfo>,
+    tables: Option<&super::data::housing::Tables>,
+) -> Option<Current> {
     let unit = units.get(obj_id)?;
     let UnitKind::Housing { tl_id, template_id, .. } = unit.kind else { return None };
     let snapshot = houses.by_tl_id.get(&tl_id).filter(|h| !h.demolished).map(|h| h.snapshot.clone());
     let name = if unit.name.is_empty() { snapshot.as_ref().map(|s| s.name.clone()).unwrap_or_default() } else { unit.name.clone() };
     let mine = snapshot.as_ref().is_some_and(|s| s.owner_id == me && me != 0);
-    let decorations = aa_net::housing_attachments(doodads, units).filter(|a| a.house_obj_id == obj_id).count() as u32;
+    let mut attachments: Vec<_> = aa_net::housing_attachments(doodads, units).filter(|a| a.house_obj_id == obj_id).collect();
+    // The native house list keeps placement order; the doodad store is a map, so use the object id as the stable proxy.
+    attachments.sort_unstable_by_key(|a| a.doodad_obj_id);
+    let decorations = attachments.len() as u32;
+    let furniture = furniture_of(&attachments, tables);
+    let (view_type, always_public) = tables
+        .and_then(|t| t.housings.get(&template_id))
+        .map_or((None, false), |t| (view_type(t.category_id), t.always_public));
     let tax = tax.filter(|t| t.tl_id == tl_id).or_else(|| houses.by_tl_id.get(&tl_id).and_then(|h| h.tax.clone()));
-    Some(Current { obj_id, tl_id, design: template_id, snapshot, name, mine, tax, decorations })
+    Some(Current { obj_id, tl_id, design: template_id, snapshot, name, mine, tax, decorations, furniture, view_type, always_public })
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -647,6 +828,15 @@ fn sync(
     let count = |t: u32| inventory.bag.iter().flatten().filter(|i| i.template_id == t).map(|i| i64::from(i.count)).sum::<i64>();
     v.tax_certificates = count(TAX_CERTIFICATE) + count(BOUND_TAX_CERTIFICATE);
     v.appraisals = count(APPRAISAL_CERTIFICATE);
+    // `FUN_3907BA10`: a change of the player's actability points refreshes the house actability counters.
+    let actability = {
+        let d = bridge.0.borrow();
+        crate::hud::crafting::actability_signature(&d)
+    };
+    if v.actability != actability {
+        v.actability = actability;
+        v.signals.push(Signal::ChangeActability);
+    }
 
     // the builder: its steps, the build window's buttons, the dev hooks
     for signal in builder_signals.p1().read() {
@@ -720,7 +910,7 @@ fn sync(
         }
     }
 
-    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &mut last_tax);
+    interact_and_refresh(&mut v, None, (&units, &houses, &doodads, &inventory), (pos, me), &bridge.0, &mut last_tax);
     v.last_tax = last_tax;
     drop(v);
     flush_view(&rt, &state, &mut net);
@@ -731,6 +921,7 @@ fn interact_and_refresh(
     picked: Option<u32>,
     (units, houses, doodads, inventory): (&Units, &Houses, &Doodads, &Inventory),
     (pos, me): (Vec3, u32),
+    bridge: &Shared,
     last_tax: &mut Option<HouseTaxInfo>,
 ) {
     // the interaction: a right click or the dev hook on a house in reach
@@ -779,7 +970,11 @@ fn interact_and_refresh(
     }
     if let Some(obj_id) = started {
         let had = v.current.is_some();
-        v.current = current_of(obj_id, units, houses, doodads, me, None);
+        {
+            let data = bridge.borrow();
+            let tables = data.game.get().map(|g| &g.housing);
+            v.current = current_of(obj_id, units, houses, doodads, me, None, tables);
+        }
         if had {
             v.signals.insert(0, Signal::End);
         }
@@ -798,9 +993,13 @@ fn interact_and_refresh(
                 };
                 Vec2::new(u.pos.x - pos.x, u.pos.y - pos.y).length() <= garden + LEAVE
             });
-        let next = near
-            .then(|| current_of(obj_id, units, houses, doodads, me, last_tax.clone()))
-            .flatten();
+        let next = if near {
+            let data = bridge.borrow();
+            let tables = data.game.get().map(|g| &g.housing);
+            current_of(obj_id, units, houses, doodads, me, last_tax.clone(), tables)
+        } else {
+            None
+        };
         match next {
             Some(next) => {
                 let deco = v
@@ -872,6 +1071,7 @@ fn pointer_interaction(
         picked,
         (&units, &houses, &doodads, &inventory),
         (pos, me),
+        &bridge.0,
         &mut last_tax,
     );
     v.last_tax = last_tax;
@@ -913,5 +1113,7 @@ pub fn plugin(app: &mut App) {
     ).add_systems(Update, pointer_interaction.after(super::PointerFinished).after(sync).run_if(in_state(Screen::InGame)).run_if(super::hud_up));
 }
 
+#[allow(dead_code)]
+pub(super) mod fixture;
 #[cfg(test)]
 mod tests;
