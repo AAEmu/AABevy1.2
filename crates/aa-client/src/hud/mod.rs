@@ -111,7 +111,7 @@ mod map_quests;
 mod map_services;
 mod map_slaves;
 mod notices;
-mod panels;
+pub(crate) mod panels;
 mod party;
 mod period;
 mod portal;
@@ -146,7 +146,7 @@ mod tipitem;
 mod tips;
 mod trade;
 mod trial;
-mod usable;
+pub(crate) mod usable;
 mod user_music;
 pub(crate) use user_music::MusicItemUsed;
 
@@ -183,6 +183,33 @@ pub(crate) fn trade_fixture() {
 
 pub(crate) fn keybindings_runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
     loot_roll::fixture::runtime(width, height)
+}
+
+/// The real World-stage HUD without a server, for the Options-open regression example.
+#[allow(dead_code)]
+pub(crate) fn options_hang_runtime(width: f32, height: f32) -> Result<UiRuntime, Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    let mut rt = UiRuntime::new("en_us", width, height)?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
+    let bridge = Rc::new(RefCell::new(api::HudData::default()));
+    {
+        let mut d = bridge.borrow_mut();
+        d.snapshot.unit_id = "100".into();
+        d.snapshot.name = "Options fixture".into();
+        d.snapshot.level = 30;
+        d.snapshot.hp = 100;
+        d.snapshot.max_hp = 100;
+        d.panels.actions_known = true;
+        d.panels.bag_slots = 50;
+        assert!(d.game.0.set(data::GameData::load(&db)?).is_ok());
+    }
+    api::install(&mut rt, &bridge)?;
+    rt.run_stage(aa_ui::Stage::World);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    api::enter_world(&rt, &bridge, &aa_net::state::Chat::default());
+    Ok(rt)
 }
 
 #[allow(dead_code)]
