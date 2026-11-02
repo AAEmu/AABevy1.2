@@ -963,10 +963,10 @@ pub(super) fn cancel_walk(data: &mut HudData) -> bool {
     data.dialog.approach.take().is_some()
 }
 
-/// The player is on a slave seat or driving: a forward key would drive the vehicle, so the talk walk must not
-/// run. Riding a mate is not a seat (`player_attachment` also reports the mate): the player still walks.
+/// The player is on a slave seat, driving or sitting on a seat doodad: a forward key would drive the vehicle
+/// (or the seat blocks it), so the talk walk must not run. Riding a mate still walks.
 fn seated_or_driving(data: &HudData) -> bool {
-    data.mounted.slave_seat().is_some() || data.mounted.local_cart.is_some()
+    data.mounted.slave_seat().is_some() || data.mounted.local_cart.is_some() || data.doodad.seated
 }
 
 /// What one frame of the walk to a right-clicked NPC decides.
@@ -1861,6 +1861,17 @@ mod tests {
         if !with_ui(&mut app) { return; }
         npc_events(&mut app);
         shared.borrow_mut().mounted.local_cart = Some((31, 0.0));
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_none());
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_player_seated_on_a_doodad_does_not_hold_w_for_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        shared.borrow_mut().doodad.seated = true;
         right_click(&mut app, 20);
         assert!(shared.borrow().dialog.approach.is_none());
         assert!(!w_held(&app));

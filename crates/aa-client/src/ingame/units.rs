@@ -467,14 +467,6 @@ impl Views {
             self.source_generation += 1;
             self.doodads.insert(doodad.obj_id,View { announced_at:now, source_generation:self.source_generation, doodad_source:Some(doodad.clone()), ..default() });
         } else if let Some(view) = self.doodads.get_mut(&doodad.obj_id) {
-            // a phase/model change drops the old model's bounds before the new model is built
-            if view
-                .doodad_source
-                .as_ref()
-                .is_some_and(|old| old.func_group_id != doodad.func_group_id)
-            {
-                view.bounds = None;
-            }
             view.announced_at = now;
             view.doodad_source = Some(doodad.clone());
         }
@@ -554,6 +546,13 @@ impl Views {
     /// real collision shape; the model bounds are the closest recovered shape).
     pub(crate) fn doodad_bounds(&self, obj_id: u32) -> Option<(Vec3, Vec3)> {
         self.doodads.get(&obj_id).and_then(|v| v.bounds)
+    }
+
+    /// The model phase changed: keep the drawn model's bounds until its replacement is built.
+    pub(crate) fn set_doodad_bounds(&mut self, obj_id: u32, bounds: Option<(Vec3, Vec3)>) {
+        if let Some(view) = self.doodads.get_mut(&obj_id) {
+            view.bounds = bounds;
+        }
     }
 
     /// Source lifetime of the currently rendered doodad root.

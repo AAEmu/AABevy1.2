@@ -794,7 +794,7 @@ mod tests {
     }
 
     /// A neutral unit whose attackable bit is false: a flag case the decompile has not recovered. Real
-    /// neutral units stay attackable (see `panels::an_npcs_tendency...`).
+    /// neutral units stay attackable (see `panels::neutral_npcs_stay_attackable_and_friendly_npcs_are_not`).
     fn neutral_npc() -> TargetSnap {
         TargetSnap {
             attackable: false,
@@ -988,7 +988,7 @@ mod tests {
     }
 
     #[test]
-    fn an_auto_attack_or_hostile_skill_on_a_neutral_npc_is_refused_before_sending() {
+    fn an_auto_attack_or_hostile_skill_on_a_friendly_npc_is_refused_before_sending() {
         // A friendly NPC is refused with 0x22 `INVALID_TARGET` (FUN_39837d60 reason 1 is a character only).
         for skill in [2, 18132] {
             let mut app = press_app(skill, "friendly", false, 4, "npc");

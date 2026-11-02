@@ -1007,8 +1007,8 @@ target** (`+0x3c26` is the target's dead flag, set by `FUN_390b4df0`; `FUN_393be
 it walks to the NPC (`FUN_390a6af0`, the same scripted-forward walk the mount and doodad approaches
 use) and `CSStartInteraction` is sent only when the gap is inside the reach (2026-11-01). A target
 change, any F use (also when a doodad or loot takes the key), an in-reach doodad use or a click on
-another/hostile unit cancels the walk; a player on a slave seat or driving a cart does not start it (the
-forward key would drive the vehicle). Riding a mate still walks. Sending revalidates the selected mailbox against all
+another/hostile unit cancels the walk; a player on a slave seat, driving a cart or sitting on a seat doodad
+does not start it (the forward key would drive the vehicle or the seat blocks it). Riding a mate still walks. Sending revalidates the selected mailbox against all
 currently nearby mailboxes, rather than requiring it to remain the nearest. Hotkey consumption
 now completes before gameplay input, so Ctrl-E does not also move the character right.
 
