@@ -421,21 +421,25 @@ portal and every one is a `VehicleModel` or `ShipModel`; slave 15 (the rowboat) 
 has no spawn clip (only `fist_ba_relaxed_idle` and `dead_01`), so the emergence plus its portal is the summon visual.
 
 `vehicle::track_summon_portals` keeps the SC061 timeline ids whose `hideSpawnEffect` is false in `SummonPortals`
-(until the unit root exists, like the 1.2 pending list, capped at 64 so an id that never draws cannot grow it all
-session). `spawn_summon_portals` resolves the id to the unit, skips `portal_time <= 0`, starts
+(until the unit root exists, like the 1.2 pending list, capped at 64). A later creation with `hideSpawnEffect` for
+the same timeline id clears the wait, and an entry whose unit never appears expires 10 s after the packet (1.2
+resolves against unit existence, not drawing). `spawn_summon_portals` resolves the ids in one pass over the drawn
+roots, skips `portal_time <= 0`, starts
 `SummonEmergence` and the world-anchored portal at the plane point, and plays the prefab's `portal_exhaust` if it has
 one (the galleons do, the tractor does not). `animate_summon_emergence` moves the unit root from the start to its
-position; `end_summon_portals` stops emission at `portal_time` (`FxRun::stop_emitting`) and the effects despawn after
-their last particles fade. A vehicle that merely streams into view later was never announced by SC061 near the
+position; `end_summon_portals` stops emission at `portal_time` (`FxRun::stop_emitting`), and
+`despawn_summon_portal_effects` removes each effect after its longest particle life (with a fallback cap) so a
+continuous or rebuilt simulation cannot linger. A vehicle that merely streams into view later was never announced by SC061 near the
 client, so it has no entry and plays none; a creation with `hideSpawnEffect` plays none either. Both controls are in
 `examples/slave_summon.rs` and the unit tests.
 
 Approximation: 1.2 also clips the model at the portal plane (model vfunc 0xf8) and toggles the model's enable state
-around the emergence (model vfunc 0x1a4). The Bevy `StandardMaterial` path has no per-material clip plane, so the hull
-can show behind the portal while it emerges; the portal effect covers most of the seam, and the enable call has no
-direct equivalent. `h` stands in for the native `[bounds+0x28]` with the largest horizontal half extent of the
-combined model bounds. The group's `FxSound` item is not played yet (the particle portal is); the pending list
-survives visibility loss like the 1.2 list.
+around the emergence (model vfunc 0x1a4). The clip plane is **not implemented** in this slice: a per-material
+discard needs an `ExtendedMaterial`/shader extension across the vehicle's `StandardMaterial` parts, and the hull can
+show behind the portal while it emerges (the portal effect covers most of the seam). The enable call has no direct
+equivalent. `h` stands in for the native `[bounds+0x28]` with the largest horizontal half extent of the combined
+model bounds. The group's `FxSound` item is not played yet (the particle portal is); the pending list survives
+visibility loss like the 1.2 list.
 
 ### Damage states (S15)
 

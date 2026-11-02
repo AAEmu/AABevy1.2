@@ -118,6 +118,7 @@ fn main() -> AppExit {
                 ingame::vehicle::spawn_summon_portals,
                 ingame::vehicle::animate_summon_emergence,
                 ingame::vehicle::end_summon_portals,
+                ingame::vehicle::despawn_summon_portal_effects,
                 ingame::vehicle::cleanup_summon_portals,
                 check,
             )
@@ -286,13 +287,17 @@ fn check(
         let (transform, emergence) = roots.single().expect("the summoned cart's emergence");
         assert!(emergence.ended, "the emergence ends at portal_time");
         assert!((transform.translation - emergence.end).length() < 1e-3, "{:?}", transform.translation);
-        assert!(effects.is_empty(), "the portal stops emitting at the end event 5");
+        assert!(
+            effects.iter().all(|(_, marker)| marker.stopped),
+            "the portal stops emitting at the end event 5"
+        );
         info!("slave_summon: emergence ended at {:?}", emergence.end);
         check.ended = true;
     }
     if check.ended && !check.gone && elapsed >= GONE_AT {
         let left: Vec<&str> = portal_fx.iter().map(|effect| effect.name.as_str()).filter(|name| name.contains("portal_tank")).collect();
         assert!(left.is_empty(), "the portal particles fade out: {left:?}");
+        assert!(effects.is_empty(), "the capped portal effects are despawned");
         info!("slave_summon: ok (emergence, portal end and the streamed-in control match 1.2)");
         check.gone = true;
         if !aa_dev::args()

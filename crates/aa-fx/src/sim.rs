@@ -2122,6 +2122,60 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_looping_effect_does_not_restart_and_a_rebuilt_sim_stays_stopped() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params Continuous="true"/><Childs><Particles Name="e"><Params Continuous="true" Count="1" ParticleLifeTime="0.4" Texture="textures/x.dds" Speed="0"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let effect = lib.get("a").unwrap();
+        assert!(effect.loops());
+        let mut run = crate::FxRun { def: Some(Arc::clone(effect)), ..Default::default() };
+        run.stop_emitting();
+        assert!(run.is_stopped());
+        assert!(!run.restarts(&crate::Effect::new("T.a")), "a stopped looping effect does not restart");
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut rebuilt = tree_sim(xml);
+        crate::stop_sim(&run, &mut rebuilt);
+        rebuilt.step(&c);
+        assert!(rebuilt.finished(), "a rebuilt sim is stopped from its first step");
+        assert_eq!(rebuilt.alive(), 0);
+    }
+
+    #[test]
+    fn a_stopped_real_portal_sim_stays_stopped_when_rebuilt() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let lib = Library::load("abillity_skill_table_m").unwrap();
+        let effect = lib.get("system_skill.portal_tank_main").unwrap();
+        let build = || {
+            let emitters = effect
+                .emitters
+                .iter()
+                .enumerate()
+                .map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER))
+                .collect();
+            EffectSim::new(emitters, 0.8, 1.0, 1.0)
+        };
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut sim = build();
+        sim.step(&c);
+        assert!(sim.alive() > 0, "the real portal emits");
+        let mut run = crate::FxRun { def: Some(Arc::clone(effect)), ..Default::default() };
+        assert!(run.max_particle_life().is_some_and(|life| life > 0.0));
+        run.stop_emitting();
+        sim.stop_emitting();
+        for _ in 0..400 {
+            sim.step(&c);
+        }
+        assert!(sim.finished(), "the live portal particles fade out");
+        let mut rebuilt = build();
+        crate::stop_sim(&run, &mut rebuilt);
+        rebuilt.step(&c);
+        assert!(rebuilt.finished(), "a rebuilt portal starts stopped");
+    }
+
+    #[test]
     fn stop_emitting_keeps_the_live_particles_until_they_fade() {
         let budget = AtomicI32::new(10_000);
         let mut s = sim(r#"Continuous="true" Count="1" ParticleLifeTime="0.5" Texture="textures/x.dds" Speed="0""#);

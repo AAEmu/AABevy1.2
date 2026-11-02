@@ -122,26 +122,36 @@ pub struct VehicleEffect;
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct VehicleExtent(pub f32);
 
-/// The timeline ids (packet `+0xc`, unit `+0x41c`) whose summon portal is still to play. `OnSlaveCreated`
-/// (`SCSlaveCreatedPacket`) pushes the slave's timeline id into `SlaveManager`'s pending list unless
-/// `hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`); `FUN_39349600` resolves that id to the unit
-/// (`FUN_3935e3f0`). A vehicle that only streams into view later has no entry, so it plays none.
+/// The timeline ids (packet `+0xc`, unit `+0x41c`) whose summon portal is still pending, and the
+/// `Time::elapsed_secs_f64` of their `SCSlaveCreatedPacket`. `OnSlaveCreated` pushes the timeline id into
+/// `SlaveManager`'s pending list unless `hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`); `FUN_39349600`
+/// resolves it against the unit (`FUN_3935e3f0`). A vehicle that only streams into view later has no entry.
 #[derive(Resource, Default)]
-pub struct SummonPortals(Vec<u16>);
+pub struct SummonPortals {
+    pending: HashMap<u16, f64>,
+}
 
-/// Most timeline ids kept waiting for their unit root: 1.2 keeps its pending list until the unit can be found, but
-/// a unit that is never drawn (created out of range) must not grow this list for the whole session.
+/// Most timeline ids kept waiting: a unit that is never drawn must not grow this map for the whole session.
 pub const SUMMON_PORTALS_MAX: usize = 64;
 
+/// How long a creation packet waits for its unit to appear. 1.2 resolves against unit existence, not drawing, but an
+/// entry that never resolves (created out of range and never streamed in) must expire; a drawn unit appears in well
+/// under this window.
+pub const SUMMON_PENDING_TTL: f64 = 10.0;
+
 impl SummonPortals {
-    fn announce(&mut self, tl_id: u16) {
-        if self.0.contains(&tl_id) {
-            return;
+    fn announce(&mut self, tl_id: u16, now: f64) {
+        if self.pending.len() >= SUMMON_PORTALS_MAX && !self.pending.contains_key(&tl_id)
+            && let Some(oldest) = self.pending.iter().min_by(|a, b| a.1.total_cmp(b.1)).map(|(id, _)| *id)
+        {
+            self.pending.remove(&oldest);
         }
-        if self.0.len() >= SUMMON_PORTALS_MAX {
-            self.0.remove(0);
-        }
-        self.0.push(tl_id);
+        // a reused timeline id restarts the wait instead of keeping the old packet's deadline
+        self.pending.insert(tl_id, now);
+    }
+
+    fn forget(&mut self, tl_id: u16) {
+        self.pending.remove(&tl_id);
     }
 }
 
@@ -164,11 +174,19 @@ pub struct SummonEmergence {
     pub ended: bool,
 }
 
-/// A summon portal effect: it stops emitting at `until` and its live particles fade (the 1.2 end event 5).
+/// Safety cap for a summon effect whose library def never resolved (no client pak or a failed read).
+const SUMMON_EFFECT_CAP: f64 = 30.0;
+
+/// A summon portal effect: it stops emitting at `until`, its live particles fade, and the fallback cap
+/// `despawn_at` removes it even if the simulation never finishes (the 1.2 end event 5 plus a bounded life).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SummonPortalEffect {
     /// The `Time::elapsed_secs_f64` at which emission stops.
     pub until: f64,
+    /// The `Time::elapsed_secs_f64` at which the entity is removed whatever the simulation does.
+    pub despawn_at: f64,
+    /// The end event was sent (the stop is not repeated every frame).
+    pub stopped: bool,
 }
 
 /// The world anchor of a summon portal group at the clip-plane point (`FUN_3909ea30`): it does not move with the
@@ -180,16 +198,27 @@ pub struct SummonPortalAnchor {
     pub until: f64,
 }
 
-/// Remembers the slaves `SCSlaveCreatedPacket` announced without `hideSpawnEffect` (see [`SummonPortals`]).
-pub fn track_summon_portals(events: Option<MessageReader<NetEvent>>, mut portals: ResMut<SummonPortals>) {
+/// Remembers the slaves `SCSlaveCreatedPacket` announced without `hideSpawnEffect`, and forgets a timeline id whose
+/// later creation is hidden. Entries expire in [`spawn_summon_portals`] so a packet for a unit that never appears
+/// cannot linger.
+pub fn track_summon_portals(
+    events: Option<MessageReader<NetEvent>>,
+    mut portals: ResMut<SummonPortals>,
+    time: Res<Time>,
+) {
     let Some(mut events) = events else {
         return;
     };
+    let now = time.elapsed_secs_f64();
     for NetEvent(event) in events.read() {
-        if let Event::Slave(SlaveEvent::Created(created)) = event
-            && !created.hide_spawn_effect
-        {
-            portals.announce(created.tl_id);
+        match event {
+            Event::Slave(SlaveEvent::Created(created)) if created.hide_spawn_effect => {
+                // a hidden creation for the same timeline id supersedes a pending visible one
+                portals.forget(created.tl_id);
+            }
+            Event::Slave(SlaveEvent::Created(created)) => portals.announce(created.tl_id, now),
+            Event::Slave(SlaveEvent::Removed { tl_id, .. }) => portals.forget(*tl_id),
+            _ => {}
         }
     }
 }
@@ -201,6 +230,9 @@ pub fn track_summon_portals(events: Option<MessageReader<NetEvent>>, mut portals
 /// `FUN_390ca1e0` -> `FUN_3909ea30` (x2game.dll.c:136679): it anchors the fx at `pos - forward * extent`, scale
 /// `unit_scale * portal_scale`, puts the unit at `pos - forward * 2 * extent` and clips it at the plane while
 /// `FUN_39097220` (x2game.dll.c:132165) moves it to `pos` over `portal_time`.
+///
+/// The pending map is keyed by timeline id and resolved in one pass over the drawn roots (no per-pending scan); an
+/// entry older than [`SUMMON_PENDING_TTL`] is dropped.
 pub fn spawn_summon_portals(
     mut commands: Commands,
     db: Option<Res<Db>>,
@@ -210,36 +242,41 @@ pub fn spawn_summon_portals(
     time: Res<Time>,
     roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform, Option<&VehicleExtent>)>,
 ) {
-    let (Some(db), Some(book), Some(units)) = (db, book, units) else {
-        return;
-    };
-    if portals.0.is_empty() {
+    if portals.pending.is_empty() {
         return;
     }
     let now = time.elapsed_secs_f64();
-    portals.0.retain(|tl_id| {
-        // 1.2 resolves the pending id against the unit's timeline id (+0x41c), not its object id
-        let Some(unit) = units.by_id.values().find(
-            |unit| matches!(unit.kind, aa_net::model::UnitKind::Slave { tl_id: id, .. } if id == *tl_id),
-        ) else {
-            return true;
+    portals
+        .pending
+        .retain(|_, announced| now - *announced <= SUMMON_PENDING_TTL);
+    if portals.pending.is_empty() {
+        return;
+    }
+    let (Some(db), Some(book), Some(units)) = (db, book, units) else {
+        return;
+    };
+    let mut resolved = Vec::new();
+    for (root, remote, damage, transform, extent) in &roots {
+        let Some(unit) = units.by_id.get(&remote.obj_id) else {
+            continue;
         };
-        let Some((root, damage, transform, extent)) = roots
-            .iter()
-            .find(|(_, remote, ..)| remote.obj_id == unit.obj_id)
-            .map(|(entity, _, damage, transform, extent)| (entity, damage, *transform, extent))
-        else {
-            return true;
+        let aa_net::model::UnitKind::Slave { tl_id, .. } = unit.kind else {
+            continue;
         };
+        if !portals.pending.contains_key(&tl_id) {
+            continue;
+        }
+        resolved.push(tl_id);
         let Some(portal) = db.slave_summon_portal(unit.kind.template_id()) else {
-            return false;
+            continue;
         };
         // `FUN_390cf130` only starts the emergence when `portal_time > DAT_3999c484` (0.0): slaves 54, 94 and 115
         // (time 0) get no portal.
         if portal.time <= 0.0 {
-            return false;
+            continue;
         }
         let extent = extent.map_or(1.0, |extent| extent.0);
+        // the unit's forward (cry +Y) in Bevy is -Z, projected to the horizontal plane like the native axis
         let mut axis = transform.rotation * Vec3::NEG_Z;
         axis.y = 0.0;
         let axis = axis.normalize_or_zero();
@@ -284,6 +321,8 @@ pub fn spawn_summon_portals(
                 ChildOf(anchor),
                 SummonPortalEffect {
                     until: now + f64::from(portal.time),
+                    despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
+                    stopped: false,
                 },
             ));
         }
@@ -299,8 +338,10 @@ pub fn spawn_summon_portals(
             duration: portal.time,
             ended: false,
         });
-        false
-    });
+    }
+    for tl_id in resolved {
+        portals.forget(tl_id);
+    }
 }
 
 /// Plays the prefab's authored `portal_exhaust` particle (inactive in the prefab) on the unit during the emergence,
@@ -327,7 +368,11 @@ fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, un
                     ..default()
                 },
                 ChildOf(root),
-                SummonPortalEffect { until },
+                SummonPortalEffect {
+                    until,
+                    despawn_at: until + SUMMON_EFFECT_CAP,
+                    stopped: false,
+                },
             ))
             .id();
         spawned.push(entity);
@@ -335,10 +380,14 @@ fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, un
     spawned
 }
 
-/// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`). A true model clip
-/// plane (1.2's model vfunc 0xf8) is not available on the Bevy `StandardMaterial` path, so the hull may show behind
-/// the portal during the emergence; the portal effect covers most of that seam.
-pub fn animate_summon_emergence(time: Res<Time>, mut roots: Query<(&mut Transform, &mut SummonEmergence)>) {
+/// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`), unless the local
+/// player is driving it (`Driven`, `cart::drive_cart` owns the transform then). The model clip plane (1.2's model
+/// vfunc 0xf8) is not implemented on the Bevy `StandardMaterial` path, so the hull may show behind the portal during
+/// the emergence; the portal effect covers most of that seam.
+pub fn animate_summon_emergence(
+    time: Res<Time>,
+    mut roots: Query<(&mut Transform, &mut SummonEmergence), Without<super::mount::Driven>>,
+) {
     let now = time.elapsed_secs_f64();
     for (mut transform, mut emergence) in &mut roots {
         if emergence.ended {
@@ -358,17 +407,35 @@ pub fn animate_summon_emergence(time: Res<Time>, mut roots: Query<(&mut Transfor
 }
 
 /// The end of the emergence (`FUN_39097390`): send the portal effect end event 5 (`FUN_393ed520(fx, 5, ...)`) by
-/// stopping emission and letting the live particles fade, instead of killing the effect.
+/// stopping emission and letting the live particles fade, instead of killing the effect. The effect still has a
+/// bounded life: `despawn_at` is reset to `until + the library's longest particle life`, and a safety-cap system
+/// removes it even when the stopped simulation never reports finished.
 pub fn end_summon_portals(
     time: Res<Time>,
-    mut commands: Commands,
-    mut effects: Query<(Entity, &SummonPortalEffect, &mut aa_fx::FxRun)>,
+    mut effects: Query<(Entity, &mut SummonPortalEffect, &mut aa_fx::FxRun)>,
 ) {
     let now = time.elapsed_secs_f64();
-    for (entity, effect, mut run) in &mut effects {
-        if now >= effect.until {
-            run.stop_emitting();
-            commands.entity(entity).remove::<SummonPortalEffect>();
+    for (_entity, mut effect, mut run) in &mut effects {
+        if effect.stopped || now < effect.until {
+            continue;
+        }
+        run.stop_emitting();
+        effect.stopped = true;
+        effect.despawn_at = now + f64::from(run.max_particle_life().unwrap_or(10.0)) + 0.25;
+    }
+}
+
+/// Removes a summon effect after `until` + its longest particle life (the fallback cap included), so a continuous
+/// effect that never finishes and a stopped sim that is rebuilt cannot linger.
+pub fn despawn_summon_portal_effects(
+    time: Res<Time>,
+    mut commands: Commands,
+    effects: Query<(Entity, &SummonPortalEffect)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, effect) in &effects {
+        if now >= effect.despawn_at {
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -932,6 +999,7 @@ impl Plugin for VehiclePlugin {
                     // the emergence drives the root after the server position, like the 1.2 unit state does
                     animate_summon_emergence.after(super::units::move_units),
                     end_summon_portals,
+                    despawn_summon_portal_effects,
                     cleanup_summon_portals,
                 )
                     .chain(),
@@ -1682,6 +1750,7 @@ mod tests {
                 spawn_summon_portals,
                 animate_summon_emergence,
                 end_summon_portals,
+                despawn_summon_portal_effects,
                 cleanup_summon_portals,
             )
                 .chain(),
@@ -1726,6 +1795,14 @@ mod tests {
             .collect()
     }
 
+    fn portal_markers(app: &mut App) -> Vec<(String, bool, f64)> {
+        app.world_mut()
+            .query::<(&aa_fx::Effect, &SummonPortalEffect)>()
+            .iter(app.world())
+            .map(|(effect, marker)| (effect.name.clone(), marker.stopped, marker.despawn_at))
+            .collect()
+    }
+
     fn created(tl_id: u16, hide: bool) -> NetEvent {
         NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
             owner_obj_id: 1,
@@ -1760,6 +1837,9 @@ mod tests {
             "the group's FxSound item"
         );
 
+        // a non-identity hull yaw: the emergence axis must be the hull's forward, not world -Z
+        let yaw = 0.8;
+        app.world_mut().get_mut::<Transform>(root).unwrap().rotation = Quat::from_rotation_y(yaw);
         app.world_mut().write_message(created(1, false));
         app.update();
         let effects = portal_effects(&mut app);
@@ -1775,6 +1855,11 @@ mod tests {
         let axis = emergence.axis;
         assert!(emergence.extent > 0.5, "extent {}", emergence.extent);
         assert!(axis.y.abs() < 1e-6 && (axis.length() - 1.0).abs() < 1e-4, "{axis:?}");
+        let rotation = app.world().get::<Transform>(root).expect("the root").rotation;
+        let mut hull_forward = rotation * Vec3::NEG_Z;
+        hull_forward.y = 0.0;
+        let hull_forward = hull_forward.normalize_or_zero();
+        assert!((axis - hull_forward).length() < 1e-5, "axis {axis:?} vs hull forward {hull_forward:?}");
         assert!((emergence.plane - (end - axis * emergence.extent)).length() < 1e-4);
         assert!((emergence.start - (end - axis * (2.0 * emergence.extent))).length() < 1e-4);
         let transform = *app.world().get::<Transform>(root).expect("the root");
@@ -1808,7 +1893,14 @@ mod tests {
         let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
         assert!(emergence.ended, "the emergence ends after portal_time");
         assert!((app.world().get::<Transform>(root).unwrap().translation - end).length() < 1e-4);
-        assert!(portal_effects(&mut app).is_empty(), "the portal stops emitting at the end");
+        let markers = portal_markers(&mut app);
+        assert_eq!(markers.len(), 2, "the effect is not killed by the end event");
+        assert!(markers.iter().all(|(_, stopped, _)| *stopped), "the end event stopped emission: {markers:?}");
+        // a continuous/never-finished effect still has a bounded life: the fallback cap despawns it
+        for _ in 0..360 {
+            app.update();
+        }
+        assert!(portal_markers(&mut app).is_empty(), "the stopped effect is despawned by its cap");
     }
 
     /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
@@ -1855,9 +1947,75 @@ mod tests {
         assert!(portal_effects(&mut app).is_empty(), "portal_time 0 plays no portal");
         assert!(app.world().get::<SummonEmergence>(root).is_none(), "portal_time 0 starts no emergence");
         assert!(
-            app.world().resource::<SummonPortals>().0.is_empty(),
+            app.world().resource::<SummonPortals>().pending.is_empty(),
             "the timeline id is consumed"
         );
+    }
+
+    /// The fallback cap despawns a summon effect that is not under a portal anchor (the prefab's `portal_exhaust` is
+    /// parented to the unit root), even when no simulation ever reports finished.
+    #[test]
+    fn a_summon_effect_is_despawned_at_its_cap() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((
+                aa_fx::Effect::new("T.a"),
+                SummonPortalEffect {
+                    until: 0.0,
+                    despawn_at: 0.0,
+                    stopped: true,
+                },
+            ))
+            .id();
+        app.add_systems(Update, despawn_summon_portal_effects);
+        app.update();
+        assert!(app.world().get_entity(entity).is_err(), "the cap removes the effect");
+    }
+
+    /// A later `hideSpawnEffect` creation for the same timeline id clears the pending wait, and an entry whose unit
+    /// never appears expires after [`SUMMON_PENDING_TTL`].
+    #[test]
+    fn a_hidden_creation_clears_the_pending_entry_and_old_entries_expire() {
+        let Some((mut app, _db, _root)) = hauler() else { return };
+        app.world_mut().write_message(created(99, false));
+        app.update();
+        assert!(app.world().resource::<SummonPortals>().pending.contains_key(&99));
+        app.world_mut().write_message(created(99, true));
+        app.update();
+        assert!(
+            !app.world().resource::<SummonPortals>().pending.contains_key(&99),
+            "a hidden creation clears the pending timeline id"
+        );
+        app.world_mut().write_message(created(98, false));
+        app.update();
+        assert!(app.world().resource::<SummonPortals>().pending.contains_key(&98));
+        for _ in 0..320 {
+            app.update();
+        }
+        assert!(
+            !app.world().resource::<SummonPortals>().pending.contains_key(&98),
+            "an unresolved packet expires"
+        );
+    }
+
+    /// The local player's drive (`Driven`, `cart::drive_cart`) owns the transform: the emergence must not fight it.
+    #[test]
+    fn a_driven_vehicle_keeps_its_emergence_from_moving_it() {
+        let Some((mut app, _db, root)) = hauler() else { return };
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        app.world_mut().entity_mut(root).insert(super::super::mount::Driven);
+        let placed = Vec3::new(4.0, 0.0, 0.0);
+        app.world_mut().get_mut::<Transform>(root).unwrap().translation = placed;
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(root).unwrap().translation,
+            placed,
+            "drive_cart owns the transform of a driven cart"
+        );
+        assert!(app.world().get::<SummonEmergence>(root).is_some());
     }
 
     /// `FUN_39097140` plays the prefab's authored `portal_exhaust` on the emerging unit (the galleons have one;
