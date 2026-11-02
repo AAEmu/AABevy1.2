@@ -475,26 +475,29 @@ item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no t
 
 The portal emergence code has **no ship branch**: `FUN_3909ea30`/`FUN_39097220` (x2game.dll.c:136679 / 132165) always
 slide the unit along its forward projected to the horizontal, through a vertical clip plane, for `portal_time`. The
-captured Eznan Cutter rises vertically and rights itself because `ShipUnitModel` carries a CryPhysics buoyancy body:
-`ShipUnitModel::Init` (`FUN_390e8b30`, x2game.dll.c:185704) accepts model subtype 4 and `ShipUnitModel::Update`
-(`FUN_390ebc50`, x2game.dll.c:187637) runs the base prefab update and then the ship helpers, while `FUN_390df580`
-(x2game.dll.c:179095) attaches the buoyancy: it scans the prefab's objects for names starting with `buoy`
-(`XlComparePrefixI`, x2game.dll.c:179531) and, when there are none, builds the float body from the ship descriptor's
-keel tube (`tube_length` / `tube_radius` / `tube_offset_z` / `keel_offset_z`), mass box (`mass_center_*` /
-`mass_box_size_*`) and floats it with `water_damping` / `water_density` / `water_resistance` (fallback at
-x2game.dll.c:179577 ff.; `galleon.xml/galleon.step_10galleon_normal` has no `buoy` object). So the captured
-rise/righting is the model's physics, not the portal animation.
+captured Eznan Cutter rises vertically and rights itself; the **inferred** attribution is its CryPhysics buoyancy
+body. `FUN_390df580` (x2game.dll.c:179095) builds that body: it scans the prefab's objects for names starting with
+`buoy` (`XlComparePrefixI`, x2game.dll.c:179531) and, when there are none, builds the float body from the ship
+descriptor's keel tube (`tube_length` / `tube_radius` / `tube_offset_z` / `keel_offset_z`), mass box
+(`mass_center_*` / `mass_box_size_*`) and floats it with `water_damping` / `water_density` / `water_resistance`
+(fallback at x2game.dll.c:179577 ff.; `galleon.xml/galleon.step_10galleon_normal` has no `buoy` object). It is
+reached through the model vtable (`FUN_390e2220` / `FUN_390e3530` / `FUN_390eb720`), **not** directly from
+`ShipUnitModel::Init`/`Update` (`FUN_390e8b30`, x2game.dll.c:185704 / `FUN_390ebc50`, x2game.dll.c:187637, which
+do not reference it); the captured rise/righting is therefore taken as the model physics, not the portal animation,
+but that link is **capture-inferred**, not proven by the decompile.
 
 The Bevy emergence reproduces the result for a `ShipModel` when a water surface is known at its position
-(`WaterQuery`): it keeps the native horizontal start (`end - axis * 2 * extent`) and linear slide, but starts the
-root with the hull top at the sea (`ship_models.mass_center_z + mass_box_size_z / 2`, via `Db::ship_hull_height`),
-pitched bow up, and eases the rise and the righting to upright over `portal_time`; the clip plane is the horizontal
-sea surface (normal +Y) instead of the vertical portal plane, so the submerged part is not drawn. The pitch is 50°
-(the capture's 45-60° mast/yard line); the pitch angle and the easing curve are **capture-inferred** (2026-11-02
-Eznan Cutter capture, `<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`), not decompiled constants. The
-captured timing (first mast inside the burst, sails +0.9 s, upright with a bow wake ~3.5 s into the 7 s) is the
-reference; our rise is the same shape but is not frame-exact. Without a water query the ship takes the land path
-exactly as before (start/plane/clip unchanged).
+(`WaterQuery`): it keeps the native horizontal start (`end - axis * 2 * extent`), linear slide and native anchor
+x/z (`end - axis * extent`, `FUN_3909ea30` state +0x74), but starts the root with the hull top at the sea
+(`ship_models.mass_center_z + mass_box_size_z / 2`, via `Db::ship_hull_height`), pitched bow up, and eases the rise
+and the righting to upright over `portal_time`; the clip plane is the horizontal sea surface (normal +Y, the native
+anchor x/z lifted to the water) instead of the native vertical portal plane, so the submerged part is not drawn.
+The horizontal-only ship clip is **capture-inferred**: the native code has only the vertical plane. The pitch is 50°
+(the capture's 45-60° mast/yard line); the start depth, the pitch angle and the easing curve are **capture-inferred**
+(2026-11-02 Eznan Cutter capture, `<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`), not decompiled
+constants. The captured timing (first mast inside the burst, sails +0.9 s, upright with a bow wake ~3.5 s into the
+7 s) is the reference; our rise is the same shape but is not frame-exact. Without a water query the ship takes the
+land path exactly as before (start/plane/clip unchanged).
 
 ### Damage states (S15)
 

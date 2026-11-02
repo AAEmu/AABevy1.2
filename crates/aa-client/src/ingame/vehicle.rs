@@ -22,8 +22,8 @@
 //! plane, and moves out over `portal_time` while the portal hangs at the plane (`FUN_3909ea30` / `FUN_39097220`,
 //! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). The group's `FxSound` items
 //! and particle sounds start at the portal through [`super::sounds::Audio`]. A ship (the Eznan Cutter) instead
-//! floats up out of the sea with the native buoyancy motion's bow-up righting, clipped at the sea surface; see
-//! [`SummonEmergence`]. A vehicle that merely streams into view later has no creation packet, so it plays none.
+//! floats up out of the sea with the captured bow-up buoyancy rise (inferred; see [`SummonEmergence`]), clipped at
+//! the sea surface. A vehicle that merely streams into view later has no creation packet, so it plays none.
 //!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
@@ -163,18 +163,21 @@ impl SummonPortals {
 /// behind the portal plane at `end - axis * extent`, and moves to `end` over `slaves.portal_time`.
 /// `FUN_39097390` restores `end` and sends the portal effect's end event 5.
 ///
-/// Ships add the rise the native `ShipUnitModel` gets from its CryPhysics buoyancy body (`FUN_390df580`, attached
-/// from `ShipUnitModel::Init`/`Update`): the root starts below the sea with the hull top at the surface
-/// (`ship_models.mass_center_z` + half `mass_box_size_z`), starts pitched bow up and rights over the same
-/// `portal_time`, and the clip plane is the horizontal sea surface instead of the vertical portal plane. The pitch
-/// and the shape of the rise are a capture approximation, not decompiled values (2026-11-02 Eznan Cutter capture).
+/// Ships add the captured rise (`FUN_390df580` builds the ship's CryPhysics buoyancy volumes, but it is reached via
+/// the model vtable (`FUN_390e2220`/`FUN_390e3530`/`FUN_390eb720`), not directly from `ShipUnitModel::Init`/`Update`
+/// (`FUN_390e8b30`/`FUN_390ebc50` do not reference it), so the attribution itself is **inferred**): the root starts
+/// below the sea with the hull top at the surface (`ship_models.mass_center_z` + half `mass_box_size_z`), starts
+/// pitched bow up and rights over the same `portal_time`, and the clip plane is the horizontal sea surface instead
+/// of the native vertical portal plane. The start depth, the horizontal-only sea clip, the 50 degree pitch and the
+/// easing are capture approximations, not decompiled values (2026-11-02 Eznan Cutter capture, case
+/// `ship-sea-summon`).
 #[derive(Component, Clone, Copy, Debug)]
 #[allow(dead_code)] // `plane`, `axis` and `extent` are read by `examples/slave_summon` and the tests
 pub struct SummonEmergence {
     pub start: Vec3,
     pub end: Vec3,
     /// The clip-plane point and portal anchor: `end - axis * extent` (`FUN_3909ea30` state +0x74); for a ship the
-    /// sea-surface point at the start (the clip plane is horizontal then).
+    /// same x/z lifted to the sea surface (the horizontal clip plane then; capture-inferred).
     pub plane: Vec3,
     /// The unit's forward axis projected to the horizontal plane.
     pub axis: Vec3,
@@ -187,9 +190,10 @@ pub struct SummonEmergence {
     pub start_rotation: Quat,
     /// The unit's rotation at `end` (its yaw only); the ship rights itself to this.
     pub end_rotation: Quat,
-    /// The clip-plane normal: the unit's forward for the vertical portal plane, `+Y` for a ship's sea surface.
+    /// The clip-plane normal: the unit's forward for the native vertical portal plane, `+Y` for a ship's sea surface
+    /// (the horizontal-only ship clip is capture-inferred).
     pub clip_normal: Vec3,
-    /// A ship rises and rights itself (the native buoyancy); a land vehicle only slides through the portal.
+    /// A ship rises and rights itself (the inferred buoyancy); a land vehicle only slides through the portal.
     pub buoyant: bool,
 }
 
@@ -324,10 +328,10 @@ pub fn spawn_summon_portals(
         let mut start_rotation = end_rotation;
         let mut clip_normal = axis;
         let mut buoyant = false;
-        // A ship does not slide out of a vertical portal: its `ShipUnitModel` floats up out of the sea (the CryPhysics
-        // buoyancy body `FUN_390df580` builds from `ship_models`; see the struct docs). The sea surface is the clip
-        // plane, the hull starts with its physics-box top at the surface, and the model starts pitched bow up.
-        // The pitch and the shape of the rise are the capture's (Eznan Cutter, 2026-11-02), not decompiled values.
+        // A ship does not slide out of a vertical portal in the capture: it floats up out of the sea. The buoyancy
+        // attribution (`FUN_390df580`, reached via the model vtable) and this whole result -- the horizontal sea clip
+        // replacing the native vertical plane, the hull-top start depth, the bow-up pitch and the rise shape -- are
+        // inferred from the 2026-11-02 Eznan Cutter capture, not decompiled values (case `ship-sea-summon`).
         if db.is_ship(unit.model_id)
             && let Some(surface) = water.as_ref().and_then(|water| {
                 water
@@ -337,7 +341,9 @@ pub fn spawn_summon_portals(
         {
             let hull_top = db.ship_hull_height(unit.model_id).map_or(1.0, |(_, high)| high.max(0.0));
             start.y = (surface - hull_top).min(end.y);
-            plane = Vec3::new(start.x, surface, start.z);
+            // keep the native anchor x/z (`end - axis * extent`, FUN_3909ea30 state +0x74) and only lift it to the
+            // sea surface: the horizontal clip plane needs a water point, and the anchor stays where 1.2 puts it
+            plane.y = surface;
             clip_normal = Vec3::Y;
             start_rotation = end_rotation * Quat::from_axis_angle(Vec3::X, SHIP_SUMMON_PITCH);
             buoyant = true;
@@ -504,10 +510,16 @@ pub fn animate_summon_emergence(
             emergence.start.y + (emergence.end.y - emergence.start.y) * float,
             emergence.start.z + (emergence.end.z - emergence.start.z) * progress,
         );
-        transform.rotation = emergence.start_rotation.slerp(emergence.end_rotation, float);
+        // Only a ship's rise owns the rotation; a land vehicle's server/remote-driver turn during the portal window
+        // must not be overwritten and then snapped back (`FUN_39097220` moves the unit, it does not rotate it).
+        if emergence.buoyant {
+            transform.rotation = emergence.start_rotation.slerp(emergence.end_rotation, float);
+        }
         if progress >= 1.0 {
             transform.translation = emergence.end;
-            transform.rotation = emergence.end_rotation;
+            if emergence.buoyant {
+                transform.rotation = emergence.end_rotation;
+            }
             emergence.ended = true;
         }
     }
@@ -515,9 +527,9 @@ pub fn animate_summon_emergence(
 
 /// Gives every mesh of an emerging vehicle a clone of its `IllumMaterial` with the portal clip plane, so the part
 /// still behind the ring is discarded (`FUN_3909ea30` model vfunc 0xf8: plane at `pos - axis * extent`, normal
-/// `axis`; a ship's plane is the horizontal sea surface, normal `+Y`). It runs every frame while the emergence
-/// lasts, so parts swapped in during it are clipped too; the material is per vehicle, other objects keep the
-/// shared asset.
+/// `axis`; a ship's plane is the horizontal sea surface, normal `+Y`, capture-inferred instead of the native
+/// vertical plane). It runs every frame while the emergence lasts, so parts swapped in during it are clipped too;
+/// the material is per vehicle, other objects keep the shared asset.
 /// Keeps a summoned vehicle hidden until its clipped material copies are in place. A marker rather than
 /// `Visibility`, because [`super::units::cull_units`] rewrites the root's `Visibility` every frame.
 #[derive(Component)]
@@ -2245,6 +2257,17 @@ mod tests {
         assert_eq!(portal_effects(&mut app).len(), 2, "the portal plays once");
         let moved = app.world().get::<Transform>(root).unwrap().translation;
         assert!((moved - emergence.start).length() > 0.0, "the cart is emerging");
+        // the land path is translation-only: a turn the server/remote driver makes during the portal window is not
+        // overwritten and then snapped back
+        let turned = Quat::from_rotation_y(1.1);
+        app.world_mut().get_mut::<Transform>(root).unwrap().rotation = turned;
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(
+            app.world().get::<Transform>(root).unwrap().rotation.angle_between(turned) < 1e-6,
+            "the land emergence does not write the rotation"
+        );
         // `portal_time` is 1.0 s: the cart reaches its position and the effects stop emitting
         for _ in 0..40 {
             app.update();
@@ -2264,8 +2287,9 @@ mod tests {
 
     /// A ship's summon (Eznan Cutter, slave 21) floats up out of the sea instead of sliding out of a vertical
     /// portal: the root starts below the surface with the hull top at the water, pitched bow up; the clip plane is
-    /// the sea surface; after `portal_time` 7 s it is upright at its position. The rise/righting shape is the
-    /// 2026-11-02 capture approximation documented on [`SummonEmergence`].
+    /// the sea surface; midway it is partly righted and still clipped; after `portal_time` 7 s it is upright at its
+    /// position on the surface. The rise/righting shape is the 2026-11-02 capture approximation documented on
+    /// [`SummonEmergence`].
     #[test]
     fn a_summoned_ship_starts_below_the_water_tilted_and_ends_upright() {
         use aa_world::{TerrainQuery, WaterQuery};
@@ -2275,6 +2299,19 @@ mod tests {
         assert_eq!((portal.fx_group, portal.scale, portal.time), (619, 10.0, 7.0));
         let sea = WaterQuery::fixture_sea("test", 2.0, TerrainQuery::fixture_flat("test", 0.0));
         app.insert_resource(sea);
+        app.init_asset::<IllumMaterial>();
+        // the ship's end position is on the sea surface; a child with an Illum material proves the sea clip is
+        // applied for the whole window (the ship's own parts are StandardMaterial until PostUpdate's swap, which
+        // this headless app does not run)
+        app.world_mut().get_mut::<Transform>(root).unwrap().translation.y = 2.0;
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let mesh = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), MeshMaterial3d(original.clone()), ChildOf(root)))
+            .id();
         app.world_mut().write_message(created(1, false));
         app.update();
         app.update();
@@ -2282,11 +2319,23 @@ mod tests {
         assert!(emergence.buoyant, "a ship floats up; the land path slides");
         assert_eq!(emergence.clip_normal, Vec3::Y, "the sea surface is the clip plane");
         assert!((emergence.plane.y - 2.0).abs() < 1e-4, "{:?}", emergence.plane);
+        assert!((emergence.end.y - 2.0).abs() < 1e-4, "the ship ends on the surface: {:?}", emergence.end);
         assert!(emergence.start.y < 2.0, "the ship starts below the sea: {:?}", emergence.start);
         assert!(emergence.start.y < emergence.end.y, "it rises to its position: {:?} {:?}", emergence.start, emergence.end);
         // the horizontal start is still the native two extents behind, so the hull also slides through the portal
         let behind = emergence.end - emergence.axis * (2.0 * emergence.extent);
         assert!((emergence.start.x - behind.x).abs() < 1e-4 && (emergence.start.z - behind.z).abs() < 1e-4);
+        // the anchor keeps the native x/z (end - axis * extent) and only moves to the water height; here the end is
+        // on the water too, so it is the native plane point exactly
+        assert!(
+            (Vec2::new(emergence.plane.x, emergence.plane.z) - Vec2::new(behind.x, behind.z)).length() > 1e-4,
+            "the anchor is not at the start"
+        );
+        assert!(
+            (emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length() < 1e-4,
+            "the anchor stays native: {:?}",
+            emergence.plane
+        );
         // bow up: the local forward (-Z) of the start rotation points up
         let forward = emergence.start_rotation * Vec3::NEG_Z;
         assert!(forward.y > 0.5, "{forward:?}");
@@ -2300,8 +2349,40 @@ mod tests {
             -emergence.clip_normal.dot(emergence.plane),
         );
         assert_eq!(clip, Vec4::new(0.0, 1.0, 0.0, -2.0));
-        // `portal_time` 7 s: upright at its position
-        for _ in 0..230 {
+        // ~3.5 s of 7: partly righted, between start and end, still clipped
+        for _ in 0..103 {
+            app.update();
+        }
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        assert!(!emergence.ended, "the ship is still emerging at 3.5 s");
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y > emergence.start.y && transform.translation.y < emergence.end.y,
+            "mid-window height {:?} between {:?} and {:?}",
+            transform.translation.y,
+            emergence.start.y,
+            emergence.end.y
+        );
+        let from_start = emergence.start_rotation.angle_between(transform.rotation);
+        let to_end = transform.rotation.angle_between(emergence.end_rotation);
+        assert!(from_start > 1e-2 && to_end > 1e-2, "partly righted: {from_start} / {to_end}");
+        assert!(to_end < tilt - 1e-2, "not upright yet: {to_end} of {tilt}");
+        let mid = app
+            .world()
+            .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+            .expect("the mesh material")
+            .0
+            .clone();
+        let mid_plane = app
+            .world()
+            .resource::<Assets<IllumMaterial>>()
+            .get(&mid)
+            .expect("the clipped material")
+            .extension
+            .clip_plane;
+        assert_eq!(mid_plane, Vec4::new(0.0, 1.0, 0.0, -2.0), "still clipped at 3.5 s");
+        // the rest of `portal_time`: upright at its position on the surface, the clip restored
+        for _ in 0..135 {
             app.update();
         }
         let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
@@ -2313,6 +2394,15 @@ mod tests {
             "upright: {:?} vs {:?}",
             transform.rotation,
             emergence.end_rotation
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            original.id(),
+            "the sea clip is restored after portal_time"
         );
     }
 
@@ -2369,6 +2459,48 @@ mod tests {
             app.update();
         }
         assert_eq!(count(&mut app), expected.len(), "the portal sound starts once per summon");
+    }
+
+    /// The sea portal's sound is the particle's `fx_particles.sound_id` (group 619 item 890 -> sound 2413
+    /// `portal_ship_15`), not an `FxSound` item; it must take the same path once per summon.
+    #[test]
+    fn the_sea_portal_plays_its_particle_sound_once() {
+        use super::super::combat::Sfx;
+        use super::super::sounds::SoundBook;
+        let Some((mut app, db, _root)) = vehicle_app(21, 393) else { return };
+        let portal = db.slave_summon_portal(21).expect("the Eznan Cutter's portal");
+        assert_eq!(portal.fx_group, 619);
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let expected = "Sounds/x2eventsounds:portal:portal_ship_15";
+        let sounds: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter_map(|item| match item.sound.as_ref() {
+                Some(Sfx::Event(path)) => Some(path.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            sounds.iter().any(|path| path.eq_ignore_ascii_case(expected)),
+            "the particle sound_id path: {sounds:?}"
+        );
+        app.insert_resource(SoundBook::open());
+        app.world_mut().write_message(created(1, false));
+        for _ in 0..3 {
+            app.update();
+        }
+        let count = |app: &mut App| {
+            app.world_mut()
+                .query::<&aa_audio::Sound>()
+                .iter(app.world())
+                .filter(|sound| sound.event.eq_ignore_ascii_case(expected))
+                .count()
+        };
+        assert_eq!(count(&mut app), 1, "the sea portal sound starts once");
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(count(&mut app), 1, "the sea portal sound starts once per summon");
     }
 
     /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
