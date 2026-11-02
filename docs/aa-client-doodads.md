@@ -9,7 +9,7 @@ Code:
 | `crates/aa-client/src/ingame/doodad_affordance.rs` | the use-target ring under the doodad the bar is about (`use_target_decal`) |
 | `crates/aa-client/examples/doodad_affordance.rs` | the unattended check of the ring, the bar and the plate (see "Seeing it") |
 | `crates/aa-net/src/interaction.rs` | `Interact::NaviTeleport` / `NaviOpenPortal` (`CSNaviTeleport` 0x0e7, `CSNaviOpenPortal` 0x0e8, `bc doodadObjId`) |
-| `crates/aa-net/src/session.rs` | `SCNaviTeleport` (0x15c, decoded in `portal.rs`) -> `CSTeleportEnded` + `Event::Teleported { yaw: 0, reason: 0 }` |
+| `crates/aa-net/src/session.rs` | `SCNaviTeleport` (0x15c, decoded in `portal.rs`) -> `Event::Teleported { yaw: 0, reason: 0 }` (the app answers `CSTeleportEnded` after the load, like `SCTeleportUnit`) |
 | `crates/aa-client/src/ingame/combat.rs` | a skill aimed at a doodad is aimed at the doodad's position (the player turns to it) |
 | `crates/aa-client/src/hud/combat.rs` | a cast at a doodad does not start the fight ("Battle Start!" only for unit targets) |
 
@@ -25,8 +25,8 @@ what the doodad's **current phase** (`func_group_id` of `SCDoodad(s)Created`, up
   `dynamic_action_bar.lua` hides them).
 * `DoodadFuncNaviTeleport` / `DoodadFuncNaviOpenPortal` without a skill: `CSNaviTeleport` / `CSNaviOpenPortal`. The answer to a
   teleport is `SCNaviTeleport` (a position); like the 1.2 client (`OnNaviTeleport` runs the `SCTeleportUnit` routine with reason 0,
-  yaw 0) aa-net answers `CSTeleportEnded` and emits `Teleported`, so `player::follow_server` and the long-jump loading screen
-  (`ingame::teleport`) handle it.
+  yaw 0) aa-net emits `Teleported`, so `player::follow_server` and the long-jump loading screen (`ingame::teleport`) handle it;
+  that module sends `CSTeleportEnded` when the destination is loaded.
 
 `hud/doodad.rs` loads `doodad_funcs` once (`Tables`, in the HUD's `GameData`) as phase -> skills / navi uses, plus the English
 doodad names (`localized_texts` of `doodad_almighties`).

@@ -10,8 +10,9 @@ use bevy::window::PrimaryWindow;
 use super::super::{api, data::GameData};
 
 pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared, PathBuf), Box<dyn std::error::Error>> {
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     let mut rt = UiRuntime::new("en_us", width, height)?;
-    rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
     let bridge = Rc::new(RefCell::new(api::HudData::default()));
     {
         let mut d = bridge.borrow_mut();
@@ -27,7 +28,7 @@ pub(crate) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, api::Shared
         d.panels.actions_known = true;
         d.panels.bag_slots = 50;
         d.breath.actor = Some(100);
-        assert!(d.game.0.set(GameData::load(aa_anim::db::DEFAULT_DB)?).is_ok());
+        assert!(d.game.0.set(GameData::load(&db)?).is_ok());
     }
     api::install(&mut rt, &bridge)?;
     let path = crate::settings::isolated_bindings(&rt)?;

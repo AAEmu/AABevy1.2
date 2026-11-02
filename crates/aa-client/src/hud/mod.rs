@@ -46,7 +46,7 @@ pub(crate) mod cameras;
 mod cast;
 pub(crate) mod cinema;
 mod cinema_flow;
-mod chat;
+pub(crate) mod chat;
 mod combat;
 mod cooldown;
 mod crafting;
@@ -70,7 +70,7 @@ mod family;
 mod expedition;
 mod territory;
 mod friends;
-mod input;
+pub(crate) mod input;
 mod itemlinks;
 mod item_effects;
 mod items;
@@ -605,7 +605,7 @@ impl Plugin for HudPlugin {
         notices::plugin(app);
         cinema::plugin(app);
         doodad::plugin(app);
-        app.add_systems(Update, alerts::track_death.before(sync_hud).run_if(crate::ingame::world_screens));
+        schedule_death_tracking(app);
         app.add_systems(Update, skillbook::apply_resets.before(sync_hud).run_if(in_state(Screen::InGame)));
         app.add_systems(Update, skillbook::route_book.after(sync_hud).before(api::handle_requests).run_if(in_state(Screen::InGame)));
         app.insert_resource(HudOptions { enabled: !aa_dev::args().into_iter().any(|a| a == "--no-hud") })
@@ -659,7 +659,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
+                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, targeting::self_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )
@@ -689,6 +689,9 @@ pub(crate) fn suspend(world: &mut World) -> bool {
         return false;
     }
     let Some(rt) = world.remove_non_send::<UiRuntime>() else { return false };
+    // the key-up edges will reach the loading stage: a held Enter would otherwise keep this stage
+    // capturing the keyboard after it comes back (`keyboard::suspend`)
+    aa_ui::lua::keyboard::suspend(&rt.lua);
     world.insert_non_send(SuspendedStage(rt));
     world.resource_mut::<HudBuilt>().up = false;
     world.resource_mut::<HudSuspended>().0 = true;
@@ -857,6 +860,19 @@ fn build_hud(world: &mut World) {
     }
 }
 
+/// The death window's OnUpdate asks `GetResurrectionCountdown` as soon as it opens: the timers
+/// must be set before any UI frame and before `show` raises `UNIT_DEAD`.
+fn schedule_death_tracking(app: &mut App) {
+    app.add_systems(
+        Update,
+        alerts::track_death
+            .before(sync_hud)
+            .before(aa_ui::UiFrame)
+            .before(alerts::show)
+            .run_if(crate::ingame::world_screens),
+    );
+}
+
 /// Folds aa-net's state into the snapshot and tells the scripts what changed.
 fn sync_hud(world: &mut World) {
     let bridge = world.non_send::<api::HudBridge>().0.clone();
@@ -931,6 +947,37 @@ mod tests {
         app.world_mut().resource_mut::<HudSuspended>().0 = false;
         for _ in 0..3 {
             app.update();
+        }
+    }
+
+    #[test]
+    fn death_tracking_is_ordered_before_the_ui_frame_and_the_death_window() {
+        use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules};
+        fn dummy() {}
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<HudBuilt>().init_resource::<alerts::ScriptedFails>()
+            .init_resource::<aa_net::state::Skills>().init_resource::<State<crate::Screen>>();
+        app.world_mut().insert_non_send(api::HudBridge(std::rc::Rc::new(std::cell::RefCell::new(api::HudData::default()))));
+        // Add the targets first: without the explicit ordering they would stay before track_death.
+        app.add_systems(Update, (
+            sync_hud,
+            alerts::show,
+            dummy.in_set(aa_ui::UiFrame),
+        ));
+        schedule_death_tracking(&mut app);
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().expect("schedules");
+        let mut schedule = schedules.remove(Update).expect("Update");
+        schedule.initialize(app.world_mut()).expect("schedule");
+        let graph = schedule.graph();
+        let one = |set| graph.systems_in_set(set).expect("set").iter().next().copied().expect("system");
+        let track = one(alerts::track_death.into_system_set().intern());
+        for (name, set) in [
+            ("sync_hud", sync_hud.into_system_set().intern()),
+            ("show", alerts::show.into_system_set().intern()),
+            ("UiFrame", aa_ui::UiFrame.into_system_set().intern()),
+        ] {
+            let key = graph.system_sets.get_key(set).expect("target set");
+            assert!(graph.dependency().contains_edge(NodeId::System(track), NodeId::Set(key)), "track_death must run before {name}");
         }
     }
 }

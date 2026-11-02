@@ -102,9 +102,13 @@ struct Actor {
     slave_tl: Option<u16>,
     /// `UnitKind::Slave.id`: 7 siege weapon, 8 ship cannon/equipment. A cart is 6.
     slave_kind: Option<u32>,
+    /// `Unit.model_id`: the model whose +0x2a0 slot gates the driver's 0x67 unbind refusal (a
+    /// wheeled-simulation vehicle flag or a ship's 0x198-byte ship object pointer,
+    /// `hud/slave.rs`).
+    model_id: u32,
     /// Latest replicated unit-movement velocity, in (m/s)^2, and when it arrived. The native
-    /// unbind check reads an engine getter (`vtable+0xa4`, `FUN_39345aa0`); this source is
-    /// unverified.
+    /// unbind check reads the model's entity velocity (`vtable+0xa4`, `FUN_39345970`); for a
+    /// replicated slave this is the same pose the client moves the model with.
     speed_squared: f32,
     speed_at: Option<Instant>,
     link: Link,
@@ -112,16 +116,12 @@ struct Actor {
 }
 
 pub(super) fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
+    // `Movement::velocity_mps` owns the codec: 30/32767 for type-2 land vehicles and type-3
+    // ships, 50/32767 for a type-5 transfer, 1/1024 for unit movements. Reading type 3 at
+    // 1/1024 would make a real 4.8 m/s ship read 5.12 and falsely refuse the unbind.
     movement.map_or(0.0, |m| {
-        // Type 2 (land vehicle) velocities use the 30/32767 codec (the codec's VEL_SCALE_VEHICLE
-        // is the writer's 1/30); unit movements use 1/1024.
-        let scale = if m.move_type == 2 {
-            aa_net::vehicle::VEL_VEHICLE / 32767.0
-        } else {
-            1.0 / 1024.0
-        };
-        let [x, y, z] = m.velocity;
-        (f32::from(x).powi(2) + f32::from(y).powi(2) + f32::from(z).powi(2)) * scale * scale
+        let [x, y, z] = m.velocity_mps();
+        x * x + y * y + z * z
     })
 }
 
@@ -199,6 +199,7 @@ impl View {
                 mate_owner,
                 slave_tl,
                 slave_kind,
+                model_id: unit.model_id,
                 speed_squared: movement_speed_squared(unit.movement.as_ref()),
                 speed_at: unit.movement.as_ref().map(|_| now),
                 link: snapshot_link(unit),
@@ -329,6 +330,12 @@ impl View {
     pub(super) fn bound_slave(&self) -> Option<(u32, u16)> {
         let id = self.bound?;
         Some((id, self.slave(id)?.slave_tl?))
+    }
+
+    /// The model of the slave `obj_id` (`Unit.model_id`), for the model-data gates of the
+    /// driver's leave (`hud/slave.rs`).
+    pub(super) fn slave_model(&self, obj_id: u32) -> Option<u32> {
+        self.slave(obj_id).map(|actor| actor.model_id)
     }
 
     /// The seated slave with its timeline id, for the passenger `FUN_39362170` branch of

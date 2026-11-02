@@ -78,7 +78,10 @@ pub struct SkillInfo {
     pub max_range: i64,
     /// `skills.desc` with the placeholders filled in as far as the database allows.
     pub desc: String,
-    /// `skills.weapon_slot_for_autoattack_id` is set: the auto attack (the combat text prints its hits white).
+    /// The 1.2 basic attacks (skills 2, 3 and 4: the melee, off-hand and ranged auto attacks; the combat text prints their hits
+    /// white). Skill 2 is the one the decompile special-cases (`DAT_39ac769c`); 3 and 4 are inferred (the server treats them as
+    /// auto attacks). Not `weapon_slot_for_autoattack_id`: that column holds a weapon slot and is also set on skills that are not
+    /// auto attacks (Triple Slash 18132 carries 15), so it cannot tell them apart.
     pub auto_attack: bool,
     /// `skills.target_type_id`: 11 is `BallisticPos` (a cannon's fire skill), the only type that
     /// needs a `Position` target instead of a unit.
@@ -230,6 +233,13 @@ pub struct GameData {
     /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
     /// `ModelManager.GetActorModel(modelId).Radius`.
     pub(super) model_radii: HashMap<u32, f32>,
+    /// `models.id` -> whether the native model's +0x2a0 slot is non-zero, the gate of the
+    /// driver's 0x67 unbind speed refusal (`FUN_39345aa0` 677646). A `VehicleModel` sets it from
+    /// `vehicle_models.use_wheeled_vehicle_simulation` (`X2::VehicleUnitModel::Init`,
+    /// `FUN_390f0510` 190001). A `ShipModel` keeps its 0x198-byte ship object pointer there
+    /// (`FUN_390bdf70` 156143-156149), so its byte is non-zero too (inferred: a ship dismount at
+    /// speed is capture-pending).
+    pub(super) unbind_speed_gated: HashMap<u32, bool>,
     /// `models.id` -> the prefab / model reference of a `VehicleModel` or `ShipModel` (no wheels:
     /// the reach box is the body's).
     pub(super) vehicle_looks: HashMap<u32, crate::ingame::data::VehicleLook>,
@@ -497,7 +507,7 @@ fn load_summon_slaves(
 }
 
 /// The body model of every `VehicleModel` / `ShipModel`, for [`GameData::vehicle_box`]. The reach
-/// box is the body's (wheels stay out, as in the summon placement's own box).
+/// box is the body's only: the wheels stay out (the summon placement's own box includes them).
 fn load_vehicle_looks(
     conn: &Connection,
 ) -> rusqlite::Result<HashMap<u32, crate::ingame::data::VehicleLook>> {
@@ -617,7 +627,8 @@ impl GameData {
                         channeling_ms: any_int(r, 11)?.max(0),
                         min_range: any_int(r, 12)?.max(0),
                         max_range: any_int(r, 13)?.max(0),
-                        auto_attack: any_int(r, 14)? > 0,
+                        // the 1.2 basic attacks (skill 2 is `DAT_39ac769c` in the client; 3 and 4 are inferred from the server's auto attacks)
+                        auto_attack: matches!(id, 2..=4),
                         target_type: any_int(r, 15)?.clamp(0, 255) as u8,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },
@@ -740,6 +751,28 @@ impl GameData {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 data.model_radii.insert(r.get(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0) as f32);
+            }
+        }
+        {
+            // The native `VehicleUnitModel` copies this data byte to the model and the driver's
+            // discard path checks it (`FUN_390f0510` 190001 -> `FUN_39345aa0` 677646).
+            let mut q = conn.prepare(
+                "SELECT m.id, v.use_wheeled_vehicle_simulation FROM models m \
+                 JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.unbind_speed_gated.insert(r.get(0)?, any_flag(r, 1)?);
+            }
+        }
+        {
+            // A ship keeps a heap object in the same +0x2a0 slot (`FUN_390bdf70` 156143-156149,
+            // `FUN_390b25c0`), so a driver's leave is speed-checked too. Inferred: no capture of a
+            // ship dismount above 5 m/s yet.
+            let mut q = conn.prepare("SELECT id FROM models WHERE sub_type = 'ShipModel'")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.unbind_speed_gated.insert(r.get(0)?, true);
             }
         }
         {
@@ -982,6 +1015,18 @@ impl GameData {
     /// scale, 0 when the model has no actor radius (or the database is not loaded yet).
     pub(super) fn model_size(&self, model_id: u32, scale: f32) -> f32 {
         self.model_radii.get(&model_id).copied().unwrap_or(0.0) * scale
+    }
+
+    /// Whether the native model's +0x2a0 slot is non-zero, the gate of the driver's speed
+    /// refusal (`FUN_39345aa0` 677646): a `VehicleModel` with
+    /// `use_wheeled_vehicle_simulation`, or a `ShipModel` (its 0x198-byte ship object pointer,
+    /// inferred). A model the database does not name is not gated: the captured land leave
+    /// (`hud/slave.rs`) sends.
+    pub(super) fn unbind_speed_gated(&self, model_id: u32) -> bool {
+        self.unbind_speed_gated
+            .get(&model_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The model-space AABB `(lo, hi)` of a vehicle or ship model, in Cry metres and at scale 1.

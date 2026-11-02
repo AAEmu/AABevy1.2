@@ -4,7 +4,9 @@
 //! The run grabs a synthetic kind-1 climb doodad with F, climbs with W, and asserts:
 //! * `CSHang` and a `CSMoveUnit` with actor flag `0x40`, gcId 1 and the grab's climb data are sent;
 //! * the body rises along the ladder and the climb data stays the grab value;
-//! * reaching the top starts the 0.5 s exit, then the body steps over and `CSUnhang` 1 is sent.
+//! * reaching the top starts the 0.5 s exit, then the body steps over and `CSUnhang` 1 is sent;
+//! * a ladder attached to a rotated, translated hull (`ChildOf`) hangs on the ladder's front
+//!   side, not between the rungs and the deck, and its jump carries outboard (`CSUnhang` 7).
 //!
 //! It exits non-zero when a stage times out or a check fails. Without `--shot`/`--offscreen-shot`
 //! it ends after the checks.
@@ -52,8 +54,12 @@ pub enum Screen {
 }
 
 const LADDER: u32 = 77;
+const SHIP_LADDER: u32 = 78;
+const HULL: u32 = 0x1234;
 const PLAYER: u32 = 100;
 const HEIGHT: f32 = 2.0;
+const HULL_POS: Vec3 = Vec3::new(4.0, 0.0, 0.0);
+const HULL_YAW: f32 = std::f32::consts::FRAC_PI_2;
 
 fn main() -> AppExit {
     if !aa_cry::pak_available() {
@@ -80,6 +86,7 @@ fn main() -> AppExit {
     .init_resource::<Views>()
     .init_resource::<DeckHullPoses>()
     .init_resource::<LadderClaim>()
+    .init_resource::<ingame::ladder::LadderGrab>()
     .init_resource::<SendState>()
     .init_resource::<PlayerInput>()
     .init_resource::<settings::Actions>()
@@ -104,6 +111,9 @@ struct Script {
     climb_seen: bool,
     top_seen: bool,
     unhang_seen: bool,
+    ship_hang_seen: bool,
+    ship_front_seen: bool,
+    ship_unhang_seen: bool,
     done: bool,
 }
 
@@ -224,6 +234,71 @@ fn spawn_ladder(mut commands: Commands, mut doodads: ResMut<Doodads>) {
         Transform::default(),
         GlobalTransform::default(),
     ));
+    // A rotated, translated hull with the ladder as its child, as a ship's side ladder is.
+    let hull = commands
+        .spawn((
+            Transform {
+                translation: aa_world::cry_to_bevy(HULL_POS),
+                rotation: Quat::from_rotation_y(HULL_YAW),
+                scale: Vec3::ONE,
+            },
+            GlobalTransform::default(),
+            Visibility::default(),
+        ))
+        .id();
+    doodads.by_id.insert(
+        SHIP_LADDER,
+        aa_net::model::Doodad {
+            obj_id: SHIP_LADDER,
+            template_id: 1187,
+            owner_obj_id: 0,
+            parent_obj_id: HULL,
+            attach_point: 24,
+            pos: Pos::new(0.0, 0.0, 0.0),
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: 1.0,
+            has_loot_item: false,
+            func_group_id: 15013,
+            owner_id: 0,
+            ucc_id: 0,
+            item_template_id: 0,
+            type2: 0,
+            time_left: 0,
+            plant_time: 0,
+            quest_glow: 0,
+            family: 0,
+            puzzle_group: 0,
+            owner_type: 0,
+            owner_db_id: 0,
+            data: 0,
+        },
+    );
+    commands.spawn((
+        RemoteDoodad {
+            obj_id: SHIP_LADDER,
+        },
+        DoodadVisual {
+            path: String::new(),
+            model: None,
+            func_group_id: 15013,
+            rendered_func_group_id: 15013,
+            bond_helpers: Default::default(),
+            ladder: Some(LadderHelper {
+                bottom: Vec3::ZERO,
+                top: Vec3::new(0.0, HEIGHT, 0.0),
+                axis: Vec3::Y,
+                // the helper faces the hull's local +X; the hull yaw turns it to world +Y
+                forward: Vec3::X,
+            }),
+            growth: None,
+            remaining_ms: 0.0,
+            total_ms: 0.0,
+            base_scale: 1.0,
+        },
+        Transform::default(),
+        GlobalTransform::default(),
+        ChildOf(hull),
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -232,6 +307,7 @@ fn run_script(
     mut actions: ResMut<settings::Actions>,
     mut script: ResMut<Script>,
     ladder: Query<&Ladder>,
+    mut player: Query<&mut Mover, With<LocalPlayer>>,
     mut moves: MessageReader<NetCommand>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -242,7 +318,11 @@ fn run_script(
     for NetCommand(command) in moves.read() {
         match command {
             Command::Hang { target_obj_id } if *target_obj_id == LADDER => script.hang_seen = true,
+            Command::Hang { target_obj_id } if *target_obj_id == SHIP_LADDER => {
+                script.ship_hang_seen = true
+            }
             Command::Unhang { reason: 1 } => script.unhang_seen = true,
+            Command::Unhang { reason: 7 } => script.ship_unhang_seen = true,
             Command::Move(m) => {
                 let movement = m.to_movement(0);
                 if movement.actor_flags & aa_net::model::actor_flags::HANGING_FROM_OBJECT != 0 {
@@ -297,13 +377,61 @@ fn run_script(
                     "the top exit did not start"
                 );
                 assert!(script.unhang_seen, "no CSUnhang 1 after the top exit");
-                println!("ladder_climb: PASS (grab, climb data, top exit, unhang)");
+                // the ship ladder: stand on the deck side (south of the front), the inside
+                if let Ok(mut mover) = player.single_mut() {
+                    mover.pos = HULL_POS + Vec3::new(0.0, -0.6, 0.0);
+                    mover.facing = 0.0;
+                    mover.vz = 0.0;
+                    mover.grounded = true;
+                }
+                actions.script_clear_taps();
+                script.stage = 4;
+            }
+            assert!(t < 10.0, "the top exit timed out");
+        }
+        4 => {
+            actions.script_tap("do_interaction_1");
+            script.stage = 5;
+        }
+        5 => {
+            if let Ok(l) = ladder.single()
+                && l.obj_id == SHIP_LADDER
+            {
+                let mover = player.single().expect("the local player");
+                assert!(
+                    mover.pos.y > HULL_POS.y + 0.25,
+                    "the ship ladder hangs inside the hull: {:?}",
+                    mover.pos
+                );
+                script.ship_front_seen = true;
+                actions.script_clear_taps();
+                actions.script_tap("jump");
+                script.stage = 6;
+            }
+            assert!(t < 15.0, "the ship ladder grab timed out");
+        }
+        6 => {
+            if ladder.single().is_err() && script.ship_unhang_seen {
+                assert!(script.ship_hang_seen, "no CSHang on the ship ladder");
+                assert!(
+                    script.ship_front_seen,
+                    "the ship ladder front side was never checked"
+                );
+                let mover = player.single().expect("the local player");
+                assert!(
+                    mover.pos.y > HULL_POS.y + 0.5,
+                    "the ship ladder jump did not carry outboard: {:?}",
+                    mover.pos
+                );
+                println!(
+                    "ladder_climb: PASS (grab, climb data, top exit, ship ladder front side and jump)"
+                );
                 script.done = true;
                 if !std::env::args().any(|a| a == "--shot" || a == "--offscreen-shot") {
                     exit.write(AppExit::Success);
                 }
             }
-            assert!(t < 10.0, "the top exit timed out");
+            assert!(t < 18.0, "the ship ladder jump timed out");
         }
         _ => {}
     }

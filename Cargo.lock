@@ -94,6 +94,7 @@ dependencies = [
  "roxmltree",
  "thiserror 2.0.21",
  "web-time",
+ "wesl",
 ]
 
 [[package]]

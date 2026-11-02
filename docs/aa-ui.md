@@ -389,6 +389,12 @@ key also fires `OnKeyDown` / `OnKeyUp(self, name)` with lower-case names (`"ente
 blinks every 530 ms. `SetPrefixText` draws a prefix in `prefixStyle` before the text
 (`SetPrefixInset` around it).
 
+A stage that is put aside while another one owns the keyboard (the HUD during a teleport's loading
+screen) must release its keyboard state: `keyboard::suspend`, called by `hud::suspend`, drops the
+held UI keys, the keyboard capture and the edit focus. The key-up edges go to the stage that replaces
+it; without this a held Enter would keep `keyboard_captured()` true when the old stage comes back and
+the game would ignore every key.
+
 Edit selection uses character indices, replaces the selected range on typing/deletion, and
 counts the replaced text when applying maximum length. `UseSelectAllWhenFocused(true)` is
 honored before `OnAcceptFocus`, as original `InitEdit` expects. Pointer clicks place the caret;

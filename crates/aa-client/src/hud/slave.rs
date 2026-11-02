@@ -16,8 +16,8 @@
 //! this one (silent), a bind is already pending (0x13), and the same gap strictly below
 //! `DAT_39ac7408` 16.0 -> 4.0 m (0x9a). 1.2 minimises over per-collider shapes that are not
 //! recovered; a slave (a `VehicleModel`) has no `ActorModel` radius, so this client measures the
-//! player to the drawn body's prefab box ([`slave_gap`]: the same box the summon placement uses,
-//! in the slave's yaw frame), not to its origin. That box is an approximation of the collision
+//! player to the drawn body's prefab box ([`slave_gap`]: the body only, without the wheels the
+//! summon placement's box adds, in the slave's yaw frame), not to its origin. That box is an approximation of the collision
 //! parts, like the server's ship mass box / attach-point stand-in.
 //! The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
 //!
@@ -38,15 +38,24 @@
 //!
 //! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`):
 //! `CSDiscardSlave` 0x032 for the slave `SCSlaveBound` named as the local player's master (its
-//! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
-//! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) leaves through the same explicit
-//! dismount path (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that
-//! branch has no speed check. The 2026-11-02 12:30 real 1.2 capture (owner, Red Farm Hauler
-//! passenger via G; `handoff/2026-11-01-owner-session/README.md`) pressed W and the client sent
-//! nothing (no CSMoveUnit, no CSDiscardSlave); the 12:30:06 CSDiscardSlave came from the R
-//! dismount skill. So 1.2 keeps a passenger seated on W, and the decompile `FUN_39406540` ->
-//! `FUN_39404d50` -> `FUN_39362170` path must be blocked for passengers by one of its guards
-//! (unresolved which). This client keeps the seat. The speed source is unverified (see docs).
+//! timeline, `this+0x14`). The native refuses with 0x67 (`SLAVE_SHUT_OFF_TO_UNBIND`) only when
+//! BOTH hold: the bound slave model's +0x2a0 slot is non-zero, and the model's entity velocity
+//! squared is above 25.0 (`_DAT_3999f85c`, 5 m/s) (`FUN_39345aa0` 677646-677660,
+//! `FUN_39345970` 677552-677561). For a `VehicleModel` the slot is
+//! `use_wheeled_vehicle_simulation` (`X2::VehicleUnitModel::Init`, `FUN_390f0510` 190001, copies
+//! the model descriptor's +0x72); for a `ShipModel` it holds the ship's 0x198-byte driver object
+//! pointer (`FUN_390bdf70` 156143-156149), so a ship driver is refused too (inferred: a ship
+//! dismount at speed is capture-pending). The 2026-11-01 owner capture: the Red Farm Hauler
+//! (slave template 146, model 1553, `vehicle_models` 65: `use_wheeled_vehicle_simulation`
+//! false) sent 0x032 at ~6.7 m/s and the owner got off, with no 0x67.
+//!
+//! A passenger (attach point above 1) leaves through the same explicit dismount path
+//! (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that branch has no
+//! speed check. The 2026-11-02 12:30 real 1.2 capture (owner, Red Farm Hauler passenger via G)
+//! pressed W and the client sent nothing (no CSMoveUnit, no CSDiscardSlave); the 12:30:06
+//! CSDiscardSlave came from the R dismount skill. So 1.2 keeps a passenger seated on W, and the
+//! decompile `FUN_39406540` -> `FUN_39404d50` -> `FUN_39362170` path must be blocked for
+//! passengers by one of its guards (unresolved which). This client keeps the seat.
 
 use std::time::Duration;
 
@@ -79,7 +88,8 @@ pub(super) const CANDIDATE_REACH: f32 = 2.5;
 /// the candidate gap: the longest 1.2 ship body is well under 32 m. Skip it before
 /// [`slave_gap`] loads the model from the pak (the F prompt producer runs every frame).
 const SLAVE_PREFILTER: f32 = 64.0;
-/// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
+/// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s, checked only when the bound
+/// slave model's +0x2a0 slot is non-zero (a wheeled-simulation vehicle, or a ship).
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
 /// `_DAT_3a169948`: the passenger dismount throttle.
 pub(super) const WALK_OFF_THROTTLE: Duration = Duration::from_millis(1500);
@@ -493,8 +503,8 @@ pub(super) fn bind(
 
 /// `FUN_39345aa0` through `X2SiegeWeapon:DiscardSiegeWeapon` and the mode bar's `unbind` slot:
 /// `CSDiscardSlave` for the slave `SCSlaveBound` named as the local player's master. That same
-/// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
-/// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
+/// bound slave is the one speed-checked (refused above 5 m/s with 0x67 on a gated model), even
+/// when the player is seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
 /// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
 /// one request per 1500 ms (`_DAT_3a169948`). The 2026-11-02 12:30 1.2 capture showed a
 /// passenger's W sends nothing; the decompile input path is blocked for passengers by one of its
@@ -509,8 +519,20 @@ pub(super) fn discard_at(data: &mut HudData, now: Instant) -> Outcome {
     // lookup); the seat point plays no part. Both the check and the packet use the bound slave,
     // never the seat's `discard_slave` preference.
     if let Some((obj_id, tl_id)) = data.mounted.bound_slave() {
+        // `FUN_39345aa0` 677646 puts the speed check inside `if (model[+0x2a0] != 0)`: the
+        // vehicle `use_wheeled_vehicle_simulation` flag (`FUN_390f0510` 190001) or a ship's
+        // 0x198-byte ship object pointer (`FUN_390bdf70` 156143-156149, inferred). A land
+        // vehicle such as the captured hauler has 0 and never refuses. A model the game data
+        // does not name is not gated; the server still decides the unbind.
+        let speed_gated = data.mounted.slave_model(obj_id).is_some_and(|model| {
+            data.game
+                .get()
+                .is_some_and(|game| game.unbind_speed_gated(model))
+        });
         // No replicated movement, or one older than the staleness bound, means a standing slave.
-        if data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED {
+        if speed_gated
+            && data.mounted.speed_squared(obj_id, now).unwrap_or(0.0) > UNBIND_SPEED_SQUARED
+        {
             return Outcome::Refused(MSG_SLAVE_SHUT_OFF_TO_UNBIND);
         }
         data.requests
