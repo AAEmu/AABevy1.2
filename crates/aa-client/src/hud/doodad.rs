@@ -66,14 +66,19 @@ mod gather;
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// `max_interaction_doodad_distance`: `FUN_3902f010` reads this client setting (at
-/// `DAT_39aefb98+0x2a0`, not a static in the pak) for the doodad candidates, independent of the
-/// skill's `max_range`. The exact setting is not in the pak; the 2026-10-30 original-client
-/// capture bounds it: Gather 13990 (`max_range` 4) is offered at 3.0 m and absent at 4.5 m. The
-/// bar therefore uses this 4.0 m **centre distance**, not `max_range`: storage skill 15307 has
-/// `max_range` 20 but its button still clears at the doodad distance. The surface gap below is
-/// only the ordering key, so a non-zero player radius does not push the prompt past 4 m.
+/// The dynamic action bar's candidate distance (`FUN_3902f010`), as a **centre distance**,
+/// independent of the skill's `max_range`. The 2026-10-30 original-client capture bounds it:
+/// Gather 13990 (`max_range` 4) is offered at 3.0 m and absent at 4.5 m, and storage skill 15307
+/// (`max_range` 20) must still clear at the doodad distance. The surface gap below is only the
+/// ordering key, so a non-zero player radius does not push the prompt past 4 m. `FUN_3902f010`
+/// passes `max_interaction_doodad_distance` to its range predicate, whose default is the 2.1 m of
+/// [`INTERACTION_DISTANCE`] measured as a surface gap to the doodad's shape; how that maps to this
+/// capture-bounded centre distance is not resolved (the bar's own shape distance is not ported).
 pub(super) const DOODAD_REACH: f32 = 4.0;
+/// `max_interaction_doodad_distance` (`x2game` config +0x2a0, default f32 2.0999999046325684 at `0x399a7660`):
+/// the reach of the right-click doodad use, as the 3D surface gap (`FUN_39093800` requires the offset strictly
+/// greater than the geometry distance, so 2.1 m is already out). The skill's `max_range` is not the use's reach.
+const INTERACTION_DISTANCE: f32 = 2.099_999_9;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
 /// A press that moves more than this many pixels before it is released was a camera drag.
@@ -126,6 +131,9 @@ pub(super) struct Tables {
     silhouettes: HashSet<u32>,
     /// `doodad_almighties.id` -> `target_decal_size` of the use-target decal, when `use_target_decal` is on.
     decals: HashMap<u32, f32>,
+    /// `doodad_almighties.id` -> simulation radius in metres (`max(sim_radius / 1000, 0.1)`, the same
+    /// shape radius `ingame::data::Db` uses; the native `FUN_3989bf90` uses the doodad's real collider).
+    radii: HashMap<u32, f32>,
     /// `doodad_func_groups.id` -> the phase message shown by `DOODAD_PHASE_MSG`.
     messages: HashMap<u32, String>,
     /// The phase messages with `is_msg_to_zone`: shown even when the doodad itself is not known.
@@ -153,7 +161,7 @@ impl Tables {
                 &detail,
             );
         }
-        let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size FROM doodad_almighties")?;
+        let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let id = super::data::any_int(r, 0)? as u32;
@@ -166,6 +174,7 @@ impl Tables {
             if super::data::any_flag(r, 3)? {
                 t.decals.insert(id, any_float(r, 4)?);
             }
+            t.radii.insert(id, (any_float(r, 5)? * 0.001).max(0.1));
         }
         let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_almighties' AND tbl_column_name = 'name' AND en_us <> ''")?;
         let mut rows = q.query([])?;
@@ -269,6 +278,12 @@ impl Tables {
         self.decals.get(&template_id).copied()
     }
 
+    /// The doodad's simulation radius as the shape the interaction gap measures against (`sim_radius` millimetres,
+    /// at least 0.1 m). Unknown templates keep a point.
+    fn radius(&self, template_id: u32) -> f32 {
+        self.radii.get(&template_id).copied().unwrap_or(0.0)
+    }
+
     /// The phase message of `doodad_func_groups.id` (`DOODAD_PHASE_MSG`).
     pub(super) fn message(&self, func_group_id: u32) -> Option<&str> {
         self.messages.get(&func_group_id).map(String::as_str)
@@ -344,6 +359,9 @@ pub(super) struct View {
     approach: Option<Approach>,
     /// The coffer window was closed.
     coffer_close: bool,
+    /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
+    /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
+    bounds: HashMap<u32, (Vec3, Vec3)>,
     pointer_pick: Option<u32>,
     arrived: Option<u32>,
 }
@@ -382,19 +400,15 @@ struct Approach {
     best_at: f32,
 }
 
-/// Starts the walk to a doodad that was right clicked out of reach; a mount walk gives way.
+/// Starts the walk to a doodad that was right clicked out of reach; a mount walk and a talk walk give way.
 pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
     super::pets::cancel_mount_walk(data);
+    super::dialog::cancel_walk(data);
     data.doodad.approach = Some(Approach {
         obj_id,
         best: dist,
         best_at: now,
     });
-}
-
-/// How near the character walks to a doodad whose use reaches `reach` metres: well inside it.
-fn stop_distance(reach: f32) -> f32 {
-    (reach - 1.0).clamp(1.5, 3.0)
 }
 
 impl View {
@@ -417,22 +431,39 @@ impl View {
     pub(super) fn climb_click(&self) -> Option<(f32, u32)> {
         self.climb_click
     }
+
+    /// The bar's F claim, for the dialog tests (`claims_key` is set by the doodad frame system).
+    #[cfg(test)]
+    pub(super) fn claim_key_for_test(&mut self) {
+        self.claims_key = true;
+    }
 }
 
-/// The right-click walk's reach: the 4 m interaction distance, shortened by the first skill's
-/// `max_range` when that is smaller. The bar's threshold is still the interaction setting; this
-/// only makes a right click walk closer before using a short-range skill.
-fn walk_reach(data: &HudData, uses: &Uses) -> f32 {
-    let range = data
+/// The 3D surface gap from the player to a doodad, the distance `FUN_39093800` compares against
+/// [`INTERACTION_DISTANCE`]. The doodad's radius is its `sim_radius` (scaled by the spawn scale); the native
+/// predicate takes the minimum over the doodad's real colliders, which are not recovered.
+fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> Option<f32> {
+    let o = doodads.by_id.get(&obj_id)?;
+    let pos = doodad_world(o, units)?;
+    let scale = if o.scale > 0.0 { o.scale } else { 1.0 };
+    // The native predicate measures to the doodad's real colliders. Use the drawn model's bounds when the
+    // model is ready; the sim radius (often 0) is only a fallback while it is not, and for parented
+    // doodads whose parent transform the HUD does not compose here.
+    if o.parent_obj_id == 0
+        && let Some(bounds) = data.doodad.bounds.get(&obj_id).copied()
+    {
+        let (transform, lo, hi) = crate::ingame::units::doodad_bounds_local(o, bounds, scale);
+        let player = aa_world::cry_to_bevy(data.pos);
+        // the doodad's own (oriented) frame: an axis-aligned world box is too lenient on a rotated model
+        let local = transform.to_matrix().inverse().transform_point3(player);
+        let nearest = transform.transform_point(local.clamp(lo, hi));
+        return Some(player.distance(nearest) - data.player_radius);
+    }
+    let radius = data
         .game
         .get()
-        .and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s)))
-        .map_or(0.0, |s| s.max_range as f32);
-    if range > 0.0 {
-        range.min(DOODAD_REACH)
-    } else {
-        DOODAD_REACH
-    }
+        .map_or(0.0, |g| g.doodad.radius(o.template_id) * scale);
+    Some(super::slave::surface_gap(data.pos, data.player_radius, pos, radius))
 }
 
 /// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
@@ -973,7 +1004,12 @@ fn track(
         // The ladder grab is decided in the dialog against the unit/ship hit, so this only
         // records the ladder click. A climb doodad never goes to the doodad skill bar.
         climb_click = ladder_click;
-        clicked = nearest.map(|(_, id)| id).filter(|id| {
+        // a ladder click in grab reach is a new target action: a running talk or doodad walk must not keep
+        // steering (and holding W) while the player takes the ladder
+        if climb_click.is_some() && (d.doodad.cancel_walk() | super::dialog::cancel_walk(&mut d)) {
+            dev.script_keys.retain(|c| c != 'W');
+        }
+        clicked =nearest.map(|(_, id)| id).filter(|id| {
             !doodads.by_id.get(id).is_some_and(|o| {
                 db.as_deref()
                     .is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
@@ -1058,6 +1094,16 @@ fn track(
     d.doodad.hover = hover;
     d.doodad.climb_click = climb_click;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
+    // The interaction gap measures to the drawn model's bounds; cache them for the doodads the pointer,
+    // the bar or the walk is about (the clicked one may be far and not in `focus`).
+    for id in [clicked, arrived, d.doodad.hover, d.doodad.preferred, d.doodad.focus.as_ref().map(|f| f.obj_id)].into_iter().flatten() {
+        // a changed model or a reused obj_id must not keep the old model's bounds
+        match views.doodad_bounds(id) {
+            Some(bounds) => { d.doodad.bounds.insert(id, bounds); }
+            None => { d.doodad.bounds.remove(&id); }
+        }
+    }
+    d.doodad.bounds.retain(|id, _| doodads.by_id.contains_key(id));
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
@@ -1159,7 +1205,7 @@ fn owner_name(owner_id: u32, own: Option<(u32, &str)>, units: &Units, names: &aa
 enum Walk {
     /// Keep running at the doodad.
     Run,
-    /// The doodad is inside [`stop_distance`]: use it.
+    /// The doodad is inside [`INTERACTION_DISTANCE`]: use it.
     Arrived,
     /// It has not got nearer for [`STUCK_SECS`]: give up (the use may still be in reach).
     Stuck,
@@ -1180,7 +1226,7 @@ fn advance(
     target_gone: bool,
     moving: bool,
     dist: f32,
-    reach: f32,
+    stop: f32,
     best: f32,
     best_at: f32,
     now: f32,
@@ -1197,7 +1243,7 @@ fn advance(
     } else {
         (best, best_at)
     };
-    let walk = if dist <= stop_distance(reach) {
+    let walk = if dist < stop {
         Walk::Arrived
     } else if now - best_at > STUCK_SECS {
         Walk::Stuck
@@ -1230,18 +1276,12 @@ pub(super) fn walk_to(
         .by_id
         .get(&a.obj_id)
         .and_then(|o| doodad_world(o, units));
-    let reach = d
-        .game
-        .get()
-        .zip(doodads.by_id.get(&a.obj_id))
-        .and_then(|(g, o)| g.doodad.uses(o.func_group_id))
-        .map_or(DOODAD_REACH, |uses| walk_reach(d, uses));
-    let dist = target.map_or(f32::INFINITY, |t| d.pos.distance(t));
+    let gap = interaction_gap(d, doodads, units, a.obj_id).unwrap_or(f32::INFINITY);
     let step = advance(
         target.is_none(),
         moving,
-        dist,
-        reach,
+        gap,
+        INTERACTION_DISTANCE,
         a.best,
         a.best_at,
         now,
@@ -1262,9 +1302,9 @@ pub(super) fn walk_to(
         Walk::Stuck => {
             stop(dev);
             d.doodad.approach = None;
-            info!("doodad: stopped {dist:.1} m from {} (no progress)", a.obj_id);
-            // close enough for the server's range check: use it from here
-            return (dist <= reach).then_some(a.obj_id);
+            info!("doodad: stopped {gap:.1} m from {} (no progress)", a.obj_id);
+            // close enough for the interaction reach: use it from here
+            return (gap < INTERACTION_DISTANCE).then_some(a.obj_id);
         }
         Walk::Run => {}
     }
@@ -1310,24 +1350,24 @@ fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> 
 /// in reach) drops the old walk, whose held W key nothing else would release.
 fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions) -> bool {
     let Some(o) = doodads.by_id.get(&obj_id) else { return false };
-    let Some(pos) = doodad_world(o, units) else { return false };
+    if doodad_world(o, units).is_none() { return false; }
     let (name, uses) = {
         let Some(game) = d.game.get() else { return false };
         let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
         (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
-    let dist = d.pos.distance(pos);
-    let reach = walk_reach(d, &uses);
+    let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
     d.doodad.preferred = Some(obj_id);
-    // a doodad use is a new target action: a mount walk to the pet must not keep steering
+    // a doodad use is a new target action: a mount walk to the pet or a talk walk must not keep steering
     super::pets::cancel_mount_walk(d);
+    super::dialog::cancel_walk(d);
     // a click that replaces a running doodad walk takes the forward key it was holding
     if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
     }
-    if dist >= reach {
-        info!("doodad: {name} ({obj_id}) is {dist:.1} m away (reach {reach:.1} m): walking there");
-        start_walk(d, obj_id, dist, now);
+    if gap >= INTERACTION_DISTANCE {
+        info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
+        start_walk(d, obj_id, gap, now);
         return false;
     }
     let Some(game) = d.game.get() else { return false };
@@ -1652,14 +1692,6 @@ mod tests {
     }
 
     #[test]
-    fn the_walk_stops_well_inside_the_reach() {
-        assert_eq!(stop_distance(4.0), 3.0);
-        assert_eq!(stop_distance(3.0), 2.0);
-        assert_eq!(stop_distance(1.0), 1.5, "never closer than this");
-        assert_eq!(stop_distance(30.0), 3.0, "never further than this");
-    }
-
-    #[test]
     fn a_doodad_skill_over_the_players_labor_is_refused_locally() {
         // 2026-10-30 1.2 capture: Gather 13990 (1 LP) at -2946 LP printed "Insufficient Labor Points."
         // and sent no CSStartSkill; the fake-use lamp 13166 costs no labor.
@@ -1884,7 +1916,7 @@ mod tests {
     fn the_template_columns_map_highlight_silhouette_and_decal() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
-            "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL);
+            "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL, sim_radius REAL);
              CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
              CREATE TABLE skills (id INTEGER);
              CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
@@ -1894,8 +1926,8 @@ mod tests {
         )
         .unwrap();
         conn.execute_batch(
-            "INSERT INTO doodad_almighties VALUES (7, 'f', 't', 'f', 0.0);
-             INSERT INTO doodad_almighties VALUES (8, 't', 'f', 't', 2.5);
+            "INSERT INTO doodad_almighties VALUES (7, 'f', 't', 'f', 0.0, 500.0);
+             INSERT INTO doodad_almighties VALUES (8, 't', 'f', 't', 2.5, 0.0);
              INSERT INTO doodad_func_groups VALUES (11, 'f', 'raw one');
              INSERT INTO doodad_func_groups VALUES (12, 't', 'raw two');
              INSERT INTO localized_texts VALUES ('doodad_func_groups', 'phase_msg', 11, 'English one');
@@ -1935,33 +1967,33 @@ mod tests {
 
     #[test]
     fn the_walk_keeps_running_until_it_is_inside_the_reach() {
-        let start = advance(false, false, 10.0, 4.0, 10.0, 0.0, 0.0);
+        let start = advance(false, false, 10.0, INTERACTION_DISTANCE, 10.0, 0.0, 0.0);
         assert_eq!(start.walk, Walk::Run);
         assert_eq!((start.best, start.best_at), (10.0, 0.0));
-        let closer = advance(false, false, 6.0, 4.0, 10.0, 0.0, 1.0);
+        let closer = advance(false, false, 6.0, INTERACTION_DISTANCE, 10.0, 0.0, 1.0);
         assert_eq!(closer.walk, Walk::Run);
         assert_eq!((closer.best, closer.best_at), (6.0, 1.0));
         assert_eq!(
-            advance(false, false, 3.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(false, false, 2.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Arrived
         );
         assert_eq!(
-            advance(false, true, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(false, true, 6.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Cancel,
             "the player took over"
         );
         assert_eq!(
-            advance(true, false, 6.0, 4.0, 6.0, 1.0, 5.0).walk,
+            advance(true, false, 6.0, INTERACTION_DISTANCE, 6.0, 1.0, 5.0).walk,
             Walk::Cancel,
             "the doodad is gone"
         );
         assert_eq!(
-            advance(false, false, 5.9, 4.0, 6.0, 1.0, 4.0).walk,
+            advance(false, false, 5.9, INTERACTION_DISTANCE, 6.0, 1.0, 4.0).walk,
             Walk::Run,
             "5.9 is progress"
         );
         assert_eq!(
-            advance(false, false, 5.9, 4.0, 5.9, 4.0, 7.1).walk,
+            advance(false, false, 5.9, INTERACTION_DISTANCE, 5.9, 4.0, 7.1).walk,
             Walk::Stuck,
             "no progress for 3.1 s"
         );
@@ -2291,19 +2323,14 @@ mod tests {
     fn approach_app(doodads: Vec<aa_net::model::Doodad>) -> (App, Shared) {
         let mut tables = Tables::default();
         tables.add(1, 14602, "DoodadFuncUse");
-        approach_app_with_game(
-            GameData {
-                doodad: tables,
-                ..Default::default()
-            },
-            doodads,
-        )
-    }
-
-    fn approach_app_with_game(
-        game: GameData,
-        doodads: Vec<aa_net::model::Doodad>,
-    ) -> (App, Shared) {
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        // The bar's reach is the skill's; the right-click use must not take a long skill range as its own
+        // interaction reach (2026-11-01: a 100 m doodad skill let the click use it from any distance).
+        game.skills.insert(14602, SkillInfo { max_range: 100, ..Default::default() });
+        let game = game;
         let data = HudData::default();
         let _ = data.game.0.set(game);
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
@@ -2321,6 +2348,104 @@ mod tests {
         app.world_mut()
             .spawn(crate::ingame::camera::OrbitCamera::default());
         (app, shared)
+    }
+
+    #[test]
+    fn a_large_workbench_measures_to_its_model_bounds_not_its_centre() {
+        // sim_radius is 0 for most templates (Owl Mailbox, warehouses, workbenches); a large model
+        // whose body keeps the player 4 m from its centre is still inside the 2.1 m interaction gap
+        // when the gap is measured to its drawn model bounds (the collider approximation).
+        let mut data = HudData {
+            pos: Vec3::new(0.0, -4.0, 0.0),
+            player_radius: 0.5,
+            ..HudData::default()
+        };
+        data.doodad
+            .bounds
+            .insert(7, (Vec3::new(-3.0, -2.0, 0.0), Vec3::new(3.0, 2.0, 3.0)));
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(7, world_doodad(7, 850, 1, Vec3::ZERO));
+        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(
+            (gap - 1.5).abs() < 1e-4,
+            "the 3 x 2 m body leaves 1.5 m from its side (centre distance would be 4 m): {gap}"
+        );
+        assert!(gap < INTERACTION_DISTANCE);
+    }
+
+    #[test]
+    fn a_rotated_doodad_is_measured_in_its_own_frame_not_a_world_box() {
+        // A 8 x 2 m body turned 45 degrees. The point (4.8, 4.8) is inside the axis-aligned box around
+        // the model (that box would report a gap of 1.78 m) but 2.79 m from the real, rotated body, so
+        // the right click must walk, not use.
+        let mut data = HudData {
+            pos: Vec3::new(4.8, 4.8, 1.5),
+            ..HudData::default()
+        };
+        data.doodad
+            .bounds
+            .insert(7, (Vec3::new(-4.0, -1.0, 0.0), Vec3::new(4.0, 1.0, 3.0)));
+        let mut doodad = world_doodad(7, 850, 1, Vec3::ZERO);
+        doodad.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4).to_array();
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(7, doodad);
+        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(
+            (gap - 2.789).abs() < 0.01,
+            "the rotated corner leaves its real 2.79 m gap: {gap}"
+        );
+        assert!(
+            gap >= INTERACTION_DISTANCE,
+            "the axis-aligned box's 1.78 m would have used it from out of reach"
+        );
+    }
+
+    #[test]
+    fn the_right_click_use_range_is_the_interaction_gap_not_the_skill_range() {
+        // `max_interaction_doodad_distance` (2.1 m surface gap, `FUN_39093800`) is the right-click use reach;
+        // `skills.max_range` only decides the bar's offer. A 100 m tome skill clicked at 3 m walks instead of
+        // using the tome from there.
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 3.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().doodad.approach.is_some(),
+            "3 m is beyond the 2.1 m interaction gap"
+        );
+        assert!(w_held(&app));
+        assert!(
+            shared.borrow().doodad.chosen.is_empty() && shared.borrow().doodad.menu.is_none(),
+            "no use is queued before the walk arrives"
+        );
+        assert!(app.world().resource::<Harness>().acted.is_empty());
+
+        app.world_mut().resource_mut::<Harness>().now = 1.0;
+        app.world_mut().resource_mut::<Harness>().player = Vec3::new(0.0, 1.6, 0.0);
+        app.update();
+        assert_eq!(app.world().resource::<Harness>().acted, vec![7]);
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1, "one use on arrival");
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_doodad_inside_the_interaction_gap_is_used_at_once() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 1.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(shared.borrow().doodad.approach.is_none());
+        assert!(!w_held(&app));
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1, "the single use");
+        assert!(app.world().resource::<Harness>().acted.is_empty());
     }
 
     #[test]
@@ -2348,9 +2473,9 @@ mod tests {
         // walk again and arrive
         step(&mut app, 2.0, Vec3::ZERO, false, Some(7));
         assert!(shared.borrow().doodad.approach.is_some());
-        step(&mut app, 3.0, Vec3::new(0.0, 8.0, 0.0), false, None);
-        step(&mut app, 4.0, Vec3::new(0.0, 6.0, 0.0), false, None);
-        step(&mut app, 5.0, Vec3::new(0.0, 2.9, 0.0), false, None);
+        step(&mut app, 3.0, Vec3::new(0.0, 9.0, 0.0), false, None);
+        step(&mut app, 4.0, Vec3::new(0.0, 8.8, 0.0), false, None);
+        step(&mut app, 5.0, Vec3::new(0.0, 8.6, 0.0), false, None);
         assert_eq!(
             app.world().resource::<Harness>().acted,
             vec![7],
@@ -2359,7 +2484,7 @@ mod tests {
         assert!(shared.borrow().doodad.approach.is_none());
         assert!(!w_held(&app));
         assert_eq!(shared.borrow().doodad.chosen.len(), 1, "one single use");
-        step(&mut app, 6.0, Vec3::new(0.0, 2.9, 0.0), false, None);
+        step(&mut app, 6.0, Vec3::new(0.0, 8.6, 0.0), false, None);
         assert_eq!(
             app.world().resource::<Harness>().acted,
             vec![7],
@@ -2368,67 +2493,23 @@ mod tests {
         assert_eq!(shared.borrow().doodad.chosen.len(), 1);
     }
 
-    /// A right click walks closer for a skill whose max_range is below the 4 m interaction
-    /// distance, and uses the same centre-distance/strict comparison as the bar.
     #[test]
-    fn a_right_click_walks_to_a_skill_shorter_than_four_metres() {
-        let mut tables = Tables::default();
-        tables.add(1, 14602, "DoodadFuncUse");
-        let mut game = GameData {
-            doodad: tables,
-            ..Default::default()
-        };
-        game.skills.insert(
-            14602,
-            SkillInfo {
-                max_range: 2,
-                ..default()
-            },
-        );
-        let (mut app, shared) =
-            approach_app_with_game(game, vec![test_doodad(7, 0.0, 3.0)]);
+    fn an_in_reach_doodad_use_cancels_a_running_npc_walk() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 1.0)]);
+        crate::hud::dialog::start_walk(&mut shared.borrow_mut(), (20, 42), 5.0, 0.0, None);
+        assert!(shared.borrow().dialog.approach.is_some());
         {
             let mut h = app.world_mut().resource_mut::<Harness>();
             h.now = 0.0;
+            h.player = Vec3::ZERO;
             h.click = Some(7);
         }
         app.update();
         assert!(
-            shared.borrow().doodad.approach.is_some(),
-            "3 m is outside the 2 m skill range: walk first"
+            shared.borrow().dialog.approach.is_none(),
+            "the in-reach doodad use ends the talk walk"
         );
-        assert!(w_held(&app));
-
-        let (mut app, shared) =
-            approach_app_with_game(
-                {
-                    let mut tables = Tables::default();
-                    tables.add(1, 14602, "DoodadFuncUse");
-                    let mut game = GameData {
-                        doodad: tables,
-                        ..Default::default()
-                    };
-                    game.skills.insert(
-                        14602,
-                        SkillInfo {
-                            max_range: 2,
-                            ..default()
-                        },
-                    );
-                    game
-                },
-                vec![test_doodad(7, 0.0, 1.9)],
-            );
-        {
-            let mut h = app.world_mut().resource_mut::<Harness>();
-            h.now = 0.0;
-            h.click = Some(7);
-        }
-        app.update();
-        assert!(
-            shared.borrow().doodad.approach.is_none(),
-            "1.9 m is inside the 2 m skill range"
-        );
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1);
     }
 
     #[test]

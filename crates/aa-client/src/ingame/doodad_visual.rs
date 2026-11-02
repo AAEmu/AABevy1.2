@@ -194,6 +194,16 @@ fn tint_illum(m: &mut IllumMaterial) {
     m.extension.params.emission += Vec4::new(GLOW.red, GLOW.green, GLOW.blue, 0.0);
 }
 
+/// The bounds after a phase change: a same-model phase keeps the old model and its bounds; a swapped model takes
+/// the new bounds when it was prepared, else keeps the old ones.
+fn phase_bounds(
+    old: Option<(Vec3, Vec3)>,
+    new: Option<(Vec3, Vec3)>,
+    same_model: bool,
+) -> Option<(Vec3, Vec3)> {
+    if same_model { old } else { new.or(old) }
+}
+
 /// `SCDoodadPhaseChanged`: the new phase's growth from the announced `time_left` at once, its model when it differs
 /// a few per frame ([`MAX_SWAPS`]). A cutdown tree that is falling keeps its model and its scale (the phase's growth
 /// scale would be a pop mid-fall) until it lands; the swap then applies both.
@@ -243,7 +253,9 @@ pub fn phase_changes(
         let Some(doodad) = doodads.by_id.get(&obj_id) else { continue };
         let func_group_id = visual.func_group_id;
         let Some(path) = db.doodad_phase_visual(doodad.template_id, func_group_id) else { continue };
+        let old_bounds = views.doodad_bounds(obj_id);
         if path == visual.path {
+            views.set_doodad_bounds(obj_id, phase_bounds(old_bounds, None, true));
             visual.rendered_func_group_id = func_group_id;
             continue;
         }
@@ -256,6 +268,8 @@ pub fn phase_changes(
                 }
                 debug!("doodad {} phase {func_group_id}: model {path}", remote.obj_id);
                 visual.path = path;
+                // the new model's bounds replace the old only once it is there; a failed build keeps the old
+                views.set_doodad_bounds(obj_id, phase_bounds(old_bounds, spawned.bounds, false));
                 visual.bond_helpers = spawned.helpers;
                 visual.ladder = spawned.ladder;
                 visual.rendered_func_group_id = func_group_id;
@@ -294,7 +308,7 @@ pub fn grow(
 
 /// Loads `path` and puts its model under `root`; `None` (and the old model kept) when it cannot be loaded.
 fn swap_model(commands: &mut Commands, cry: &mut CryAssets, root: Entity, path: &str) -> Option<super::doodad_model::Spawned> {
-    let prepared = super::doodad_model::prepare(&cry.loader(), path)?;
+    let prepared = super::doodad_model::prepare_with_bounds(&cry.loader(), path)?;
     let spawned = super::doodad_model::spawn(commands, cry, prepared);
     commands.entity(spawned.entity).insert(ChildOf(root));
     Some(spawned)
@@ -317,6 +331,15 @@ mod tests {
             total_ms: 0.0,
             base_scale: 1.0,
         }
+    }
+
+    #[test]
+    fn a_model_swap_takes_the_new_bounds_and_a_failed_or_same_model_keeps_the_old() {
+        let old = Some((Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 2.0)));
+        let new = Some((Vec3::new(-4.0, -2.0, 0.0), Vec3::new(4.0, 2.0, 3.0)));
+        assert_eq!(phase_bounds(old, new, false), new, "a swapped model's bounds replace the old");
+        assert_eq!(phase_bounds(old, None, false), old, "a failed build keeps the old bounds");
+        assert_eq!(phase_bounds(old, new, true), old, "a same-model phase keeps the old bounds");
     }
 
     #[test]

@@ -58,6 +58,8 @@ pub mod code {
     pub const NEED_LABOR_POWER: u8 = 39;
     pub const HIGHER_BUFF: u8 = 42;
     pub const NOT_NOW: u8 = 44;
+    pub const PROTECTED_FACTION: u8 = 47;
+    pub const PROTECTED_LEVEL: u8 = 48;
     pub const UNIT_REQS_OR_FAIL: u8 = 49;
     pub const URK_LEVEL: u8 = 64;
     pub const URK_ABILITY: u8 = 65;
@@ -141,6 +143,12 @@ pub struct SkillRules {
     labor: i32,
     /// `SkillTargetType`: 0 self, 1 friendly, 4 hostile, 5 any unit, 16 others, 17 friendly others, ...
     target_type: u8,
+    /// `SkillTargetRelation` (`target_relation_id`): 0 any, 1 friendly, 2 party, 3 raid, 4 hostile, 5 others.
+    target_relation: u8,
+    /// One of the basic auto attacks, skills 2 (main hand), 3 (off hand) and 4 (ranged), as `GameData`'s
+    /// `SkillInfo::auto_attack`. Not `weapon_slot_for_autoattack_id > 0`: that column also marks skills
+    /// such as Shield Slam and the instrument songs (values 15-18).
+    auto_attack: bool,
     source_alive: bool,
     source_dead: bool,
     target_alive: bool,
@@ -208,7 +216,8 @@ impl Rules {
         {
             let mut q = conn.prepare(
                 "SELECT id, mana_cost, mana_level_md, ability_id, consume_lp, target_type_id, source_alive, source_dead, target_alive, target_dead, source_stun, \
-                 min_range, max_range, weapon_slot_for_range_id, damage_type_id, stop_channeling_on_start_skill, or_unit_reqs FROM skills",
+                 min_range, max_range, weapon_slot_for_range_id, damage_type_id, stop_channeling_on_start_skill, or_unit_reqs, \
+                 target_relation_id FROM skills",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -232,6 +241,8 @@ impl Rules {
                         damage_type: any_int(r, 14)?.clamp(0, 255) as u8,
                         stop_channeling: any_flag(r, 15)?,
                         or_reqs: any_flag(r, 16)?,
+                        target_relation: any_int(r, 17)?.clamp(0, 255) as u8,
+                        auto_attack: matches!(id, 2..=4),
                         reqs: reqs.remove(&id).unwrap_or_default(),
                     },
                 );
@@ -534,6 +545,23 @@ impl Env<'_> {
         let own = self.is_self(t);
         let hostile = t.relation == "hostile";
         let friendly = t.relation == "friendly";
+        // `CanAutoAttackTargetUnit` (`FUN_393be4e0`) before the auto attacks and a hostile-relation skill
+        // (`target_relation_id` 4): only a target `FUN_39838880` marks attackable (0x100) passes; the
+        // attackable bit is the non-friendly relation (`FUN_39837800`'s `+0x40` and the force-attack/
+        // bloodlust flags are not recovered). `FUN_39898e60` picks the refusal from `FUN_39838880`'s reason
+        // byte (`FUN_39837d60`): 0x2f `PROTECTED_FACTION` only for reason 1, a character (the value is
+        // `target+0x3adc`, unconfirmed); reasons 5/6 are 0x30 `PROTECTED_LEVEL` (that operand is not
+        // ported); everything else is 0x22 `INVALID_TARGET`.
+        if (r.auto_attack || r.target_relation == 4) && !t.attackable {
+            return Some(if t.unit_type == "character" {
+                Fail {
+                    result: code::PROTECTED_FACTION,
+                    value: t.faction_id.max(0) as u32,
+                }
+            } else {
+                fail(code::INVALID_TARGET)
+            });
+        }
         match r.target_type {
             1 if hostile => return Some(fail(code::INVALID_TARGET)),
             4 if friendly => return Some(fail(code::INVALID_TARGET)),
@@ -779,7 +807,33 @@ mod tests {
     }
 
     fn target(hp: i32, relation: &'static str) -> TargetSnap {
-        TargetSnap { obj_id: 77, hp, max_hp: 100, relation, buffs: BuffLists::default(), ..TargetSnap::default() }
+        TargetSnap {
+            obj_id: 77,
+            hp,
+            max_hp: 100,
+            relation,
+            attackable: relation != "friendly",
+            faction_id: 101,
+            unit_type: "character",
+            buffs: BuffLists::default(),
+            ..TargetSnap::default()
+        }
+    }
+
+    fn npc_target(hp: i32, relation: &'static str) -> TargetSnap {
+        TargetSnap {
+            unit_type: "npc",
+            ..target(hp, relation)
+        }
+    }
+
+    /// A neutral unit whose attackable bit is false: a flag case the decompile has not recovered. Real
+    /// neutral units stay attackable (see `panels::neutral_npcs_stay_attackable_and_friendly_npcs_are_not`).
+    fn neutral_npc() -> TargetSnap {
+        TargetSnap {
+            attackable: false,
+            ..npc_target(100, "neutral")
+        }
     }
 
     fn me() -> Snapshot {
@@ -804,7 +858,15 @@ mod tests {
 
     #[test]
     fn target_and_range() {
-        let g = game(Rules::default().with_skill(1, melee()));
+        // 1: a hostile target type with relation Any; 2: a hostile-relation skill (Triple Slash); 3: an auto attack.
+        let hostile_relation = SkillRules { target_relation: 4, ..melee() };
+        let auto = SkillRules { auto_attack: true, ..melee() };
+        let g = game(
+            Rules::default()
+                .with_skill(1, melee())
+                .with_skill(2, hostile_relation)
+                .with_skill(3, auto),
+        );
         let me = me();
         let rat = target(100, "hostile");
         // a hostile skill needs a target, a living hostile one, in reach
@@ -818,8 +880,188 @@ mod tests {
         assert_eq!(env(&g, &me, Some(&rat), 9.0).precheck(1), Some(fail(code::TOO_FAR_RANGE)));
         // the rat is dead: `combat_death` real_16, the bar goes dark
         assert_eq!(env(&g, &me, Some(&target(0, "hostile")), 3.0).why_not(1, 0.0), Some(fail(code::TARGET_DIED)));
-        // a friendly unit is no target for a hostile skill
-        assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(1, 0.0), Some(fail(code::INVALID_TARGET)));
+        // a friendly unit is no target for a hostile skill type: `INVALID_TARGET` (the 0x2f choice is not
+        // recovered for this branch)
+        assert_eq!(
+            env(&g, &me, Some(&npc_target(100, "friendly")), 3.0).why_not(1, 0.0),
+            Some(fail(code::INVALID_TARGET))
+        );
+        // `CanAutoAttackTargetUnit`/`FUN_39898e60`: a neutral NPC is attackable (tendency is not evidence);
+        // a friendly NPC is refused with 0x22 `INVALID_TARGET`, a friendly character with 0x2f
+        // `PROTECTED_FACTION` and the faction value (`FUN_39837d60` reason 1).
+        let neutral = neutral_npc();
+        assert_eq!(env(&g, &me, Some(&neutral), 3.0).why_not(2, 0.0), Some(fail(code::INVALID_TARGET)));
+        assert_eq!(env(&g, &me, Some(&neutral), 3.0).why_not(3, 0.0), Some(fail(code::INVALID_TARGET)));
+        let mut attackable_neutral = neutral_npc();
+        attackable_neutral.attackable = true;
+        assert_eq!(env(&g, &me, Some(&attackable_neutral), 3.0).why_not(2, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&attackable_neutral), 3.0).why_not(3, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&rat), 3.0).why_not(2, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&rat), 3.0).why_not(3, 0.0), None);
+        assert_eq!(
+            env(&g, &me, Some(&npc_target(100, "friendly")), 3.0).why_not(3, 0.0),
+            Some(fail(code::INVALID_TARGET))
+        );
+        assert_eq!(
+            env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(3, 0.0),
+            Some(Fail { result: code::PROTECTED_FACTION, value: 101 })
+        );
+        // a friendly heal still passes: the relation gate is only for auto attacks and relation-4 skills
+        let heal = SkillRules { target_type: 1, target_relation: 1, ..SkillRules::default() };
+        let g = game(Rules::default().with_skill(1, melee()).with_skill(4, heal));
+        assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(4, 0.0), None);
+    }
+
+    #[derive(Resource)]
+    struct Press {
+        skill: u32,
+        relation: &'static str,
+        attackable: bool,
+        target_type: u8,
+        unit_type: &'static str,
+    }
+
+    fn press_refused_or_sent(
+        mut net: bevy::prelude::MessageWriter<crate::ingame::ground_target::SkillPressed>,
+        mut failed: bevy::prelude::MessageWriter<super::super::alerts::UseFailed>,
+        press: bevy::prelude::Res<Press>,
+    ) {
+        use aa_net::items::{ActionKind, ActionSlot, ACTION_SLOTS};
+        use aa_net::state::{ActionBar, Target};
+        let mut data = HudData {
+            snapshot: Snapshot {
+                unit_id: "5".into(),
+                level: 1,
+                hp: 700,
+                max_hp: 700,
+                mp: 100,
+                max_mp: 100,
+                labor: 50,
+                ..Snapshot::default()
+            },
+            ..HudData::default()
+        };
+        let rules = Rules::default().with_skill(
+            press.skill,
+            SkillRules {
+                target_type: press.target_type,
+                auto_attack: press.skill == 2,
+                target_relation: if press.skill == 18132 { 4 } else { 0 },
+                source_alive: true,
+                target_alive: true,
+                max_range: 4.0,
+                damage_type: 1,
+                ..SkillRules::default()
+            },
+        );
+        let _ = data.game.0.set(GameData {
+            rules,
+            ..GameData::default()
+        });
+        data.panels.target = Some(TargetSnap {
+            obj_id: 77,
+            hp: 100,
+            max_hp: 100,
+            relation: press.relation,
+            attackable: press.attackable,
+            faction_id: 101,
+            unit_type: press.unit_type,
+            ..TargetSnap::default()
+        });
+        data.target_pos = Some(Vec3::new(2.0, 0.0, 0.0));
+        let env = Env::of(&data, None, &[], None);
+        let mut bar = ActionBar {
+            slots: vec![ActionSlot::default(); ACTION_SLOTS],
+            ..ActionBar::default()
+        };
+        bar.slots[2] = ActionSlot {
+            kind: ActionKind::Spell,
+            id: u64::from(press.skill),
+        };
+        let mut target = Target::default();
+        target.obj_id = Some(77);
+        super::super::panels::use_slot(
+            2,
+            &env,
+            &InFlight::default(),
+            &bar,
+            &Inventory::default(),
+            &target,
+            &mut net,
+            &mut failed,
+        );
+    }
+
+    fn press_app(skill: u32, relation: &'static str, attackable: bool, target_type: u8, unit_type: &'static str) -> bevy::prelude::App {
+        let mut app = bevy::prelude::App::new();
+        app.add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_message::<super::super::alerts::UseFailed>()
+            .insert_resource(Press {
+                skill,
+                relation,
+                attackable,
+                target_type,
+                unit_type,
+            })
+            .add_systems(bevy::prelude::Update, press_refused_or_sent);
+        app
+    }
+
+    fn drain_press(app: &mut bevy::prelude::App) -> (Vec<crate::ingame::ground_target::SkillPressed>, Vec<super::super::alerts::UseFailed>) {
+        let pressed = app
+            .world_mut()
+            .resource_mut::<bevy::prelude::Messages<crate::ingame::ground_target::SkillPressed>>()
+            .drain()
+            .collect();
+        let failed = app
+            .world_mut()
+            .resource_mut::<bevy::prelude::Messages<super::super::alerts::UseFailed>>()
+            .drain()
+            .collect();
+        (pressed, failed)
+    }
+
+    #[test]
+    fn an_auto_attack_or_hostile_skill_on_a_friendly_npc_is_refused_before_sending() {
+        // A friendly NPC is refused with 0x22 `INVALID_TARGET` (FUN_39837d60 reason 1 is a character only).
+        for skill in [2, 18132] {
+            let mut app = press_app(skill, "friendly", false, 4, "npc");
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(pressed.is_empty(), "skill {skill} must not be sent");
+            assert!(
+                matches!(failed.as_slice(), [f] if f.skill == skill && f.result == code::INVALID_TARGET),
+                "skill {skill}: {failed:?}"
+            );
+        }
+        // A friendly character: PROTECTED_FACTION (0x2f) with the faction value (`FUN_39898e60`).
+        let mut app = press_app(2, "friendly", false, 4, "character");
+        app.update();
+        let (pressed, failed) = drain_press(&mut app);
+        assert!(pressed.is_empty());
+        assert!(matches!(
+            failed.as_slice(),
+            [f] if f.result == code::PROTECTED_FACTION && f.value == 101
+        ));
+
+        // A neutral NPC (Amutar 3443, the lv1 rat 10661 ...) is attackable, and so is a hostile mob.
+        for (relation, unit_type) in [("neutral", "npc"), ("hostile", "npc")] {
+            let mut app = press_app(2, relation, true, 4, unit_type);
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(
+                matches!(pressed.as_slice(), [p] if p.skill == 2 && p.target_obj_id == 77),
+                "{relation}: {pressed:?} {failed:?}"
+            );
+            assert!(failed.is_empty(), "{relation}: {failed:?}");
+        }
+
+        // A heal (friendly target type) on a friendly unit still passes the attack gate.
+        let mut app = press_app(4, "friendly", false, 1, "character");
+        app.update();
+        let (pressed, failed) = drain_press(&mut app);
+        assert!(matches!(pressed.as_slice(), [p] if p.skill == 4), "{pressed:?}");
+        assert!(failed.is_empty(), "{failed:?}");
     }
 
     #[test]
@@ -1400,6 +1642,8 @@ mod tests {
         assert_eq!((r.mana, r.target_type, r.max_range, r.damage_type), (30.0, 4, 4.0, 1));
         // Melee Attack reaches as far as the weapon in the main hand; Dash does not work in a fight
         assert_eq!(rules.skills[&2].range_slot, 15);
+        assert!(rules.skills[&2].auto_attack, "Melee Attack is auto attack 2");
+        assert_eq!(rules.skills[&18132].target_relation, 4, "Triple Slash is hostile-relation");
         assert!(rules.skills[&16287].reqs.iter().any(|q| q.kind == 12));
         assert!(rules.buffs.values().any(|b| b.stun) && rules.buffs.values().any(|b| b.silence));
         assert!(rules.weapons.values().any(|w| w.max_range >= 20.0));

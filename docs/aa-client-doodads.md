@@ -46,8 +46,9 @@ doodad names (`localized_texts` of `doodad_almighties`).
   and absent at 4.5 m and 8.0 m (F sent nothing), so the port uses 4.0 m with no slack. It is the same distance for every doodad
   skill: storage skill 15307 has `max_range` 20 but its "store a trade pack" button must clear at the same 4 m (2026-11-01 retest:
   the icon stayed on screen 10 m from the box). The threshold is the **centre distance** to the doodad's origin (strictly
-  under 4 m), as the capture's 3 m/4.5 m boundary supports; the player's radius only feeds the ordering key. The doodad's
-  own collision shape is not recovered. The right-click walk uses the same 4 m interaction distance.
+  under 4 m), as the capture's 3 m/4.5 m boundary supports; the player's radius only feeds the ordering key. The setting's
+  binary default is 2.0999999 m as a surface gap to the doodad's shape (see "Walk-to" below, which uses it for the right-click
+  use); how the bar's capture-bounded 4 m centre distance relates to it is not resolved.
 * **Keys**: F (G, H, J for the 2nd to 4th button) uses the doodad when no loot is in reach (F loots first, `loot.rs`) and no NPC
   is nearer than the doodad (F talks, `dialog.rs` asks `View::claims_key`).
 * **Right click** on a doodad (view ray against a sphere at the doodad, 1.3 m * scale, within 40 m; an NPC in front of it wins):
@@ -285,9 +286,14 @@ silhouette pass; the game's native silhouette path is `Prefab::SetSilhouetteColo
 ## Walk-to, plate and phase messages
 
 A right click on a doodad out of reach starts `View::approach`: the character runs at it (camera turned, W held) until
-`stop_distance(DOODAD_REACH)`, then the use is sent; the walk uses the same 4 m interaction distance as the bar, not the
-skill's `max_range`. A key of the player's, a missing doodad or [`STUCK_SECS`] without getting
-0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
+the **interaction gap** is inside `max_interaction_doodad_distance` (2.0999999 m, `x2game` config `+0x2a0`,
+`FUN_39093800`, a 3D surface gap against the doodad's shape; this port measures to the drawn model's
+combined LOD 0 bounds in the doodad's own rotated frame (an axis-aligned world box was too lenient on rotated
+models); a phase change swaps the bounds only when the new model is built, a same-model phase keeps them,
+falling back to `doodad_almighties.sim_radius` while the model is not ready and for parented doodads), then
+the use is sent. The skill's own `max_range` is only the dynamic action bar's reach, not the right-click use range:
+a 100 m doodad skill clicked at 3 m walks first (2026-11-01). A key of the player's, a missing doodad or
+[`STUCK_SECS`] without getting 0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
 `DRAW_DOODAD_TOOLTIP`: name, `owner` while the doodad has one (`SCDoodadCreated`/`SCDoodadOriginator`), and
 `displayTime` = the growth seconds left
 (rounded up) from `DoodadVisual::remaining_ms`. `SCDoodadPhaseMsg` (0x157, bc object id + i32 message id) is decoded

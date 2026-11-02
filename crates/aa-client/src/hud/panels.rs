@@ -107,6 +107,11 @@ pub struct TargetSnap {
     pub faction_name: String,
     /// `"friendly"`, `"neutral"` or `"hostile"` towards the player.
     pub relation: &'static str,
+    /// `CanAutoAttackTargetUnit`'s attackable bit (`FUN_39838880` 0x100): every unit is attackable
+    /// except a friendly one; the type-3 `+0x40` and the force-attack/bloodlust flags are not recovered.
+    pub attackable: bool,
+    /// The unit's faction id, for the `PROTECTED_FACTION` refusal detail.
+    pub faction_id: i64,
     pub grade: &'static str,
     pub race: u8,
     pub gender: u8,
@@ -406,6 +411,11 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // the maxima come from the database's formulas; the highest seen is the fallback
         let unit_buffs = world.get_resource::<Buffs>().map_or(&[][..], |b| b.of(u.obj_id));
         let (max_hp, max_mp) = game.and_then(|g| super::stats::unit_max(g, u, unit_buffs)).unwrap_or((u.max_hp, u.max_mp));
+        let relation = game.map_or("neutral", |g| g.relation(own_faction, faction));
+        // 1.2 has no recovered attackability test here (`FUN_39837800` only calls the type-3 vtable's
+        // `+0x40`, whose source is not decoded): neutral units, NPC or character, stay attackable as
+        // before; only a FRIENDLY one is refused.
+        let attackable = relation != "friendly";
         p.target = Some(TargetSnap {
             obj_id: u.obj_id,
             npc_type: match u.kind { UnitKind::Npc { template_id, .. } => Some(template_id), _ => None },
@@ -421,7 +431,9 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             unit_type,
             detail,
             faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
-            relation: game.map_or("neutral", |g| g.relation(own_faction, faction)),
+            relation,
+            attackable,
+            faction_id: i64::from(faction),
             grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
             race,
             gender,
@@ -780,6 +792,80 @@ mod tests {
 
     use super::*;
     use aa_net::state::NativeCooldown;
+
+    #[test]
+    fn neutral_npcs_stay_attackable_and_friendly_npcs_are_not() {
+        use aa_net::model::UnitKind;
+        use crate::hud::data::NpcInfo;
+        let mut game = GameData::default();
+        game.factions.insert(101, "Mine".into());
+        game.factions.insert(2, "Neutral".into());
+        game.npcs.insert(
+            42,
+            NpcInfo {
+                name: "Amutar".into(),
+                level: 15,
+                grade: 1,
+                kind: 14,
+                template: 9,
+                faction_id: 2,
+                show_name_tag: true,
+            },
+        );
+        game.npcs.insert(
+            43,
+            NpcInfo {
+                name: "Cocky Trainee".into(),
+                level: 32,
+                grade: 1,
+                kind: 1,
+                template: 9,
+                faction_id: 2,
+                show_name_tag: true,
+            },
+        );
+        game.npcs.insert(
+            44,
+            NpcInfo {
+                name: "Friendly Guard".into(),
+                level: 32,
+                grade: 1,
+                kind: 1,
+                template: 9,
+                faction_id: 101,
+                show_name_tag: true,
+            },
+        );
+        let mut units = Units::default();
+        for (obj_id, template, faction) in [(7, 42, 2), (8, 43, 2), (9, 44, 101)] {
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = obj_id;
+            unit.kind = UnitKind::Npc {
+                template_id: template,
+                owner_id: 0,
+            };
+            unit.faction_id = faction;
+            units.by_id.insert(obj_id, unit);
+        }
+        let mut app = App::new();
+        app.insert_resource(units).init_resource::<Target>().init_resource::<Buffs>();
+        let attackable = |app: &mut App, obj_id| {
+            app.world_mut().resource_mut::<Target>().obj_id = Some(obj_id);
+            let (panels, _, _) = refresh(
+                app.world(),
+                Some(&game),
+                101,
+                1,
+                Instant::now(),
+                &Snapshot::default(),
+                Vec3::ZERO,
+            );
+            panels.target.unwrap().attackable
+        };
+        assert!(attackable(&mut app, 7), "a neutral NPC (Amutar-like) is attackable");
+        assert!(attackable(&mut app, 8), "another neutral NPC is attackable");
+        assert!(!attackable(&mut app, 9), "a friendly NPC is not attackable");
+    }
 
     #[test]
     fn action_bar_page_keys_rotate_the_four_pages() {

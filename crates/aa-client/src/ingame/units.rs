@@ -372,6 +372,8 @@ struct View {
     parent: Option<u32>,
     /// Receipt which created this incarnation, not a same-identity refresh.
     announced_after: Option<usize>,
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame: (min, max) metres.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 impl View {
@@ -537,6 +539,20 @@ impl Views {
     /// The entity drawing the doodad `obj_id`, when it is drawn.
     pub fn doodad_entity(&self, obj_id: u32) -> Option<Entity> {
         self.doodads.get(&obj_id).and_then(|v| v.entity)
+    }
+
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame (metres), when the model
+    /// is built with them. The interaction gap measures to these (the native `FUN_3989bf90` uses the doodad's
+    /// real collision shape; the model bounds are the closest recovered shape).
+    pub(crate) fn doodad_bounds(&self, obj_id: u32) -> Option<(Vec3, Vec3)> {
+        self.doodads.get(&obj_id).and_then(|v| v.bounds)
+    }
+
+    /// The model phase changed: keep the drawn model's bounds until its replacement is built.
+    pub(crate) fn set_doodad_bounds(&mut self, obj_id: u32, bounds: Option<(Vec3, Vec3)>) {
+        if let Some(view) = self.doodads.get_mut(&obj_id) {
+            view.bounds = bounds;
+        }
     }
 
     /// Source lifetime of the currently rendered doodad root.
@@ -797,6 +813,22 @@ fn doodad_root_transform(doodad: &aa_net::model::Doodad, scale: f32) -> Transfor
         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
         scale: Vec3::splat(scale),
     }
+}
+
+/// The world transform of a doodad's model (prefab-local Cry metres) and the same model bounds in that
+/// transform's local Bevy frame, as an oriented box for the right-click interaction gap: a rotated doodad
+/// is measured against its real box, not an axis-aligned box around it. Parented doodads are not composed
+/// here (their parent transform is not in the HUD); callers fall back to the centre/sim-radius for those.
+pub(crate) fn doodad_bounds_local(
+    doodad: &aa_net::model::Doodad,
+    bounds: (Vec3, Vec3),
+    scale: f32,
+) -> (Transform, Vec3, Vec3) {
+    let transform = doodad_root_transform(doodad, if scale > 0.0 { scale } else { 1.0 });
+    let (lo, hi) = bounds;
+    let a = cry_to_bevy(lo);
+    let b = cry_to_bevy(hi);
+    (transform, a.min(b), a.max(b))
 }
 
 /// Where a doodad stands in the world (game coordinates): the packet position for an ordinary doodad, or the parent
@@ -1184,6 +1216,7 @@ pub fn sync_views(
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
                 let DoodadBuild { path, model: prepared, func_group_id, growth } = build;
+                let bounds = prepared.as_ref().and_then(|p| p.bounds);
                 // the announced `time_left` has been running down since it was announced, also while the doodad was not drawn
                 let since_announced_ms = (time.elapsed_secs() - view.announced_at) * 1000.0;
                 let entity = prepared.map(|prepared| {
@@ -1207,6 +1240,7 @@ pub fn sync_views(
                 });
                 drop(t_doodad);
                 let view = views.doodads.entry(id).or_default();
+                view.bounds = bounds;
                 match entity {
                     Some(e) => {
                         view.entity = Some(e);
