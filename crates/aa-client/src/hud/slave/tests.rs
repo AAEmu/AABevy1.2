@@ -716,7 +716,7 @@ fn the_captured_farm_wagon_reaches_pass_with_the_real_model_radii()
 #[test]
 fn a_vehicle_slave_reach_uses_its_body_box_not_its_origin() {
     let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
-    let mut game = game_with_radii(&[]);
+    let game = game_with_radii(&[]);
     game.set_vehicle_box(
         1008,
         Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
@@ -742,7 +742,7 @@ fn a_vehicle_slave_reach_uses_its_body_box_not_its_origin() {
 #[test]
 fn a_vehicle_passenger_request_uses_the_body_box() {
     let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
-    let mut game = game_with_radii(&[]);
+    let game = game_with_radii(&[]);
     game.set_vehicle_box(
         1008,
         Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
@@ -1289,106 +1289,29 @@ fn tap_walk(app: &mut App) {
         .tap_for_test("moveforward");
 }
 
-fn hold_mouse(app: &mut App, left: bool, right: bool) {
-    let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
-    if left {
-        mouse.press(MouseButton::Left);
-    }
-    if right {
-        mouse.press(MouseButton::Right);
-    }
-}
-
+/// 2026-11-01 owner retest: W on the Red Farm Hauler's passenger seat keeps the seat and sends
+/// no `CSDiscardSlave`. The explicit dismount skill/button is the only passenger leave
+/// (`a_passenger_unbind_is_throttled_to_1500_ms_without_a_speed_check`).
 #[test]
-fn both_mouse_buttons_walk_off_the_passenger_seat() {
+fn movement_keys_keep_the_passenger_seat() {
     let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
     let mut app = walk_off_app(&state, &units, 2, false, false);
-    hold_mouse(&mut app, true, true);
+    tap_walk(&mut app);
     app.update();
+    assert!(
+        state.borrow().requests.is_empty(),
+        "movement must not queue an unbind: {:?}",
+        state.borrow().requests
+    );
     assert_eq!(
-        state.borrow().requests,
-        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })],
-        "holding both world mouse buttons runs forward in the player controller"
-    );
-}
-
-#[test]
-fn one_mouse_button_alone_is_not_movement() {
-    for (left, right) in [(true, false), (false, true)] {
-        let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-        let mut app = walk_off_app(&state, &units, 2, false, false);
-        hold_mouse(&mut app, left, right);
-        app.update();
-        assert!(
-            state.borrow().requests.is_empty(),
-            "left {left}, right {right}: one button only turns the camera"
-        );
-    }
-}
-
-#[test]
-fn both_mouse_buttons_over_the_hud_do_not_walk_off() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    app.world_mut()
-        .resource_mut::<super::super::HudPointerOverUi>()
-        .0 = true;
-    hold_mouse(&mut app, true, true);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "the player controller ignores world buttons held over a HUD widget"
-    );
-}
-
-#[test]
-fn walk_off_needs_a_passenger_seat_and_free_keyboard_focus() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 1, false, false);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "a driver seat does not walk off"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, true, false);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "HUD keyboard focus is not movement input"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, true);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "a suspended HUD cannot unbind"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    tap_walk(&mut app);
-    app.update();
-    assert_eq!(
-        state.borrow().requests,
-        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
-    );
-}
-
-#[test]
-fn every_walk_off_input_guard_blocks_the_unbind() {
-    assert!(!input_blocked(false, false, false, false));
-    assert!(input_blocked(true, false, false, false), "suspended HUD");
-    assert!(input_blocked(false, true, false, false), "teleport loading");
-    assert!(input_blocked(false, false, true, false), "HUD focus");
-    assert!(
-        input_blocked(false, false, false, true),
-        "typing in a field"
+        app.world()
+            .resource::<aa_net::state::Player>()
+            .spawn
+            .as_ref()
+            .and_then(|spawn| spawn.unit.attached_to)
+            .map(|attachment| attachment.point),
+        Some(2),
+        "the passenger keeps the seat"
     );
 }
 

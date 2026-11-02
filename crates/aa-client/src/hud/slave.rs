@@ -39,16 +39,18 @@
 //! Leaving is `X2SiegeWeapon:DiscardSiegeWeapon` (`FUN_394aa090` -> `FUN_39345aa0`):
 //! `CSDiscardSlave` 0x032 for the slave `SCSlaveBound` named as the local player's master (its
 //! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
-//! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) walks off on movement input through
-//! `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`); that native path has no
-//! speed check. The speed source is unverified (see the docs).
+//! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) leaves through the same explicit
+//! dismount path (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that
+//! branch has no speed check. Movement keys do not unbind a passenger: the 2026-11-01 1.2 retest
+//! kept the seat on W, so [`walk_off`] is deliberately inert. The speed source is unverified
+//! (see the docs).
 
 use std::time::Duration;
 
 use aa_net::interaction::{Interact, InteractEvent};
 use aa_net::model::{Unit, UnitKind};
 use aa_net::slave_control::SlaveCommand;
-use aa_net::state::{Player, Units};
+use aa_net::state::Units;
 use aa_net::{Event, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -72,7 +74,7 @@ pub(super) const BIND_REACH: f32 = 4.0;
 pub(super) const CANDIDATE_REACH: f32 = 2.5;
 /// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
-/// `_DAT_3a169948`: the passenger walk-off throttle.
+/// `_DAT_3a169948`: the passenger dismount throttle.
 pub(super) const WALK_OFF_THROTTLE: Duration = Duration::from_millis(1500);
 
 /// `ErrorMessageType` ids from the native message table (`FUN_3956b860`).
@@ -477,7 +479,8 @@ pub(super) fn bind(
 /// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
 /// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
 /// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
-/// one request per 1500 ms (`_DAT_3a169948`).
+/// one request per 1500 ms (`_DAT_3a169948`). This is the only passenger leave: movement input
+/// does not send it (2026-11-01 1.2 retest).
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
@@ -555,84 +558,13 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
     )
 }
 
-/// Movement input on a passenger seat walks off (`FUN_39404d50` -> `FUN_39362170`).
-/// The input guards `talk_input` uses: typing in a field or a loading screen is not movement.
-fn input_blocked(
-    suspended: bool,
-    teleport_loading: bool,
-    focus: bool,
-    keyboard_captured: bool,
-) -> bool {
-    suspended || teleport_loading || focus || keyboard_captured
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn walk_off(
-    actions: Res<crate::settings::Actions>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    focus: Res<super::HudKeyboardFocus>,
-    rt: Option<NonSend<UiRuntime>>,
-    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
-    suspended: Res<super::HudSuspended>,
-    over_ui: Option<Res<super::HudPointerOverUi>>,
-    player: Res<Player>,
-    units: Res<Units>,
-    bridge: NonSend<HudBridge>,
-) {
-    if input_blocked(
-        suspended.0,
-        teleport.is_some_and(|t| t.loading()),
-        focus.0,
-        rt.as_ref().is_some_and(|rt| rt.keyboard_captured()),
-    ) {
-        return;
-    }
-    let Some(spawn) = player.spawn.as_ref() else {
-        return;
-    };
-    let Some(attachment) = spawn.unit.attached_to else {
-        return;
-    };
-    if attachment.point <= 1 {
-        return;
-    }
-    let Some(unit) = units.get(attachment.obj_id) else {
-        return;
-    };
-    let UnitKind::Slave { tl_id, .. } = unit.kind else {
-        return;
-    };
-    // The player controller's mapping (x2game+0x412590): both world mouse buttons run
-    // forward and either button makes A / D strafe, so any input that moves the player
-    // on foot also leaves the passenger seat (`FUN_39362170`). NumLock autorun is a
-    // toggle rather than a held direction and keeps its tap.
-    let over_ui = over_ui.is_some_and(|o| o.0);
-    let held = crate::ingame::player::MoveKeys {
-        forward: actions.pressed("moveforward", 0),
-        back: actions.pressed("moveback", 0),
-        left: actions.pressed("moveleft", 0),
-        right: actions.pressed("moveright", 0),
-        turn_left: actions.pressed("turnleft", 0),
-        turn_right: actions.pressed("turnright", 0),
-    };
-    let (forward, strafe, turn) = crate::ingame::player::resolve_keys(
-        held,
-        mouse.pressed(MouseButton::Left) && !over_ui,
-        mouse.pressed(MouseButton::Right) && !over_ui,
-        0,
-    );
-    let moving =
-        forward != 0.0 || strafe != 0.0 || turn != 0.0 || actions.just_pressed("autorun", 0);
-    if !moving {
-        return;
-    }
-    let mut data = bridge.0.borrow_mut();
-    if !data.mounted.walk_off_throttle(web_time::Instant::now()) {
-        return;
-    }
-    data.requests
-        .push(Request::Slave(SlaveCommand::Unbind { tl_id }));
-}
+/// Passenger movement input keeps the seat. The 1.2 passenger leaves only through the explicit
+/// dismount skill/button ([`discard`] -> `CSDiscardSlave`); the 2026-11-01 retest on the Red Farm
+/// Hauler showed W does not leave the seat. Bevy used to turn `moveforward`/`moveback`/strafe/
+/// turn and both world mouse buttons into `CSDiscardSlave` here; that path is removed for
+/// passengers. Drivers steer their cart and mate riders keep their own movement, neither through
+/// this system.
+pub(super) fn walk_off() {}
 
 #[cfg(test)]
 mod tests;

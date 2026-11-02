@@ -664,21 +664,20 @@ and explicit controls").
   (`ingame/mount.rs::rider_rotation`); the `$driver` helper is identity and keeps the mount's own
   quaternion. Without the helper turn the seated character faced the cargo bed (2026-11-01 owner
   retest), because the seat clip itself has an identity root (`fist_ac_trailer_sit_idle`).
-* **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
-  (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
-  the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
-  buttons run forward, one button makes A / D strafe) sends the parent's 0x032 through
-  `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`). That native path has no
-  speed check, unlike the driver's `FUN_39345aa0`. Like `talk_input` it is skipped while the HUD
-  is suspended or loading, while a widget has the HUD focus, and while the UI owns the keyboard
-  (typing in a field); mouse buttons held over a HUD widget are ignored like they are on foot.
+* **Passenger leaving.** With the own attachment point above 1 on a slave, the explicit dismount
+  skill/button sends the parent's 0x032 through `FUN_39362170`, throttled to one request per
+  1500 ms (`_DAT_3a169948`). That branch has no speed check, unlike the driver's `FUN_39345aa0`.
+  Movement input does **not** leave the seat: Bevy used to map `moveforward`/`moveback`/strafe/
+  turn and both world mouse buttons to an unbind, but the 2026-11-01 1.2 retest showed W keeps
+  the passenger seat, so `hud/slave.rs::walk_off` is now inert. The decompile's input manager
+  reaches `FUN_39362170` from `FUN_39404d50`; the observed 1.2 behaviour is recorded above.
 * **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
   unverified.
   The mode bar's `unbind` function slot now calls the same `FUN_39345aa0` path (driver 0x67 above
-  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point and the passenger walk-off remain
-  the other two ways a client action sends the unbind.
+  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point is the other way a client action
+  sends the unbind.
 
 #### Pending live checks
 
@@ -758,8 +757,9 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
   input with the smoothed hull). `mount.rs` tests cover two remote passengers at different helpers and
   a moved cart transform (capture-pending S11-C4).
 * **Leaving.** The local driver uses `DiscardSiegeWeapon`/the speed-guarded 0x032 (S5); a passenger
-  walks off on movement input (1500 ms throttle) or sends the same 0x032. On `SCUnitDetached` the local
-  seat clears and the mover starts from the seat helper, as before.
+  sends the same 0x032 from the explicit dismount skill/button (1500 ms throttle). Movement input
+  keeps the seat (2026-11-01 owner retest). On `SCUnitDetached` the local seat clears and the mover
+  starts from the seat helper, as before.
 
 Capture-pending (S11):
 

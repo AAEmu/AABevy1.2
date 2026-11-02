@@ -146,7 +146,8 @@ without an attached list counts at point 1 only, a row with one only at its FIRS
 driver branch is the SCSlaveBound master (`this+0x14` timeline, `+0x18` object id): both the speed
 check and the packet use that BOUND slave, refusing above `_DAT_3999f85c` 25.0 (5 m/s) with 0x67;
 the passenger branch is `FUN_39362170`'s no-speed path throttled at `_DAT_3a169948` 1500 ms (a
-point-1 seat without the master stays silent). The dynamic action bar gets a slave candidate from
+point-1 seat without the master stays silent); the explicit dismount skill is the only passenger
+leave, movement keys keep the seat (2026-11-01 owner retest). The dynamic action bar gets a slave candidate from
 `FUN_393bbb80`: reach `_DAT_399d3230` 6.25 -> 2.5 m surface gap and the native key
 `gap - (1 + facing)`, one sorted unit/doodad set (`FUN_3902ed20`), so the doodad producer is
 arbitrated on the same key (the wagon beats its nearer rear storage box). A right-clicked doodad is
