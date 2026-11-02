@@ -62,6 +62,37 @@ doodad names (`localized_texts` of `doodad_almighties`).
   Book's Default Site moves its recall marker to the new point; `SCDoodadPhaseChanged` moves the tome to its timer phase (no skill
   use: the bar goes to the next doodad or hides) and back after a few seconds.
 
+## Workbenches (craft benches)
+
+A `DoodadFuncCraftStart` or `DoodadFuncCraftPack` phase has no `func_skill_id` (1.2: 18 + 7
+CraftStart rows with NULL/0 and all 304 CraftPack rows NULL). It is still a use: native
+`393bd290` adds the craft action to the shared action list, and selecting it calls
+`393b7ba0` -> `394dc360`, which installs interaction kind 3 and fires event 0x78
+`CRAFTING_START(objectID, uniqueRecipeCount)` for `crafting_renewal.alb`. The open is local:
+`394dc360` sends no packet. `394dc210` builds CURRENT from every static template function
+group, taking `DoodadFuncCraftStart` (kind 0x0c) recipe lists and `DoodadFuncCraftPack`
+(kind 0x3a) pack membership, deduplicated and grouped by the recipe's `ac_id`. That is the
+same union `crafting/data.rs` loads into `benches` by `doodad_almighties.id`.
+
+The port adds that action to the phase's `Uses` (`craft: Option<perm_id>`), offers it on F,
+the right-click list and the dynamic bar (a sentinel id, since no skill exists), and
+`doodad::execute` opens the bench through `crafting::open_bench`, firing
+`CRAFTING_START` with the two numeric arguments the script's `SetDoodad` reads. No packet
+goes out on open.
+
+The native range is `max_interaction_doodad_distance` (2.1 m surface gap): the bar only
+offers craft inside it (`in_interaction_reach`), `FUN_394d6dc0`/`FUN_39093800` recheck it
+before `CSExecuteCraft` (`batch::command`), and the active-interaction monitor `393b7e40`
+closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
+(`batch::update`, which keeps CURRENT maps until the next bench, as `393b7aa0` does).
+`X2Craft:EndCraftingInteraction` (wrapper `39460890`) now queues the same close.
+
+Permission: `doodad_funcs.perm_id` 3 (owner only) is checked against the doodad owner; the
+1.2 client's same-account / zone-resident checks (perms 6/8 — the 61 housing workbench rows)
+need the owner's account and house-zone data the HUD does not keep per doodad, so the
+server's `bench_denial` stays authoritative for those. The send carries the live bench
+object id (`CSExecuteCraft` 0x0f8: recipe, doodad, count).
+
 ## Natural gathering
 
 The use bar offers a func that has a skill. The skill is `doodad_funcs.func_skill_id`; when that is empty it is the

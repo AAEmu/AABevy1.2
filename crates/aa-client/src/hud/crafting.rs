@@ -29,6 +29,37 @@ pub(super) struct View {
     expert: expert::View,
 }
 
+/// Opens the bench at `object` (template `template`), the local entry of native `FUN_394dc360`.
+/// Returns the unique recipe count for `CRAFTING_START`, or `None` when the object is invalid or
+/// the catalog is not loaded.
+pub(super) fn open_bench(data: &mut HudData, object: u32, template: u32) -> Option<usize> {
+    bench::open(data, object, template)
+}
+
+/// The live workbench identity `(object, template)`, or `None` after a close.
+#[cfg(test)]
+pub(super) fn active_bench(data: &HudData) -> Option<(u32, u32)> {
+    data.crafting.current.active.map(|b| (b.object, b.template))
+}
+
+/// The CURRENT recipe count (native `DAT_3a5ad86c`).
+#[cfg(test)]
+pub(super) fn current_recipe_count(data: &HudData) -> usize {
+    data.crafting.current.recipes.len()
+}
+
+/// The profession icon (`actability_groups.icon_path`) of the first recipe a bench template offers:
+/// the icon the shared action bar shows for the workbench action. This is a presentation choice
+/// (the original action's own icon id is the unresolved protected action key); the window itself
+/// uses the same actability group icon.
+pub(super) fn bench_icon(data: &HudData, template: u32) -> Option<String> {
+    let tables = &data.game.get()?.crafting;
+    let recipe = tables.benches.get(&template)?.iter().next()?;
+    let group = tables.recipes.get(recipe)?.actability_group;
+    let icon = tables.groups.get(&group)?.icon.clone();
+    (!icon.is_empty()).then_some(icon)
+}
+
 pub(super) fn refresh(world: &World, data: &mut HudData) {
     if data.crafting.owner != data.character_id {
         data.crafting = View {

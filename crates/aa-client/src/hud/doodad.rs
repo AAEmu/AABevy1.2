@@ -64,6 +64,13 @@ mod gather;
 
 /// Skills the dynamic action bar leaves out (`dynamic_action_bar.lua`, `ShoulPassShow`).
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
+/// The action id of a `DoodadFuncCraftStart` / `DoodadFuncCraftPack` phase in the shared action
+/// list. Native `FUN_393bd240` stores the func id as the action key; a bench has no skill, so the
+/// port uses a sentinel above the skill range and resolves its icon separately. The workbench
+/// callback (`FUN_393b7ba0` -> `FUN_394dc360`) is the local open, not a skill cast.
+pub(super) const CRAFT_ACTION: u32 = 0xffff_fffe;
+/// `doodad_func_permission::OWNER_ONLY`: the craft action is offered only to the doodad's owner.
+const CRAFT_OWNER_ONLY: u8 = 3;
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
 /// The dynamic action bar's candidate distance (`FUN_3902f010`), as a **centre distance**,
@@ -117,6 +124,10 @@ pub(super) struct Uses {
     /// The skills of its funcs, in func order, without repeats.
     pub skills: Vec<u32>,
     pub navi: Vec<Navi>,
+    /// The `perm_id` of a `DoodadFuncCraftStart` / `DoodadFuncCraftPack` in this phase: the
+    /// workbench window opens locally (native `FUN_394dc360`); the recipe list is the template's
+    /// static CraftStart/CraftPack lists (`FUN_394dc210`).
+    pub craft: Option<u8>,
 }
 
 #[derive(Default)]
@@ -146,18 +157,20 @@ impl Tables {
     pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut t = Tables::default();
         let detail = gather::DetailSkills::load(conn)?;
-        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
+        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let group = super::data::any_int(r, 0)? as u32;
             let skill = super::data::any_int(r, 1)? as u32;
             let kind: Option<String> = r.get(2)?;
             let func_id = super::data::any_int(r, 3)? as u32;
+            let perm = super::data::any_int(r, 4)? as u8;
             t.add_resolved(
                 group,
                 skill,
                 kind.as_deref().unwrap_or(""),
                 func_id,
+                perm,
                 &detail,
             );
         }
@@ -217,6 +230,7 @@ impl Tables {
         skill: u32,
         kind: &str,
         func_id: u32,
+        perm: u8,
         detail: &gather::DetailSkills,
     ) {
         let skill = if skill != 0 {
@@ -224,10 +238,15 @@ impl Tables {
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
-        self.add(group, skill, kind);
+        self.add_full(group, skill, kind, perm);
     }
 
+    #[cfg(test)]
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
+        self.add_full(group, skill, kind, 0);
+    }
+
+    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8) {
         if skill != 0 && kind == "DoodadFuncAttachment" {
             self.attachment_skills.insert((group, skill));
         }
@@ -237,7 +256,10 @@ impl Tables {
             "DoodadFuncCoffer" => Some(Navi::Coffer),
             _ => None,
         };
-        if skill == 0 && navi.is_none() {
+        // Native `FUN_394dc210` collects recipes from `DoodadFuncCraftStart` (kind 0x0c) and
+        // `DoodadFuncCraftPack` (kind 0x3a); both open the same window through `FUN_394dc360`.
+        let craft = matches!(kind, "DoodadFuncCraftStart" | "DoodadFuncCraftPack").then_some(perm);
+        if skill == 0 && navi.is_none() && craft.is_none() {
             return;
         }
         let uses = self.uses.entry(group).or_default();
@@ -250,11 +272,14 @@ impl Tables {
         {
             uses.navi.push(n);
         }
+        if let Some(perm) = craft {
+            uses.craft.get_or_insert(perm);
+        }
     }
 
     /// What the phase `group` can be used for (`None`: nothing).
     pub(super) fn uses(&self, group: u32) -> Option<&Uses> {
-        self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty())
+        self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty() || u.craft.is_some())
     }
 
     fn allows_attachment(&self, group: u32, skill: u32, bond_free: bool, mount_free: bool) -> bool {
@@ -320,6 +345,9 @@ fn cstr(s: &str) -> &str {
 struct Focus {
     obj_id: u32,
     skills: Vec<u32>,
+    /// The workbench action's profession icon (`actability_groups.icon_path`), when the phase
+    /// offers a craft action; the dynamic bar resolves it for [`CRAFT_ACTION`].
+    craft_icon: Option<String>,
     /// The native ordering key (see `slave::native_key`): lower sorts first.
     key: f32,
     /// Centre distance, metres (the HUD's NPC-talk priority uses it).
@@ -340,6 +368,8 @@ pub(super) struct View {
     /// `BondLazyDoodad`): 1.2 builds no interaction indicator candidate then, so neither the
     /// doodad bar nor the slave Grab Machine prompt is shown.
     pub(super) seated: bool,
+    /// The profession icon of the craft action the bar currently shows (see [`CRAFT_ACTION`]).
+    pub(super) craft_icon: Option<String>,
     /// F goes to the doodad (it is nearer than any NPC).
     claims_key: bool,
     /// The interaction list: the doodad and its rows.
@@ -439,6 +469,15 @@ impl View {
     }
 }
 
+/// 1.2's craft action is offered only to the doodad's owner for `perm_id` 3. The same-account
+/// and zone-resident permissions (6/8, the 61 housing workbench rows in the 1.2 data) need the
+/// owner's account / house-zone data the HUD does not keep for a generic doodad; the server's
+/// `bench_denial` rechecks them on `CSExecuteCraft`. The current phase's craft func must be the
+/// one that offers the recipe (`FUN_398a9480`), which the CURRENT recipe map enforces.
+fn craft_permitted(perm: u8, owner_id: u32, character_id: u32) -> bool {
+    perm != CRAFT_OWNER_ONLY || (owner_id != 0 && owner_id == character_id)
+}
+
 /// The 3D surface gap from the player to a doodad, the distance `FUN_39093800` compares against
 /// [`INTERACTION_DISTANCE`]. The doodad's radius is its `sim_radius` (scaled by the spawn scale); the native
 /// predicate takes the minimum over the doodad's real colliders, which are not recovered.
@@ -464,6 +503,13 @@ fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32
         .get()
         .map_or(0.0, |g| g.doodad.radius(o.template_id) * scale);
     Some(super::slave::surface_gap(data.pos, data.player_radius, pos, radius))
+}
+
+/// The native interaction range: `FUN_39093800` refuses when the surface offset is greater than
+/// `max_interaction_doodad_distance` (2.1 m). Workbench entry opens only inside it and the craft
+/// validator (`FUN_394d6dc0`) rechecks it before `CSExecuteCraft`.
+pub(super) fn in_interaction_reach(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
+    interaction_gap(data, doodads, units, obj_id).is_some_and(|gap| gap < INTERACTION_DISTANCE)
 }
 
 /// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
@@ -503,9 +549,6 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
         let Some(uses) = game.doodad.uses(o.func_group_id) else {
             continue;
         };
-        if uses.skills.is_empty() {
-            continue;
-        }
         let Some(pos) = doodad_world(o, units) else {
             continue;
         };
@@ -513,12 +556,27 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
         if dist >= DOODAD_REACH {
             continue;
         }
+        // The workbench callback is reached through the same action list, but its native
+        // validator (`FUN_394d6dc0` -> `FUN_39093800`) uses `max_interaction_doodad_distance`
+        // (2.1 m surface gap), not the bar's 4 m centre reach; only offer it inside that.
+        let craft = uses
+            .craft
+            .filter(|perm| craft_permitted(*perm, o.owner_id, data.character_id))
+            .and_then(|_| in_interaction_reach(data, doodads, units, o.obj_id).then_some(()));
+        let mut skills = uses.skills.clone();
+        if craft.is_some() {
+            skills.push(CRAFT_ACTION);
+        }
+        if skills.is_empty() {
+            continue;
+        }
         let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
         let key = super::slave::native_key(from, forward, pos, gap);
         let preferred = data.doodad.preferred == Some(o.obj_id);
         let focus = Focus {
             obj_id: o.obj_id,
-            skills: uses.skills.clone(),
+            skills,
+            craft_icon: craft.and_then(|_| super::crafting::bench_icon(data, o.template_id)),
             key,
             dist,
         };
@@ -566,6 +624,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "GetInteractionSkillIconPath",
         lua.create_function(move |_, (_, skill): (Value, u32)| {
             let d = state.borrow();
+            if skill == CRAFT_ACTION {
+                return Ok(d.doodad.craft_icon.clone().unwrap_or_else(|| "ui/icon/icon_skill_none.dds".into()));
+            }
             Ok(d.game.get().and_then(|g| g.skills.get(&skill)).map(|s| s.named.icon.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| "ui/icon/icon_skill_none.dds".into()))
         })?,
     )?;
@@ -903,6 +964,7 @@ fn track(
         })
     });
     d.doodad.focus = focus;
+    d.doodad.craft_icon = d.doodad.focus.as_ref().and_then(|f| f.craft_icon.clone());
     if !directing && d.dynamic_actions.replace(wanted.clone()) {
         drop(d);
         match &wanted {
@@ -1376,6 +1438,14 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         .iter()
         .map(|s| Entry { id: i64::from(*s), name: game.skills.get(s).map(|i| i.named.name.clone()).unwrap_or_else(|| format!("skill {s}")) })
         .collect();
+    if uses.craft.is_some_and(|perm| craft_permitted(perm, o.owner_id, d.character_id))
+        && in_interaction_reach(d, doodads, units, obj_id)
+    {
+        entries.push(Entry {
+            id: i64::from(CRAFT_ACTION),
+            name: "Craft".into(),
+        });
+    }
     entries.extend(uses.navi.iter().map(|n| Entry { id: NAVI_ID + *n as i64, name: n.label().into() }));
     if entries.len() == 1 {
         d.doodad.menu = Some((obj_id, entries.clone()));
@@ -1390,6 +1460,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 /// The uses the bar, the keys and the list asked for become packets.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute(
+    rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     doodads: Res<Doodads>,
     units: Res<Units>,
@@ -1416,6 +1487,7 @@ pub(super) fn execute(
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
+    let mut opens: Vec<(u32, usize)> = Vec::new();
     for pick in execute {
         match pick.source {
             super::dynamic_actions::Source::Doodad {
@@ -1431,7 +1503,14 @@ pub(super) fn execute(
                     && d.doodad.focus.as_ref().is_some_and(|f| {
                         f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
                     });
-                if current {
+                if current && pick.skill == CRAFT_ACTION {
+                    if in_interaction_reach(&d, &doodads, &units, obj_id)
+                        && let Some(o) = doodads.by_id.get(&obj_id)
+                        && let Some(count) = super::crafting::open_bench(&mut d, obj_id, o.template_id)
+                    {
+                        opens.push((obj_id, count));
+                    }
+                } else if current {
                     commands.push((
                         obj_id,
                         Command::UseDoodadSkill {
@@ -1464,6 +1543,15 @@ pub(super) fn execute(
         && let Some((obj_id, _)) = d.doodad.menu.take()
     {
         for id in chosen {
+            if id == i64::from(CRAFT_ACTION) {
+                if in_interaction_reach(&d, &doodads, &units, obj_id)
+                    && let Some(o) = doodads.by_id.get(&obj_id)
+                    && let Some(count) = super::crafting::open_bench(&mut d, obj_id, o.template_id)
+                {
+                    opens.push((obj_id, count));
+                }
+                continue;
+            }
             let command = match id - NAVI_ID {
                 x if x == Navi::Teleport as i64 => Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id }),
                 x if x == Navi::OpenPortal as i64 => Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id }),
@@ -1505,6 +1593,15 @@ pub(super) fn execute(
         let name = doodads.by_id.get(&obj_id).and_then(|o| game.and_then(|g| g.doodad.name(o.template_id))).unwrap_or("?");
         info!("doodad: use {name} ({obj_id}): {command:?}");
         out.write(NetCommand(command));
+    }
+    drop(d);
+    if let Some(rt) = rt {
+        // Native `FUN_394dc360` fires event 0x78 with the doodad object id and the unique recipe
+        // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
+        // count) treats either argument nil/zero as the general recipe book.
+        for (object, count) in opens {
+            rt.fire_event("CRAFTING_START", (object, count));
+        }
     }
 }
 
@@ -1676,10 +1773,10 @@ mod tests {
         t.add(1351, 0, "DoodadFuncNaviNaming");
         t.add(7851, 15193, "DoodadFuncNaviTeleport");
         t.add(9, 10994, "DoodadFuncUse");
-        assert_eq!(t.uses(13066), Some(&Uses { skills: vec![14602], navi: vec![] }));
+        assert_eq!(t.uses(13066), Some(&Uses { skills: vec![14602], navi: vec![], craft: None }));
         assert_eq!(t.uses(13067), None);
-        assert_eq!(t.uses(1351), Some(&Uses { skills: vec![], navi: vec![Navi::Teleport, Navi::OpenPortal] }));
-        assert_eq!(t.uses(7851), Some(&Uses { skills: vec![15193], navi: vec![] }));
+        assert_eq!(t.uses(1351), Some(&Uses { skills: vec![], navi: vec![Navi::Teleport, Navi::OpenPortal], craft: None }));
+        assert_eq!(t.uses(7851), Some(&Uses { skills: vec![15193], navi: vec![], craft: None }));
         assert_eq!(t.uses(9), None, "the bar hides skill 10994");
     }
 
@@ -1687,7 +1784,7 @@ mod tests {
     fn a_safe_opens_without_a_skill() {
         let mut t = Tables::default();
         t.add(5602, 0, "DoodadFuncCoffer");
-        assert_eq!(t.uses(5602), Some(&Uses { skills: vec![], navi: vec![Navi::Coffer] }));
+        assert_eq!(t.uses(5602), Some(&Uses { skills: vec![], navi: vec![Navi::Coffer], craft: None }));
         assert_eq!(Navi::Coffer.label(), "Open");
     }
 
@@ -1827,6 +1924,7 @@ mod tests {
             d.doodad.focus = Some(Focus {
                 obj_id: 2075,
                 skills: vec![13990],
+                craft_icon: None,
                 key: -3.0,
                 dist: 3.0,
             });
@@ -1917,7 +2015,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL, sim_radius REAL);
-             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER);
+             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
              CREATE TABLE skills (id INTEGER);
              CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
              CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
@@ -3144,5 +3242,88 @@ mod tests {
             );
         }
         assert!(found > 0, "the Eznan Cutter has a ladder doodad binding");
+    }
+
+    /// A workbench phase (Alchemy Table 568 / `DoodadFuncCraftPack` group 1088) has no skill:
+    /// native `393bd290` lists its craft action, `393b7ba0` -> `394dc360` opens the local bench and
+    /// emits `CRAFTING_START(objectID, uniqueRecipeCount)` (event 0x78). The right-click use goes
+    /// through the same local action, sends no packet, and opens the original window script.
+    #[test]
+    fn a_craft_bench_use_fires_crafting_start_and_opens_the_bench() {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+        if !std::path::Path::new(&pak).is_file() {
+            eprintln!("skip: no game_pak at {pak}");
+            return;
+        }
+        let Some(conn) = real_db() else { return };
+        let mut game = GameData::default();
+        game.doodad = Tables::load(&conn).unwrap();
+        game.crafting = crate::hud::crafting::Tables::load(&conn).unwrap();
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            assert!(d.game.0.set(game).is_ok());
+        }
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        let mut units = Units::default();
+        units.by_id.clear();
+        {
+            let mut d = bridge.borrow_mut();
+            let mut dev = crate::ingame::DevOptions::default();
+            assert!(
+                !right_click(&mut d, &doodads, &units, 300, 0.0, &mut dev),
+                "a single craft action uses the doodad at once"
+            );
+            assert_eq!(d.doodad.chosen, vec![i64::from(CRAFT_ACTION)]);
+        }
+        let rt = UiRuntime::new("en_us", 800.0, 600.0).unwrap();
+        rt.lua
+            .load(
+                "CRAFT_ARGS={};local w=UIParent:CreateWidget('emptywidget','craftProbe','UIParent');                 w:RegisterEvent('CRAFTING_START');                 w:SetHandler('OnEvent',function(_,event,id,count) CRAFT_ARGS={id,count} end)",
+            )
+            .exec()
+            .unwrap();
+        let mut app = App::new();
+        app.insert_non_send(rt)
+            .insert_non_send(HudBridge(bridge.clone()))
+            .insert_resource(units)
+            .insert_resource(doodads)
+            .insert_resource(Views::default())
+            .insert_resource(Inventory::default())
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Target>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::InFlight>()
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_systems(Update, execute);
+        app.update();
+        let d = bridge.borrow();
+        assert_eq!(
+            crate::hud::crafting::active_bench(&d),
+            Some((300, 568)),
+            "the bench is the live CURRENT workbench"
+        );
+        assert_eq!(crate::hud::crafting::current_recipe_count(&d), 71, "Alchemy Table 568 contributes 71 recipes");
+        drop(d);
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(CRAFT_ARGS[1]==300 and CRAFT_ARGS[2]==71,'CRAFTING_START(doodadId,count)')")
+            .exec()
+            .unwrap();
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect::<Vec<_>>();
+        assert!(sent.is_empty(), "opening a bench is local (no packet): {sent:?}");
     }
 }

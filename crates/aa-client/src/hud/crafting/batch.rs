@@ -1,7 +1,7 @@
 //! One full batch request; UI progress follows observed local CraftEffect casts.
 use super::super::api::{HudBridge, HudData, Shared};
 use super::bench::Bench;
-use aa_net::state::{Doodads, Player};
+use aa_net::state::{Doodads, Player, Units};
 use aa_net::{Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -160,7 +160,7 @@ impl Batch {
     }
 }
 
-fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
+pub(super) fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
     if data.character_id == 0 || count <= 0 || data.crafting.batch.left > 0 {
         return;
     }
@@ -177,7 +177,7 @@ fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
     }
 }
 
-fn command(data: &HudData, doodads: &Doodads, owner: u32, request: Request) -> Option<Command> {
+fn command(data: &HudData, doodads: &Doodads, units: &Units, owner: u32, request: Request) -> Option<Command> {
     let Request::Start {
         owner: quoted_owner,
         bench,
@@ -195,6 +195,11 @@ fn command(data: &HudData, doodads: &Doodads, owner: u32, request: Request) -> O
     }
     let actual = doodads.by_id.get(&bench.object)?;
     if actual.template_id != bench.template {
+        return None;
+    }
+    // Native `FUN_394d6dc0` rechecks `FUN_39093800` with `max_interaction_doodad_distance`
+    // (2.1 m surface gap) before `CSExecuteCraft`; a bench that moved out of reach refuses.
+    if !super::super::doodad::in_interaction_reach(data, doodads, units, bench.object) {
         return None;
     }
     let game = data.game.get()?;
@@ -237,6 +242,14 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    let state = bridge.clone();
+    craft.set(
+        "EndCraftingInteraction",
+        lua.create_function(move |_, _: Value| {
+            state.borrow_mut().crafting.requests.push(Request::Close);
+            Ok(())
+        })?,
+    )?;
     let interaction: Table = lua.globals().get("X2Interaction")?;
     let prior: mlua::Function = interaction.get("CancelInteraction")?;
     let state = bridge.clone();
@@ -260,6 +273,7 @@ pub(super) fn update(
     bridge: NonSend<HudBridge>,
     player: Res<Player>,
     doodads: Res<Doodads>,
+    units: Res<Units>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else {
@@ -296,18 +310,18 @@ pub(super) fn update(
                 fires.extend(failed_links(&data, notice).into_iter().map(Fire::Failed));
             }
         }
-        if data
-            .crafting
-            .current
-            .active
-            .is_some_and(|b| !doodads.by_id.get(&b.object).is_some_and(|d| d.template_id == b.template))
-        {
+        // Native `393b7e40` monitors the active interaction with the same 2.1 m predicate and
+        // closes through `393b7aa0` (INTERACTION_END) when the doodad is gone or out of range.
+        if data.crafting.current.active.is_some_and(|b| {
+            !doodads.by_id.get(&b.object).is_some_and(|d| d.template_id == b.template)
+                || !super::super::doodad::in_interaction_reach(&data, &doodads, &units, b.object)
+        }) {
             ended_interaction = super::bench::close(&mut data);
         }
         for request in std::mem::take(&mut data.crafting.requests) {
             match request {
                 Request::Start { recipe, bench, count, .. } => {
-                    if let Some(command) = command(&data, &doodads, owner, request) {
+                    if let Some(command) = command(&data, &doodads, &units, owner, request) {
                         data.crafting.batch.start(recipe, bench.object, count);
                         net.write(NetCommand(command));
                     }
@@ -480,13 +494,13 @@ mod tests {
             count: 3,
         };
         assert!(
-            command(&bridge.borrow(), &doodads, 46, quote).is_none(),
+            command(&bridge.borrow(), &doodads, &Units::default(), 46, quote).is_none(),
             "a changed character invalidates the button request"
         );
         let mut replaced = doodads.clone();
         replaced.by_id.get_mut(&300).unwrap().template_id = 2241;
         assert!(
-            command(&bridge.borrow(), &replaced, 47, quote).is_none(),
+            command(&bridge.borrow(), &replaced, &Units::default(), 47, quote).is_none(),
             "an object ID reused for a different bench is stale"
         );
         let mut app = App::new();
@@ -497,6 +511,7 @@ mod tests {
                 spawn: Some(super::super::super::expansion::fixture::spawn()),
             })
             .insert_resource(doodads)
+            .insert_resource(Units::default())
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
             .add_systems(Update, update);
