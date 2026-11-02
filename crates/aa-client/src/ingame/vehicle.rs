@@ -2869,6 +2869,74 @@ mod tests {
         );
     }
 
+    /// The Eznan Cutter's damage stages and wreck use the real prefab effects: the 25 % hull
+    /// (`galleon.damaged75`) burns at its aft deck, the dead look has no `_dead_effect` explosion and
+    /// carries the water-destroy burst. Its hp25/50/75 repair doodads (`slave_healing_point_doodads`)
+    /// and the 16 death debris (`slave_drop_doodads`) all have readable models, so SCDoodadCreated
+    /// draws them.
+    #[test]
+    fn the_eznan_cutters_damage_effects_and_doodads_are_readable() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let damaged = super::super::data::prefab_effects_named(
+            "prefab://Prefabs/galleon.xml/galleon.damaged75",
+        );
+        assert!(
+            damaged.iter().any(|effect| {
+                effect.active
+                    && effect.effect.effect.eq_ignore_ascii_case(
+                        "X2_EFFECTS.e_effect.ship_damage_fireflame",
+                    )
+            }),
+            "the 25 % hull's aft-deck fire"
+        );
+        let dead = super::super::data::prefab_effects_named(
+            "prefab://Prefabs/galleon.xml/galleon.dead",
+        );
+        assert!(
+            !dead.iter().any(|effect| effect.name.eq_ignore_ascii_case("_dead_effect")),
+            "no explosion on ship death"
+        );
+        assert!(dead.iter().any(|effect| {
+            effect.active
+                && effect
+                    .effect
+                    .effect
+                    .eq_ignore_ascii_case("X2_EFFECTS.e_effect.caraval_water_destroy")
+        }));
+        // slave 21's four hp repair doodads and its 16 debris doodads (12 planks + chest + helm +
+        // figurehead + net mass)
+        for (template, phase) in [
+            (2510, 5510),
+            (2511, 5511),
+            (2512, 5512),
+            (2513, 5342),
+            (1327, 2140),
+            (1322, 2130),
+            (1323, 2132),
+            (1324, 2134),
+            (1330, 2146),
+        ] {
+            let reference = db
+                .doodad_phase_visual(template, phase)
+                .unwrap_or_else(|| panic!("doodad {template} phase {phase} has a model"));
+            let parts = super::super::housing::prefab::load(&reference);
+            let models = if parts.is_empty() {
+                vec![reference.clone()]
+            } else {
+                parts.into_iter().map(|part| part.model).collect()
+            };
+            for model in models {
+                assert!(
+                    aa_cry::mesh::Model::load(&model).is_ok(),
+                    "doodad {template} model {model} is readable"
+                );
+            }
+        }
+    }
+
     /// The dead `_dead_effect` burst is spawned unprimed and actually retires when its simulation ends; the
     /// continuous smoke stays.
     #[test]

@@ -571,6 +571,22 @@ poller never returns 5: dying is entered by the death path below.
   motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle gate at
   states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
 
+### Ship damage and death (Eznan Cutter)
+
+The 2026-11-02 capture (`<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`, "Eznan Cutter damage and
+death") is the evidence for the ship half of S15; the prefabs are the game's own.
+
+* **HP stages.** `slave_healing_point_doodads` rows for template 21 are doodads 2510/2511/2512/2513 at attach points
+  36-39 (`galleon.galleon_repair01/04/03/02`). The server's `UpdateSlaveRepairPoints` spawns them as parented
+  `SCDoodadCreated` doodads when the HP crosses 75/50/25 %; Bevy announces them through `Event::DoodadsSpawned` and
+  draws each under the ship root (`units::sync_views` / `doodad_model`). Their prefabs carry the `repair_doodad`
+  particle. The state prefabs are `galleon.damaged25` (state 2/3) and `galleon.damaged75` (state 4); the latter's
+  `effect_fire` emitter is `X2_EFFECTS.e_effect.ship_damage_fireflame` (the captured aft-deck fire at 25 %).
+  `the_eznan_cutters_damage_effects_and_doodads_are_readable` checks the four hp doodads, the 16 drop doodads and
+  both effects against the real data.
+* **Debris.** The server's `DistributeSlaveDropDoodads` (`slave_drop_doodads`: 1327, 1322, 1323, 1324 and 12 x 1330)
+  creates 16 doodads around the hull; Bevy draws them like any `SCDoodadsCreated` doodad.
+
 Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed
 only once the idle branch lands). Combat effects anchored to a body bone (`super::attachments`) go away
