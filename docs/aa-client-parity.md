@@ -153,8 +153,9 @@ arbitrated on the same key (the wagon beats its nearer rear storage box). A righ
 preferred only among doodads; a tie keeps the doodad (`FUN_393bd9e0`, not decoded). There is no
 prompt for the slave already bound/sat on, while riding a mate, or while sitting on a bonded seat
 doodad (`player+0x3b94`). F sends `CSBindSlave` 0x031 for 12076, or 13863 when `model_bindings` has
-a free point 2. The stock Summon Info window opens from `SHOW_SLAVE_INFO` and shows the received
-header/equipment; the vehicle-gear and speed getters stay stubs (listed in
+a free point 2. The stock Summon Info window opens from `SHOW_SLAVE_INFO`; its Type and
+Classification rows read the received slave template, and its Move Speed and Turn Speed rows
+read the seated slave's live motion (`FUN_394aabd0` / `FUN_394aae90`, listed in
 [HUD](aa-client-hud.md)). Unit, click and producer tests are in `hud/mode_actions/tests.rs`,
 `hud/slave/tests.rs` and the inline tests in `hud/doodad.rs`; the `vehicle_bar` example shows the
 7-slot bar and the F prompt in one frame, measured from the driven wagon. Open: the two

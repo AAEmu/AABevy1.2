@@ -1416,9 +1416,17 @@ fn the_driven_cart_uses_the_controller_speed() {
     let (state, _units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
     bound(&state, 20);
     // no UnitMoved reports the cart this client drives
-    state.borrow_mut().mounted.local_cart = Some((20, 5.5));
+    state.borrow_mut().mounted.local_cart = Some(crate::hud::mounted::LocalCart {
+        obj_id: 20,
+        speed: 5.5,
+        turn_rate: 0.0,
+    });
     assert_eq!(discard(&state), Outcome::Refused(0x67));
-    state.borrow_mut().mounted.local_cart = Some((20, -4.0));
+    state.borrow_mut().mounted.local_cart = Some(crate::hud::mounted::LocalCart {
+        obj_id: 20,
+        speed: -4.0,
+        turn_rate: 0.0,
+    });
     assert_eq!(discard(&state), Outcome::Sent);
 }
 

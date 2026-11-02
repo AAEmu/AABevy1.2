@@ -270,3 +270,97 @@ fn original_equipment_rows_read_receipts_and_refresh_even_after_failed_reports()
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     Ok(())
 }
+
+/// The stock Summon Info window over the real World UI, pak and database: the mode bar's
+/// `showSlaveInfo` slot opens it, the received slave 146 fills the header, and the two motion
+/// rows follow the seated controller live (`FUN_394aabd0` / `FUN_394aae90`).
+#[test]
+#[ignore = "requires the original World UI, game pak and read-only game database"]
+fn original_summon_info_rows_follow_the_seated_hauler() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = super::breath::fixture::runtime(1280., 720.)?;
+    let _bindings = BindingsFile(path);
+    let own = super::expansion::fixture::spawn();
+    super::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::CharacterSelected(Box::new(own.state.clone())),
+        None,
+    );
+    super::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let mut hauler = super::expansion::fixture::spawn().unit;
+    hauler.obj_id = 20;
+    hauler.name = "Red Farm Hauler".into();
+    hauler.kind = UnitKind::Slave {
+        id: 6,
+        tl_id: 8,
+        template_id: 146,
+        summoner_id: 100,
+    };
+    hauler.model_id = 1553;
+    super::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(hauler)),
+        None,
+    );
+    super::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    state.borrow_mut().mounted.local_cart = Some(super::mounted::LocalCart {
+        obj_id: 20,
+        speed: 0.0,
+        turn_rate: 0.0,
+    });
+    super::mode_actions::run_function(
+        &mut state.borrow_mut(),
+        super::mode_actions::Function::ShowSlaveInfo,
+        web_time::Instant::now(),
+    );
+    super::mode_actions::ready(Some(&rt), &state);
+    aa_ui::lua::tick(&rt.lua, 16.);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame:IsVisible(), 'SHOW_SLAVE_INFO opens the stock window')
+        assert(slaveInfoFrame.name:GetText() == 'Red Farm Hauler')
+        assert(slaveInfoFrame.kind:GetText() == locale.map.slaveKind('machine'), 'Production Equipment')
+        assert(slaveInfoFrame.class:GetText() == 'Red Farm Hauler')
+        assert(slaveInfoFrame.kindTitle:GetText() == locale.slave.kind)
+        assert(slaveInfoFrame.classTitle:GetText() == locale.slave.class)
+        assert(slaveInfoFrame.moveSpeedTitle:GetText() == locale.slave.move_speed)
+        assert(slaveInfoFrame.turnSpeedTitle:GetText() == locale.slave.turn_speed)
+        assert(slaveInfoFrame.moveSpeed:GetText() == '0 '..locale.util.speed_unit,
+               slaveInfoFrame.moveSpeed:GetText())
+        assert(slaveInfoFrame.turnSpeed:GetText() == '0 '..locale.util.rotation_unit,
+               slaveInfoFrame.turnSpeed:GetText())
+    "#,
+        )
+        .exec()?;
+    state.borrow_mut().mounted.local_cart = Some(super::mounted::LocalCart {
+        obj_id: 20,
+        speed: 5.0,
+        turn_rate: 0.4,
+    });
+    aa_ui::lua::tick(&rt.lua, 16.);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame:IsVisible(), 'the window stays open while driving')
+        assert(slaveInfoFrame.moveSpeed:GetText() == '5 '..locale.util.speed_unit,
+               slaveInfoFrame.moveSpeed:GetText())
+        assert(slaveInfoFrame.turnSpeed:GetText() == '22.9 '..locale.util.rotation_unit,
+               slaveInfoFrame.turnSpeed:GetText())
+    "#,
+        )
+        .exec()?;
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    Ok(())
+}

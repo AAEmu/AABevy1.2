@@ -402,9 +402,15 @@ pub struct CartDrive {
 }
 
 impl CartDrive {
-    /// The driven cart and the controller's forward speed (m/s), while driving.
-    pub fn speed(&self) -> Option<(u32, f32)> {
-        Some((self.obj_id, self.controller?.speed))
+    /// The driven cart, the controller's forward speed (m/s) and its yaw rate (rad/s), while
+    /// driving. `X2SiegeWeapon:GetSiegeWeaponSpeed` / `GetSiegeWeaponTurnSpeed` read these.
+    pub fn motion(&self) -> Option<(u32, f32, f32)> {
+        let controller = self.controller.as_ref()?;
+        Some((
+            self.obj_id,
+            controller.speed,
+            controller.angular_velocity()[2],
+        ))
     }
 
     /// Stops driving (dead driver, left the seat, no cart): no controller, no sends.
