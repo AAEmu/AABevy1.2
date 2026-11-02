@@ -157,9 +157,12 @@ pub struct HudData {
     pub death_started: std::cell::Cell<Option<u64>>,
     /// The server offered an in-place resurrection (the caster may be the player below level 10).
     pub revive_caster: std::cell::Cell<Option<u32>>,
-    /// `CSResurrectCharacter` was sent for this death (`FUN_39186e70` sends once per death; the
-    /// two-second native debounce still lets a refused click through again, so the HUD latches it).
-    pub death_requested: std::cell::Cell<bool>,
+    /// When `CSResurrectCharacter` was last sent for this death (HUD clock, ms). `FUN_39186e70`
+    /// debounces 2 s, which still let the countdown and a click send twice, so the HUD holds
+    /// further requests until the death ends, a new death or offer arrives, or
+    /// [`RESURRECT_RETRY_MS`] passes without `SCUnitResurrected` (a refused or lost request must
+    /// not leave the player dead with a dead button; the retry bound is ours, not 1.2's).
+    pub death_requested: std::cell::Cell<Option<u64>>,
     /// The offered caster's name, for `X2Unit:GetUnitNameById` in the death window
     /// (`PLAYER_RESURRECTION`), which may name a unit outside the player's target or party.
     pub revive_caster_name: std::cell::RefCell<Option<String>>,
@@ -300,6 +303,9 @@ const FAKE_INGAME: [(&str, &str); 8] = [
     ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
 ];
 const INGAME_LUA: &str = include_str!("ingame.lua");
+/// How long a sent resurrect request holds further ones without `SCUnitResurrected` (ours, not
+/// 1.2's: the native only debounces 2 s).
+pub(super) const RESURRECT_RETRY_MS: u64 = 10_000;
 /// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
@@ -1222,7 +1228,12 @@ pub fn handle_requests(
                 let dead = data.death_started.get().is_some();
                 let wait_over = data.death_ends.get().is_some_and(|end| now >= end);
                 let allowed = !in_place || data.revive_caster.get().is_some();
-                if dead && wait_over && allowed && !data.death_requested.replace(true) {
+                let held = data
+                    .death_requested
+                    .get()
+                    .is_some_and(|sent| now < sent + RESURRECT_RETRY_MS);
+                if dead && wait_over && allowed && !held {
+                    data.death_requested.set(Some(now));
                     drop(data);
                     net.write(NetCommand(Command::Resurrect { in_place }));
                 }

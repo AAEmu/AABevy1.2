@@ -219,11 +219,13 @@ pub fn track_death(
                 data.death_ends.set(None);
                 data.death_started.set(None);
                 data.revive_caster.set(None);
-                data.death_requested.set(false);
+                data.death_requested.set(None);
                 data.revive_caster_name.borrow_mut().take();
             }
             Event::ResurrectionOffered { caster } => {
                 data.revive_caster.set(Some(caster.obj_id));
+                // a new offer may be accepted even after a refused request
+                data.death_requested.set(None);
                 let name = match (&units, &player) {
                     (Some(units), Some(player)) => super::combat::unit_name(units, data.game.get(), player, caster.obj_id),
                     _ => String::new(),
@@ -235,9 +237,7 @@ pub fn track_death(
             // `+0xaf8`; `SCNotifyResurrection` only raises the offer flag (`FUN_391d39f0`).
             Event::DeathDetails { obj_id, resurrect_wait_ms, .. } if own != 0 && *obj_id == own => {
                 let now = super::panels::now_ms(data.start);
-                if data.death_started.get().is_none() {
-                    data.death_requested.set(false);
-                }
+                data.death_requested.set(None);
                 data.death_started.set(Some(now));
                 data.death_ends.set(Some(now + (*resurrect_wait_ms).max(0) as u64));
             }
@@ -247,7 +247,7 @@ pub fn track_death(
                 data.death_ends.set(None);
                 data.death_started.set(None);
                 data.revive_caster.set(None);
-                data.death_requested.set(false);
+                data.death_requested.set(None);
                 data.revive_caster_name.borrow_mut().take();
             }
             _ => {}
