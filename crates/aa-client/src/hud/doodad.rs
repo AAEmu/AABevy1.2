@@ -937,14 +937,26 @@ fn track(
     let usable = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world));
     // the ladder must be the nearest doodad along the ray, not one behind a closer one
     let nearest = nearest_hit(climb, usable);
-    // ... and it must be within grab reach: a far click falls through to the unit/doodad pick.
+    // ... and it must be within grab reach: a far click falls through to the unit/doodad pick. The reach is
+    // to the ladder's segment, like the grab's `nearest_ladder` (a ship ladder's origin can sit at the
+    // waterline with its rungs at deck height); the doodad origin only stands in without a drawn helper.
     let ladder_click = climb.filter(|(_, id)| {
-        nearest.is_some_and(|(_, n)| n == *id)
-            && doodads
+        let in_reach = match ladder_segments.iter().find(|(seg, ..)| seg == id) {
+            Some((_, bottom, top)) => {
+                crate::ingame::ladder::segment_point(
+                    d.pos,
+                    aa_world::bevy_to_cry(*bottom),
+                    aa_world::bevy_to_cry(*top),
+                )
+                .0 <= crate::ingame::ladder::REACH
+            }
+            None => doodads
                 .by_id
                 .get(id)
                 .and_then(|o| doodad_world(o, &units))
-                .is_some_and(|p| d.pos.distance(p) <= crate::ingame::ladder::REACH)
+                .is_some_and(|p| d.pos.distance(p) <= crate::ingame::ladder::REACH),
+        };
+        nearest.is_some_and(|(_, n)| n == *id) && in_reach
     });
     let mut clicked = None;
     let mut climb_click = None;

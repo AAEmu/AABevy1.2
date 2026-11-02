@@ -2604,6 +2604,23 @@ mod tests {
     }
 
     #[test]
+    fn an_unprimed_one_shot_has_particles_in_its_first_frames() {
+        let budget = AtomicI32::new(10_000);
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params ParticleLifeTime="6" Count="10" Texture="textures/x.dds"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let def = lib.get("a").unwrap();
+        assert!(def.one_shot());
+        let effect = crate::Effect::new("T.a");
+        assert!(!effect.primes(def), "the burst is not primed");
+        let mut s = tree_sim(xml);
+        let c = ctx(&budget);
+        // the production start decision: a burst starts at t=0, not advanced by `EffectSim::prime`
+        crate::start_simulation(&effect, def, &mut s, &c);
+        s.step(&c);
+        assert!(s.alive() > 0, "the burst's first frame is visible");
+    }
+
+    #[test]
     fn gravity_pulls_down_and_focus_gravity_goes_up() {
         let budget = AtomicI32::new(10_000);
         let mut s = sim(r#"Count="1" ParticleLifeTime="3" Texture="textures/x.dds" Speed="0" GravityScale="1""#);
