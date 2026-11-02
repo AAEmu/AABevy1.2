@@ -46,6 +46,12 @@ impl EffectDef {
         self.root.def.continuous
     }
 
+    /// A burst: no enabled emitter is `Continuous`, so the whole effect plays once and ends. The root may be an
+    /// empty wrapper (`housing_test.housing_fire_b` has `<Params/>` with continuous children, not a burst).
+    pub fn one_shot(&self) -> bool {
+        self.emitters.iter().all(|e| !e.def.continuous)
+    }
+
     /// Number of emitters that draw.
     pub fn drawn(&self) -> usize {
         self.emitters.iter().filter(|e| e.def.draws()).count()
@@ -219,6 +225,13 @@ mod tests {
         let lib = Library::load("x2_effects").unwrap();
         let torch = lib.get("fire_smoke.torchlight_b").expect("torch");
         assert!(torch.drawn() >= 2, "{}", torch.drawn());
+        // continuous children keep a fire alive even when its root wrapper has no Params; the burst has none
+        let fire = lib.get("housing_test.housing_fire_b").expect("dying fire");
+        assert!(!fire.one_shot(), "{} emitters", fire.emitters.len());
+        let smoke = lib.get("fire_smoke.burning_smoke_01").expect("dead smoke");
+        assert!(!smoke.one_shot());
+        let burst = lib.get("housing_test.small_ship_exp").expect("dead explosion");
+        assert!(burst.one_shot(), "{} emitters", burst.emitters.len());
         let lib = Library::load("abillity_skill_table_m").unwrap();
         assert!(lib.get("login_stage_effect.flow_fog_01").is_some());
     }

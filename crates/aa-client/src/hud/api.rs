@@ -157,6 +157,12 @@ pub struct HudData {
     pub death_started: std::cell::Cell<Option<u64>>,
     /// The server offered an in-place resurrection (the caster may be the player below level 10).
     pub revive_caster: std::cell::Cell<Option<u32>>,
+    /// When `CSResurrectCharacter` was last sent for this death (HUD clock, ms). `FUN_39186e70`
+    /// debounces 2 s, which still let the countdown and a click send twice, so the HUD holds
+    /// further requests until the death ends, a new death or offer arrives, or
+    /// [`RESURRECT_RETRY_MS`] passes without `SCUnitResurrected` (a refused or lost request must
+    /// not leave the player dead with a dead button; the retry bound is ours, not 1.2's).
+    pub death_requested: std::cell::Cell<Option<u64>>,
     /// The offered caster's name, for `X2Unit:GetUnitNameById` in the death window
     /// (`PLAYER_RESURRECTION`), which may name a unit outside the player's target or party.
     pub revive_caster_name: std::cell::RefCell<Option<String>>,
@@ -244,6 +250,7 @@ impl Default for HudData {
             death_ends: Default::default(),
             death_started: Default::default(),
             revive_caster: Default::default(),
+            death_requested: Default::default(),
             revive_caster_name: Default::default(),
             tips: Default::default(),
             stats_pushed: 0,
@@ -296,6 +303,9 @@ const FAKE_INGAME: [(&str, &str); 8] = [
     ("fake_target.lua", include_str!("../../../aa-ui/examples/fake/fake_target.lua")),
 ];
 const INGAME_LUA: &str = include_str!("ingame.lua");
+/// How long a sent resurrect request holds further ones without `SCUnitResurrected` (ours, not
+/// 1.2's: the native only debounces 2 s).
+pub(super) const RESURRECT_RETRY_MS: u64 = 10_000;
 /// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
@@ -1216,7 +1226,24 @@ pub fn handle_requests(
                 panels::use_bag_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
-                net.write(NetCommand(Command::Resurrect { in_place }));
+                // `FUN_39186e70` (`X2Player:Resurrect`): the native sends only while the death
+                // timestamp is set and the server's resurrect wait has run out; an in-place
+                // revival also needs the offer. It debounces 2 s, which still allowed the
+                // countdown and a click to send twice: latch one request per death.
+                let data = bridge.0.borrow();
+                let now = panels::now_ms(data.start);
+                let dead = data.death_started.get().is_some();
+                let wait_over = data.death_ends.get().is_some_and(|end| now >= end);
+                let allowed = !in_place || data.revive_caster.get().is_some();
+                let held = data
+                    .death_requested
+                    .get()
+                    .is_some_and(|sent| now < sent + RESURRECT_RETRY_MS);
+                if dead && wait_over && allowed && !held {
+                    data.death_requested.set(Some(now));
+                    drop(data);
+                    net.write(NetCommand(Command::Resurrect { in_place }));
+                }
             }
             Request::LearnSkill { id } => super::skillbook::learn_skill(&bridge.0.borrow(), id, &mut net),
             Request::LearnBuff { id } => super::skillbook::learn_buff(&bridge.0.borrow(), id, &mut net),

@@ -7,7 +7,9 @@
 //! `SCUnitDeath` through `vehicle::update_damage` (the packet path is in the unit tests). It asserts the
 //! state and the prefab ref of every step (2 normal, 3 normal, 4 `tractor_body_damage75`, 6
 //! `tractor_body_dead`, then the death: 5 `tractor_body_dying` for `models.dying_time` 3.3 s, then 6
-//! `tractor_body_dead`) and exits non-zero on a mismatch. `--shot` keeps it open for the picture.
+//! `tractor_body_dead`), and that the dying prefab spawns its fire effect and the dead prefab its smoke
+//! and explosion (`aa_fx::FxPlugin` plays them). It exits non-zero on a mismatch. `--shot` keeps it open
+//! for the picture.
 //!
 //! `cargo run -p aa-client --example vehicle_damage -- --mute --offscreen-shot shots/aa-client/vehicle_damage.png --shot-after 8`
 
@@ -172,6 +174,7 @@ fn main() -> AppExit {
             aa_dev::DevPlugin,
             aa_cry::CryPlugin,
             aa_anim::AnimPlugin,
+            aa_fx::FxPlugin,
             aa_world::pipelines::build,
         ))
         .init_state::<Screen>()
@@ -301,7 +304,8 @@ fn check_states(
     db: Res<ingame::data::Db>,
     mut units: ResMut<aa_net::state::Units>,
     mut check: ResMut<Check>,
-    live: Query<&ingame::vehicle::VehicleDamage, With<Live>>,
+    live: Query<(Entity, &ingame::vehicle::VehicleDamage), With<Live>>,
+    effects: Query<(&ChildOf, &aa_fx::Effect), With<ingame::vehicle::VehicleEffect>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     check.timer.tick(time.delta());
@@ -309,13 +313,54 @@ fn check_states(
         return;
     }
     if let Some((state, variant)) = check.pending.take() {
-        let damage = live.single().expect("the live wagon");
+        let (root, damage) = live.single().expect("the live wagon");
         assert_eq!(damage.state, state, "state after step {}", check.stage);
         assert!(
             damage.variant.ends_with(variant),
             "{} does not end with {variant}",
             damage.variant
         );
+        let names: Vec<String> = effects
+            .iter()
+            .filter(|(parent, _)| parent.parent() == root)
+            .map(|(_, effect)| effect.name.to_ascii_lowercase())
+            .collect();
+        if state == 5 {
+            assert!(
+                names
+                    .iter()
+                    .any(|name| name == "x2_effects.housing_test.housing_fire_b"),
+                "the dying prefab's fire effect: {names:?}"
+            );
+            assert!(
+                !names.iter().any(|name| name.starts_with("x2_sounds.")),
+                "a sound particle is not drawn as a visual effect: {names:?}"
+            );
+        }
+        if state == 6 {
+            assert!(
+                names
+                    .iter()
+                    .any(|name| name == "x2_effects.fire_smoke.burning_smoke_01"),
+                "the dead prefab's smoke: {names:?}"
+            );
+            if check.death_phase == 0 {
+                // the HP-0 step is the worsening transition into dead: its explosion plays here
+                assert!(
+                    names
+                        .iter()
+                        .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+                    "the dead prefab's explosion: {names:?}"
+                );
+            } else {
+                assert!(
+                    !names
+                        .iter()
+                        .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+                    "the death's 6 -> 5 -> 6 does not replay the explosion: {names:?}"
+                );
+            }
+        }
         info!("vehicle_damage: verified state {state} {}", damage.variant);
         match check.death_phase {
             2 => {

@@ -632,7 +632,12 @@ pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inve
             if env.held_back(skill, flight) {
                 return;
             }
-            if let Some(f) = env.precheck(skill) {
+            // a basic attack checks its target and then range-checks (`FUN_39397f90`): an out-of-range press is sent unless the
+            // `DAT_39d1fba4` setting returns 1, which then takes the click-attack path (`FUN_39393920`) without a send; the K2
+            // client sent `CSStartSkill 2` at 11.2 m, so its setting was not 1 (the default is not provable). The client's own
+            // refusal shows the same alert as any skill.
+            let refusal = if env.is_auto_attack(skill) { env.precheck_auto_attack(skill) } else { env.precheck(skill) };
+            if let Some(f) = refusal {
                 failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
                 return;
             }
