@@ -645,14 +645,28 @@ and explicit controls").
   check on that bound slave's object id (`this+0x18`): both use the BOUND slave, not the seat, so
   a player seated on another slave still discards the bound one. The driver branch is keyed on
   `this+0x14`, the slave SCSlaveBound named as the local player's master, not on the seat point.
-  With it the unbind is refused while the bound slave's speed squared is above
-  `_DAT_3999f85c` 25.0 (5 m/s) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170`
-  sends only from an attachment above point 1 (no speed check, 1500 ms throttle) and is silent for
-  a point-1 seat that is not the player's. The speed is the latest replicated
-  `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s, 30/32767 m/s for a type-2 vehicle
-  body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
-  `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
-  value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+  With it the unbind is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 only when **both** hold: the
+  bound slave model's +0x2a0 slot is non-zero, and the model's entity velocity squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s). `FUN_39345aa0` (677646) puts the check inside
+  `if (model[+0x2a0] != 0)`. For a `VehicleModel`, `X2::VehicleUnitModel::Init`
+  (`FUN_390f0510`, 190001) copies the slot from the model descriptor's +0x72, which the client's
+  `vehicle_models` loader (`FUN_39736bd0`, 1581965) fills from column 0x20
+  (`use_wheeled_vehicle_simulation`; +0x74 is `velocity`, +0x78/+0x7c `wheel`/`wheel2`). Carts
+  are false (model 1008 Farm Wagon, model 1553 Red Farm Hauler) and the speed cars are true
+  (vehicle models 45-48, 50, 52, 54-56). A `ShipModel` keeps its 0x198-byte ship object pointer
+  in the same slot (`FUN_390bdf70`, 156143-156149, the ship base vtable 0x399a56d0 slot 0x50;
+  the ship dtor deletes it), so a ship driver is refused too - **inferred** from the pointer
+  byte test, **capture-pending** (a ship dismount above 5 m/s has not been recorded). The
+  2026-11-01 owner capture sent 0x032 at ~6.7 m/s on the hauler (slave template 146) with W held
+  and got off, no 0x67; the client reads the gate from `AA_DB` and a model the data does not name
+  is not gated (the server still decides the unbind). The speed is the latest replicated
+  `SCOneUnitMovement` velocity through `Movement::velocity_mps`: 30/32767 m/s for a type-2 land
+  vehicle and a type-3 ship body, 50/32767 for a type-5 transfer, 1/1024 for a unit movement. (A
+  type-3 body read at 1/1024 would make a real 4.8 m/s ship read 5.12 and refuse it.) The
+  controller speed covers the cart this client drives (`cart::CartDrive`, which no `UnitMoved`
+  reports); the speed is treated as 0 after 500 ms without a new report (a port bound, **not a
+  1.2 value**). Without a bound master `FUN_39362170` sends only from an attachment above point 1
+  (no speed check, 1500 ms throttle) and is silent for a point-1 seat that is not the player's.
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
   the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
@@ -700,9 +714,17 @@ and explicit controls").
   (`CANT_DO_WHILE_YOU_DEAD`) shows the same text.
 * The player flags +0x3a70..+0x3a73/+0x3a7b -> 0x13 and the parent unit type 0xe silent refusal,
   both not ported.
-* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s, and the
-  native speed source and staleness (the port ages the last velocity after 500 ms, not 1.2);
+* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s on a
+  gated model (wheeled-simulation vehicle or ship), and the staleness bound (the port ages the
+  last velocity after 500 ms, not 1.2);
   `SCSlaveDespawn`/`SCEscapeSlave`/`SCSlaveRemoved`/visibility loss clearing the bound slave.
+* A live leave on a wheeled-simulation car at 5-15 m/s: the data gate and the capture cover the
+  cart; the car's own 0x67 has not been recorded.
+* A ship driver's leave above 5 m/s: `FUN_390bdf70` leaves a non-zero pointer byte in the ship
+  model's +0x2a0, so the refusal is **inferred**, not captured. It allocates the 0x198-byte
+  object only when `param_2 != 0` and `*(DAT_3a5bb1d8 + 0x94) != 0` (DEC 156143), so a ship that
+  is not crewed or a disabled cvar keeps 0 on this slot. The pointer's low byte could in
+  principle be 0 too (the native tests only that byte); the port gates every `ShipModel`.
 * The 1500 ms agent throttle, the driver/passenger seat difference, a non-owner passenger, and
   whether any mounted-HUD button or key (not just `DiscardSiegeWeapon` and movement) leaves.
 * A slave with a zero timeline (the port stays silent; not a 1.2 check), and whether movement

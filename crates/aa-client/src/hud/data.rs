@@ -230,6 +230,13 @@ pub struct GameData {
     /// `models.id` -> `actor_models.radius` for `models.sub_type = 'ActorModel'`: the server's
     /// `ModelManager.GetActorModel(modelId).Radius`.
     pub(super) model_radii: HashMap<u32, f32>,
+    /// `models.id` -> whether the native model's +0x2a0 slot is non-zero, the gate of the
+    /// driver's 0x67 unbind speed refusal (`FUN_39345aa0` 677646). A `VehicleModel` sets it from
+    /// `vehicle_models.use_wheeled_vehicle_simulation` (`X2::VehicleUnitModel::Init`,
+    /// `FUN_390f0510` 190001). A `ShipModel` keeps its 0x198-byte ship object pointer there
+    /// (`FUN_390bdf70` 156143-156149), so its byte is non-zero too (inferred: a ship dismount at
+    /// speed is capture-pending).
+    pub(super) unbind_speed_gated: HashMap<u32, bool>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
@@ -705,6 +712,28 @@ impl GameData {
             }
         }
         {
+            // The native `VehicleUnitModel` copies this data byte to the model and the driver's
+            // discard path checks it (`FUN_390f0510` 190001 -> `FUN_39345aa0` 677646).
+            let mut q = conn.prepare(
+                "SELECT m.id, v.use_wheeled_vehicle_simulation FROM models m \
+                 JOIN vehicle_models v ON v.id = m.sub_id AND m.sub_type = 'VehicleModel'",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.unbind_speed_gated.insert(r.get(0)?, any_flag(r, 1)?);
+            }
+        }
+        {
+            // A ship keeps a heap object in the same +0x2a0 slot (`FUN_390bdf70` 156143-156149,
+            // `FUN_390b25c0`), so a driver's leave is speed-checked too. Inferred: no capture of a
+            // ship dismount above 5 m/s yet.
+            let mut q = conn.prepare("SELECT id FROM models WHERE sub_type = 'ShipModel'")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.unbind_speed_gated.insert(r.get(0)?, true);
+            }
+        }
+        {
             let mut q = conn.prepare("SELECT zone_key, group_id, faction_id FROM zones WHERE group_id IS NOT NULL")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -940,6 +969,18 @@ impl GameData {
     /// scale, 0 when the model has no actor radius (or the database is not loaded yet).
     pub(super) fn model_size(&self, model_id: u32, scale: f32) -> f32 {
         self.model_radii.get(&model_id).copied().unwrap_or(0.0) * scale
+    }
+
+    /// Whether the native model's +0x2a0 slot is non-zero, the gate of the driver's speed
+    /// refusal (`FUN_39345aa0` 677646): a `VehicleModel` with
+    /// `use_wheeled_vehicle_simulation`, or a `ShipModel` (its 0x198-byte ship object pointer,
+    /// inferred). A model the database does not name is not gated: the captured land leave
+    /// (`hud/slave.rs`) sends.
+    pub(super) fn unbind_speed_gated(&self, model_id: u32) -> bool {
+        self.unbind_speed_gated
+            .get(&model_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Zone group of a `zones.zone_key` ("Solzreed Peninsula") and the faction protecting the zone.
