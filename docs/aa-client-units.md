@@ -479,10 +479,11 @@ captured Eznan Cutter rises vertically and rights itself because `ShipUnitModel`
 `ShipUnitModel::Init` (`FUN_390e8b30`, x2game.dll.c:185704) accepts model subtype 4 and `ShipUnitModel::Update`
 (`FUN_390ebc50`, x2game.dll.c:187637) runs the base prefab update and then the ship helpers, while `FUN_390df580`
 (x2game.dll.c:179095) attaches the buoyancy: it scans the prefab's objects for names starting with `buoy`
-(`XlComparePrefixI`, x2game.dll.c:179531) and, when there are none, builds the float boxes from the
-`ship_models.mass_center_*` / `mass_box_size_*` block (fallback at x2game.dll.c:179577 ff.;
-`galleon.xml/galleon.step_10galleon_normal` has no `buoy` object). The `ship_models` water fields are read there.
-So the captured rise/righting is the model's physics, not the portal animation.
+(`XlComparePrefixI`, x2game.dll.c:179531) and, when there are none, builds the float body from the ship descriptor's
+keel tube (`tube_length` / `tube_radius` / `tube_offset_z` / `keel_offset_z`), mass box (`mass_center_*` /
+`mass_box_size_*`) and floats it with `water_damping` / `water_density` / `water_resistance` (fallback at
+x2game.dll.c:179577 ff.; `galleon.xml/galleon.step_10galleon_normal` has no `buoy` object). So the captured
+rise/righting is the model's physics, not the portal animation.
 
 The Bevy emergence reproduces the result for a `ShipModel` when a water surface is known at its position
 (`WaterQuery`): it keeps the native horizontal start (`end - axis * 2 * extent`) and linear slide, but starts the
