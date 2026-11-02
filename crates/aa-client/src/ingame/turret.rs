@@ -170,7 +170,10 @@ impl TurretLimits {
 /// `vehicle_models` turret block. A bad data row (a text value in an angle column) gives `None`,
 /// so a cart is never mistaken for a turret.
 pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
-    if !matches!(unit.kind, UnitKind::Slave { id: 7 | 8, .. }) {
+    let UnitKind::Slave { template_id, .. } = unit.kind else {
+        return None;
+    };
+    if !matches!(db.slave_kind(template_id), Some(7 | 8)) {
         return None;
     }
     db.turret_limits(unit.model_id)
@@ -186,10 +189,16 @@ pub fn slave_turret(unit: &Unit, db: &Db) -> Option<TurretLimits> {
 /// needs a `BallisticPos`/`ArtilleryPos` mount skill (`Db::has_cannon_skill`), so a cart with
 /// only Honk horn is a seat but not a mode-8 gunner.
 pub fn turret_seat(unit: &Unit, db: &Db) -> bool {
-    let UnitKind::Slave { id, .. } = unit.kind else {
+    let UnitKind::Slave { template_id, .. } = unit.kind else {
         return false;
     };
-    turret_seat_model(id, unit.model_id, db)
+    // `UnitKind::Slave.id` is the server's persisted slave id; the unit state's `template_id`
+    // is the `slaves.id` the 1.2 client looks the kind up by (see `Db::slave_kind`).
+    turret_seat_model(
+        db.slave_kind(template_id).unwrap_or(0),
+        unit.model_id,
+        db,
+    )
 }
 
 /// [`turret_seat`] from the two ids the slave unit carries. The real-data test iterates the
@@ -1817,6 +1826,8 @@ mod tests {
             let conn = rusqlite::Connection::open(&path).expect("fixture database");
             conn.execute_batch(
                 "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+                 CREATE TABLE slaves(id INTEGER PRIMARY KEY, slave_kind_id INTEGER);
+                 INSERT INTO slaves VALUES (77, 8);
                  CREATE TABLE vehicle_models(id INTEGER PRIMARY KEY,
                      turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
                      turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
@@ -1976,6 +1987,8 @@ mod tests {
                 let conn = rusqlite::Connection::open(&path).expect("fixture database");
                 conn.execute_batch(&format!(
                     "CREATE TABLE models(id INTEGER PRIMARY KEY, sub_type TEXT, sub_id INTEGER);
+                     CREATE TABLE slaves(id INTEGER PRIMARY KEY, slave_kind_id INTEGER);
+                     INSERT INTO slaves VALUES ({template}, 8);
                      CREATE TABLE vehicle_models(id INTEGER PRIMARY KEY,
                          turret_pitch_angle_min REAL, turret_pitch_angle_max REAL,
                          turret_yaw_angle_min REAL, turret_yaw_angle_max REAL,
