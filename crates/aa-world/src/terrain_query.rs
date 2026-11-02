@@ -67,10 +67,10 @@ struct Inner {
     world: String,
     capacity: usize,
     cache: Mutex<Cache>,
-    /// No heightmap is loaded (a test query without the game pak).
+    /// A test query without the pak: there is no cell data, so every position is outside the map.
     no_data: bool,
-    /// A flat synthetic height at every inside-map position (a test ground).
-    flat: Option<f32>,
+    /// A synthetic cell served at every inside-map position, for tests that must run without the pak.
+    fixture: Option<Arc<CellHeights>>,
 }
 
 #[derive(Default)]
@@ -103,7 +103,7 @@ impl TerrainQuery {
                 capacity: cells.max(1),
                 cache: Mutex::default(),
                 no_data: false,
-                flat: None,
+                fixture: None,
             }),
         }
     }
@@ -116,20 +116,35 @@ impl TerrainQuery {
                 capacity: 1,
                 cache: Mutex::default(),
                 no_data: true,
-                flat: None,
+                fixture: None,
             }),
         }
     }
 
     /// A flat ground at `height` (no pak): every inside-map position stands at the same height.
     pub fn fixture_flat(world: &str, height: f32) -> TerrainQuery {
+        let n = crate::heightmap::GRID * crate::heightmap::GRID;
+        let cell = CellHeights {
+            heights: vec![height; n],
+            surface: vec![0; n],
+            hole_sectors: [false; 256],
+            ocean_level: 0.0,
+            min_z: height,
+            max_z: height,
+            sectors: 0,
+        };
+        TerrainQuery::fixture_cell(world, cell)
+    }
+
+    /// A synthetic cell (no pak) served at every inside-map position, for tests that need holes, slopes or a seabed.
+    pub fn fixture_cell(world: &str, cell: CellHeights) -> TerrainQuery {
         TerrainQuery {
             inner: Arc::new(Inner {
                 world: world.to_string(),
                 capacity: 1,
                 cache: Mutex::default(),
                 no_data: false,
-                flat: Some(height),
+                fixture: Some(Arc::new(cell)),
             }),
         }
     }
@@ -141,19 +156,13 @@ impl TerrainQuery {
     /// The parsed heightmap of cell `(cx, cy)` (loaded on first use); `None` when the cell does not exist or
     /// cannot be read.
     pub fn cell(&self, cx: i32, cy: i32) -> Option<Arc<CellHeights>> {
-        if let Some(height) = self.inner.flat {
-            let n = crate::heightmap::GRID * crate::heightmap::GRID;
-            return Some(Arc::new(CellHeights {
-                heights: vec![height; n],
-                surface: vec![0; n],
-                hole_sectors: [false; 256],
-                ocean_level: 0.0,
-                min_z: height,
-                max_z: height,
-                sectors: 0,
-            }));
+        if self.inner.no_data {
+            return None;
         }
-        if self.inner.no_data || cx < 0 || cy < 0 {
+        if let Some(cell) = &self.inner.fixture {
+            return Some(cell.clone());
+        }
+        if cx < 0 || cy < 0 {
             return None;
         }
         let slot = {
@@ -275,6 +284,36 @@ mod tests {
 
     /// The Nuian spawn, a meadow at the pond in cell `(15, 15)`.
     const SPAWN: (f32, f32) = (15575.0, 15375.0);
+
+    #[test]
+    fn fixtures_answer_without_the_pak() {
+        let flat = TerrainQuery::fixture_flat("test", 90.0);
+        assert_eq!(flat.height_at(100.0, 200.0), Some(90.0));
+        assert_eq!(flat.ground_at(100.0, 200.0).unwrap().height, 90.0);
+        assert_eq!(flat.is_hole_at(100.0, 200.0), Some(false));
+        assert_eq!(flat.height_at(-1.0, 200.0), None);
+        // an empty fixture is outside the map everywhere
+        let empty = TerrainQuery::fixture("test");
+        assert_eq!(empty.height_at(100.0, 200.0), None);
+        assert!(empty.cell(0, 0).is_none());
+        // a synthetic hole: raw heights remain, physical ground does not
+        let n = crate::heightmap::GRID * crate::heightmap::GRID;
+        let hole = TerrainQuery::fixture_cell(
+            "test",
+            CellHeights {
+                heights: vec![90.0; n],
+                surface: vec![31; n],
+                hole_sectors: [true; 256],
+                ocean_level: 0.0,
+                min_z: 90.0,
+                max_z: 90.0,
+                sectors: 256,
+            },
+        );
+        assert_eq!(hole.height_at(100.0, 200.0), Some(90.0));
+        assert_eq!(hole.is_hole_at(100.0, 200.0), Some(true));
+        assert_eq!(hole.ground_at(100.0, 200.0), None);
+    }
 
     #[test]
     fn heights_match_the_grid() {

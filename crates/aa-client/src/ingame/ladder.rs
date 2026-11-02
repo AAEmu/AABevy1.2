@@ -724,6 +724,7 @@ fn land_after_climb(
                 speed: 0.0,
                 vertical: 0.0,
                 deep: false,
+                hold: 0.0,
             });
             mover.grounded = false;
             mover.vz = 0.0;
