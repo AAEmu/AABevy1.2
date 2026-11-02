@@ -471,7 +471,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // 1.2 has no recovered attackability test here (`FUN_39837800` only calls the type-3 vtable's
         // `+0x40`, whose source is not decoded): neutral units, NPC or character, stay attackable as
         // before; only a FRIENDLY one is refused.
-        // `FUN_39838880` reasons 2-6 need both units' owning-character id (`+0x24` valid, `FUN_39356b60`):
+        // `FUN_39838880` reasons 2-6 need both owning-character ids (`+0x24`) valid (`FUN_39356b60`):
         // character/slave/house/mate/shipyard, never an NPC or a transfer. Reason 2 (the attacker's
         // unresolved `+0x30` flag) is not modeled. On relation 2/3, reasons 3/4 (same owner, same party)
         // come first and refuse as INVALID_TARGET (0x22); reasons 5/6 then use `FUN_39837a90`'s level <= 10
