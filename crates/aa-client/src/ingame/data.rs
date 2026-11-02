@@ -86,18 +86,31 @@ pub struct AttachPointStrings {
 pub const DEFAULT_SHIP_STEER_VEL: f32 = 6.0;
 
 /// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
-/// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model.
+/// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model. The speed follows a
+/// wanted one at the actor model's `game_inertia` (slowing, 4 for a horse) or `game_inertia_accel` (speeding up, 11) rate;
+/// the 2026-11-02 capture's Leomorph ramps 0 -> 5.9 m/s in the first 103 ms packet and coasts 12.65 -> 8.3 -> 0.7 -> 0
+/// over 0.1 / 0.7 / 1.5 s, which is exactly those two exponential rates (feel capture 1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MountSpeed {
     pub run: f32,
     pub walk: f32,
     pub backward: f32,
+    /// `actor_models.game_inertia`: response rate (1/s) while slowing down.
+    pub inertia: f32,
+    /// `actor_models.game_inertia_accel`: response rate (1/s) while speeding up.
+    pub accel: f32,
 }
 
 impl Default for MountSpeed {
     /// A horse's.
     fn default() -> Self {
-        MountSpeed { run: 9.0, walk: 0.2, backward: 0.2 }
+        MountSpeed {
+            run: 9.0,
+            walk: 0.2,
+            backward: 0.2,
+            inertia: 4.0,
+            accel: 11.0,
+        }
     }
 }
 
@@ -1185,11 +1198,11 @@ impl Db {
         let speed = l
             .conn
             .query_row(
-                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
+                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier, a.game_inertia, a.game_inertia_accel FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
                 params![model_id],
                 |r| {
                     let f = |i: usize, default: f32| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.map_or(default, |v| v as f32)) };
-                    Ok(MountSpeed { run: f(0, d.run)?, walk: f(1, d.walk)?, backward: f(2, d.backward)? })
+                    Ok(MountSpeed { run: f(0, d.run)?, walk: f(1, d.walk)?, backward: f(2, d.backward)?, inertia: f(3, d.inertia)?, accel: f(4, d.accel)? })
                 },
             )
             .unwrap_or(d);
@@ -1995,7 +2008,7 @@ mod tests {
     #[test]
     fn the_database_holds_the_mount_speeds() {
         let Some(db) = Db::open() else { return };
-        assert_eq!(db.mount_speed(139), MountSpeed { run: 9.0, walk: 0.2, backward: 0.2 });
+        assert_eq!(db.mount_speed(139), MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0 });
         assert!((db.mount_speed(953).run - 7.2).abs() < 1e-5);
     }
 
