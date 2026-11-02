@@ -668,7 +668,6 @@ impl Plugin for HudPlugin {
                     .run_if(in_state(Screen::InGame)),
             );
         app.add_systems(Update, targeting::click_target.after(PointerFinished).run_if(hud_up).run_if(in_state(Screen::InGame)));
-        app.add_systems(Update, slave::walk_off.after(sync_hud).before(api::handle_requests).run_if(hud_up).run_if(in_state(Screen::InGame)));
     }
 }
 

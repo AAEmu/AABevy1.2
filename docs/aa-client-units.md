@@ -658,23 +658,38 @@ and explicit controls").
   `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
   value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
 * **Vehicle seat frames.** A vehicle seat is the body helper named by
-  `model_attach_point_strings` (point 2 is `$passenger0`, point 1 `$driver`). The helper matrix is
-  the attachment frame: its translation and **full** authored rotation (a quaternion, not yaw
-  only) compose with the vehicle's world rotation (`ingame/mount.rs::rider_rotation`). This is
-  applied to every `Seat::Helper`, driver included, so a body that turns any seat is handled the
-  same way. Real frames: the Red Farm Hauler (model 1553, `transfers_trailer_c.chr`) has an
-  identity `$driver` and a 180-degree-about-model-Z `$passenger0`; the Farm Wagon (model 1008)
-  has only an identity `$driver` (no point-2 helper in 1.2). The seat clip
+  `model_attach_point_strings` (point 2 is `$passenger0`, point 1 `$driver`). A **passenger**
+  helper's matrix is the attachment frame: its translation and **full** authored rotation (a
+  quaternion, not yaw only) compose with the vehicle's world rotation
+  (`ingame/mount.rs::rider_rotation`). Driver and other helper frames are not rider frames: the
+  real data authors `$driver` 180 degrees on model 129 (`ShipModel`) and 772 (`singboat`), and
+  `$cannonN`/ladder/box helpers carry prop rotations; applying them would turn or tilt the
+  driver/gunner. They are left on the mount rotation.
+  Real passenger frames: model 1553 Red Farm Hauler `$passenger0` 180 degrees about model Z;
+  models 314 (`maritram`), 653 (`carriage_trailed`) and 1459 (`ghostcarriage_trailed`) also 180;
+  the speedcar/car passenger helpers (1293/1323/1371/1406/1444/1460-1462) are a 23.1-degree
+  recline. Model 1008 Farm Wagon has only an identity `$driver` and no point-2 helper in 1.2. The seat clip
   `fist_ac_trailer_sit_idle` has an identity Bip01 root, so it adds no turn of its own; the
-  passenger's turn comes from the `$passenger0` attachment frame. The 2026-11-01 1.2 retest has
-  the passenger facing the vehicle's forward, and the real-data test pins both frames.
+  passenger's turn comes from the `$passenger0` attachment frame.
+  Why the old identity mount rotation faced the rear: the rider was drawn in the mount frame and
+  the `$passenger0` attachment frame (the only 180-degree frame in the seat data) was not
+  applied; whether the native composition also includes a body/bind-root turn is not captured.
+  The owner's Bevy retest and the real-data test pin the corrected frames.
 * **Passenger leaving.** With the own attachment point above 1 on a slave, the explicit dismount
   skill/button sends the parent's 0x032 through `FUN_39362170`, throttled to one request per
   1500 ms (`_DAT_3a169948`). That branch has no speed check, unlike the driver's `FUN_39345aa0`.
-  Movement input does **not** leave the seat: Bevy used to map `moveforward`/`moveback`/strafe/
-  turn and both world mouse buttons to an unbind, but the 2026-11-01 1.2 retest showed W keeps
-  the passenger seat, so `hud/slave.rs::walk_off` is now inert. The decompile's input manager
-  reaches `FUN_39362170` from `FUN_39404d50`; the observed 1.2 behaviour is recorded above.
+  Movement input currently does **not** leave the seat. This is an owner request on Bevy, not a
+  1.2 capture: the native behaviour is under investigation and capture-pending. The decompile
+  suggests native 1.2 does unbind a passenger on W/S: `FUN_39406540` (`InputManager::Update`)
+  calls `FUN_39404d50` at :843283-843297, whose forward/back flags call `FUN_39362170`
+  (:700266); that sends 0x032 when the parent type is 2 and the attach point is not 0/1, with
+  the 1500 ms throttle. The input update skips that path when its input-block flag
+  `*param_1 != 0` calls `FUN_39402b30` (resets the axis/controller state and calls the model's
+  +0x44), when `FUN_39055fa0` or the `+0x480` flag is set (UI/script input capture), or when
+  the player's model controller `local_60[0x74]` is set (a scripted/vehicle controller owns the
+  body). Those are input gates, not a passenger-seat exception, so with normal input the
+  decompile path still reaches the unbind. Bevy keeps the seat until the owner's real-client
+  check settles it.
 * **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
@@ -762,7 +777,8 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
   a moved cart transform (capture-pending S11-C4).
 * **Leaving.** The local driver uses `DiscardSiegeWeapon`/the speed-guarded 0x032 (S5); a passenger
   sends the same 0x032 from the explicit dismount skill/button (1500 ms throttle). Movement input
-  keeps the seat (2026-11-01 owner retest). On `SCUnitDetached` the local seat clears and the mover
+  currently keeps the seat (owner request on Bevy; native W/S is capture-pending, the decompile
+  suggests it unbinds). On `SCUnitDetached` the local seat clears and the mover
   starts from the seat helper, as before.
 
 Capture-pending (S11):

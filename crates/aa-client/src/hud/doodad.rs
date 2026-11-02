@@ -411,6 +411,22 @@ impl View {
     }
 }
 
+/// The right-click walk's reach: the 4 m interaction distance, shortened by the first skill's
+/// `max_range` when that is smaller. The bar's threshold is still the interaction setting; this
+/// only makes a right click walk closer before using a short-range skill.
+fn walk_reach(data: &HudData, uses: &Uses) -> f32 {
+    let range = data
+        .game
+        .get()
+        .and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s)))
+        .map_or(0.0, |s| s.max_range as f32);
+    if range > 0.0 {
+        range.min(DOODAD_REACH)
+    } else {
+        DOODAD_REACH
+    }
+}
+
 /// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
 /// 2026-10-30 capture printed "Insufficient Labor Points." and sent no `CSStartSkill` (Gather 13990, 1 LP). A skill that
 /// costs no labor has nothing to refuse, so a labor below zero does not stop it (a free skill below zero LP was not
@@ -1034,7 +1050,12 @@ pub(super) fn walk_to(
         .by_id
         .get(&a.obj_id)
         .and_then(|o| doodad_world(o, units));
-    let reach = DOODAD_REACH;
+    let reach = d
+        .game
+        .get()
+        .zip(doodads.by_id.get(&a.obj_id))
+        .and_then(|(g, o)| g.doodad.uses(o.func_group_id))
+        .map_or(DOODAD_REACH, |uses| walk_reach(d, uses));
     let dist = target.map_or(f32::INFINITY, |t| d.pos.distance(t));
     let step = advance(
         target.is_none(),
@@ -1116,7 +1137,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
     let dist = d.pos.distance(pos);
-    let reach = DOODAD_REACH;
+    let reach = walk_reach(d, &uses);
     d.doodad.preferred = Some(obj_id);
     // a doodad use is a new target action: a mount walk to the pet must not keep steering
     super::pets::cancel_mount_walk(d);
@@ -1124,7 +1145,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
     }
-    if dist > reach {
+    if dist >= reach {
         info!("doodad: {name} ({obj_id}) is {dist:.1} m away (reach {reach:.1} m): walking there");
         start_walk(d, obj_id, dist, now);
         return false;
@@ -2090,10 +2111,19 @@ mod tests {
     fn approach_app(doodads: Vec<aa_net::model::Doodad>) -> (App, Shared) {
         let mut tables = Tables::default();
         tables.add(1, 14602, "DoodadFuncUse");
-        let game = GameData {
-            doodad: tables,
-            ..Default::default()
-        };
+        approach_app_with_game(
+            GameData {
+                doodad: tables,
+                ..Default::default()
+            },
+            doodads,
+        )
+    }
+
+    fn approach_app_with_game(
+        game: GameData,
+        doodads: Vec<aa_net::model::Doodad>,
+    ) -> (App, Shared) {
         let data = HudData::default();
         let _ = data.game.0.set(game);
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
@@ -2156,6 +2186,69 @@ mod tests {
             "no second action"
         );
         assert_eq!(shared.borrow().doodad.chosen.len(), 1);
+    }
+
+    /// A right click walks closer for a skill whose max_range is below the 4 m interaction
+    /// distance, and uses the same centre-distance/strict comparison as the bar.
+    #[test]
+    fn a_right_click_walks_to_a_skill_shorter_than_four_metres() {
+        let mut tables = Tables::default();
+        tables.add(1, 14602, "DoodadFuncUse");
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        game.skills.insert(
+            14602,
+            SkillInfo {
+                max_range: 2,
+                ..default()
+            },
+        );
+        let (mut app, shared) =
+            approach_app_with_game(game, vec![test_doodad(7, 0.0, 3.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().doodad.approach.is_some(),
+            "3 m is outside the 2 m skill range: walk first"
+        );
+        assert!(w_held(&app));
+
+        let (mut app, shared) =
+            approach_app_with_game(
+                {
+                    let mut tables = Tables::default();
+                    tables.add(1, 14602, "DoodadFuncUse");
+                    let mut game = GameData {
+                        doodad: tables,
+                        ..Default::default()
+                    };
+                    game.skills.insert(
+                        14602,
+                        SkillInfo {
+                            max_range: 2,
+                            ..default()
+                        },
+                    );
+                    game
+                },
+                vec![test_doodad(7, 0.0, 1.9)],
+            );
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().doodad.approach.is_none(),
+            "1.9 m is inside the 2 m skill range"
+        );
     }
 
     #[test]
@@ -2433,13 +2526,14 @@ mod tests {
         );
         let mut data = HudData::default();
         assert!(data.game.0.set(game).is_ok());
-        data.pos = Vec3::new(10.0, 10.0, 1.0);
-        data.yaw = 0.0;
+        // In the cargo bed, 3 m behind the origin, facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(10.0, 7.0, 1.0);
+        data.yaw = std::f32::consts::PI;
         data.player_radius = 0.55;
         let mut doodads = Doodads::default();
         doodads.by_id.insert(
             3446,
-            world_doodad(3446, 850, 1, Vec3::new(10.0, 11.2, 1.0)),
+            world_doodad(3446, 850, 1, Vec3::new(10.0, 4.9, 1.0)),
         );
         let mut units = Units::default();
         let mut hauler = crate::hud::expansion::fixture::spawn().unit;
@@ -2520,11 +2614,12 @@ mod tests {
         );
         let mut data = HudData::default();
         assert!(data.game.0.set(game).is_ok());
-        data.pos = Vec3::new(100.0, 200.0, 6.0);
-        data.yaw = 0.0;
+        // In the cargo bed (3 m behind the origin), facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(100.0, 197.0, 6.0);
+        data.yaw = std::f32::consts::PI;
         data.player_radius = 0.55;
         let mut doodads = Doodads::default();
-        let storage = world_doodad(3446, 850, 8264, Vec3::new(100.0, 201.2, 6.0));
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(100.0, 194.9, 6.0));
         doodads.by_id.insert(3446, storage);
         let mut units = Units::default();
         let mut hauler = crate::hud::expansion::fixture::spawn().unit;

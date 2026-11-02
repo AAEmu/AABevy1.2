@@ -720,24 +720,28 @@ fn helper_seat(now: &Transform, helpers: &super::vehicle::SeatHelpers, name: &st
 
 /// The full authored rotation of a vehicle body helper, in the mount root's frame. The helper
 /// matrix is the attachment frame, not a seat-yaw hint: `transfers_trailer_c.chr` (the Red Farm
-/// Hauler's body, model 1553) authors `$passenger0` as a 180-degree turn about model Z, while
-/// its `$driver` and the Farm Wagon's `$driver` are identity. The seat clip
-/// (`fist_ac_trailer_sit_idle`) has an identity Bip01 root, so it adds no turn of its own.
+/// Hauler's body, model 1553) authors `$passenger0` as a 180-degree turn about model Z. The
+/// seat clip (`fist_ac_trailer_sit_idle`) has an identity Bip01 root, so it adds no turn.
 fn helper_rotation(helpers: &super::vehicle::SeatHelpers, name: &str) -> Option<Quat> {
     let (_, rotation, _) = helpers.0.get(name)?.to_scale_rotation_translation();
     Some(cry_rot_to_bevy(rotation))
 }
 
-/// The world rotation of a rider: the mount's world rotation composed with the full rotation of
-/// a vehicle body helper. Every `Seat::Helper` takes its authored frame (driver included, so a
-/// body that turns any seat is handled consistently); a creature seat (`Seat::Bone`) keeps the
-/// mount's rotation.
+fn passenger_helper(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("passenger")
+}
+
+/// The world rotation of a rider: the mount's world rotation composed with a **passenger**
+/// helper's full authored frame. Driver helpers are not rider frames: the real data authors
+/// `$driver` 180 degrees on models 129 (`ShipModel`) and 772 (`singboat`), and applying that
+/// would turn the helm/driver backwards. Other helpers (`$cannonN`, ladders, boxes) are prop
+/// frames and are left alone too. A creature seat (`Seat::Bone`) keeps the mount rotation.
 fn rider_rotation(seat: &Seat, helpers: Option<&super::vehicle::SeatHelpers>, mount: Quat) -> Quat {
     match seat {
-        Seat::Helper(name) => helpers
+        Seat::Helper(name) if passenger_helper(name) => helpers
             .and_then(|helpers| helper_rotation(helpers, name))
             .map_or(mount, |authored| mount * authored),
-        Seat::Bone(_) => mount,
+        _ => mount,
     }
 }
 
@@ -2034,74 +2038,44 @@ mod tests {
         );
     }
 
-    /// The driver helper takes its authored frame too: a body that turns `$driver` must not be
-    /// assumed to have an identity seat. The full quaternion is applied, not just a yaw.
+    /// Only passenger helpers are rider frames. Their full authored rotation (not yaw only) is
+    /// applied; a driver helper carrying a prop rotation (models 129/772 author `$driver` 180)
+    /// must leave the rider on the mount's own rotation.
     #[test]
-    fn every_vehicle_helper_seat_takes_its_full_authored_rotation() {
-        use crate::ingame::units::{RemoteUnit, Views};
+    fn only_passenger_helpers_take_their_full_authored_frame() {
+        use std::f32::consts::PI;
 
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
-            .insert_resource(Units::default())
-            .add_systems(Update, pose_local_rider);
-        let cart_pos = Vec3::new(100.0, 200.0, 5.0);
-        let cart_yaw = 0.4;
-        let authored = Quat::from_euler(EulerRot::XYZ, 0.3, 0.4, 0.5);
         let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        let authored = Quat::from_euler(EulerRot::XYZ, 0.3, 0.4, 0.5);
         helpers.0.insert(
-            "driver".into(),
+            "passenger0".into(),
             bevy::math::Affine3A::from_rotation_translation(
                 authored,
                 Vec3::new(0.1, -0.5, 1.3),
             ),
         );
-        let cart = app
-            .world_mut()
-            .spawn((
-                RemoteUnit::fixture(7, cart_pos),
-                placement(cart_pos, cart_yaw, 1.0),
-                helpers,
-            ))
-            .id();
-        let mut views = Views::default();
-        views.track_unit_entity(7, cart);
-        app.insert_resource(views);
-        app.insert_resource(LocalMount(Some(LocalSeat {
-            mount: 7,
-            point: 1,
-            drives: true,
-            cart: true,
-            ship: false,
-            turret: false,
-            speed: MountSpeed::default(),
-            lift: 0.0,
-        })));
-        let (mut rider, animator) = stepped_rider(riding());
-        rider.seat = Seat::Helper("driver".into());
-        let player = app
-            .world_mut()
-            .spawn((
-                LocalPlayer { obj_id: 5 },
-                Mover {
-                    pos: cart_pos,
-                    facing: cart_yaw,
-                    vz: 0.0,
-                    grounded: true,
-                    velocity: Vec3::ZERO,
-                    swim: None,
-                    wading: 0.0,
-                },
-                Transform::default(),
-                rider,
-                animator,
-            ))
-            .id();
-        app.update();
-        let rotation = app.world().get::<Transform>(player).unwrap().rotation;
-        let expected = Quat::from_rotation_y(cart_yaw) * cry_rot_to_bevy(authored);
+        helpers.0.insert(
+            "driver".into(),
+            bevy::math::Affine3A::from_rotation_translation(
+                Quat::from_rotation_z(PI),
+                Vec3::ZERO,
+            ),
+        );
+        let mount = Quat::from_rotation_y(0.4);
+        let passenger = rider_rotation(
+            &Seat::Helper("passenger0".into()),
+            Some(&helpers),
+            mount,
+        );
+        let expected = mount * cry_rot_to_bevy(authored);
         assert!(
-            rotation.dot(expected).abs() > 1.0 - 1e-6,
-            "driver yaw {rotation:?} should take the helper's full rotation {expected:?}"
+            passenger.dot(expected).abs() > 1.0 - 1e-6,
+            "passenger yaw {passenger:?} should take the helper's full rotation {expected:?}"
+        );
+        let driver = rider_rotation(&Seat::Helper("driver".into()), Some(&helpers), mount);
+        assert!(
+            driver.dot(mount).abs() > 1.0 - 1e-6,
+            "a driver helper's prop rotation must not turn the rider: {driver:?} vs {mount:?}"
         );
     }
 
@@ -2231,6 +2205,68 @@ mod tests {
             !wagon_helpers.contains_key("passenger0"),
             "the Farm Wagon has no point-2 helper in 1.2"
         );
+        // Ship/boat driver helpers can carry a prop frame (180 degrees). It is not a rider
+        // frame: the driver must keep the mount's rotation.
+        for model in [129u32, 772] {
+            let look = db.vehicle_look(model).expect("the model look");
+            let helpers = crate::ingame::vehicle::body_helpers(&look);
+            let (_, driver, _) = helpers["driver"].to_scale_rotation_translation();
+            assert!(
+                driver.angle_between(Quat::from_rotation_z(PI)) < 1e-2,
+                "model {model} driver helper is authored 180 degrees: {driver:?}"
+            );
+            let seat = crate::ingame::vehicle::SeatHelpers(helpers);
+            let turned = rider_rotation(&Seat::Helper("driver".into()), Some(&seat), mount);
+            assert!(
+                turned.dot(mount).abs() > 1.0 - 1e-6,
+                "model {model} driver must ignore its 180-degree helper: {turned:?}"
+            );
+        }
+    }
+
+    /// Inventory of every vehicle/ship body's authored helper rotations: run with AA_PAK/AA_DB
+    /// and print each non-identity helper. The seat-frame rule must not tilt a driver whose
+    /// helper happens to carry a prop rotation.
+    #[test]
+    #[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+    fn the_real_vehicle_helper_rotations_are_listed() {
+        let Some(db) = Db::open() else { return };
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(conn) = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) else {
+            return;
+        };
+        let mut q = conn
+            .prepare(
+                "SELECT id FROM models WHERE sub_type IN ('VehicleModel', 'ShipModel') ORDER BY id",
+            )
+            .expect("model query");
+        let ids: Vec<u32> = q
+            .query_map([], |r| r.get(0))
+            .expect("model rows")
+            .filter_map(Result::ok)
+            .collect();
+        let mut seen = 0usize;
+        for id in ids {
+            let Some(look) = db.vehicle_look(id) else {
+                continue;
+            };
+            let helpers = crate::ingame::vehicle::body_helpers(&look);
+            for (name, matrix) in helpers {
+                let (_, rotation, _) = matrix.to_scale_rotation_translation();
+                let angle = rotation.angle_between(Quat::IDENTITY).to_degrees();
+                if angle > 0.01 {
+                    seen += 1;
+                    eprintln!(
+                        "helper rotation: model {id} {name} {angle:.3} deg quat {rotation:?} (PI {:.3})",
+                        angle / 180.0
+                    );
+                }
+            }
+        }
+        eprintln!("helper rotation: {seen} non-identity helpers");
     }
 
     #[test]

@@ -41,9 +41,10 @@
 //! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
 //! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) leaves through the same explicit
 //! dismount path (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that
-//! branch has no speed check. Movement keys do not unbind a passenger: the 2026-11-01 1.2 retest
-//! kept the seat on W, so [`walk_off`] is deliberately inert. The speed source is unverified
-//! (see the docs).
+//! branch has no speed check. Whether a passenger's W/S should leave is capture-pending: the
+//! owner asked for no movement unbind on Bevy, while the 1.2 decompile (`FUN_39406540` ->
+//! `FUN_39404d50` -> `FUN_39362170`, 1500 ms throttle) suggests W/S sends 0x032; this client
+//! currently keeps the seat. The speed source is unverified (see the docs).
 
 use std::time::Duration;
 
@@ -121,12 +122,13 @@ pub(super) fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32
 
 /// The key `FUN_393601a0` (units) and `FUN_3902f010` (doodads) store per candidate, ordered by
 /// `FUN_3902ed20`: the surface gap minus `1 + facing` (`_DAT_3999c488` is the 1.0), where
-/// `facing` is the player's forward dot the horizontal direction to the candidate. Lower sorts
-/// first. A candidate the player stands inside keeps a negative gap; the F-bar producer clamps
-/// a slave's gap at 0 before this key, while the bind/right-click checks keep the signed value.
+/// `facing` is the player's forward dot the horizontal direction to the candidate. The gap is
+/// taken absolute like the native bits mask (`DAT_3999d500` 0x7fffffff); lower sorts first. The
+/// F-bar producer additionally clamps a slave's signed gap at 0 before this key; the
+/// bind/right-click checks keep the signed value.
 pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
     let toward = (at - from).truncate().normalize_or_zero();
-    gap - (1.0 + forward.dot(toward))
+    gap.abs() - (1.0 + forward.dot(toward))
 }
 
 /// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
@@ -492,8 +494,8 @@ pub(super) fn bind(
 /// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
 /// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
 /// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
-/// one request per 1500 ms (`_DAT_3a169948`). This is the only passenger leave: movement input
-/// does not send it (2026-11-01 1.2 retest).
+/// one request per 1500 ms (`_DAT_3a169948`). Movement input is currently not wired to it; the
+/// native W/S behaviour is capture-pending (owner request on Bevy, decompile suggests it does).
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
@@ -570,14 +572,6 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         })?,
     )
 }
-
-/// Passenger movement input keeps the seat. The 1.2 passenger leaves only through the explicit
-/// dismount skill/button ([`discard`] -> `CSDiscardSlave`); the 2026-11-01 retest on the Red Farm
-/// Hauler showed W does not leave the seat. Bevy used to turn `moveforward`/`moveback`/strafe/
-/// turn and both world mouse buttons into `CSDiscardSlave` here; that path is removed for
-/// passengers. Drivers steer their cart and mate riders keep their own movement, neither through
-/// this system.
-pub(super) fn walk_off() {}
 
 #[cfg(test)]
 mod tests;

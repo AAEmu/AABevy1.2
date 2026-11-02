@@ -1289,46 +1289,122 @@ fn passenger_walk_off_is_throttled_to_1500_ms() {
     assert!(view.walk_off_throttle(now + Duration::from_millis(1500)));
 }
 
-fn walk_off_app(state: &Shared, units: &Units, point: u8, focus: bool, suspended: bool) -> App {
-    let mut spawn = crate::hud::fixture_spawn();
-    spawn.unit.attached_to = Some(Attachment { obj_id: 20, point, reason: 0 });
-    let mut app = App::new();
-    app.insert_non_send(HudBridge(state.clone()))
-        .insert_resource(units.clone())
-        .insert_resource(aa_net::state::Player { spawn: Some(spawn) })
-        .insert_resource(crate::settings::Actions::default())
-        .insert_resource(ButtonInput::<MouseButton>::default())
-        .insert_resource(super::super::HudPointerOverUi(false))
-        .insert_resource(super::super::HudKeyboardFocus(focus))
-        .insert_resource(super::super::HudSuspended(suspended))
-        .insert_resource(crate::ingame::teleport::Teleport::default())
-        .add_systems(Update, walk_off);
-    app
-}
+/// Current behaviour, owner-requested pending the native 1.2 check: W held on a passenger seat
+/// goes through the real `player::control_player` and the HUD request pipeline and sends no
+/// `CSDiscardSlave`; the seat stays at point 2. The dismount skill is covered by
+/// `a_passenger_unbind_is_throttled_to_1500_ms_without_a_speed_check`.
+#[test]
+fn a_seated_passenger_with_w_held_sends_no_cs_discard_slave() {
+    use crate::ingame::player::{self, LocalPlayer, Mover, PlayerInput, SendState};
+    use crate::ingame::{DevOptions, LocalJump, LocalMount, Motion};
+    use crate::ingame::camera::OrbitCamera;
+    use crate::ingame::mount::LocalSeat;
+    use aa_net::state::Player;
 
-fn tap_walk(app: &mut App) {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+    );
+    let mut spawn = crate::hud::fixture_spawn();
+    spawn.unit.attached_to = Some(Attachment {
+        obj_id: 20,
+        point: 2,
+        reason: 0,
+    });
+    let terrain = aa_world::TerrainQuery::new("main_world");
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(HudBridge(state.clone()))
+        .insert_resource(units)
+        .insert_resource(Player { spawn: Some(spawn) })
+        .insert_resource(crate::settings::Actions::default())
+        .insert_resource(DevOptions::default())
+        .insert_resource(LocalMount(Some(LocalSeat {
+            mount: 20,
+            point: 2,
+            drives: false,
+            cart: true,
+            ship: false,
+            turret: false,
+            speed: Default::default(),
+            lift: 0.0,
+        })))
+        .insert_resource(SendState::default())
+        .insert_resource(PlayerInput::default())
+        .insert_resource(LocalJump::default())
+        .insert_resource(terrain.clone())
+        .insert_resource(aa_world::WorldCollision::new("main_world", terrain.clone()))
+        .insert_resource(aa_world::WaterQuery::with_terrain("main_world", terrain))
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<NextState<crate::Screen>>()
+        .init_resource::<aa_net::state::ActionBar>()
+        .init_resource::<aa_net::state::Inventory>()
+        .init_resource::<aa_net::state::Target>()
+        .init_resource::<aa_net::state::Skills>()
+        .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<crate::hud::InFlight>()
+        .add_message::<NetCommand>()
+        .add_message::<crate::hud::alerts::UseFailed>()
+        .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .add_systems(
+            Update,
+            (player::control_player, crate::hud::api::handle_requests),
+        );
+    app.world_mut().spawn(OrbitCamera::default());
+    let player = app
+        .world_mut()
+        .spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::default(),
+            Motion::default(),
+        ))
+        .id();
     app.world_mut()
         .resource_mut::<crate::settings::Actions>()
-        .tap_for_test("moveforward");
-}
-
-/// 2026-11-01 owner retest: W on the Red Farm Hauler's passenger seat keeps the seat and sends
-/// no `CSDiscardSlave`. The explicit dismount skill/button is the only passenger leave
-/// (`a_passenger_unbind_is_throttled_to_1500_ms_without_a_speed_check`).
-#[test]
-fn movement_keys_keep_the_passenger_seat() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    tap_walk(&mut app);
+        .hold_for_test("moveforward");
     app.update();
+    let sent: Vec<Command> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|message| message.0)
+        .collect();
     assert!(
-        state.borrow().requests.is_empty(),
-        "movement must not queue an unbind: {:?}",
-        state.borrow().requests
+        sent.iter()
+            .all(|command| !matches!(
+                command,
+                Command::Slave(SlaveCommand::Unbind { .. })
+            )),
+        "movement sent an unbind: {sent:?}"
+    );
+    assert!(state.borrow().requests.is_empty());
+    assert_eq!(
+        app.world()
+            .get::<Mover>(player)
+            .map(|mover| mover.pos)
+            .map(Some),
+        Some(Some(Vec3::ZERO)),
+        "a passenger is not moved by W"
     );
     assert_eq!(
         app.world()
-            .resource::<aa_net::state::Player>()
+            .resource::<Player>()
             .spawn
             .as_ref()
             .and_then(|spawn| spawn.unit.attached_to)
