@@ -78,7 +78,10 @@ pub struct SkillInfo {
     pub max_range: i64,
     /// `skills.desc` with the placeholders filled in as far as the database allows.
     pub desc: String,
-    /// `skills.weapon_slot_for_autoattack_id` is set: the auto attack (the combat text prints its hits white).
+    /// The 1.2 basic attacks (skills 2, 3 and 4: the melee, off-hand and ranged auto attacks; the combat text prints their hits
+    /// white). Skill 2 is the one the decompile special-cases (`DAT_39ac769c`); 3 and 4 are inferred (the server treats them as
+    /// auto attacks). Not `weapon_slot_for_autoattack_id`: that column holds a weapon slot and is also set on skills that are not
+    /// auto attacks (Triple Slash 18132 carries 15), so it cannot tell them apart.
     pub auto_attack: bool,
     /// `skills.target_type_id`: 11 is `BallisticPos` (a cannon's fire skill), the only type that
     /// needs a `Position` target instead of a unit.
@@ -586,7 +589,8 @@ impl GameData {
                         channeling_ms: any_int(r, 11)?.max(0),
                         min_range: any_int(r, 12)?.max(0),
                         max_range: any_int(r, 13)?.max(0),
-                        auto_attack: any_int(r, 14)? > 0,
+                        // the 1.2 basic attacks (skill 2 is `DAT_39ac769c` in the client; 3 and 4 are inferred from the server's auto attacks)
+                        auto_attack: matches!(id, 2..=4),
                         target_type: any_int(r, 15)?.clamp(0, 255) as u8,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                     },

@@ -1,5 +1,28 @@
 # ArcheAge 1.2 feature parity
 
+## Combat stance and auto-attack checkpoint, 2026-11-01
+
+The 1.2 decompile settles the combat state; the K2 capture (2026-11-01-combat-k2k3) only supplies the client's outbound packets.
+The battle flag is the `X2Unit + 0x3bba` byte: `OnCombatEngaged` sets it (`FUN_391d69a0` -> `FUN_390b36f0`), a real blow sets
+it on both sides (`FUN_39391670`: a caster, a hit, both units alive), and `OnCombatCleared` clears it at once (`FUN_391d6a60` ->
+vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`); a clear on a unit that is not flagged changes nothing. The capture's
+1 -> 0 at t=59,322 is our server's `SCCombatCleared` 0.772 s after the recorder lost the target (0.613 s after the no-target
+press), not a client timer. Separate from the flag is the derived combat idle (`combat.rs` `CombatIdle`, `X2Unit + 0x5fc4`):
+`FUN_39355ee0` refreshes `+0x5fc0` every update while the flag is set and for 1000 ms after the local player's auto attack
+request (skill 2; the `+0x158` branch for another skill is unreachable in 1.2), and the idle falls `DAT_39ac7424` =
+10000 ms after the last refresh (the model's `+0x428`); the deadline does not clear the flag and does not put the weapon away.
+Putting the weapon away zeroes `+0x5fc0` (`FUN_39360920`), as does the resurrect reset (`FUN_39362690`), so the idle ends with
+the weapon. The weapon byte `+0x3ba8` stayed 1 after the K2 clear, so the **drawn weapon** (`Drawn`) remains a separate state
+(Bevy's 10 s auto-sheathe is inferred; the capture shows no sheathe). The combat idle with no weapon in the hand is the fist
+one. The K2 client sent another `CSStartSkill 2` on the re-press and at 11.2 m: there is no local toggle, no stop-on-walk and
+no local swing timer, and the first clip and 2 s cadence were our server's `SCSkillFired` timing (CONT). The client's only
+swallow is the auto attack latch `+0x3ad5` (`FUN_393989e0`), set by an `SCSkillStarted` for skill 2 with timeline 0 and
+cleared by `SCSkillStopped` (`FUN_39398410`); our server sends none for skill 2, so every K2 press went out. Out of range is a
+range check (`FUN_39397f90`) whose send depends on the `DAT_39d1fba4` setting; the K2 client sent at 11.2 m, so its setting was
+not 1 (the default is not provable). The GCD exemption (K2 pair 0/1000) is **inferred**, not decompile-proven, and the
+white/yellow combat text split follows the same inferred basic ids (2, 3, 4), not `weapon_slot_for_autoattack_id`. Open: the
+client's own sheathe after a fight is not recovered.
+
 ## Vehicle interaction, engine and cinema checkpoint, 2026-11-01
 
 The 1.2 mode bar is filled natively (`FUN_39204500` / `FUN_392045f0`), not by Lua. The 2026-11-01
