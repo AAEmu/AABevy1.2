@@ -221,8 +221,19 @@ Pending live checks:
 ### Dismount placement (S2, 2026-10-28)
 
 The local player's `SCUnitDetached` (`FUN_390a2e90`, `FUN_390a6110` / `FUN_390aaff0`) moves the character off the seat
-instead of leaving it where the mount stood; a remote rider still unseats in place (pending). The reason comes from the
-detach packet (AAEmu echoes the request: 9 for `UnMountMate`, 10 for `DismissPet` while mounted).
+instead of leaving it where the mount stood; a remote rider keeps the world seat `pose_riders` draws and seeds its walk
+from there. The reason comes from the detach packet (AAEmu echoes the request: 9 for `UnMountMate`, 10 for
+`DismissPet` while mounted).
+
+**World pose.** The 1.2 `OnUnitDetached` handler (`FUN_391d4a70`, `x2game.dll.c:363904-363909`) calls
+`FUN_39355bd0` -> `Unit::DetachFrom` (`FUN_390b4000`, `x2game.dll.c:148624-148630`), which clears the attach ids
+(`+0xebc` / `+0xebd`) and detaches the model; it never writes the parent-local packet point, so the actor keeps its
+world transform. `track_local_mount` composes the mount's current `Transform` chain (a ship times a cannon's local
+attach) with the rider's seat bone/helper at the detach and starts the get-off there; a slave attached to another slave
+is never a driven mount, and `cart::drive_cart` refuses a parented slave. A cannon on a hull follows `unit_parent` to
+the root `ShipModel` and lands on that hull's deck. Owner run 2026-11-01 15:32:02-15:32:08 (`rs-game.log`): the bound
+cannon's parent-local (-4.5703, -3.6836, 4.8404) was sent as world (the server measured 2872 m/s from 12008.822,
+9022.671, 105.118); the first `CSMoveUnit` now carries the world seat.
 
 * **Side (`FUN_3909b1a0`):** `forward` is the mount's local Y flattened; the candidate is
   `mount + forward * 1.0 + left * 1.5` (`DAT_39ac3888` / `DAT_39ac388c`). The left candidate's capsule is tested first,
@@ -1304,10 +1315,17 @@ vehicle_models` row has turret limits. `ingame::turret::slave_turret` reads the 
 `Db::turret_limits` (degrees and deg/s into radians). A row with a non-numeric angle (vehicle_models 5,
 the siege ladder, has the text `f` in `turret_yaw_angle_max`) is skipped, not read as zero.
 
+* **Slave kind.** `UnitKind::Slave.id` is the server's persisted slave id, not its kind. The 1.2
+  client keeps the unit-state template id at `Unit+0x420` (`FUN_398a1f90` copies net `+0x448`,
+  `x2game.dll.c:1937685`), tests base unit type 2 and looks it up with `FUN_39696380(Unit+0x420)`
+  (`FUN_39345ea0`, `x2game.dll.c:677830-677836`), then reads `slaves.slave_kind_id`
+  (`x2game.dll.c:1482520/1482585`); `FUN_39571630` names 7 `siege_weapon` and 8 `slave_equipment`
+  (`x2game.dll.c:1140951-1140971`). `Db::slave_kind` does that lookup from `UnitKind::Slave.template_id`
+  for ship and ground cannons alike (slaves.id 10 = kind 8, model 117).
 * **Boarding.** The existing `CSBindSlave` 0x031 interaction (`hud/slave.rs`, skill 12076) seats the
   gunner at point 1 of the cannon; `track_local_mount` marks that seat `LocalSeat.turret` when the
-  slave is kind 7/8 and its `models.sub_type = 'VehicleModel'` row parses to a non-zero turret
-  range. That is the 1.2 controller type 3 (`FUN_390b3750` = `X2::VehicleUnitModel`, S12-C6). A
+  slave's template kind is 7/8 and its `models.sub_type = 'VehicleModel'` row parses to a non-zero
+  turret range. That is the 1.2 controller type 3 (`FUN_390b3750` = `X2::VehicleUnitModel`, S12-C6). A
   drivable catapult or tank is a turret seat too and keeps driving through the cart path; the
   all-zero rows (vehicle_models 37/40) are not turrets. `turret_seat_model` is the gate; a
   real-data test walks every kind-7/8 `slaves` row. The gunner's `player::control_player` locks

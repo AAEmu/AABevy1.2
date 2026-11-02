@@ -67,6 +67,10 @@ struct Inner {
     world: String,
     capacity: usize,
     cache: Mutex<Cache>,
+    /// No heightmap is loaded (a test query without the game pak).
+    no_data: bool,
+    /// A flat synthetic height at every inside-map position (a test ground).
+    flat: Option<f32>,
 }
 
 #[derive(Default)]
@@ -94,7 +98,39 @@ impl TerrainQuery {
     /// Like [`TerrainQuery::new`] with at most `cells` (at least 1) parsed cells in memory.
     pub fn with_capacity(world: &str, cells: usize) -> TerrainQuery {
         TerrainQuery {
-            inner: Arc::new(Inner { world: world.to_string(), capacity: cells.max(1), cache: Mutex::default() }),
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                capacity: cells.max(1),
+                cache: Mutex::default(),
+                no_data: false,
+                flat: None,
+            }),
+        }
+    }
+
+    /// An empty query (no heightmap, no pak): every position is outside the map.
+    pub fn fixture(world: &str) -> TerrainQuery {
+        TerrainQuery {
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                capacity: 1,
+                cache: Mutex::default(),
+                no_data: true,
+                flat: None,
+            }),
+        }
+    }
+
+    /// A flat ground at `height` (no pak): every inside-map position stands at the same height.
+    pub fn fixture_flat(world: &str, height: f32) -> TerrainQuery {
+        TerrainQuery {
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                capacity: 1,
+                cache: Mutex::default(),
+                no_data: false,
+                flat: Some(height),
+            }),
         }
     }
 
@@ -105,7 +141,19 @@ impl TerrainQuery {
     /// The parsed heightmap of cell `(cx, cy)` (loaded on first use); `None` when the cell does not exist or
     /// cannot be read.
     pub fn cell(&self, cx: i32, cy: i32) -> Option<Arc<CellHeights>> {
-        if cx < 0 || cy < 0 {
+        if let Some(height) = self.inner.flat {
+            let n = crate::heightmap::GRID * crate::heightmap::GRID;
+            return Some(Arc::new(CellHeights {
+                heights: vec![height; n],
+                surface: vec![0; n],
+                hole_sectors: [false; 256],
+                ocean_level: 0.0,
+                min_z: height,
+                max_z: height,
+                sectors: 0,
+            }));
+        }
+        if self.inner.no_data || cx < 0 || cy < 0 {
             return None;
         }
         let slot = {

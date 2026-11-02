@@ -141,6 +141,21 @@ impl WaterQuery {
         WaterQuery::with_terrain(world, TerrainQuery::new(world))
     }
 
+    /// A query with no sea data, for tests that must run without the game pak.
+    pub fn fixture(world: &str) -> WaterQuery {
+        WaterQuery {
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                ocean_level: None,
+                cells_x: 0,
+                cells_y: 0,
+                terrain: TerrainQuery::new(world),
+                capacity: Self::DEFAULT_CACHE_CELLS,
+                cache: Mutex::default(),
+            }),
+        }
+    }
+
     /// Like [`WaterQuery::new`], sharing the terrain cells of `terrain` (a clone of the app's [`TerrainQuery`]).
     pub fn with_terrain(world: &str, terrain: TerrainQuery) -> WaterQuery {
         let info = World::load(world).unwrap_or_default();
