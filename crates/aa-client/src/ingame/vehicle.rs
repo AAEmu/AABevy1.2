@@ -804,7 +804,7 @@ fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placem
             speed_scale: effect.speed_scale,
             count_scale: effect.count_scale,
             prime: if one_shot { false } else { effect.prime },
-            despawn_when_finished: one_shot,
+            despawn_when_finished: true,
             no_body: true,
             ..aa_fx::Effect::new(effect.effect.clone())
         },
@@ -829,7 +829,8 @@ fn plays_state_effects(old: u8, state: u8, dead_effect_played: bool) -> bool {
 }
 
 /// Spawns the particle entities of a damage variant: its active standing effects (damaged fire, dead
-/// smoke) and, when [`plays_state_effects`] says so, its `_spawn_effect*` elements once (`FUN_39109120`). The
+/// smoke) and, when [`plays_state_effects`] says so, its `_spawn_effect*` and `_dead_effect` bursts
+/// (`FUN_39109120`). A unit that arrives already dead only gets the standing smoke, not the explosion. The
 /// `_despawn_effect` trigger has no traced call site and is left out.
 pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str, worsening: bool) {
     if !variant.to_ascii_lowercase().starts_with("prefab://") {
@@ -841,6 +842,9 @@ pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str,
             if worsening {
                 spawn_effect(commands, root, &named.effect, true);
             }
+            continue;
+        }
+        if name.starts_with("_dead_effect") && !worsening {
             continue;
         }
         if name.starts_with("_despawn_effect") || !named.active || is_speed_emitter(&name) {
@@ -1647,6 +1651,154 @@ mod tests {
         assert!(!is_speed_emitter("airship_smoke"));
     }
 
+    /// The Red Farm Hauler (slave 146, model 1553, `vehicle_models` 65) is the owner's destroyed vehicle:
+    /// dying carries the fire particle and dead carries the burning smoke and the explosion. Both must be
+    /// spawned as `aa_fx::Effect` entities, not just the mesh swap.
+    #[test]
+    fn the_red_farm_haulers_dying_and_dead_states_spawn_their_effects() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1553) else {
+            return;
+        };
+        let max_hp = db
+            .slave_max_hp(146, 50)
+            .expect("Red Farm Hauler template 146's MaxHealth");
+        assert_eq!(max_hp, 7_296);
+        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(&db, look.clone(), unit, 1, look.normal, max_hp, true);
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+
+        set_dying_time(&mut app, 60.0);
+        die(&mut app);
+        let dying = wait_for_state(&mut app, 5);
+        assert!(dying.variant.ends_with("tractor_body_dying"));
+        let names = effect_names(&mut app, root);
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "x2_effects.housing_test.housing_fire_b"),
+            "the dying fire: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name.starts_with("x2_sounds.")),
+            "the sound particle is filtered: {names:?}"
+        );
+
+        end_dying_window_in(&mut app, 0.2);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(dead.variant.ends_with("tractor_body_dead"));
+        let effects = effect_flags(&mut app, root);
+        assert!(
+            effects
+                .iter()
+                .any(|(name, _)| name == "x2_effects.fire_smoke.burning_smoke_01"),
+            "the dead smoke: {effects:?}"
+        );
+        assert!(
+            effects.iter().any(|(name, despawn)| {
+                name == "x2_effects.housing_test.small_ship_exp" && *despawn
+            }),
+            "the dead explosion is a burst that retires: {effects:?}"
+        );
+    }
+
+    /// A slave that arrives already dead only gets the dead prefab's standing smoke; the `_dead_effect`
+    /// explosion waits for a worsening transition into 6.
+    #[test]
+    fn a_slave_announced_dead_does_not_play_the_explosion() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let dead = "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor_c.tractor_body_dead";
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let root = app.world_mut().spawn(()).id();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            spawn_state_effects(&mut commands, root, dead, false);
+        });
+        app.update();
+        let names = effect_names(&mut app, root);
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "x2_effects.fire_smoke.burning_smoke_01"),
+            "the standing smoke: {names:?}"
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+            "no explosion on arrival: {names:?}"
+        );
+    }
+
+    /// The dead `_dead_effect` burst is spawned unprimed and actually retires when its simulation ends; the
+    /// continuous smoke stays.
+    #[test]
+    fn the_dead_burst_despawns_when_it_finishes() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use bevy::asset::AssetPlugin;
+        use bevy::transform::TransformPlugin;
+        let dead = "prefab://prefabs/vehicle_tractor.xml/vehicle_tractor_c.tractor_body_dead";
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            TransformPlugin,
+            aa_fx::FxPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ));
+        let root = app.world_mut().spawn(Transform::default()).id();
+        app.add_systems(Startup, move |mut commands: Commands| {
+            spawn_state_effects(&mut commands, root, dead, true);
+        });
+        app.update();
+        let explosion = effect_entity(
+            &mut app,
+            root,
+            "X2_EFFECTS.housing_test.small_ship_exp",
+        )
+        .expect("the spawned explosion");
+        // run the 6 s burst at 30x so the test does not take its real time
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .set_relative_speed(30.0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.world().get_entity(explosion).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the finished burst never retired"
+            );
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(
+            effect_entity(
+                &mut app,
+                root,
+                "X2_EFFECTS.fire_smoke.burning_smoke_01"
+            )
+            .is_some(),
+            "the continuous smoke stays"
+        );
+    }
+
     /// A slave first announced already damaged is built in its state's prefab with the same attribute-6
     /// maximum the per-frame check will use, including a template with no `unit_modifiers` row.
     #[test]
@@ -1820,6 +1972,37 @@ mod tests {
             .filter(|(_, parent, _)| parent.parent() == root)
             .map(|(entity, _, _)| entity)
             .collect()
+    }
+
+    fn effect_names(app: &mut App, root: Entity) -> Vec<String> {
+        effect_flags(app, root)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    }
+
+    fn effect_flags(app: &mut App, root: Entity) -> Vec<(String, bool)> {
+        app.world_mut()
+            .query::<(&ChildOf, &aa_fx::Effect, &VehicleEffect)>()
+            .iter(app.world())
+            .filter(|(parent, _, _)| parent.parent() == root)
+            .map(|(_, effect, _)| {
+                (
+                    effect.name.to_ascii_lowercase(),
+                    effect.despawn_when_finished,
+                )
+            })
+            .collect()
+    }
+
+    fn effect_entity(app: &mut App, root: Entity, name: &str) -> Option<Entity> {
+        app.world_mut()
+            .query::<(Entity, &ChildOf, &aa_fx::Effect, &VehicleEffect)>()
+            .iter(app.world())
+            .find(|(_, parent, effect, _)| {
+                parent.parent() == root && effect.name.eq_ignore_ascii_case(name)
+            })
+            .map(|(entity, _, _, _)| entity)
     }
 
     fn hp_update(app: &mut App, hp: i32) {
@@ -2022,8 +2205,10 @@ mod tests {
         let Some(look) = db.vehicle_look(1008) else {
             return;
         };
-        let max_hp = db.slave_max_hp(60, 50).expect("the Farm Wagon's MaxHealth");
-        let unit = slave_unit_kind(7, 7, 60, 1008, max_hp, max_hp);
+        // The turret gate reads the slave kind from the template id: template 73 is a real
+        // kind-7 slave on the same tractor model (1008), template 60 is a kind-6 farm wagon.
+        let max_hp = db.slave_max_hp(73, 50).expect("the cotton-field cart's MaxHealth");
+        let unit = slave_unit_kind(7, 7, 73, 1008, max_hp, max_hp);
         let mut units = Units::default();
         units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
         let mut app = damage_app(

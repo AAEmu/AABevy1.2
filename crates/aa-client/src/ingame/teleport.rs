@@ -10,7 +10,7 @@
 //! `LEFT_LOADING` goes out, the HUD stage comes back underneath, and the curtain is lifted once the game screen is
 //! quiet.
 //!
-//! Only then are `CSTeleportEnded` and the 1.2 client's `CSNotifyInGameCompleted` sent ([`acknowledge`]), together
+//! Only then are `CSTeleportEnded` and (after a loading screen only) the 1.2 client's `CSNotifyInGameCompleted` sent ([`acknowledge`]), together
 //! with a standing `CSMoveUnit` at the destination; that is the point where input comes back. The native
 //! `SCTeleportUnit` handler (`FUN_391d6ed0`, x2game.dll.c:365756) either calls `FUN_3930c9e0` directly or parks the
 //! packet (`FUN_3901b980`) and retries it after >= 500 ms (`FUN_3901bc30`, 27004); `FUN_3930c9e0` starts the load
@@ -63,6 +63,9 @@ pub struct Teleport {
     ack: Option<Pos>,
     /// `SCLoadInstance` came: `CSInstanceLoaded` is owed once the destination is loaded.
     instance_loaded_owed: bool,
+    /// A loading screen ran for this landing: the 1.2 client re-sends `CSNotifyInGameCompleted` after a load
+    /// (captured after the cross-map and far loads), not after a short hop.
+    loaded: bool,
     /// Jumps the local player was moved by: short hops and long loads alike. The HUD reads it to end a mount walk
     /// (the native 1.2 reaction is capture-pending, A1b).
     pub(crate) jumps: u64,
@@ -226,7 +229,9 @@ fn drive(world: &mut World) {
             }
             boost_streaming(&mut world.resource_mut::<aa_world::WorldConfig>());
             world.resource::<TerrainQuery>().prefetch(target.x, target.y, NEAR + 100.0);
-            world.resource_mut::<Teleport>().load = Some(Load { hud, ..new_load(target) });
+            let mut tp = world.resource_mut::<Teleport>();
+            tp.load = Some(Load { hud, ..new_load(target) });
+            tp.loaded = true;
             info!("teleport: loading screen up (HUD put aside: {hud})");
         }
     }
@@ -265,7 +270,11 @@ fn acknowledge(
     let mover = player.single().map(|(_, mover)| mover).ok();
     let pos = mover.map_or(fallback, |m| Pos::new(m.pos.x, m.pos.y, m.pos.z));
     out.write(NetCommand(Command::TeleportEnded { pos }));
-    out.write(NetCommand(Command::NotifyInGameCompleted));
+    // the AAEmu handler treats it as a world join (`OnPlayerJoin`, the NPC stream, the house push ...): only
+    // after a real load, as captured
+    if std::mem::take(&mut tp.loaded) {
+        out.write(NetCommand(Command::NotifyInGameCompleted));
+    }
     if let Some(mover) = mover {
         super::player::report_standing(mover, &mut out, &mut state);
     }
@@ -663,9 +672,8 @@ mod tests {
         let sent = commands(&mut app);
         assert!(acked(&sent), "CSTeleportEnded was not sent: {sent:?}");
         assert!(
-            sent.iter().position(|c| matches!(c, Command::TeleportEnded { .. }))
-                < sent.iter().position(|c| matches!(c, Command::NotifyInGameCompleted)),
-            "CSNotifyInGameCompleted follows CSTeleportEnded: {sent:?}"
+            !sent.iter().any(|c| matches!(c, Command::NotifyInGameCompleted)),
+            "a short hop is not a world join: {sent:?}"
         );
         assert!(
             sent.iter().any(|c| matches!(c, Command::Move(m) if !m.moving)),
