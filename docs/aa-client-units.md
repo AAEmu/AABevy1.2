@@ -336,8 +336,8 @@ vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade
 world-prop path.
 
 A rigged prefab part also starts the animation its `AnimObject` names (`Part::animation`, `PrefabAnimation`):
-`FUN_39109d20` (x2game.dll.c:207400-207580) reads the `<Animation>` block's `Animation` and `bPlaying` while it builds
-the prefab object, and `bLoop` makes it loop. The dying Red Farm Hauler is the first case in the data: prefab
+`FUN_39109d20` (x2game.dll.c:207499-207501) opens the Animation child node and reads `bPlaying`; the clip name
+(`Animation`) and `bLoop` playback are engine AnimObject behaviour. The dying Red Farm Hauler is the first case in the data: prefab
 `vehicle_tractor.tractor_body_dying` uses `transfers_trailer_a_body_dead.cdf` with `Animation="dead_01" bPlaying="1"`,
 and `dead_01.caf` is 3.33 s with 22 tracks (21 bound; `Bip01`, `Bone_Center*`, `Bone_Front*`, the wheels). The
 2026-11-02 capture shows exactly that: the cart burns, then tips and rolls onto its side between video 41 and 43.5 s,
@@ -554,8 +554,8 @@ poller never returns 5: dying is entered by the death path below.
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying
   body is drawn, and the part's authored `Animation="dead_01" bPlaying="1"` now plays as soon as the
   prefab is spawned (`Part::animation`; `FUN_39109d20`), with or without a `Dead` marker. On the Red Farm
-  Hauler this is the captured tip/roll (video 41-43.5, `dead_01` 3.33 s); `examples/vehicle_ship_death`
-  and the dying-prefab unit test check the authored clip is the one the body plays.
+  Hauler this is the captured tip/roll (video 41-43.5, `dead_01` 3.33 s); the dying-prefab unit test
+  checks the authored clip is the one the body plays (`examples/vehicle_ship_death` covers only the ship).
 * **Wreck lifetime.** There is no client wreck/corpse timer for a slave. `SCSlaveRemoved` only clears the
   owned-slave timeline (`FUN_391d4660` -> `FUN_39345cb0` -> `FUN_39345780`); the drawn unit stays in the
   world. `SCUnitsRemoved` removes it (`FUN_391d4cd0` -> `FUN_39366480`). The 2026-11-02 frames show the
@@ -595,8 +595,12 @@ death") is the evidence for the ship half of S15; the prefabs are the game's own
   server removes the ship from its physics at death, so `WreckSink` reproduces the captured motion client side: a
   smoothstep over 12 s, 14 m down, with a bow-up pitch and a heel (`WRECK_SINK_*`). The mechanism is **inferred**
   from the capture (the engine physics that produced it was not recovered); the hull is still visible at 365 s
-  (~12.6 s after death). It runs after `units::move_units`, so it is applied over the server pose; a heal removes
-  it. `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
+  (~12.6 s after death). The offset is applied by `units::move_units`, which writes the root only while the pose
+  changes; once fully sunk the fixed offset is reused, so a stationary wreck is not rewritten every frame. A heal
+  removes the sink and restores the server pose. A ship that is already dead when it enters view (streamed corpse,
+  reconnect within the ~20 s window) has no death swap to start the sink: `start_dead_ship_sinks` places it at the
+  end pose and carries the 25 % prefab's fire (**inferred**; the client has no death timestamp for it).
+  `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
 
 Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed

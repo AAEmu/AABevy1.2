@@ -130,45 +130,110 @@ pub const WRECK_SINK_DEPTH: f32 = 14.0;
 pub const WRECK_SINK_PITCH: f32 = 0.14;
 pub const WRECK_SINK_ROLL: f32 = 0.18;
 
-/// A dead ship's sink: the pose it started from and the [`Time::elapsed_secs_f64`] of the dead swap.
-/// The original client's hull list/sink is not in the decompiled ship update (it has no damage-state
-/// gate) and the server removes the ship from its physics at death, so the captured motion is client
-/// side; the original mechanism (engine buoyancy/physics) is not recovered (inferred).
+/// A dead ship's sink: the pose it started from, the [`Time::elapsed_secs_f64`] of the dead swap and
+/// the offset from the server pose that `units::move_units` applies. The original client's hull
+/// list/sink is not in the decompiled ship update (it has no damage-state gate) and the server removes
+/// the ship from its physics at death, so the captured motion is client side; the original mechanism
+/// (engine buoyancy/physics) is not recovered (inferred).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct WreckSink {
     pub base: Transform,
     pub started: f64,
+    /// Pose relative to the server pose; fixed once [`Self::finished`].
+    pub offset: Transform,
+    pub finished: bool,
 }
 
 impl WreckSink {
     fn at(base: &Transform, now: f64) -> Self {
-        Self { base: *base, started: now }
+        Self { base: *base, started: now, offset: Transform::IDENTITY, finished: false }
+    }
+
+    /// A wreck that was already dead when it entered view: start at the fully sunk pose (inferred; the
+    /// client has no death timestamp for a unit that was culled or reconnected).
+    fn sunk(base: &Transform, now: f64) -> Self {
+        Self {
+            base: *base,
+            started: now - WRECK_SINK_TIME,
+            offset: Self::sunk_offset(1.0),
+            finished: true,
+        }
+    }
+
+    fn sunk_offset(ease: f32) -> Transform {
+        Transform {
+            translation: -Vec3::Y * (WRECK_SINK_DEPTH * ease),
+            rotation: Quat::from_axis_angle(Vec3::X, WRECK_SINK_PITCH * ease)
+                * Quat::from_axis_angle(Vec3::Z, WRECK_SINK_ROLL * ease),
+            ..Transform::IDENTITY
+        }
+    }
+
+    /// The server pose with this sink's offset applied.
+    pub fn apply(&self, base: Transform) -> Transform {
+        Transform {
+            translation: base.translation + self.offset.translation,
+            rotation: base.rotation * self.offset.rotation,
+            scale: base.scale,
+        }
     }
 }
 
-/// The sinks of dead ships: lower the root and add the capture's gentle bow-up pitch and heel,
-/// over [`WRECK_SINK_TIME`]. Runs after `units::move_units` (which writes the server pose) and after
-/// [`finish_damage_swaps`]. A heal or resurrection removes the sink and restores the server pose.
+/// Starts the sink of a ship that was already dead when it entered view (streamed in as a corpse,
+/// reconnected within the server's ~20 s wreck window). The dead prefab alone floats at the surface;
+/// the wreck is placed at its end pose, and the 25 % prefab's fire is carried so it burns like the
+/// capture's wreck (both inferred: the original client has no death timestamp for such a unit).
+pub fn start_dead_ship_sinks(
+    mut commands: Commands,
+    db: Option<Res<Db>>,
+    time: Res<Time>,
+    roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform), Added<VehicleDamage>>,
+    sinks: Query<(), With<WreckSink>>,
+) {
+    let Some(db) = db else { return };
+    let now = time.elapsed_secs_f64();
+    for (entity, remote, damage, transform) in &roots {
+        if damage.state != 6 || sinks.contains(entity) || !db.is_ship(remote.model_id) {
+            continue;
+        }
+        let sink = WreckSink::sunk(transform, now);
+        if let Some(variants) = db.vehicle_variants(remote.model_id) {
+            carry_ship_fire(&mut commands, entity, &variants.for_state(4));
+        }
+        commands.entity(entity).insert((sink, sink.apply(*transform)));
+    }
+}
+
+/// The sinks of dead ships: move the offset from the server pose (which `units::move_units` applies)
+/// along the capture's gentle bow-up list over [`WRECK_SINK_TIME`]. Only writes a transform while the
+/// offset changes; once fully sunk it leaves the fixed offset for `move_units`, so a stationary wreck
+/// does not fight it every frame. A heal removes the sink and restores the server pose.
 pub fn sink_ship_wrecks(
     time: Res<Time>,
     mut commands: Commands,
     mut sinks: Query<(Entity, &mut WreckSink, &VehicleDamage, &mut Transform)>,
 ) {
     let now = time.elapsed_secs_f64();
-    for (entity, sink, damage, mut transform) in &mut sinks {
+    for (entity, mut sink, damage, mut transform) in &mut sinks {
         if damage.state != 6 {
             commands.entity(entity).remove::<WreckSink>();
             *transform = sink.base;
             continue;
         }
+        if sink.finished {
+            continue;
+        }
         let p = ((now - sink.started) / WRECK_SINK_TIME).clamp(0.0, 1.0) as f32;
         // smoothstep: the hull settles slowly at first, like the captured list
         let ease = p * p * (3.0 - 2.0 * p);
-        transform.translation = sink.base.translation - Vec3::Y * (WRECK_SINK_DEPTH * ease);
-        transform.rotation = sink.base.rotation
-            * Quat::from_axis_angle(Vec3::X, WRECK_SINK_PITCH * ease)
-            * Quat::from_axis_angle(Vec3::Z, WRECK_SINK_ROLL * ease);
-        transform.scale = sink.base.scale;
+        let offset = WreckSink::sunk_offset(ease);
+        if sink.offset != offset {
+            sink.offset = offset;
+            *transform = sink.apply(sink.base);
+        }
+        if p >= 1.0 {
+            sink.finished = true;
+        }
     }
 }
 
@@ -1377,7 +1442,8 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
                 }
                 // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn;
                 // an `AnimObject` that names a playing animation (the dying prefab's `dead_01`) starts that
-                // instead (`FUN_39109d20` reads `Animation` / `bPlaying`).
+                // instead (`FUN_39109d20` opens the Animation child and reads `bPlaying`; the clip name and
+                // loop are engine AnimObject behaviour).
                 let spawned = super::creature::spawn_with_idle(
                     commands,
                     cry,
@@ -1682,8 +1748,6 @@ pub fn finish_damage_swaps(
                 carry_ship_fire(&mut commands, root, &damage.variant);
                 commands.entity(root).insert(WreckSink::at(pose, now));
             }
-        } else {
-            commands.entity(root).remove::<WreckSink>();
         }
         adopt_state(&mut damage, built.state);
         damage.variant = built.variant;
@@ -2508,8 +2572,9 @@ mod tests {
     }
 
     /// The dying prefab's `AnimObject` starts its authored `dead_01` on its own (`Animation="dead_01"`,
-    /// `bPlaying="1"` in `vehicle_tractor.tractor_body_dying`; `FUN_39109d20` reads both): the cart tips and
-    /// rolls without waiting for a `Dead` marker. The clip is 3.33 s and the body's bones move.
+    /// `bPlaying="1"` in `vehicle_tractor.tractor_body_dying`; `FUN_39109d20` opens the Animation child and
+    /// reads `bPlaying`, and the clip name/loop are engine AnimObject behaviour): the cart tips and rolls
+    /// without waiting for a `Dead` marker. The clip is 3.33 s and the body's bones move.
     #[test]
     fn the_dying_prefab_plays_its_authored_dead_01_and_tips_the_body() {
         if !aa_cry::pak_available() {
@@ -3028,6 +3093,72 @@ mod tests {
             transform.rotation.angle_between(sink.base.rotation) > 0.05,
             "the dead hull lists: {transform:?}"
         );
+        assert!(app.world().get::<WreckSink>(root).is_some_and(|sink| sink.finished));
+        // a fully sunk wreck keeps its fixed offset; the sink does not rewrite the root every frame
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(root).expect("the root"),
+            &transform,
+            "the finished sink leaves the pose alone"
+        );
+        // a heal (or resurrection) makes the sink stop and restores the server pose
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            let unit = units.by_id.get_mut(&7).expect("the ship unit");
+            unit.dead = false;
+            unit.hp = max_hp;
+        }
+        app.world_mut().get_mut::<VehicleDamage>(root).unwrap().state = 1;
+        app.update();
+        assert!(app.world().get::<WreckSink>(root).is_none(), "the sink ends on a heal");
+        assert_eq!(
+            app.world().get::<Transform>(root).expect("the root").translation,
+            sink.base.translation,
+            "the server pose is restored"
+        );
+    }
+
+    /// A ship that is already dead when it enters view (streamed corpse, reconnect) is built in the
+    /// dead look and has no death swap to start the wreck, so `start_dead_ship_sinks` places it at the
+    /// end pose (inferred) and carries the burning 25 % prefab's fire.
+    #[test]
+    fn an_announced_dead_ship_starts_at_its_sunk_pose_and_burns() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(393) else { return };
+        let variants = db.vehicle_variants(393).expect("the Eznan Cutter's rows");
+        let max_hp = db.slave_max_hp(21, 50).expect("Eznan Cutter template 21's MaxHealth");
+        let mut unit = slave_unit_kind(7, 21, 21, 393, 0, max_hp);
+        unit.dead = true;
+        let variant = variants.for_state(6).to_string();
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            6,
+            variant,
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let sink = *app.world().get::<WreckSink>(root).expect("the announced dead ship sinks");
+        assert!(sink.finished, "it starts at its end pose");
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y < -10.0,
+            "the wreck starts under the waterline: {transform:?}"
+        );
+        let names = effect_names(&mut app, root);
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+            "the announced-dead wreck burns: {names:?}"
+        );
     }
 
     /// The Eznan Cutter's damage stages and wreck use the real prefab effects: the 25 % hull
@@ -3264,7 +3395,13 @@ mod tests {
         if finish {
             app.add_systems(
                 Update,
-                (update_damage, finish_damage_swaps, sink_ship_wrecks).chain(),
+                (
+                    update_damage,
+                    finish_damage_swaps,
+                    start_dead_ship_sinks,
+                    sink_ship_wrecks,
+                )
+                    .chain(),
             );
         } else {
             app.add_systems(Update, update_damage);

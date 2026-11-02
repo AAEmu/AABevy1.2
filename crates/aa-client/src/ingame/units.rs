@@ -1307,7 +1307,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
                 requested: None,
                 dying_start: None,
                 dying_time,
-                death_seen: state == 5,
+                death_seen: matches!(state, 5 | 6),
                 dead_effect_played: false,
             });
             super::vehicle::spawn_state_effects(commands, root, &variant, false);
@@ -1898,7 +1898,8 @@ pub fn move_units(
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
     mut views: ResMut<Views>,
-    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    sinks: Query<&super::vehicle::WreckSink>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
 ) {
@@ -1917,7 +1918,7 @@ pub fn move_units(
         }
     }
     let measure = smoothness_wanted();
-    for (mut unit, mut transform, motion) in &mut query {
+    for (entity, mut unit, mut transform, motion) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
         // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
         // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position. A
@@ -1936,7 +1937,12 @@ pub fn move_units(
         }
         // only a real move touches the transform: a changed root propagates through every bone and part of the unit and
         // re-extracts its meshes, and most of a town stands still
-        let placed = unit.drawn();
+        let mut placed = unit.drawn();
+        // a dead ship's sink is an offset from the server pose; keeping it here means a fully sunk
+        // wreck is written once and then left alone
+        if let Ok(sink) = sinks.get(entity) {
+            placed = sink.apply(placed);
+        }
         if !(transform.translation.abs_diff_eq(placed.translation, 1e-4) && transform.rotation.abs_diff_eq(placed.rotation, 1e-6) && transform.scale == placed.scale) {
             *transform = placed;
         }

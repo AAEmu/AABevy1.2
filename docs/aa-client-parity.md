@@ -413,7 +413,8 @@ and the walk to the mount before mounting is in the mount-walk checkpoint above.
   geometry files with no double geometry). The Eznan Cutter's hp repair/debris doodads are drawn from the
   server's `SCDoodadCreated`; ship death has no explosion (`galleon.dead` names only the water-destroy
   burst), keeps the damaged prefab's fire burning and lists/sinks over 12 s (`WreckSink`, capture-inferred
-  mechanism; the ship update has no sink function and the server stops its physics). Covered by
+  mechanism; the ship update has no sink function and the server stops its physics); a wreck announced already
+  dead starts at the end pose (inferred). Covered by
   `examples/vehicle_damage`, `examples/vehicle_ship_death`, the threshold/max-HP/variant/dying/swap/turret,
   authored-animation, ship-death/sink and wreck-lifetime unit tests, and the `aa-cry` dead-hull test.
 

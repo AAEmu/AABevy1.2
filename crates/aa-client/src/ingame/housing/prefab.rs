@@ -34,8 +34,9 @@ pub struct PrefabAnimation {
     pub looping: bool,
 }
 
-/// The `<Animation>` block of an `AnimObject`: `Animation="dead_01"` and `bPlaying="1"` start it,
-/// `bLoop="1"` loops it (`FUN_39109d20` reads both properties while it builds the prefab object).
+/// The `<Animation>` block of an `AnimObject`: `FUN_39109d20` (x2game.dll.c:207499-207501) opens the
+/// Animation child node and reads `bPlaying`; the clip name, `Animation="dead_01"`, and `bLoop`
+/// playback are engine AnimObject behaviour.
 fn animation(body: &str) -> Option<PrefabAnimation> {
     let props = body.get(body.find("<Properties")?..)?;
     let playing = attr(props, "bPlaying")?.trim();
