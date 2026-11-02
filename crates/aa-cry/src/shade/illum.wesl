@@ -126,6 +126,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @if(VERTEX_COLORS)
     vertex_factor = select(vec3<f32>(1.0), in.color.rgb * in.color.rgb, p.vertex.x > 0.5);
     var pbr_input = pbr_input_from_standard_material(material_in, is_front);
+@if(ILLUM_CLIP)
+    if (dot(data.clip.xyz, pbr_input.world_position.xyz) + data.clip.w < 0.0) {
+        discard;
+    }
 @if(VERTEX_UVS_A)
     let opacity_uv = in.uv;
 @else

@@ -448,6 +448,19 @@ mod tests {
     }
 
     #[test]
+    fn f1_is_round_target_in_the_original_bindings() -> anyhow::Result<()> {
+        // the client's default_binding.g (`hotkey.g` on disk): F1 -> round_target
+        let Ok(map) = Keymap::new(None) else {
+            eprintln!("f1_is_round_target_in_the_original_bindings: skipped, no game_pak (set AA_PAK)");
+            return Ok(());
+        };
+        let mut a = Actions::default();
+        a.edge(KeyCode::F1, true, false, false, &map, &[]);
+        assert!(a.just_pressed("round_target", 0));
+        Ok(())
+    }
+
+    #[test]
     fn physical_release_clears_movement_even_after_modifiers_change() -> anyhow::Result<()> {
         let map = Keymap::new(None)?;
         let mut a = Actions::default();

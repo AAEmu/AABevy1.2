@@ -25,6 +25,8 @@ struct IllumData {
     motion: MotionData,
     // x: VERTALPHA, y: ALPHAGLOW, z: authored multiplier in engine light units.
     alpha: vec4<f32>,
+    // world-space clip plane (normal.xyz, d): discard where dot(normal, world) + d < 0; zero on ordinary materials
+    clip: vec4<f32>,
 }
 
 struct MotionData {

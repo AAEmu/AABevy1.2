@@ -9,7 +9,10 @@
 //! their own packets (`CSNaviTeleport`, `CSNaviOpenPortal`).
 //!
 //! Original 1.2 capture (2026-10-30, `tools/evidence/doodad_affordance/capture-results.txt`): the bar offers a phase's
-//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857) and the reach is the skill's `max_range` ([`reach`]).
+//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857). The candidate distance is the client setting
+//! `max_interaction_doodad_distance` that `FUN_3902f010` passes to its range predicate ([`DOODAD_REACH`]), not the
+//! skill's `max_range`: the capture bounds it at 3.0 m in and 4.5 m out for Gather (whose `max_range` is also 4),
+//! and storage skill 15307 (`max_range` 20) must still clear at the same distance.
 //! The lamp 2319's fake-use skill 13166 (offered by the original too) comes from the func's own detail row (`gather.rs`),
 //! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). Not listed here yet:
 //! the Mailbox's 11400 "Open Mailbox" (no `func_skill_id` and no detail row; the mail window opens with Ctrl-E, `mail.rs`).
@@ -40,6 +43,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::ingame::data::Db;
 use crate::ingame::doodad_affordance::{DoodadDecal, DoodadTargetDecal};
 use crate::ingame::doodad_visual::{DoodadHighlights, DoodadVisual};
 use crate::ingame::units::{Views, doodad_world};
@@ -62,13 +66,18 @@ mod gather;
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// Reach of a doodad use without a skill range, metres (not captured). A skill's own `max_range` is used as is
-/// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
-/// 4.5 m, so there is no extra slack.
-const BASE_REACH: f32 = 4.0;
+/// The dynamic action bar's candidate distance (`FUN_3902f010`), as a **centre distance**,
+/// independent of the skill's `max_range`. The 2026-10-30 original-client capture bounds it:
+/// Gather 13990 (`max_range` 4) is offered at 3.0 m and absent at 4.5 m, and storage skill 15307
+/// (`max_range` 20) must still clear at the doodad distance. The surface gap below is only the
+/// ordering key, so a non-zero player radius does not push the prompt past 4 m. `FUN_3902f010`
+/// passes `max_interaction_doodad_distance` to its range predicate, whose default is the 2.1 m of
+/// [`INTERACTION_DISTANCE`] measured as a surface gap to the doodad's shape; how that maps to this
+/// capture-bounded centre distance is not resolved (the bar's own shape distance is not ported).
+pub(super) const DOODAD_REACH: f32 = 4.0;
 /// `max_interaction_doodad_distance` (`x2game` config +0x2a0, default f32 2.0999999046325684 at `0x399a7660`):
 /// the reach of the right-click doodad use, as the 3D surface gap (`FUN_39093800` requires the offset strictly
-/// greater than the geometry distance, so 2.1 m is already out). The skill's `max_range` is only the bar's reach.
+/// greater than the geometry distance, so 2.1 m is already out). The skill's `max_range` is not the use's reach.
 const INTERACTION_DISTANCE: f32 = 2.099_999_9;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
@@ -339,6 +348,9 @@ pub(super) struct View {
     chosen: Vec<i64>,
     /// The doodad under the pointer (its name tooltip is up).
     hover: Option<u32>,
+    /// A right click on the climb doodad under the pointer when it is the nearest doodad and in
+    /// grab reach: `(distance, id)`, handled by the dialog's unit comparison.
+    climb_click: Option<(f32, u32)>,
     /// What the doodad tooltip shows now.
     tip: Option<Tip>,
     /// The doodad last right clicked: the bar is about it while it is in reach.
@@ -415,28 +427,15 @@ impl View {
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
     }
+    /// The right-clicked climb doodad (nearest doodad, in grab reach): distance and id.
+    pub(super) fn climb_click(&self) -> Option<(f32, u32)> {
+        self.climb_click
+    }
 
     /// The bar's F claim, for the dialog tests (`claims_key` is set by the doodad frame system).
     #[cfg(test)]
     pub(super) fn claim_key_for_test(&mut self) {
         self.claims_key = true;
-    }
-}
-
-/// The reach of a doodad whose phase has `uses`, metres: [`skill_reach`] of the first skill's `max_range`.
-fn reach(data: &HudData, uses: &Uses) -> f32 {
-    let range = data.game.get().and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s))).map_or(0.0, |s| s.max_range as f32);
-    skill_reach(range)
-}
-
-/// A skill's `max_range` (at least 2 m, the minimum is ours), else [`BASE_REACH`]. The range is to the doodad's origin
-/// with no slack. The 2026-10-30 1.2 capture: Gather 13990 (`max_range` 4) has a bar entry at 3 m and none at 4.5 m or
-/// 8 m (`tools/evidence/gather/capture-results.txt`, `tools/evidence/doodad_affordance/capture-results.txt`).
-fn skill_reach(max_range: f32) -> f32 {
-    if max_range > 0.0 {
-        max_range.max(2.0)
-    } else {
-        BASE_REACH
     }
 }
 
@@ -511,7 +510,7 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
             continue;
         };
         let dist = from.distance(pos);
-        if dist > reach(data, uses) {
+        if dist >= DOODAD_REACH {
             continue;
         }
         let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
@@ -685,7 +684,8 @@ fn hit(ray: Ray3d, centre: Vec3, radius: f32) -> Option<f32> {
     (along > 0.0 && (ray.origin + *ray.direction * along).distance(centre) <= radius).then_some(along)
 }
 
-/// The usable doodad the ray picks, unless an NPC is in front of it.
+/// The usable doodad the ray picks, unless an NPC is in front of it. Returns the distance along
+/// the ray with the object id, so a climb doodad can be ordered against it.
 fn pick(
     ray: Ray3d,
     data: &HudData,
@@ -693,7 +693,7 @@ fn pick(
     units: &Units,
     own: u32,
     world: &impl Fn(&aa_net::model::Unit) -> Option<Vec3>,
-) -> Option<u32> {
+) -> Option<(f32, u32)> {
     let game = data.game.get()?;
     let mut best: Option<(f32, u32)> = None;
     for o in doodads.by_id.values() {
@@ -710,7 +710,7 @@ fn pick(
         }
     }
     let (along, obj_id) = best?;
-    (!npc_in_front(&ray, along, units, own, world)).then_some(obj_id)
+    (!npc_in_front(&ray, along, units, own, world)).then_some((along, obj_id))
 }
 
 /// Whether an NPC's pick-sphere middle is nearer along the ray than the doodad's middle (`along`).
@@ -752,6 +752,46 @@ fn arbitrate(
     }
 }
 
+/// The climb doodad under the ray, tested along the whole `$ladder` segment. A ship ladder's
+/// packet origin can be below the waterline while its rungs are at deck height, so a sphere at
+/// the origin would never light it up. `segments` holds the drawn `(obj_id, bottom, top)` in
+/// Bevy world space.
+fn pick_climb(
+    ray: Ray3d,
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    segments: &[(u32, Vec3, Vec3)],
+) -> Option<(f32, u32)> {
+    let mut best: Option<(f32, u32)> = None;
+    for &(obj_id, a, b) in segments {
+        let Some(pos) = doodads.by_id.get(&obj_id).and_then(|o| doodad_world(o, units)) else {
+            continue;
+        };
+        if data.pos.distance(pos) > PICK_DISTANCE {
+            continue;
+        }
+        let steps = ((a.distance(b) / 0.4).ceil() as usize).clamp(2, 24);
+        for i in 0..=steps {
+            let p = a.lerp(b, i as f32 / steps as f32);
+            if let Some(along) = hit(ray, aa_world::bevy_to_cry(p), 0.45)
+                && best.is_none_or(|(x, _)| along < x)
+            {
+                best = Some((along, obj_id));
+            }
+        }
+    }
+    best
+}
+
+/// The nearer of two ray hits, `(distance, obj_id)`; `None` when neither hit.
+fn nearest_hit(a: Option<(f32, u32)>, b: Option<(f32, u32)>) -> Option<(f32, u32)> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, b) => a.or(b),
+    }
+}
+
 /// The system that decides the doodad in reach, the plate and the walk target; `ingame::doodad_affordance` draws the
 /// target decal after it (it reads the `DoodadTargetDecal` this writes).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -780,14 +820,28 @@ fn track(
     mut pressed_at: Local<Option<Vec2>>,
     mut cameras: Query<&mut crate::ingame::camera::OrbitCamera>,
     mut dev: ResMut<crate::ingame::DevOptions>,
-    (mut glows, names, views, poses, visuals, mut target_decal, ladder_claim): (
+    (
+        mut glows,
+        names,
+        views,
+        poses,
+        mut boxes,
+        visuals,
+        mut target_decal,
+        ladder_claim,
+        db,
+        ladder_visuals,
+    ): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
         Res<Views>,
         super::pick::UnitPoses,
+        super::pick::ModelBoxes,
         Query<&DoodadVisual>,
         ResMut<DoodadTargetDecal>,
         Option<Res<crate::ingame::ladder::LadderClaim>>,
+        Option<Res<Db>>,
+        Query<(&DoodadVisual, &GlobalTransform)>,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
@@ -899,12 +953,68 @@ fn track(
     if !blocked && pointer.mouse.just_pressed(MouseButton::Right) {
         *pressed_at = if pointer.over_ui.0 { None } else { cursor };
     }
+    let ladder_segments: Vec<(u32, Vec3, Vec3)> = db.as_deref().map_or_else(Vec::new, |db| {
+        doodads
+            .by_id
+            .values()
+            .filter(|o| db.ladder_kind(o.func_group_id).is_some())
+            .filter_map(|o| {
+                let entity = views.doodad_entity(o.obj_id)?;
+                let (visual, global) = ladder_visuals.get(entity).ok()?;
+                let helper = visual.ladder?;
+                Some((
+                    o.obj_id,
+                    global.transform_point(helper.bottom),
+                    global.transform_point(helper.top),
+                ))
+            })
+            .collect()
+    });
+    let climb = ray.and_then(|r| pick_climb(r, &d, &doodads, &units, &ladder_segments));
+    let usable = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world));
+    // the ladder must be the nearest doodad along the ray, not one behind a closer one
+    let nearest = nearest_hit(climb, usable);
+    // ... and it must be within grab reach: a far click falls through to the unit/doodad pick. The reach is
+    // to the ladder's segment, like the grab's `nearest_ladder` (a ship ladder's origin can sit at the
+    // waterline with its rungs at deck height); the doodad origin only stands in without a drawn helper.
+    let ladder_click = climb.filter(|(_, id)| {
+        let in_reach = match ladder_segments.iter().find(|(seg, ..)| seg == id) {
+            Some((_, bottom, top)) => {
+                crate::ingame::ladder::segment_point(
+                    d.pos,
+                    aa_world::bevy_to_cry(*bottom),
+                    aa_world::bevy_to_cry(*top),
+                )
+                .0 <= crate::ingame::ladder::REACH
+            }
+            None => doodads
+                .by_id
+                .get(id)
+                .and_then(|o| doodad_world(o, &units))
+                .is_some_and(|p| d.pos.distance(p) <= crate::ingame::ladder::REACH),
+        };
+        nearest.is_some_and(|(_, n)| n == *id) && in_reach
+    });
     let mut clicked = None;
+    let mut climb_click = None;
     if !blocked && pointer.mouse.just_released(MouseButton::Right)
-        && let (Some(start), Some(end), Some(ray)) = (pressed_at.take(), cursor, ray)
+        && let (Some(start), Some(end)) = (pressed_at.take(), cursor)
         && start.distance(end) <= CLICK_SLOP
     {
-        clicked = pick(ray, &d, &doodads, &units, own, &world);
+        // The ladder grab is decided in the dialog against the unit/ship hit, so this only
+        // records the ladder click. A climb doodad never goes to the doodad skill bar.
+        climb_click = ladder_click;
+        // a ladder click in grab reach is a new target action: a running talk or doodad walk must not keep
+        // steering (and holding W) while the player takes the ladder
+        if climb_click.is_some() && (d.doodad.cancel_walk() | super::dialog::cancel_walk(&mut d)) {
+            dev.script_keys.retain(|c| c != 'W');
+        }
+        clicked =nearest.map(|(_, id)| id).filter(|id| {
+            !doodads.by_id.get(id).is_some_and(|o| {
+                db.as_deref()
+                    .is_some_and(|db| db.ladder_kind(o.func_group_id).is_some())
+            })
+        });
     }
     if script.rclicks.last().is_some_and(|t| script.since >= *t) {
         script.rclicks.pop();
@@ -915,8 +1025,74 @@ fn track(
         script.hovers.pop();
         script.hovering = true;
     }
-    let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
+    // Only a ladder is unit-ordered on click (a non-ladder doodad is used directly), so only a
+    // ladder hover applies the unit/hull ordering. A ladder parented to the picked slave beats
+    // that slave's loose box.
+    let hover_is_ladder = nearest.is_some_and(|(_, id)| {
+        db.as_deref().is_some_and(|db| {
+            doodads
+                .by_id
+                .get(&id)
+                .is_some_and(|o| db.ladder_kind(o.func_group_id).is_some())
+        })
+    });
+    let ridden = player
+        .spawn
+        .as_ref()
+        .and_then(|s| s.unit.attached_to.map(|a| a.obj_id));
+    let unit_hit = if hover_is_ladder {
+        ray.and_then(|r| {
+            let (entry, id) = super::pick::pick_unit_hit(
+                &r,
+                &units,
+                own,
+                ridden,
+                |u| {
+                    matches!(
+                        u.kind,
+                        aa_net::model::UnitKind::Npc { .. }
+                            | aa_net::model::UnitKind::Slave { .. }
+                    )
+                },
+                |unit, ray| {
+                    (
+                        poses.get(unit, &units).map(|(pos, _)| pos),
+                        boxes.get_near(unit, ray),
+                    )
+                },
+            )?;
+            let unit = units.get(id)?;
+            let (at, model) = (
+                poses.get(unit, &units).map(|(pos, _)| pos),
+                boxes.get_near(unit, &r),
+            );
+            let along = super::pick::unit_compare_hit(&r, unit, at, model).unwrap_or(entry);
+            Some((along, id))
+        })
+    } else {
+        None
+    };
+    let hover = nearest
+        .filter(|(_, id)| {
+            if !hover_is_ladder {
+                return true;
+            }
+            let parent = doodads
+                .by_id
+                .get(id)
+                .map(|o| o.parent_obj_id)
+                .filter(|parent| *parent != 0);
+            super::pick::doodad_beats_unit(nearest, unit_hit, parent)
+        })
+        .map(|(_, id)| id)
+        .or_else(|| {
+            script
+                .hovering
+                .then(|| nearest_usable(&d, &doodads, &units))
+                .flatten()
+        });
     d.doodad.hover = hover;
+    d.doodad.climb_click = climb_click;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
     // The interaction gap measures to the drawn model's bounds; cache them for the doodads the pointer,
     // the bar or the walk is about (the clicked one may be far and not in `focus`).
@@ -1516,19 +1692,6 @@ mod tests {
     }
 
     #[test]
-    fn a_skill_reach_is_its_max_range() {
-        // 2026-10-30 1.2 capture: Gather 13990 (`skills.max_range` 4) has the bar at 3 m and not at 4.5 m.
-        assert_eq!(skill_reach(4.0), 4.0);
-        assert!(skill_reach(4.0) > 3.0 && skill_reach(4.0) < 4.5);
-        assert_eq!(
-            skill_reach(0.0),
-            BASE_REACH,
-            "no skill range keeps the base reach"
-        );
-        assert_eq!(skill_reach(1.0), 2.0, "the shortest skill reach is 2 m");
-    }
-
-    #[test]
     fn a_doodad_skill_over_the_players_labor_is_refused_locally() {
         // 2026-10-30 1.2 capture: Gather 13990 (1 LP) at -2946 LP printed "Insufficient Labor Points."
         // and sent no CSStartSkill; the fake-use lamp 13166 costs no labor.
@@ -1595,6 +1758,40 @@ mod tests {
         assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
         assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
         assert_eq!(bar_skills(&mut data, &doodads, 8.0), None);
+    }
+
+    /// The bar's candidate distance is the doodad interaction setting, not the skill's range:
+    /// storage skill 15307 has `max_range` 20, but its button must clear at 4.5 m and 10 m from
+    /// the box (2026-11-01 owner retest: a "store a trade pack" icon stayed on screen 10 m away).
+    #[test]
+    fn a_doodad_bar_uses_the_interaction_distance_not_the_skill_range() {
+        let mut game = GameData::default();
+        game.doodad.add(8264, 15307, "DoodadFuncConsumeChanger");
+        game.skills.insert(
+            15307,
+            SkillInfo {
+                max_range: 20,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        let mut doodads = Doodads::default();
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(10990.0, 10123.0, 102.5));
+        assert!(doodads.apply(&aa_net::Event::DoodadsSpawned(vec![storage])));
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![15307]));
+        assert_eq!(
+            bar_skills(&mut data, &doodads, 4.5),
+            None,
+            "the bar clears at the interaction distance, not the 20 m skill range"
+        );
+        assert_eq!(bar_skills(&mut data, &doodads, 10.0), None);
+        // The capture's edge is a centre distance: a 0.55 m player radius must not stretch the
+        // 4 m prompt to 4.5 m.
+        data.player_radius = 0.55;
+        assert_eq!(bar_skills(&mut data, &doodads, 3.9), Some(vec![15307]));
+        assert_eq!(bar_skills(&mut data, &doodads, 4.0), None);
+        assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
     }
 
     #[test]
@@ -2029,10 +2226,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(portal_range, 4);
-        assert!(
-            skill_reach(portal_range as f32) < 5.5,
-            "out of reach at the 5.5 m the capture stood"
-        );
+        // The capture stood 5.5 m away, past the 4 m interaction distance, so the portal's fake
+        // use offered nothing.
         let mailbox_skill = conn
             .query_row(
                 "SELECT func_skill_id FROM doodad_funcs WHERE doodad_func_group_id = 107",
@@ -2573,6 +2768,144 @@ mod tests {
         );
     }
 
+    /// A player standing inside a vehicle's body box has a negative surface gap. The slave's
+    /// bar key is clamped at 0 so a nearer storage box the player faces still wins the F prompt.
+    #[test]
+    fn a_player_inside_a_hauler_box_still_gets_its_facing_storage_prompt() {
+        let mut game = GameData::default();
+        game.doodad.add(1, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        game.set_vehicle_box(
+            1553,
+            Some((Vec3::new(-1.0, -4.5, 0.0), Vec3::new(1.0, 1.5, 2.0))),
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        // In the cargo bed, 3 m behind the origin, facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(10.0, 7.0, 1.0);
+        data.yaw = std::f32::consts::PI;
+        data.player_radius = 0.55;
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(
+            3446,
+            world_doodad(3446, 850, 1, Vec3::new(10.0, 4.9, 1.0)),
+        );
+        let mut units = Units::default();
+        let mut hauler = crate::hud::expansion::fixture::spawn().unit;
+        hauler.obj_id = 20;
+        hauler.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 146,
+            summoner_id: 100,
+        };
+        hauler.model_id = 1553;
+        hauler.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
+        units.by_id.insert(20, hauler);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        assert_eq!(focus.obj_id, 3446);
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
+        assert_eq!(candidate.obj_id, 20);
+        assert!(
+            focus.key < candidate.key,
+            "storage key {} must beat the inside-box slave key {}",
+            focus.key,
+            candidate.key
+        );
+        let (wanted, _) = arbitrate(
+            Some((
+                Shown {
+                    source: Source::Doodad {
+                        obj_id: 3446,
+                        phase: 1,
+                        generation: 0,
+                    },
+                    skills: focus.skills,
+                },
+                focus.key,
+                focus.dist,
+            )),
+            Some((
+                Shown {
+                    source: Source::Npc {
+                        obj_id: 20,
+                        template: 146,
+                    },
+                    skills: candidate.skills,
+                },
+                candidate.key,
+                candidate.dist,
+            )),
+        );
+        assert!(matches!(
+            wanted.map(|w| w.source),
+            Some(Source::Doodad { obj_id: 3446, .. })
+        ));
+    }
+
+    /// The same with the real Red Farm Hauler body box (model 1553) and its storage box: the
+    /// owner's "Store Trade Pack" prompt must win over the Grab Machine while facing it.
+    #[test]
+    #[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+    fn the_real_hauler_box_does_not_hide_its_facing_storage_prompt()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&path).exists() {
+            eprintln!("skipping: the game pak {pak} or database {path} is not there");
+            return Ok(());
+        }
+        let mut game = GameData::load(&path)?;
+        let (lo, hi) = game.vehicle_box(1553).expect("the hauler body box");
+        assert!(lo.y < -3.0, "the cargo bed extends behind: {lo:?}..{hi:?}");
+        game.doodad.add(8264, 15307, "DoodadFuncConsumeChanger");
+        game.skills.insert(
+            15307,
+            SkillInfo {
+                max_range: 20,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        // In the cargo bed (3 m behind the origin), facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(100.0, 197.0, 6.0);
+        data.yaw = std::f32::consts::PI;
+        data.player_radius = 0.55;
+        let mut doodads = Doodads::default();
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(100.0, 194.9, 6.0));
+        doodads.by_id.insert(3446, storage);
+        let mut units = Units::default();
+        let mut hauler = crate::hud::expansion::fixture::spawn().unit;
+        hauler.obj_id = 20;
+        hauler.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 146,
+            summoner_id: 100,
+        };
+        hauler.model_id = 1553;
+        hauler.pos = aa_net::Pos::new(100.0, 200.0, 5.0);
+        units.by_id.insert(20, hauler);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
+        assert!(
+            focus.key < candidate.key,
+            "storage key {} must beat the real-box slave key {}",
+            focus.key,
+            candidate.key
+        );
+        Ok(())
+    }
+
     /// `player+0x3b94`: sitting on a bonded seat doodad shows no doodad bar either.
     #[test]
     fn no_doodad_bar_while_sitting_on_a_seat_doodad() {
@@ -2603,7 +2936,7 @@ mod tests {
         use crate::ingame::Motion;
         use crate::ingame::data::Db;
         use crate::ingame::doodad_model::LadderHelper;
-        use crate::ingame::ladder::{LadderClaim, control_ladder};
+        use crate::ingame::ladder::{LadderClaim, LadderGrab, control_ladder};
         use crate::ingame::player::{LocalPlayer, Mover, PlayerInput, SendState};
         use crate::ingame::units::{RemoteDoodad, Views};
 
@@ -2648,6 +2981,7 @@ mod tests {
             .insert_resource(DoodadTargetDecal::default())
             .insert_resource(aa_net::CharacterNames::default())
             .insert_resource(LadderClaim::default())
+            .insert_resource(LadderGrab::default())
             .insert_resource(SendState::default())
             .insert_resource(PlayerInput::default())
             .insert_resource(aa_anim::ClipLibrary::default())
@@ -2732,5 +3066,83 @@ mod tests {
             requested.is_empty(),
             "F did not request the bar: {requested:?}"
         );
+    }
+
+    /// A climb doodad has no use skills, but its template sets `use_target_highlight`; the pick
+    /// must still resolve it. A ship ladder's packet origin is below the waterline while its
+    /// rungs are at deck height, so the pick follows the whole `$ladder` segment.
+    #[test]
+    fn a_climb_doodad_is_picked_for_the_highlight() {
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(77, world_doodad(77, 1187, 15013, Vec3::new(0.0, 0.0, 0.0)));
+        let data = HudData {
+            pos: Vec3::new(0.0, -5.0, 0.0),
+            ..Default::default()
+        };
+        // the ray crosses the rung at 3 m up (the packet origin is at the foot, z 0)
+        let ray = Ray3d::new(
+            aa_world::cry_to_bevy(Vec3::new(0.0, -5.0, 3.0)),
+            bevy::math::Dir3::new(aa_world::cry_to_bevy(Vec3::new(0.0, 1.0, 0.0))).unwrap(),
+        );
+        // the drawn segment: the `$ladder` helper in the doodad root at the origin
+        let segments = [(77, Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0))];
+        assert_eq!(
+            pick_climb(ray, &data, &doodads, &Units::default(), &segments).map(|(_, id)| id),
+            Some(77),
+            "the visible rungs are picked"
+        );
+        // a ray from above the top pointing down: the bottom sample is the first and the
+        // farthest; the nearest sample (the top) must win.
+        let from_above = Ray3d::new(Vec3::new(0.0, 11.0, 0.4), bevy::math::Dir3::NEG_Y);
+        let long = [(77, Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0))];
+        let (along, id) = pick_climb(from_above, &data, &doodads, &Units::default(), &long)
+            .expect("the segment is under the ray");
+        assert_eq!(id, 77);
+        assert!(along < 2.0, "nearest sample, not the first: {along}");
+    }
+
+    #[test]
+    fn the_nearest_hit_keeps_a_closer_doodad_over_a_ladder_behind_it() {
+        assert_eq!(
+            nearest_hit(Some((5.0, 77)), Some((3.0, 78))),
+            Some((3.0, 78))
+        );
+        assert_eq!(
+            nearest_hit(Some((3.0, 77)), Some((5.0, 78))),
+            Some((3.0, 77))
+        );
+        assert_eq!(nearest_hit(None, Some((5.0, 78))), Some((5.0, 78)));
+        assert_eq!(nearest_hit(None, None), None);
+    }
+
+    /// The Eznan Cutter's ladder doodads must light up: the owner hovered one and saw no
+    /// highlight. `slave_doodad_bindings` for owner 21 lists templates 1187/3299/3300; their
+    /// `doodad_almighties.use_target_highlight` is on.
+    #[test]
+    fn the_eznan_cutter_ladder_templates_glow() {
+        let Some(conn) = real_db() else { return };
+        let tables = Tables::load(&conn).unwrap();
+        let mut q = conn
+            .prepare(
+                "SELECT d.id, d.model FROM slave_doodad_bindings b
+                 JOIN doodad_almighties d ON d.id = b.doodad_id
+                 WHERE b.owner_id = 21 AND b.owner_type = 'Slave' AND d.model LIKE '%ladder%'",
+            )
+            .unwrap();
+        let rows = q
+            .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))
+            .unwrap();
+        let mut found = 0;
+        for row in rows {
+            let (template, model) = row.unwrap();
+            found += 1;
+            assert!(
+                tables.glows(template),
+                "the Eznan Cutter ladder template {template} ({model}) does not glow"
+            );
+        }
+        assert!(found > 0, "the Eznan Cutter has a ladder doodad binding");
     }
 }

@@ -3,7 +3,7 @@
 //! `TargetChanged`, which the target frame follows (see `panels.rs`).
 
 use aa_net::state::{Player, Target, Units};
-use aa_net::{Command, NetCommand};
+use aa_net::{Command, Mates, NetCommand};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -76,6 +76,38 @@ pub fn tab_target(
         None => near[if backwards { near.len() - 1 } else { 0 }].1,
     };
     net.write(NetCommand(Command::Target { obj_id: next }));
+}
+
+/// `self_target` and `round_target` (F1 by default): target the local player. The native
+/// `self_target` handler (`FUN_393f8fb0`) asks for the player; `round_target` (`FUN_3942a080`)
+/// asks for the player, and when the player already is the target, for the own pet.
+pub fn self_target(
+    actions: Res<crate::settings::Actions>,
+    focus: Res<HudKeyboardFocus>,
+    rt: Option<NonSend<UiRuntime>>,
+    player: Res<Player>,
+    mates: Res<Mates>,
+    mut target: ResMut<Target>,
+    mut net: MessageWriter<NetCommand>,
+) {
+    if focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured()) {
+        return;
+    }
+    let round = actions.just_pressed("round_target", 0);
+    if !round && !actions.just_pressed("self_target", 0) {
+        return;
+    }
+    let Some(own) = player.spawn.as_ref().map(|s| s.obj_id).filter(|id| *id != 0) else { return };
+    let next = if round && target.obj_id == Some(own) {
+        mates.own.as_ref().and_then(|mate| mate.obj_id)
+    } else {
+        Some(own)
+    };
+    let Some(obj_id) = next.filter(|id| *id != 0) else { return };
+    if !target.set_local(Some(obj_id)) {
+        return;
+    }
+    net.write(NetCommand(Command::Target { obj_id }));
 }
 
 /// A left click (not a drag, not on the HUD) on a unit selects it.
@@ -212,8 +244,9 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::hud::api::{HudBridge, HudData, Shared};
+    use crate::hud::api::{HudBridge, HudData, Request, Shared};
     use crate::hud::mounted;
+    use crate::hud::usable::InFlight;
 
     fn unit(obj_id: u32, kind: UnitKind, pos: Vec3, parent: Option<u32>) -> Unit {
         let mut unit = crate::hud::fixture_spawn().unit;
@@ -241,6 +274,213 @@ mod tests {
             pos,
             parent,
         )
+    }
+
+    fn own_spawn(obj_id: u32) -> PlayerSpawn {
+        let mut spawn = crate::hud::fixture_spawn();
+        spawn.obj_id = obj_id;
+        spawn.unit.obj_id = obj_id;
+        spawn
+    }
+
+    fn target_app(spawn: PlayerSpawn, mates: Mates, target: Target) -> App {
+        let mut app = App::new();
+        app.insert_resource(Player { spawn: Some(spawn) })
+            .insert_resource(mates)
+            .insert_resource(target)
+            .init_resource::<HudKeyboardFocus>()
+            .init_resource::<crate::settings::Actions>()
+            .add_message::<NetCommand>()
+            .add_systems(Update, self_target);
+        app
+    }
+
+    fn sent(app: &mut App) -> Vec<Command> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect()
+    }
+
+    #[test]
+    fn f1_targets_the_player_and_sends_the_own_change_target_bc() {
+        let own = 0x5f21;
+        let mut app = target_app(own_spawn(own), Mates::default(), Target::default());
+        app.world_mut().resource_mut::<crate::settings::Actions>().tap_for_test("round_target");
+        app.update();
+        let commands = sent(&mut app);
+        assert!(matches!(&commands[..], [Command::Target { obj_id }] if *obj_id == own), "{commands:?}");
+        assert_eq!(app.world().resource::<Target>().obj_id, Some(own));
+        let message = aa_net::game::ClientMsg::ChangeTarget { obj_id: own };
+        assert_eq!(message.opcode(), 0x02c);
+        assert_eq!(message.encode_body(), [0x21, 0x5f, 0x00]);
+    }
+
+    #[test]
+    fn the_self_target_action_also_targets_the_player() {
+        let own = 0x5f21;
+        let mut app = target_app(own_spawn(own), Mates::default(), Target::default());
+        app.world_mut().resource_mut::<crate::settings::Actions>().tap_for_test("self_target");
+        app.update();
+        assert!(matches!(&sent(&mut app)[..], [Command::Target { obj_id }] if *obj_id == own));
+        assert_eq!(app.world().resource::<Target>().obj_id, Some(own));
+    }
+
+    #[test]
+    fn a_second_round_target_press_targets_the_own_pet() {
+        let (own, pet) = (0x5f21, 0x2a);
+        let mut mates = Mates::default();
+        mates.own = Some(aa_net::OwnedMate {
+            spawn: aa_net::MateSpawn::default(),
+            obj_id: Some(pet),
+            dynamic: None,
+        });
+        let mut target = Target::default();
+        target.set_local(Some(own));
+        let mut app = target_app(own_spawn(own), mates, target);
+        app.world_mut().resource_mut::<crate::settings::Actions>().tap_for_test("round_target");
+        app.update();
+        assert!(matches!(&sent(&mut app)[..], [Command::Target { obj_id }] if *obj_id == pet));
+        assert_eq!(app.world().resource::<Target>().obj_id, Some(pet));
+    }
+
+    #[test]
+    fn round_target_stays_on_the_player_without_a_pet() {
+        let own = 0x5f21;
+        let mut target = Target::default();
+        target.set_local(Some(own));
+        let mut app = target_app(own_spawn(own), Mates::default(), target);
+        app.world_mut().resource_mut::<crate::settings::Actions>().tap_for_test("round_target");
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        assert_eq!(app.world().resource::<Target>().obj_id, Some(own));
+    }
+
+    #[test]
+    fn a_self_target_builds_the_target_frame_from_the_player_without_a_view_unit() {
+        // aa-net keeps the local player in `Player`, not in `Units`; the target frame still has to
+        // get the player's unit (the 1.2 client shows the player as the target).
+        let own = crate::hud::fixture_spawn();
+        let mut world = World::new();
+        world.insert_resource(Player { spawn: Some(own.clone()) });
+        world.init_resource::<Units>();
+        let mut target = Target::default();
+        target.set_local(Some(own.obj_id));
+        world.insert_resource(target);
+        let snapshot = crate::hud::data::Snapshot {
+            unit_id: own.obj_id.to_string(),
+            name: own.name().to_string(),
+            level: 30,
+            hp: 87,
+            max_hp: 100,
+            mp: 40,
+            max_mp: 80,
+            ..Default::default()
+        };
+        let at = Vec3::new(1.0, 2.0, 3.0);
+        let (panels, target_pos, _) =
+            crate::hud::panels::refresh(&world, None, 0, own.obj_id, std::time::Instant::now(), &snapshot, at);
+        let shown = panels.target.expect("target frame for self");
+        assert_eq!(shown.obj_id, own.obj_id);
+        assert_eq!(shown.detail, "character");
+        assert_eq!((shown.hp, shown.max_hp, shown.mp, shown.max_mp), (87, 100, 40, 80));
+        assert_eq!(target_pos, Some(at));
+    }
+
+    /// The original world-stage HUD with an explicit synthetic player (the breath fixture, but
+    /// loading its UI texts from `AA_DB` rather than the working directory's compact.sqlite3).
+    fn world_runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, std::path::PathBuf), Box<dyn std::error::Error>> {
+        let mut rt = UiRuntime::new("en_us", width, height)?;
+        let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.into());
+        rt.load_ui_texts(std::path::Path::new(&db))?;
+        let bridge: Shared = Rc::new(RefCell::new(HudData::default()));
+        {
+            let mut d = bridge.borrow_mut();
+            d.snapshot.unit_id = "100".into();
+            d.snapshot.name = "Target self fixture".into();
+            d.snapshot.level = 30;
+            d.snapshot.hp = 100;
+            d.snapshot.max_hp = 100;
+            d.snapshot.mp = 100;
+            d.snapshot.max_mp = 100;
+            d.feature_limits = (Some(55), Some(50));
+            d.panels.actions_known = true;
+            d.panels.bag_slots = 50;
+            if let Ok(game) = crate::hud::data::GameData::load(&db) {
+                let _ = d.game.0.set(game);
+            }
+        }
+        crate::hud::api::install(&mut rt, &bridge)?;
+        let path = crate::settings::isolated_bindings(&rt)?;
+        rt.run_stage(aa_ui::Stage::World);
+        assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+        crate::hud::api::enter_world(&rt, &bridge, &aa_net::state::Chat::default());
+        Ok((rt, bridge, path))
+    }
+
+    #[test]
+    fn clicking_the_player_frame_targets_the_player() -> Result<(), Box<dyn std::error::Error>> {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+        let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.into());
+        if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&db).exists() {
+            eprintln!("clicking_the_player_frame_targets_the_player: skipped, no game_pak / compact.sqlite3 (set AA_PAK / AA_DB)");
+            return Ok(());
+        }
+        let (rt, bridge, path) = world_runtime(1280.0, 720.0)?;
+        let own = 0x5f21u32;
+        let name = "Target self fixture".to_string();
+        let mut player_spawn = own_spawn(own);
+        player_spawn.unit.name = name.clone();
+        {
+            let mut data = bridge.borrow_mut();
+            data.snapshot.unit_id = own.to_string();
+            data.snapshot.name = name.clone();
+            data.requests.clear();
+        }
+        // the original player frame's Click handler calls X2Unit:TargetUnit('player')
+        crate::hud::expansion::fixture::click(&rt, "ADDON:GetContent(UIC_PLAYER_UNITFRAME).eventWindow")?;
+        assert!(
+            bridge.borrow().requests.iter().any(|r| matches!(r, Request::Target { obj_id } if *obj_id == own)),
+            "{:?}",
+            bridge.borrow().requests
+        );
+
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge.clone()))
+            .insert_resource(Player { spawn: Some(player_spawn) })
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<Units>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<InFlight>()
+            .add_message::<NetCommand>()
+            .add_message::<crate::hud::alerts::UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_systems(Update, crate::hud::api::handle_requests);
+        app.update();
+        assert!(matches!(&sent(&mut app)[..], [Command::Target { obj_id }] if *obj_id == own));
+        assert_eq!(app.world().resource::<Target>().obj_id, Some(own));
+
+        // the target frame the original script builds from the pushed panels
+        let snapshot = bridge.borrow().snapshot.clone();
+        let (panels, _, _) =
+            crate::hud::panels::refresh(app.world(), None, 0, own, std::time::Instant::now(), &snapshot, Vec3::ZERO);
+        {
+            let mut data = bridge.borrow_mut();
+            data.panels = panels;
+            data.panels_pushed = Some(crate::hud::panels::Panels::default());
+        }
+        crate::hud::api::push_changes(&rt, &bridge);
+        let shown: String = rt.lua.load("return X2Unit:UnitName('target')").eval()?;
+        assert_eq!(shown, name);
+        let visible: bool = rt.lua.load("return targetFrame ~= nil and targetFrame:IsVisible()").eval()?;
+        assert!(visible, "the target frame must show the player");
+        std::fs::remove_file(path).ok();
+        Ok(())
     }
 
     #[test]

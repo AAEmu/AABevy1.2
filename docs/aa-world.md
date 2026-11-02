@@ -5295,6 +5295,7 @@ like it, `&self`, `Send + Sync`) answers "is there water here":
 let water = WaterQuery::new("main_world");                          // or Res<WaterQuery>
 water.water_at(Vec3::new(x, y, z))   // Option<(f32, WaterKind)>: surface height (m) and Sea / Lake / River, game coordinates
 water.body_at(pos)                   // Option<WaterBody { height, kind, fog_color, fog_density }>, the volume's own fog too
+WaterQuery::fixture_sea(world, 100.0, TerrainQuery::fixture_flat(world, 90.0))  // test sea without the pak
 ```
 
 A volume (`object.dat` type 11: outline, surface, depth) applies when the outline contains `(x, y)` (even-odd test of the same ring the mesh is
@@ -5429,6 +5430,8 @@ terrain.is_hole_at(x, y)        // Option<bool>; height_at remains defined over 
 terrain.normal_at(x, y)         // Option<Vec3>   terrain.slope_at(x, y)  // Option<f32> radians, 0 flat, pi / 2 wall
 terrain.prefetch(x, y, 600.0)   // load the cells around a position on a background thread (call when entering a cell)
 terrain.cell(cx, cy)            // Option<Arc<CellHeights>>: the raw grid, e.g. for surface type nibbles
+terrain.fixture(world)          // test query without the pak: no cell data, outside the map everywhere
+terrain.fixture_flat(world, z)  // test query without the pak: one flat cell (or fixture_cell for holes/slopes)
 ```
 
 * The surface is the finest mesh the renderer draws (`CellHeights::mesh_height` / `mesh_normal`: 2 m quads split from the south east to the north

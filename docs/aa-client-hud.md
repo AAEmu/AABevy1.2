@@ -322,6 +322,15 @@ window is the script's). The wire formats are checked against the server's own b
 
 **Tab** targets the nearest living enemy (the next one when pressed again), any unit if there is no enemy.
 
+**Self target.** `F1` is `round_target` in the client's `default_binding.g` (`hotkey.g` records the same):
+the native `round_target` handler (`FUN_3942a080`) targets the local player, and pressed again while the player
+is the target it targets the own pet (`FUN_3933f5e0` on the pet manager; no packet without one). `self_target`
+(`FUN_393f8fb0`) targets the player. A left click on the player frame goes through the original script's
+`eventWindow` `OnClick` -> `X2Unit:TargetUnit("player")` (native `ChangeTargetForUI`). The own portrait's
+CSChangeTarget `0x02c` carries the player's own bc (owner session 2026-11-01 14:18: `21 5f 00`). Both paths set
+`Target` locally before the send. The player is kept in `Player`, not `Units`, so `panels::refresh` builds the
+target frame's self snapshot from the player's spawn unit with the HUD's current points.
+
 **Not done / assumptions.** The afterimage, shake and critical bursts; the plate shows no party, guild or PvP marks;
 auto-away after 300 s is a guess; the capture's side-on camera is only approximated by
 `--hud-side-cam` (the character is not exactly side-on); a unit's height has no source for models without a skeleton
@@ -463,6 +472,25 @@ Threshold", "Your last breath has escaped you.", the countdown, "Revive Here" / 
 `X2Player:GetResurrectionCountdown` counts the server's wait down on the HUD clock, `X2Player:Resurrect(inPlace)` sends
 `Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target.
 
+**Where the countdown comes from.** `SCUnitDeathPacket.resurrect_wait_time` (i32 ms, the server's escalating
+15/30/60... s wait) is the only duration the server sends; `SCNotifyResurrectionPacket` carries only the caster.
+`FUN_39369c10` (`x2game.dll.c:706612-706613`) stores the packet time in `[[g_connection+0x40]+0xaf4]` and that field in
+`+0xaf8` when the dead unit is the local player. `FUN_39495c00` (`GetResurrectionCountdown`, `x2game.dll.c:955710`)
+returns `(offer flag +0xafc, 300000 - elapsed, +0xaf8 - elapsed)`, both truncated to seconds: the automatic temple
+respawn is the client's five-minute constant, not the server wait. The window's `OnUpdate` calls
+`X2Player:Resurrect(false)` when the second value reaches 0 (`death_and_resurrection_window.alb` disassembly lines
+233-235); the buttons enable when the third does. Bevy used to open the window before `track_death` had stored the
+packet, so the deadline read 0 and the window auto-respawned in the same second (owner test 15:33:18). `track_death`
+now runs before `aa_ui::UiFrame` and `alerts::show`, and it takes the local id from `Player.spawn` (which survives
+`SCUnitsRemoved`) rather than `Skills.obj_id` (which drops its id when the player's own unit is removed; the 15:32:07
+teleport sent `SCUnitsRemoved` packets before the death).
+
+`X2Player:Resurrect` itself (`FUN_39186e70`, `x2game.dll.c:290981`) sends only while `+0xaf4` is set, the wait has run
+out and (for an in-place revival) the offer flag is set; a two-second debounce follows. Bevy applies the same gate in
+`handle_requests` and latches one request per death, so the countdown and a click cannot send twice. `Resurrected`
+raises `PLAYER_RESURRECTED` (`FUN_391d3ad0`, `x2game.dll.c:363191-363192`, which clears `+0xaf4` and `+0xafc`) and the
+window hides.
+
 The offer is its own event. The original's `OnNotifyResurrection` (`FUN_391d39f0`, `x2game.dll` line 363081) sets `[[g_connection+0x40]+0xafc]`
 and raises `PLAYER_RESURRECTION` (event 92) with one argument, the caster's live-object id as a hexadecimal string. The death window
 handles it with `ShowResurrectionMode(casterId)`: the title stays "Hereafter Threshold", the penalty line becomes
@@ -592,7 +620,11 @@ data); the icons are drawn natively from `ui/map/icon/npc_icon.dds` (24 px cells
   grey "?" in progress, the main / livelihood / repeat variants of the sheet). The capture's big map shows no "!" at
   Desireen, 170 m from where it stands, and its roadmap the two givers within 120 m (Maude and an NPC south west).
 * **Gravesite** (`corpse_pos`) while the exp lost can still be won back; **dots** (`hostile` / `friendly`) of the
-  units in view within 250 m when the roadmap's "NPC" check is on.
+  units in view within 250 m when the roadmap's "NPC" check is on. Their tooltip is the NPC template's name (like the
+  quest marks); a dot without one has no label. The 1.2 symbol table has no `MAP_TEXT` row for `M_FRIENDLY`/`M_HOSTILE`
+  (category 0x14 dots, `FUN_3904ce90`, `x2game.dll.c:73822-73823`); `LocalizeUiText` would answer
+  `"20 ?? M_FRIENDLY"` on that miss (`x2game.dll.c:942705` and `585013`). The no-label choice is inferred: 1.2's label
+  for these dots is not established.
 * **Filters.** The "Show Icons" window of the big map works: `markers.lua` keeps each check (`SetNpcFilter`) and the
   three folders (Merchants, Infrastructure, Housing Province) and leaves the filtered icons out of both maps; the
   roadmap's NPC check hides every npc-like icon until it is on, as the toolkit's `roadmap` widget does.

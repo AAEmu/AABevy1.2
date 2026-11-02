@@ -3,9 +3,11 @@
 //! the game's own `mount` systems; no socket. Every wait has a timeout and exits non-zero.
 //!
 //! The run passes when
-//! * the local player is on attach point 2 and drawn at the body's `$passenger0` helper,
+//! * the local player is on attach point 2 and drawn at the body's `$passenger0` helper, turned
+//!   by the helper's authored 180 degrees so it faces the vehicle's forward,
 //! * after `SCUnitDetached` and a driver attach it sits at `$driver`,
-//! * a remote character attached at point 2 sits at `$passenger0` and follows a moved cart `Transform`,
+//! * a remote character attached at point 2 sits at `$passenger0`, faces the same way and follows
+//!   a moved cart `Transform`,
 //! * both leave and the local seat and the remote `Rider` are gone.
 //!
 //! The example exits non-zero on a failed check or a staging timeout. Needs `AA_PAK` and `AA_DB`; without them it says
@@ -522,8 +524,12 @@ fn drive(
             let Some((cart, helpers)) = cart else { return };
             let expected = helper(&cart, helpers, "passenger0");
             let seated = seat.0.is_some_and(|s| s.point == 2 && !s.drives);
-            match (seated, expected) {
-                (true, Some(expected)) if player.translation.distance(expected) < 1e-3 => {
+            // The hauler's `$passenger0` is authored 180 degrees about model Z; the passenger
+            // faces the vehicle's forward, not the cargo bed.
+            let expected_yaw = Quat::from_rotation_y(CART_YAW + std::f32::consts::PI);
+            let facing = player.rotation.dot(expected_yaw).abs() > 1.0 - 1e-4;
+            match (seated, expected, facing) {
+                (true, Some(expected), true) if player.translation.distance(expected) < 1e-3 => {
                     if now - since >= SETTLE {
                         info!("passenger_seats: seated as passenger at {expected:?}");
                         sequence.stage = Stage::LeavePassenger;
@@ -534,7 +540,7 @@ fn drive(
                         &mut exit,
                         &mut sequence,
                         format!(
-                            "passenger seat: {seated}, player at {:?}, expected {expected:?}",
+                            "passenger seat: {seated}, facing {facing}, player at {:?}, expected {expected:?}",
                             player.translation
                         ),
                     );
@@ -579,11 +585,15 @@ fn drive(
             let local_ok = seat.0.is_some_and(|s| s.point == 1)
                 && seat.cart_driver() == Some(CART_OBJ)
                 && driver.is_some_and(|p| player.translation.distance(p) < 1e-3);
+            let expected_yaw = Quat::from_rotation_y(CART_YAW + std::f32::consts::PI);
             let remote = riders
                 .iter()
                 .find(|(_, unit, _)| unit.obj_id == REMOTE_OBJ)
-                .map(|(_, _, transform)| transform.translation);
-            let remote_ok = remote.is_some_and(|p| passenger.is_some_and(|e| p.distance(e) < 1e-3));
+                .map(|(_, _, transform)| (transform.translation, transform.rotation));
+            let remote_ok = remote.is_some_and(|(p, rotation)| {
+                passenger.is_some_and(|e| p.distance(e) < 1e-3)
+                    && rotation.dot(expected_yaw).abs() > 1.0 - 1e-4
+            });
             if local_ok && remote_ok {
                 if now - since < SETTLE {
                     return;
@@ -627,11 +637,15 @@ fn drive(
             let driver = helper(&cart, helpers, "driver");
             let passenger = helper(&cart, helpers, "passenger0");
             let local_ok = driver.is_some_and(|p| player.translation.distance(p) < 1e-3);
+            let expected_yaw = Quat::from_rotation_y(CART_YAW + std::f32::consts::PI);
             let remote = riders
                 .iter()
                 .find(|(_, unit, _)| unit.obj_id == REMOTE_OBJ)
-                .map(|(_, _, transform)| transform.translation);
-            let remote_ok = remote.is_some_and(|p| passenger.is_some_and(|e| p.distance(e) < 1e-3));
+                .map(|(_, _, transform)| (transform.translation, transform.rotation));
+            let remote_ok = remote.is_some_and(|(p, rotation)| {
+                passenger.is_some_and(|e| p.distance(e) < 1e-3)
+                    && rotation.dot(expected_yaw).abs() > 1.0 - 1e-4
+            });
             if local_ok && remote_ok {
                 info!("passenger_seats: the drawn cart moved and both riders followed");
                 detach(&mut inbox, LOCAL_OBJ);

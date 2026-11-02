@@ -290,7 +290,9 @@ Commands (`session::Command`):
 `RefreshCharacters`, `CreateCharacter(CreateCharacter)`, `DeleteCharacter`, `CancelDeleteCharacter`,
 `EnterGame { character_id }` (select, spawn, notify in game), `Move(MoveCommand)`,
 `MoveVehicle(VehicleMoveRequest)`, `Hang { target_obj_id }`, `Unhang { reason }`, `Chat`,
-`LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`, `ReturnToWorldSelect`, `Disconnect`.
+`TeleportEnded { pos }` (the answer to `SCTeleportUnit`, sent by the app after the load),
+`NotifyInGameCompleted`, `LeaveWorld(Quit | CharacterSelect)`, `CancelLeave`,
+`ReturnToWorldSelect`, `Disconnect`.
 
 Events (`session::Event`), in the order of a normal run:
 `PhaseChanged(Phase)`, `LoginSucceeded(AccountInfo)`, `WorldList`, `WorldQueue`, `ReadyToConnect`,
@@ -306,8 +308,12 @@ and for leaving `LeavePending`, `LeftWorld`, `Disconnected`. Failures: `LoginFai
 
 `PlayerSpawn` carries `obj_id`, the full `CharacterState` (id, name, race, gender, level, zone id,
 instance id, rotation, equipment, `ModelParams`, abilities, money, labor, experience ...) and the player's own `Unit`
-(position, model id, equipment templates, appearance). Teleports are answered automatically
-(`CSTeleportEnded`) and reported as `Teleported`.
+(position, model id, equipment templates, appearance). A teleport is reported as `Teleported`; the session
+does **not** answer it. The native handler `FUN_391d6ed0` either calls `FUN_3930c9e0` directly or parks
+the packet (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); `FUN_391a4e00` is the
+`CSTeleportEnded` builder. No end-of-load callback is proven; the owner capture 2026-11-01 answered a 5 m GM
+move at once and cross-map jumps 2 s / 12 s later. The application sends
+`Command::TeleportEnded { pos }` and then `Command::NotifyInGameCompleted` at the end of its load.
 
 ### State tables (`state`)
 
@@ -452,8 +458,9 @@ position against the `sub_zones` rectangles (`x`, `y`, `w`, `h` in metres, `link
 `parent_sub_zone_id`). `zone_key` is only read when the character is selected; after a teleport or a
 border crossing `zone_group_id` is the current zone. The server streams the surroundings of a new
 position (units, doodads, the zone chat channel switch) only after the client sends movement from
-there: after `Event::Teleported` send a `Command::Move` or two (the real client moves all the
-time; `walkthrough --cmd "/teleport ..."` does it).
+there: after `Event::Teleported`, send `Command::TeleportEnded { pos }` when the destination is loaded
+and a `Command::Move` or two from there (the real client moves all the time; `walkthrough --cmd
+"/teleport ..."` does it). `aa-client`'s `ingame::teleport` does this for the app.
 
 **Chat: `Chat`**
 
@@ -506,6 +513,9 @@ bubbles").
 | `CSChangeTarget` (`Command::Target { obj_id }`, 0 clears) | | |
 | `SCTargetChanged` (also echoed to the sender) | `TargetChanged { obj_id, target_obj_id }` | `Target::obj_id` when `obj_id` is the player |
 | `SCUnitsRemoved` | `UnitsRemoved` | cleared when the target left the view |
+
+`Target::set_local(Option<u32>)` sets the target from a client request before the server's echo (the native
+`ChangeTargetForUI` updates its local target first; the player's own unit is not in `Units`).
 
 `Target::unit(&Units) -> Option<&Unit>` gives the unit for the target frame (`name`, `level`, `hp` /
 `max_hp`, `faction_id`, `buffs`). NPC names are empty on the wire: show the template id from
