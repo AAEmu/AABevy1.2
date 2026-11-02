@@ -1,18 +1,27 @@
 //! Teleports in game: a portal, a recall, a respawn far away, a GM move.
 //!
-//! The server moves the player with `SCTeleportUnit` (aa-net answers `CSTeleportEnded`, `player::follow_server` puts
-//! the player there, the world streams around the new focus by itself), preceded by `SCLoadInstance` for a recall, a
-//! world gate or an instance change. A short hop is just that. A long one ([`FAR`] or any `SCLoadInstance`) shows the
-//! loading screen like the original client: the HUD stage is put aside (`hud::suspend`), the original loading UI is
-//! built in its place (`login::loading::build`, `ENTERED_LOADING` / `STILL_LOADING`), the streaming budget is raised,
-//! the player's input is off, and the gauge follows the world around the destination (terrain within [`NEAR`] metres,
-//! then the object sectors, models and units). At 100 % the loading screen is captured and held over the window
-//! (`login::curtain`), `LEFT_LOADING` goes out, the HUD stage comes back underneath, and the curtain is lifted once the
-//! game screen is quiet. After an `SCLoadInstance` the server waits for `CSInstanceLoaded` (sent then) before it lets the
-//! player move again.
+//! The server moves the player with `SCTeleportUnit` and holds movement until the client answers `CSTeleportEnded`
+//! (aa-net no longer answers on receipt). `player::follow_server` puts the player there; a short hop reports the
+//! arrival at once. A long one ([`FAR`] or any `SCLoadInstance`) shows the loading screen like the original client:
+//! the HUD stage is put aside (`hud::suspend`), the original loading UI is built in its place
+//! (`login::loading::build`, `ENTERED_LOADING` / `STILL_LOADING`), the streaming budget is raised, the player's input
+//! is off, and the gauge follows the world around the destination (terrain within [`NEAR`] metres, then the object
+//! sectors, models and units). At 100 % the loading screen is captured and held over the window (`login::curtain`),
+//! `LEFT_LOADING` goes out, the HUD stage comes back underneath, and the curtain is lifted once the game screen is
+//! quiet.
+//!
+//! Only then are `CSTeleportEnded` and (after a loading screen only) the 1.2 client's `CSNotifyInGameCompleted` sent ([`acknowledge`]), together
+//! with a standing `CSMoveUnit` at the destination; that is the point where input comes back. The native
+//! `SCTeleportUnit` handler (`FUN_391d6ed0`, x2game.dll.c:365756) either calls `FUN_3930c9e0` directly or parks the
+//! packet (`FUN_3901b980`) and retries it after >= 500 ms (`FUN_3901bc30`, 27004); `FUN_3930c9e0` starts the load
+//! (`FUN_39171800(3)`, 630938-630947) and only its fallback calls `FUN_391a4e00`, the `CSTeleportEnded` builder
+//! (opcode `0xb4`, 320775; it clears the latch at 320815). No end-of-load callback is proven: the capture's delays
+//! (a 5 m GM move answered in the same second, a cross-map one after 2 s, the far one after 12 s) likely come from
+//! the deferred path and the native main thread blocking during the load. We send the answer when our load is down.
+//! After an `SCLoadInstance` the server waits for `CSInstanceLoaded` (sent at the same point, before the answer).
 
 use aa_net::state::Player;
-use aa_net::{Command, Event, NetCommand, NetEvent, PortalCommand};
+use aa_net::{Command, Event, NetCommand, NetEvent, PortalCommand, Pos};
 use aa_ui::UiRuntime;
 use aa_world::coords::cell_origin;
 use aa_world::objects::ObjectState;
@@ -20,12 +29,14 @@ use aa_world::stream::Streamer;
 use aa_world::{CELL_SIZE, TerrainQuery};
 use bevy::prelude::*;
 
-use super::player::{LocalPlayer, Mover};
+use super::player::{LocalPlayer, Mover, SendState};
 use super::world_switch;
 use crate::Screen;
 use crate::login::curtain::{self, Curtain};
 
-/// A jump longer than this (metres) shows the loading screen.
+/// A jump longer than this (metres) shows the loading screen. **Inferred** (capture-pending): neither
+/// `FUN_391d6ed0` nor `FUN_3930c9e0` checks distance, and the owner capture only shows that the far
+/// jump showed the screen; the native load is state/packet driven.
 pub const FAR: f32 = 300.0;
 /// Terrain within this many metres of the destination is built before the game goes on.
 const NEAR: f32 = 400.0;
@@ -47,8 +58,14 @@ pub struct WorldLoadFinished;
 pub struct Teleport {
     /// A long jump the server just made (destination), to put the loading screen up for.
     pending: Option<Vec3>,
+    /// The server holds movement until `CSTeleportEnded` for this landing; the position is the
+    /// `SCTeleportUnit` destination (used when the player entity is not there to read).
+    ack: Option<Pos>,
     /// `SCLoadInstance` came: `CSInstanceLoaded` is owed once the destination is loaded.
     instance_loaded_owed: bool,
+    /// A loading screen ran for this landing: the 1.2 client re-sends `CSNotifyInGameCompleted` after a load
+    /// (captured after the cross-map and far loads), not after a short hop.
+    loaded: bool,
     /// Jumps the local player was moved by: short hops and long loads alike. The HUD reads it to end a mount walk
     /// (the native 1.2 reaction is capture-pending, A1b).
     pub(crate) jumps: u64,
@@ -94,6 +111,8 @@ pub fn idle(tp: Res<Teleport>) -> bool {
 pub fn plugin(app: &mut App) {
     app.init_resource::<Teleport>()
         .add_message::<WorldLoadFinished>()
+        // the ack is owed on every screen: a teleport can arrive while the entry loading screen is up
+        .add_systems(Update, expect_ack.before(detect).before(super::player::follow_server))
         .add_systems(
             Update,
             detect
@@ -103,7 +122,7 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (drive, progress)
+            (drive, progress, acknowledge)
                 .chain()
                 .after(super::player::follow_server)
                 .after(aa_world::WorldSwitchSet)
@@ -115,6 +134,16 @@ pub fn plugin(app: &mut App) {
             }
             *tp = Teleport::default();
         });
+}
+
+/// The server moved the player with `SCTeleportUnit` and holds movement (`DisabledSetPosition`) until
+/// `CSTeleportEnded`; remember it until [`acknowledge`] can report the loaded destination.
+fn expect_ack(mut events: MessageReader<NetEvent>, mut tp: ResMut<Teleport>) {
+    for NetEvent(e) in events.read() {
+        if let Event::Teleported { pos, .. } = e {
+            tp.ack = Some(*pos);
+        }
+    }
 }
 
 /// Before `follow_server` moves the player: is this jump a long one, and does it change the world?
@@ -200,7 +229,9 @@ fn drive(world: &mut World) {
             }
             boost_streaming(&mut world.resource_mut::<aa_world::WorldConfig>());
             world.resource::<TerrainQuery>().prefetch(target.x, target.y, NEAR + 100.0);
-            world.resource_mut::<Teleport>().load = Some(Load { hud, ..new_load(target) });
+            let mut tp = world.resource_mut::<Teleport>();
+            tp.load = Some(Load { hud, ..new_load(target) });
+            tp.loaded = true;
             info!("teleport: loading screen up (HUD put aside: {hud})");
         }
     }
@@ -218,6 +249,36 @@ fn drive(world: &mut World) {
     }
     info!("teleport: arrived after {:.1} s at ({:.1}, {:.1}, {:.1})", load.t, load.target.x, load.target.y, load.target.z);
     world.write_message(WorldLoadFinished);
+}
+
+/// The destination is loaded and the loading screen is down: answer the `SCTeleportUnit` with
+/// `CSTeleportEnded` (the native builder is `FUN_391a4e00`, x2game.dll.c:320775), re-send
+/// `CSNotifyInGameCompleted` (owner capture 2026-11-01 13:44:02 after the 13:44:00 `CSTeleportEnded`)
+/// and report the new place. The decompile does not prove which native point sends the answer (only
+/// the handler's direct call and the deferred retry are visible); ending our own load is the captured
+/// order. The input gates (`idle`) open in the same frame, so `control_player` moves again.
+fn acknowledge(
+    player: Query<(&LocalPlayer, &Mover)>,
+    mut tp: ResMut<Teleport>,
+    mut out: MessageWriter<NetCommand>,
+    mut state: ResMut<SendState>,
+) {
+    if tp.ack.is_none() || tp.loading() {
+        return;
+    }
+    let Some(fallback) = tp.ack.take() else { return };
+    let mover = player.single().map(|(_, mover)| mover).ok();
+    let pos = mover.map_or(fallback, |m| Pos::new(m.pos.x, m.pos.y, m.pos.z));
+    out.write(NetCommand(Command::TeleportEnded { pos }));
+    // the AAEmu handler treats it as a world join (`OnPlayerJoin`, the NPC stream, the house push ...): only
+    // after a real load, as captured
+    if std::mem::take(&mut tp.loaded) {
+        out.write(NetCommand(Command::NotifyInGameCompleted));
+    }
+    if let Some(mover) = mover {
+        super::player::report_standing(mover, &mut out, &mut state);
+    }
+    info!("teleport: CSTeleportEnded at ({:.1}, {:.1}, {:.1}); input back", pos.x, pos.y, pos.z);
 }
 
 fn new_load(target: Vec3) -> Load {
@@ -328,9 +389,17 @@ fn progress(
 
 #[cfg(test)]
 mod tests {
+    use super::super::camera::OrbitCamera;
+    use super::super::{DevOptions, LocalJump, Motion};
     use super::*;
     use aa_net::state::Player;
     use aa_net::InstanceLoad;
+    use aa_ui::UiStats;
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    use crate::hud::chat::{chat_keys, ScriptedKeys};
+    use crate::hud::input::swallow_keys;
+    use crate::hud::{HudBuilt, HudKeyboardFocus, HudSuspended, options_hang_runtime};
 
     fn player_spawn() -> aa_net::PlayerSpawn {
         aa_net::PlayerSpawn {
@@ -398,6 +467,7 @@ mod tests {
             .init_resource::<world_switch::CurrentWorld>()
             .init_resource::<super::super::warm::Warm>()
             .init_resource::<crate::hud::HudBuilt>()
+            .init_resource::<SendState>()
             .add_plugins(plugin);
         app.world_mut().spawn((
             LocalPlayer { obj_id: 100 },
@@ -410,16 +480,138 @@ mod tests {
                 swim: None,
                 wading: 0.0,
             },
+            Motion::default(),
             Transform::default(),
         ));
         app
+    }
+
+    /// [`app`] with the real on-foot controller (it reads the terrain, so the caller skips without the pak).
+    fn input_app() -> App {
+        let mut app = app();
+        let terrain = app.world().resource::<aa_world::TerrainQuery>().clone();
+        app.insert_resource(terrain.clone())
+            .insert_resource(aa_world::WorldCollision::new("main_world", terrain.clone()))
+            .insert_resource(aa_world::WaterQuery::with_terrain("main_world", terrain))
+            .init_resource::<super::super::player::PlayerInput>()
+            .init_resource::<crate::settings::Actions>()
+            .init_resource::<DevOptions>()
+            .init_resource::<LocalJump>()
+            .insert_resource(bevy::input::ButtonInput::<bevy::input::keyboard::KeyCode>::default())
+            .insert_resource(bevy::input::ButtonInput::<bevy::input::mouse::MouseButton>::default())
+            .add_systems(Update, super::super::player::follow_server)
+            .add_systems(Update, super::super::player::control_player.run_if(idle));
+        app.world_mut().spawn(OrbitCamera::default());
+        app
+    }
+
+    /// [`input_app`] with the real World-stage HUD (chat window, edit focus) and the real
+    /// keyboard-to-UI delivery; the caller skips without the pak.
+    fn hud_app() -> Option<App> {
+        if !aa_world::pak_available() {
+            return None;
+        }
+        let rt = match options_hang_runtime(1280.0, 720.0) {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("teleport chat test: no HUD runtime: {e}");
+                return None;
+            }
+        };
+        let mut app = input_app();
+        app.add_plugins(bevy::input::InputPlugin)
+            .init_resource::<UiStats>()
+            .init_resource::<aa_ui::render::UiRenderState>()
+            .init_resource::<HudKeyboardFocus>()
+            .init_resource::<HudSuspended>()
+            .init_resource::<ScriptedKeys>()
+            .insert_non_send(rt)
+            .add_systems(
+                Update,
+                (pump_ui, swallow_keys, chat_keys)
+                    .chain()
+                    .before(super::super::player::control_player)
+                    .before(super::detect),
+            );
+        app.world_mut().resource_mut::<HudBuilt>().up = true;
+        Some(app)
+    }
+
+    /// What `aa_ui::ui_keyboard` + `mirror_keyboard_focus` do for a real frame (the app's UiInput set).
+    fn pump_ui(
+        rt: Option<NonSend<UiRuntime>>,
+        mut keys: MessageReader<KeyboardInput>,
+        mut stats: ResMut<UiStats>,
+        mut focus: ResMut<HudKeyboardFocus>,
+    ) {
+        let Some(rt) = rt else {
+            keys.clear();
+            stats.keyboard_focus = false;
+            focus.0 = false;
+            return;
+        };
+        aa_ui::lua::keyboard::begin_frame(&rt.lua);
+        for ev in keys.read() {
+            rt.key_event(ev.key_code, ev.state.is_pressed(), ev.text.as_deref());
+        }
+        stats.keyboard_focus = rt.keyboard_captured();
+        focus.0 = stats.keyboard_focus;
+    }
+
+    fn key_event(app: &mut App, code: KeyCode, text: Option<&str>, state: ButtonState) {
+        app.world_mut().write_message(KeyboardInput {
+            key_code: code,
+            logical_key: text.map_or(Key::Enter, |t| Key::Character(t.into())),
+            state,
+            text: match state {
+                ButtonState::Pressed => text.map(Into::into),
+                ButtonState::Released => None,
+            },
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+    }
+
+    fn press_text(app: &mut App, code: KeyCode, text: &str) {
+        key_event(app, code, Some(text), ButtonState::Pressed);
+        key_event(app, code, None, ButtonState::Released);
+        app.update();
+    }
+
+    fn char_key(c: char) -> KeyCode {
+        match c {
+            ' ' => KeyCode::Space,
+            '0' => KeyCode::Digit0,
+            '1' => KeyCode::Digit1,
+            '2' => KeyCode::Digit2,
+            '9' => KeyCode::Digit9,
+            'e' => KeyCode::KeyE,
+            'm' => KeyCode::KeyM,
+            'o' => KeyCode::KeyO,
+            'v' => KeyCode::KeyV,
+            'w' => KeyCode::KeyW,
+            '/' => KeyCode::Slash,
+            other => panic!("no key for {other:?}"),
+        }
+    }
+
+    fn commands(app: &mut App) -> Vec<Command> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|NetCommand(c)| c)
+            .collect()
+    }
+
+    fn acked(commands: &[Command]) -> bool {
+        commands.iter().any(|c| matches!(c, Command::TeleportEnded { .. }))
     }
 
     fn instance_load() -> InstanceLoad {
         InstanceLoad {
             raw_id: 0,
             zone_id: 0,
-            pos: aa_net::Pos::new(10.0, 20.0, 30.0),
+            pos: aa_net::Pos::new(-5000.0, -5000.0, 30.0),
             angles: [0.0; 3],
         }
     }
@@ -462,6 +654,195 @@ mod tests {
         assert_eq!(
             app.world().resource::<aa_world::WorldSwitch>().pending(),
             Some("instance_training_camp")
+        );
+    }
+
+    #[test]
+    fn a_near_teleport_is_answered_at_once() {
+        let mut app = app();
+        app.add_systems(Update, super::super::player::follow_server);
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: aa_net::Pos::new(11.0, 21.0, 30.0),
+            yaw: 0.0,
+            reason: 14,
+        }));
+        app.update();
+        assert!(!app.world().resource::<Teleport>().loading(), "a short hop does not show the loading screen");
+        assert!(app.world().resource::<Teleport>().ack.is_none(), "the short hop is answered at once");
+        let sent = commands(&mut app);
+        assert!(acked(&sent), "CSTeleportEnded was not sent: {sent:?}");
+        assert!(
+            !sent.iter().any(|c| matches!(c, Command::NotifyInGameCompleted)),
+            "a short hop is not a world join: {sent:?}"
+        );
+        assert!(
+            sent.iter().any(|c| matches!(c, Command::Move(m) if !m.moving)),
+            "the destination is reported after the answer: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_far_teleport_gives_the_hud_stage_back_and_opens_input() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let mut app = app();
+        app.insert_non_send(UiRuntime::new("en_us", 800.0, 600.0).unwrap())
+            .insert_resource(aa_ui::render::UiRenderState::default())
+            .init_resource::<crate::hud::HudSuspended>();
+        app.world_mut().resource_mut::<crate::hud::HudBuilt>().up = true;
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: aa_net::Pos::new(-5000.0, -5000.0, 30.0),
+            yaw: 0.0,
+            reason: 14,
+        }));
+        app.update();
+        assert!(app.world().get_non_send::<UiRuntime>().is_none(), "the HUD stage is put aside");
+        assert!(!app.world().resource::<crate::hud::HudBuilt>().up);
+        for _ in 0..20 {
+            app.update();
+            if !app.world().resource::<Teleport>().loading() {
+                break;
+            }
+        }
+        assert!(!app.world().resource::<Teleport>().loading());
+        assert!(app.world().get_non_send::<UiRuntime>().is_some(), "the HUD stage is back");
+        assert!(app.world().resource::<crate::hud::HudBuilt>().up);
+    }
+
+    #[test]
+    fn a_far_teleport_is_answered_only_after_the_loading_screen() {
+        let mut app = app();
+        app.add_systems(Update, super::super::player::follow_server);
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: aa_net::Pos::new(-5000.0, -5000.0, 30.0),
+            yaw: 1.0,
+            reason: 14,
+        }));
+        app.update();
+        assert!(app.world().resource::<Teleport>().loading(), "the far jump shows the loading screen");
+        assert!(app.world().resource::<Teleport>().ack.is_some(), "the server still waits for the answer");
+        let sent = commands(&mut app);
+        assert!(!acked(&sent), "CSTeleportEnded must wait for the load: {sent:?}");
+        assert!(!sent.iter().any(|c| matches!(c, Command::NotifyInGameCompleted)));
+
+        // no `Streamer` here, so the one cell around the destination never arrives: the gauge's 20 s
+        // timeout ends it, which also proves the old lock is bounded
+        for _ in 0..100 {
+            app.update();
+            if !app.world().resource::<Teleport>().loading() {
+                break;
+            }
+        }
+        assert!(!app.world().resource::<Teleport>().loading(), "the loading screen ends");
+        assert!(app.world().resource::<Teleport>().ack.is_none(), "the wait is over");
+        let sent = commands(&mut app);
+        let ack = sent
+            .iter()
+            .position(|c| matches!(c, Command::TeleportEnded { .. }))
+            .unwrap_or_else(|| panic!("CSTeleportEnded was not sent: {sent:?}"));
+        let notify = sent
+            .iter()
+            .position(|c| matches!(c, Command::NotifyInGameCompleted))
+            .unwrap_or_else(|| panic!("CSNotifyInGameCompleted was not sent: {sent:?}"));
+        assert!(ack < notify, "CSNotifyInGameCompleted follows CSTeleportEnded: {sent:?}");
+        assert!(
+            sent.iter().any(|c| matches!(c, Command::Move(m) if !m.moving)),
+            "the destination is reported after the answer: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_far_teleport_restores_movement_input_after_the_load() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let mut app = input_app();
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: aa_net::Pos::new(12_000.0, 9_000.0, 110.0),
+            yaw: 1.0,
+            reason: 14,
+        }));
+        for _ in 0..100 {
+            app.update();
+            if !app.world().resource::<Teleport>().loading() {
+                break;
+            }
+        }
+        assert!(!app.world().resource::<Teleport>().loading(), "the loading screen ends");
+        // no collision is built here: `control_player` must still end its COLLISION_WAIT and hand the
+        // keys back instead of leaving input off with the gate open
+        for _ in 0..60 {
+            app.update();
+        }
+        assert!(app.world().resource::<SendState>().settled, "the collision wait is bounded");
+        app.world_mut().resource_mut::<crate::settings::Actions>().script_hold("moveforward");
+        app.update();
+        let sent = commands(&mut app);
+        assert!(
+            sent.iter().any(|c| matches!(c, Command::Move(m) if m.moving)),
+            "movement input must produce CSMoveUnit again: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_chat_teleport_does_not_keep_the_keyboard_held_after_the_load() {
+        let Some(mut app) = hud_app() else { return };
+        // `/` opens the chat input through the real key path (`chat_keys` + the toolkit edit).
+        press_text(&mut app, KeyCode::Slash, "/");
+        app.update();
+        for c in "move 12000 9000 110".chars() {
+            press_text(&mut app, char_key(c), &c.to_string());
+        }
+        let text: String = app
+            .world()
+            .get_non_send::<UiRuntime>()
+            .expect("HUD runtime")
+            .lua
+            .load("return HUD.chat_window():GetChatEdit():GetText()")
+            .eval()
+            .expect("the chat text");
+        assert_eq!(text, "/move 12000 9000 110");
+        assert!(app.world().resource::<HudKeyboardFocus>().0, "the chat input owns the keyboard");
+
+        // Enter goes down; its key-up arrives while the loading stage owns the keyboard.
+        key_event(&mut app, KeyCode::Enter, None, ButtonState::Pressed);
+        app.update();
+        app.world_mut().write_message(NetEvent(Event::Teleported {
+            pos: Pos::new(12_000.0, 9_000.0, 110.0),
+            yaw: 0.0,
+            reason: 14,
+        }));
+        app.update();
+        assert!(!app.world().resource::<HudBuilt>().up, "the loading screen put the HUD aside");
+        key_event(&mut app, KeyCode::Enter, None, ButtonState::Released);
+        app.update();
+        for _ in 0..100 {
+            app.update();
+            if !app.world().resource::<Teleport>().loading() {
+                break;
+            }
+        }
+        app.update();
+        assert!(app.world().resource::<HudBuilt>().up, "the HUD stage is back");
+        assert!(
+            !app.world().resource::<HudKeyboardFocus>().0,
+            "the held Enter must be released with the suspended stage, not after the load"
+        );
+
+        // W produces a movement packet again.
+        app.world_mut().resource_mut::<SendState>().settle_now();
+        app.world_mut().resource_mut::<crate::settings::Actions>().script_hold("moveforward");
+        key_event(&mut app, KeyCode::KeyW, Some("w"), ButtonState::Pressed);
+        app.update();
+        assert!(
+            app.world().resource::<ButtonInput<KeyCode>>().pressed(KeyCode::KeyW),
+            "the W key must reach the game after the load (swallow_keys must not reset it)"
+        );
+        let sent = commands(&mut app);
+        assert!(
+            sent.iter().any(|c| matches!(c, Command::Move(m) if m.moving)),
+            "movement input must produce CSMoveUnit after a chat teleport: {sent:?}"
         );
     }
 

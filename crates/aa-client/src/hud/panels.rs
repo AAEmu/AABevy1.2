@@ -13,7 +13,7 @@ use web_time::Instant;
 use aa_net::buff::BuffKind;
 use aa_net::items::ActionKind;
 use aa_net::model::UnitKind;
-use aa_net::state::{ActionBar, Buffs, Inventory, Skills, Target, Units};
+use aa_net::state::{ActionBar, Buffs, Inventory, Player, Skills, Target, Units};
 use bevy::prelude::*;
 use mlua::{Lua, Table};
 
@@ -370,9 +370,26 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
     }
     let mut target_pos = None;
     let mut target_radius = 0.0;
-    if let (Some(target), Some(units)) = (world.get_resource::<Target>(), world.get_resource::<Units>())
-        && let Some(u) = target.unit(units)
-    {
+    let target_obj_id = world.get_resource::<Target>().and_then(|t| t.obj_id);
+    // the local player is not in `Units` (aa-net keeps it in `Player`): targeting self resolves its
+    // own unit here, with the HUD's current points.
+    let own_target = (target_obj_id == Some(own_obj_id))
+        .then(|| {
+            let spawn = world.get_resource::<Player>()?.spawn.as_ref()?;
+            let mut unit = spawn.unit.clone();
+            unit.hp = me.hp;
+            unit.max_hp = me.max_hp;
+            unit.mp = me.mp;
+            unit.max_mp = me.max_mp;
+            unit.level = me.level;
+            unit.dead = me.dead;
+            Some(unit)
+        })
+        .flatten();
+    let picked = world
+        .get_resource::<Units>()
+        .and_then(|units| world.get_resource::<Target>()?.unit(units));
+    if let Some(u) = picked.or(own_target.as_ref()) {
         let npc = super::plates::npc_of(game, u);
         let faction = if u.faction_id != 0 { u.faction_id } else { npc.map_or(0, |n| n.faction_id as u32) };
         let (race, gender) = unit_race_gender(u.race_gender);
@@ -411,15 +428,22 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             abilities: u.active_abilities.iter().copied().filter(|a| (1..aa_net::model::NO_ABILITY).contains(a)).collect(),
             buffs: world.get_resource::<Buffs>().map(|b| unit_buff_lists(game, b, u.obj_id, start)).unwrap_or_default(),
         });
-        target_pos = world
-            .get_resource::<crate::ingame::units::Views>()
-            .and_then(|views| {
-                let drawn = views
-                    .unit_entity(u.obj_id)
-                    .and_then(|e| crate::ingame::units::current_pose_world(world, e));
-                drawn.or_else(|| crate::ingame::units::unit_world_pose_in(u, units))
-            })
-            .map(|(pos, _)| pos);
+        target_pos = if Some(u.obj_id) == Some(own_obj_id) {
+            Some(pos)
+        } else {
+            world
+                .get_resource::<crate::ingame::units::Views>()
+                .and_then(|views| {
+                    let drawn = views
+                        .unit_entity(u.obj_id)
+                        .and_then(|e| crate::ingame::units::current_pose_world(world, e));
+                    drawn.or_else(|| {
+                        let units = world.get_resource::<Units>()?;
+                        crate::ingame::units::unit_world_pose_in(u, units)
+                    })
+                })
+                .map(|(pos, _)| pos)
+        };
         target_radius = game.map_or(0.0, |g| g.model_size(u.model_id, u.scale));
     }
     // the dark slots: what the original's `CanUseSkill` says about each (mana, range, target, state ...)
@@ -608,7 +632,12 @@ pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inve
             if env.held_back(skill, flight) {
                 return;
             }
-            if let Some(f) = env.precheck(skill) {
+            // a basic attack checks its target and then range-checks (`FUN_39397f90`): an out-of-range press is sent unless the
+            // `DAT_39d1fba4` setting returns 1, which then takes the click-attack path (`FUN_39393920`) without a send; the K2
+            // client sent `CSStartSkill 2` at 11.2 m, so its setting was not 1 (the default is not provable). The client's own
+            // refusal shows the same alert as any skill.
+            let refusal = if env.is_auto_attack(skill) { env.precheck_auto_attack(skill) } else { env.precheck(skill) };
+            if let Some(f) = refusal {
                 failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
                 return;
             }

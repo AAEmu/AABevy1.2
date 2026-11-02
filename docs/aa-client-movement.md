@@ -123,9 +123,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   as the equipped item 14677 (item id 16777259). **S14-C1 settled for flight; S14-C3 settled; S14-C2 key flags partly open.**
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
   item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
-  attachment (`FUN_394e4e80`) and the graph's
+  attachment (`FUN_394e4e80`; the bone is a child of `Bip01 Spine2`, `item_assets` offsets 0) and the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
-  `start/loop/front/back/left/right/sliding/endloop`. **S14-C5 settled.**
+  `start/loop/front/back/left/right/sliding/endloop`. The model is spawned in the bone's CryEngine frame
+  (`creature::spawn_cry_space`, no second `CRY_TO_BEVY`): with the world conversion added again the wing stood on
+  edge (owner report 2026-11-01). **S14-C5 settled.**
 * Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,
   default 0) makes a second jump in the air ask for the equipped item's skill. **S14-C4 settled:** `FUN_39404d50` line
   843762 calls `FUN_39399690` on the jump edge only when the actor jump-state byte (`+0x161`) is set and the
@@ -173,7 +175,8 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
 3. **S14-C3**: settled: `CSRemoveBuff` index + reason 9, then ground stance 1 / flags 6 / actor 0x14, later packets flags 4 /
    actor 0x04; water stance 2 / flags 0 / actor 0 then the remove. The old "fold stop" (stance 2) was that water entry.
 4. **S14-C4**: settled: jump edge + actor jump-state byte + `glider_start_with_double_jump`; no height/freefall gate.
-5. **S14-C5**: settled: `item_glider` identity attachment for the opened model; `item_back_c` for the stowed one.
+5. **S14-C5**: settled: `item_glider` identity attachment for the opened model (spawned in the bone's CryEngine frame);
+   `item_back_c` for the stowed one.
 6. **S14-C6**: read the live unit's attributes 7/8/9 (base + the buff's modifiers) and compare them with buff row 1029's
    `gliding_move_speed_*`.
 7. **S14-C7**: glide up under a bridge or a ship's deck: does the rise stop before the head passes through, and where?

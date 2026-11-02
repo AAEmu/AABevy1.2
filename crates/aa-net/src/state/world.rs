@@ -190,6 +190,17 @@ impl Target {
         units.get(self.obj_id?)
     }
 
+    /// Sets the target from the client's own request (the native `ChangeTargetForUI` updates its
+    /// local target before it sends): the server's `SCTargetChanged` confirms it. Returns whether
+    /// the target changed.
+    pub fn set_local(&mut self, obj_id: Option<u32>) -> bool {
+        if self.obj_id == obj_id {
+            return false;
+        }
+        self.obj_id = obj_id;
+        true
+    }
+
     pub fn apply(&mut self, e: &Event) -> bool {
         match e {
             Event::PlayerSpawn(s) => self.own_obj_id = s.obj_id,
@@ -308,6 +319,19 @@ mod tests {
         assert_eq!(t.obj_id, None);
         assert!(t.apply(&Event::TargetChanged { obj_id: 1, target_obj_id: 9 }));
         assert!(t.apply(&Event::TargetChanged { obj_id: 1, target_obj_id: 0 }));
+        assert_eq!(t.obj_id, None);
+    }
+
+    #[test]
+    fn a_local_target_request_applies_before_the_server_echo() {
+        let mut t = Target::default();
+        assert!(t.set_local(Some(5)));
+        assert_eq!(t.obj_id, Some(5));
+        assert!(!t.set_local(Some(5)));
+        // the server's echo of the same target changes nothing
+        t.own_obj_id = 1;
+        assert!(!t.apply(&Event::TargetChanged { obj_id: 1, target_obj_id: 5 }));
+        assert!(t.set_local(None));
         assert_eq!(t.obj_id, None);
     }
 }

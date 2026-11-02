@@ -1108,13 +1108,15 @@ pub fn follow_server(
     mut state: ResMut<SendState>,
 ) {
     for NetEvent(event) in events.read() {
-        let (pos, yaw, own) = match event {
+        // a teleport's `CSTeleportEnded` is sent by `ingame::teleport` once the destination is loaded;
+        // only a world load or a resurrection is reported here at once
+        let (pos, yaw, own, report_now) = match event {
             // `SCTeleportUnit` carries the facing at the destination (`z2`, radians)
-            Event::Teleported { pos, yaw, .. } => (pos, Some(*yaw), None),
+            Event::Teleported { pos, yaw, .. } => (pos, Some(*yaw), None, false),
             // `SCLoadInstance` names the destination before the server lets the player move: put the
             // player (and with it the world's streaming focus) there while the loading screen is up.
-            Event::LoadInstance(load) => (&load.pos, Some(load.angles[2]), None),
-            Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id)),
+            Event::LoadInstance(load) => (&load.pos, Some(load.angles[2]), None, true),
+            Event::Resurrected { obj_id, pos, yaw } => (pos, Some(*yaw), Some(*obj_id), true),
             _ => continue,
         };
         let Ok((entity, local, mut mover, mut transform)) = player.single_mut() else { continue };
@@ -1141,24 +1143,31 @@ pub fn follow_server(
         if let Ok(mut orbit) = cameras.single_mut() {
             orbit.yaw = mover.facing;
         }
-        // aa-net already answered with `CSTeleportEnded`; a standing movement packet at the new position makes the server's
-        // idea of where we stand (and its view of us for the other players) agree with ours
-        out.write(NetCommand(Command::Move(
-            MoveCommand {
-                pos: Pos::new(mover.pos.x, mover.pos.y, mover.pos.z),
-                yaw: mover.facing,
-                moving: false,
-                stance: stance::RELAXED,
-                velocity: [0; 3],
-                delta_movement: [0; 3],
-                ..MoveCommand::default()
-            }
-            .with_state(if mover.grounded { MoveState::Ground } else { MoveState::Fall }),
-        )));
         mover.velocity = Vec3::ZERO;
-        state.since_sent = 0.0;
-        state.was_active = false;
+        if report_now {
+            report_standing(&mover, &mut out, &mut state);
+        }
     }
+}
+
+/// A standing `CSMoveUnit` at the player's place: the server's idea of where we stand (and its view of
+/// us for the other players) agrees with ours. A world load and a resurrection report at once; a
+/// teleport reports from [`super::teleport`] after its `CSTeleportEnded`.
+pub(super) fn report_standing(mover: &Mover, out: &mut MessageWriter<NetCommand>, state: &mut SendState) {
+    out.write(NetCommand(Command::Move(
+        MoveCommand {
+            pos: Pos::new(mover.pos.x, mover.pos.y, mover.pos.z),
+            yaw: mover.facing,
+            moving: false,
+            stance: stance::RELAXED,
+            velocity: [0; 3],
+            delta_movement: [0; 3],
+            ..MoveCommand::default()
+        }
+        .with_state(if mover.grounded { MoveState::Ground } else { MoveState::Fall }),
+    )));
+    state.since_sent = 0.0;
+    state.was_active = false;
 }
 
 #[cfg(test)]

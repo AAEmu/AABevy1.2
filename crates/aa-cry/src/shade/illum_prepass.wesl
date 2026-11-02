@@ -57,7 +57,7 @@ fn fragment(
 @if(!MESHLET_MESH_MATERIAL_PASS && VISIBILITY_RANGE_DITHER)
     pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
 
-@if(!MESHLET_MESH_MATERIAL_PASS)
+@if(!MESHLET_MESH_MATERIAL_PASS && ILLUM_CLIP)
     clip_discard(in);
     sample_alpha_and_discard(in);
 
@@ -159,6 +159,7 @@ fn fragment(
 @else
 @fragment
 fn fragment(in: prepass_io::VertexOutput) {
+@if(ILLUM_CLIP)
     clip_discard(in);
     sample_alpha_and_discard(in);
 }

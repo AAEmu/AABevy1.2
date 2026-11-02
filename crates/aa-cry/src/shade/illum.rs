@@ -799,7 +799,8 @@ mod tests {
     /// inside `@if(BINDLESS)` too, or a non-bindless build sees it unconditional and the `@else` redeclares `clip`.
     #[test]
     fn the_prepass_clip_discard_preprocesses_with_bindless_on_and_off() {
-        let source = include_str!("illum_prepass.wesl");
+        // a CRLF checkout (`core.autocrlf`) must find the same function end
+        let source = include_str!("illum_prepass.wesl").replace("\r\n", "\n");
         let start = source.find("fn clip_discard").expect("the clip_discard function");
         let tail = &source[start..];
         let end = tail.find("
