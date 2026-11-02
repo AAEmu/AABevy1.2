@@ -17,10 +17,11 @@
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
 //!
-//! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) plays its
-//! `slaves.portal_spawn_fx_id` portal at the unit root, scaled by `portal_scale`, for `portal_time`
-//! ([`track_summon_portals`] / [`spawn_summon_portals`], `FUN_39349600`). A vehicle that merely streams into view
-//! later has no creation packet, so it plays none.
+//! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) emerges from its
+//! `slaves.portal_spawn_fx_id` portal: the unit starts two bounding extents behind its position, behind the portal
+//! plane, and moves out over `portal_time` while the portal hangs at the plane (`FUN_3909ea30` / `FUN_39097220`,
+//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). A vehicle that merely
+//! streams into view later has no creation packet, so it plays none.
 //!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
@@ -116,33 +117,66 @@ pub struct VehiclePart;
 #[derive(Component)]
 pub struct VehicleEffect;
 
-/// The slave object ids whose summon portal is still to play. `OnSlaveCreated` (`SCSlaveCreatedPacket`) pushes the
-/// slave's id into `SlaveManager`'s pending list unless `hideSpawnEffect` is set (`FUN_3934a6c0` ->
-/// `FUN_3934a530`); `FUN_39349600` plays the portal as soon as the unit exists. A vehicle that only streams into
-/// view later was never announced as created near this client, so it has no entry and plays none.
-#[derive(Resource, Default)]
-pub struct SummonPortals(Vec<u32>);
+/// The unit-space bounding extent of the vehicle's body at spawn (`[bounds+0x28]` of the 1.2 model). The summon
+/// emergence puts the portal plane one extent behind the unit and its start two extents behind.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct VehicleExtent(pub f32);
 
-/// Most slave ids kept waiting for their unit root: 1.2 keeps its pending list until the unit can be found, but a
-/// unit that is never drawn (created out of range) must not grow this list for the whole session.
+/// The timeline ids (packet `+0xc`, unit `+0x41c`) whose summon portal is still to play. `OnSlaveCreated`
+/// (`SCSlaveCreatedPacket`) pushes the slave's timeline id into `SlaveManager`'s pending list unless
+/// `hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`); `FUN_39349600` resolves that id to the unit
+/// (`FUN_3935e3f0`). A vehicle that only streams into view later has no entry, so it plays none.
+#[derive(Resource, Default)]
+pub struct SummonPortals(Vec<u16>);
+
+/// Most timeline ids kept waiting for their unit root: 1.2 keeps its pending list until the unit can be found, but
+/// a unit that is never drawn (created out of range) must not grow this list for the whole session.
 pub const SUMMON_PORTALS_MAX: usize = 64;
 
 impl SummonPortals {
-    fn announce(&mut self, obj_id: u32) {
-        if self.0.contains(&obj_id) {
+    fn announce(&mut self, tl_id: u16) {
+        if self.0.contains(&tl_id) {
             return;
         }
         if self.0.len() >= SUMMON_PORTALS_MAX {
             self.0.remove(0);
         }
-        self.0.push(obj_id);
+        self.0.push(tl_id);
     }
 }
 
-/// A summon portal effect of a newly created slave (`slaves.portal_spawn_fx_id`), removed when `portal_time` is over.
+/// The 1.2 summon emergence (`FUN_3909ea30` / `FUN_39097220`): the unit starts at `start = end - axis * 2 * extent`,
+/// behind the portal plane at `end - axis * extent`, and moves to `end` over `slaves.portal_time`.
+/// `FUN_39097390` restores `end` and sends the portal effect's end event 5.
+#[derive(Component, Clone, Copy, Debug)]
+#[allow(dead_code)] // `plane`, `axis` and `extent` are read by `examples/slave_summon` and the tests
+pub struct SummonEmergence {
+    pub start: Vec3,
+    pub end: Vec3,
+    /// The clip-plane point and portal anchor: `end - axis * extent` (`FUN_3909ea30` state +0x74).
+    pub plane: Vec3,
+    /// The unit's forward axis projected to the horizontal plane.
+    pub axis: Vec3,
+    /// The model's bounding extent (`[bounds+0x28]`); the start is two of these behind the unit.
+    pub extent: f32,
+    pub started: f64,
+    pub duration: f32,
+    pub ended: bool,
+}
+
+/// A summon portal effect: it stops emitting at `until` and its live particles fade (the 1.2 end event 5).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct SummonPortalEffect {
-    /// The `Time::elapsed_secs_f64` at which the portal ends.
+    /// The `Time::elapsed_secs_f64` at which emission stops.
+    pub until: f64,
+}
+
+/// The world anchor of a summon portal group at the clip-plane point (`FUN_3909ea30`): it does not move with the
+/// emerging unit. It is despawned with its unit, or after its effects have faded.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SummonPortalAnchor {
+    pub root: Entity,
+    /// `Time::elapsed_secs_f64` when `portal_time` ends; the anchor then goes once its effects are gone.
     pub until: f64,
 }
 
@@ -155,15 +189,18 @@ pub fn track_summon_portals(events: Option<MessageReader<NetEvent>>, mut portals
         if let Event::Slave(SlaveEvent::Created(created)) = event
             && !created.hide_spawn_effect
         {
-            portals.announce(created.obj_id);
+            portals.announce(created.tl_id);
         }
     }
 }
 
-/// Plays the summon portal of every waiting slave whose unit is drawn: the `fx_groups` items of
-/// `slaves.portal_spawn_fx_id` at the unit's root, scaled by `portal_scale`, for `portal_time` seconds. The original
-/// `FUN_39349600` (x2game.dll.c:680653) waits for the object of the pending id (`FUN_3935e3f0`), reads the slave
-/// row's `+0x58` (spawn fx group), `+0x54` (scale) and `+0x5c` (time), and calls the world's effect slot with them.
+/// Starts the summon emergence and portal of every waiting slave whose unit is drawn. The original `FUN_39349600`
+/// (x2game.dll.c:680653) finds the unit by timeline id (`FUN_3935e3f0`), reads the slave row's `+0x58` (spawn fx
+/// group), `+0x54` (scale) and `+0x5c` (time), and calls the world slot `0x2a8` = `FUN_390cf130`
+/// (x2game.dll.c:167908). That only starts an emergence when the time is above `DAT_3999c484` (0.0), through
+/// `FUN_390ca1e0` -> `FUN_3909ea30` (x2game.dll.c:136679): it anchors the fx at `pos - forward * extent`, scale
+/// `unit_scale * portal_scale`, puts the unit at `pos - forward * 2 * extent` and clips it at the plane while
+/// `FUN_39097220` (x2game.dll.c:132165) moves it to `pos` over `portal_time`.
 pub fn spawn_summon_portals(
     mut commands: Commands,
     db: Option<Res<Db>>,
@@ -171,7 +208,7 @@ pub fn spawn_summon_portals(
     units: Option<Res<Units>>,
     mut portals: ResMut<SummonPortals>,
     time: Res<Time>,
-    roots: Query<(Entity, &RemoteUnit)>,
+    roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform, Option<&VehicleExtent>)>,
 ) {
     let (Some(db), Some(book), Some(units)) = (db, book, units) else {
         return;
@@ -180,20 +217,52 @@ pub fn spawn_summon_portals(
         return;
     }
     let now = time.elapsed_secs_f64();
-    portals.0.retain(|obj_id| {
-        let Some(root) = roots
-            .iter()
-            .find(|(_, remote)| remote.obj_id == *obj_id)
-            .map(|(entity, _)| entity)
-        else {
+    portals.0.retain(|tl_id| {
+        // 1.2 resolves the pending id against the unit's timeline id (+0x41c), not its object id
+        let Some(unit) = units.by_id.values().find(
+            |unit| matches!(unit.kind, aa_net::model::UnitKind::Slave { tl_id: id, .. } if id == *tl_id),
+        ) else {
             return true;
         };
-        let Some(unit) = units.by_id.get(obj_id) else {
+        let Some((root, damage, transform, extent)) = roots
+            .iter()
+            .find(|(_, remote, ..)| remote.obj_id == unit.obj_id)
+            .map(|(entity, _, damage, transform, extent)| (entity, damage, *transform, extent))
+        else {
             return true;
         };
         let Some(portal) = db.slave_summon_portal(unit.kind.template_id()) else {
             return false;
         };
+        // `FUN_390cf130` only starts the emergence when `portal_time > DAT_3999c484` (0.0): slaves 54, 94 and 115
+        // (time 0) get no portal.
+        if portal.time <= 0.0 {
+            return false;
+        }
+        let extent = extent.map_or(1.0, |extent| extent.0);
+        let mut axis = transform.rotation * Vec3::NEG_Z;
+        axis.y = 0.0;
+        let axis = axis.normalize_or_zero();
+        let axis = if axis == Vec3::ZERO { Vec3::NEG_Z } else { axis };
+        let end = transform.translation;
+        let plane = end - axis * extent;
+        let start = end - axis * (2.0 * extent);
+        // the portal hangs at the clip-plane point, oriented by the unit, scaled by unit_scale x portal_scale
+        let anchor = commands
+            .spawn((
+                Transform {
+                    translation: plane,
+                    rotation: transform.rotation,
+                    ..default()
+                },
+                Visibility::default(),
+                SummonPortalAnchor {
+                    root,
+                    until: now + f64::from(portal.time),
+                },
+            ))
+            .id();
+        let unit_scale = transform.scale.y.max(0.0);
         for item in book.fx_group(portal.fx_group).iter() {
             // the group's FxSound item has no effect name; 1.2 plays it with the portal, this slice draws the particles
             if item.effect.is_empty() {
@@ -201,35 +270,126 @@ pub fn spawn_summon_portals(
             }
             commands.spawn((
                 aa_fx::Effect {
-                    scale: portal.scale * item.scale,
+                    scale: portal.scale * item.scale * unit_scale,
                     prime: false,
                     item: true,
                     no_body: true,
+                    despawn_when_finished: true,
                     ..aa_fx::Effect::new(item.effect.clone())
                 },
                 Transform {
                     translation: cry_to_bevy(item.offset),
                     ..default()
                 },
-                ChildOf(root),
+                ChildOf(anchor),
                 SummonPortalEffect {
                     until: now + f64::from(portal.time),
                 },
             ));
         }
+        // the prefab's own inactive `portal_exhaust` follows the moving unit (FUN_39097140 / FUN_39097220)
+        spawn_portal_exhaust(&mut commands, root, &damage.variant, now + f64::from(portal.time));
+        commands.entity(root).insert(SummonEmergence {
+            start,
+            end,
+            plane,
+            axis,
+            extent,
+            started: now,
+            duration: portal.time,
+            ended: false,
+        });
         false
     });
 }
 
-/// Ends the summon portals that have outlived `slaves.portal_time`.
-pub fn despawn_summon_portals(
+/// Plays the prefab's authored `portal_exhaust` particle (inactive in the prefab) on the unit during the emergence,
+/// as `FUN_39097140` does at the start and `FUN_39097220` keeps alive each frame; `FUN_39097390` stops it.
+fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, until: f64) -> Vec<Entity> {
+    let mut spawned = Vec::new();
+    for named in super::data::prefab_effects_named(variant) {
+        if !named.name.eq_ignore_ascii_case("portal_exhaust") {
+            continue;
+        }
+        let effect = named.effect;
+        let entity = commands
+            .spawn((
+                aa_fx::Effect {
+                    scale: effect.scale,
+                    prime: false,
+                    item: true,
+                    despawn_when_finished: true,
+                    ..aa_fx::Effect::new(effect.effect.clone())
+                },
+                Transform {
+                    translation: cry_to_bevy(effect.pos),
+                    rotation: cry_rot_to_bevy(effect.rot),
+                    ..default()
+                },
+                ChildOf(root),
+                SummonPortalEffect { until },
+            ))
+            .id();
+        spawned.push(entity);
+    }
+    spawned
+}
+
+/// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`). A true model clip
+/// plane (1.2's model vfunc 0xf8) is not available on the Bevy `StandardMaterial` path, so the hull may show behind
+/// the portal during the emergence; the portal effect covers most of that seam.
+pub fn animate_summon_emergence(time: Res<Time>, mut roots: Query<(&mut Transform, &mut SummonEmergence)>) {
+    let now = time.elapsed_secs_f64();
+    for (mut transform, mut emergence) in &mut roots {
+        if emergence.ended {
+            continue;
+        }
+        let progress = if emergence.duration > 0.0 {
+            ((now - emergence.started) as f32 / emergence.duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        transform.translation = emergence.start.lerp(emergence.end, progress);
+        if progress >= 1.0 {
+            transform.translation = emergence.end;
+            emergence.ended = true;
+        }
+    }
+}
+
+/// The end of the emergence (`FUN_39097390`): send the portal effect end event 5 (`FUN_393ed520(fx, 5, ...)`) by
+/// stopping emission and letting the live particles fade, instead of killing the effect.
+pub fn end_summon_portals(
     time: Res<Time>,
     mut commands: Commands,
-    portals: Query<(Entity, &SummonPortalEffect)>,
+    mut effects: Query<(Entity, &SummonPortalEffect, &mut aa_fx::FxRun)>,
 ) {
     let now = time.elapsed_secs_f64();
-    for (entity, portal) in &portals {
-        if now >= portal.until {
+    for (entity, effect, mut run) in &mut effects {
+        if now >= effect.until {
+            run.stop_emitting();
+            commands.entity(entity).remove::<SummonPortalEffect>();
+        }
+    }
+}
+
+/// Drops a portal anchor with its unit, or once its effects have faded. A safety window bounds a failed read of the
+/// prefab's effects.
+pub fn cleanup_summon_portals(
+    time: Res<Time>,
+    mut commands: Commands,
+    anchors: Query<(Entity, &SummonPortalAnchor)>,
+    children: Query<&Children>,
+    roots: Query<()>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, anchor) in &anchors {
+        let root_gone = roots.get(anchor.root).is_err();
+        let empty = match children.get(entity) {
+            Ok(children) => children.is_empty(),
+            Err(_) => true,
+        };
+        if root_gone || (now >= anchor.until && (empty || now >= anchor.until + 10.0)) {
             commands.entity(entity).try_despawn();
         }
     }
@@ -503,21 +663,31 @@ pub fn bounds(look: &VehicleLook) -> Option<(Vec3, Vec3)> {
             );
             continue;
         };
-        let placement = affine(&part);
-        for i in 0..8 {
-            let corner = Vec3::new(
-                if i & 1 == 0 { lo.x } else { hi.x },
-                if i & 2 == 0 { lo.y } else { hi.y },
-                if i & 4 == 0 { lo.z } else { hi.z },
-            );
-            let p = placement.transform_point3(corner);
-            out = Some(match out {
-                None => (p, p),
-                Some((a, b)) => (a.min(p), b.max(p)),
-            });
-        }
+        let (a, b) = placed_bounds(affine(&part), lo, hi);
+        out = Some(match out {
+            None => (a, b),
+            Some((lo, hi)) => (lo.min(a), hi.max(b)),
+        });
     }
     out
+}
+
+/// The bounds of a model's eight corners after placing it in unit space.
+fn placed_bounds(placement: Affine3A, lo: Vec3, hi: Vec3) -> (Vec3, Vec3) {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for i in 0..8 {
+        let corner = Vec3::new(
+            if i & 1 == 0 { lo.x } else { hi.x },
+            if i & 2 == 0 { lo.y } else { hi.y },
+            if i & 4 == 0 { lo.z } else { hi.z },
+        );
+        let p = placement.transform_point3(corner);
+        out = Some(match out {
+            None => (p, p),
+            Some((a, b)) => (a.min(p), b.max(p)),
+        });
+    }
+    out.unwrap_or((lo, hi))
 }
 
 /// A prepared part: a static model, or a rigged `.chr` (its models, spawned through [`super::creature::spawn`]).
@@ -529,6 +699,8 @@ pub struct Piece {
     wheel: Option<f32>,
     spindle: Option<SpindleArms>,
     helpers: HashMap<String, Affine3A>,
+    /// Unit-space model bounds (cry axes) of this piece, for the summon emergence extent.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 enum PieceModel {
@@ -575,7 +747,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                 let rigged = part.model.ends_with(".cdf")
                     || (part.model.ends_with(".chr")
                         && aa_anim::pose::shared_rig(&part.model).is_ok_and(|r| !r.is_empty()));
-                let (model, radius, helpers) = if rigged {
+                let (model, radius, helpers, bounds) = if rigged {
                     let models: Vec<PreparedModel> =
                         super::creature::model_files(&part.model, None)
                             .into_iter()
@@ -585,13 +757,18 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                             .collect();
                     // a `.chr` part is its own main model: read the helpers off the prepared model, not a second load
                     let helpers = part_helpers(&part, &models.first()?.loaded().model);
-                    (PieceModel::Rigged(models), None, helpers)
+                    let bounds = models
+                        .iter()
+                        .find_map(|m| m.loaded().model.bounds())
+                        .map(|(lo, hi)| placed_bounds(affine(&part), lo, hi));
+                    (PieceModel::Rigged(models), None, helpers, bounds)
                 } else {
                     match loader.prepare_model(&part.model, &static_options(&part)) {
                         Ok(m) => {
                             let radius = wheel.and_then(|_| wheel_radius(&m.loaded().model));
                             let helpers = part_helpers(&part, &m.loaded().model);
-                            (PieceModel::Static(m), radius, helpers)
+                            let bounds = m.loaded().model.bounds().map(|(lo, hi)| placed_bounds(affine(&part), lo, hi));
+                            (PieceModel::Static(m), radius, helpers, bounds)
                         }
                         Err(e) => {
                             debug!("vehicle part {}: {e}", part.model);
@@ -605,6 +782,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                     wheel: radius,
                     spindle,
                     helpers,
+                    bounds,
                 })
             },
         )
@@ -751,7 +929,10 @@ impl Plugin for VehiclePlugin {
                     track_summon_portals,
                     // the portal waits for the frame `units::sync_views` draws the slave's root
                     spawn_summon_portals.after(super::units::sync_views),
-                    despawn_summon_portals,
+                    // the emergence drives the root after the server position, like the 1.2 unit state does
+                    animate_summon_emergence.after(super::units::move_units),
+                    end_summon_portals,
+                    cleanup_summon_portals,
                 )
                     .chain(),
             )
@@ -842,15 +1023,38 @@ pub fn spawn(
     pieces: Vec<Piece>,
     transform: Transform,
 ) -> Entity {
+    let extent = piece_extent(&pieces);
     let root = commands
         .spawn((
             transform,
             Visibility::default(),
             VehicleMotion::at(&transform),
+            VehicleExtent(extent),
         ))
         .id();
     add_parts(commands, cry, clips, pieces, root);
     root
+}
+
+/// The unit-space bounding extent of a vehicle's prepared parts: `FUN_3909ea30` reads the model's `[bounds+0x28]`
+/// and the summon emergence puts the clip plane there, with the start another extent behind it. This uses the
+/// largest horizontal half extent of the combined bounds (cry x / y).
+fn piece_extent(pieces: &[Piece]) -> f32 {
+    let mut lo = Vec3::splat(f32::MAX);
+    let mut hi = Vec3::splat(f32::MIN);
+    let mut any = false;
+    for piece in pieces {
+        if let Some((a, b)) = piece.bounds {
+            lo = lo.min(a);
+            hi = hi.max(b);
+            any = true;
+        }
+    }
+    if !any {
+        return 1.0;
+    }
+    let size = hi - lo;
+    (size.x.max(size.y) * 0.5).clamp(0.25, 50.0)
 }
 
 /// Spawns the prepared parts as children of `root` and installs the seat helpers and spindle they define.
@@ -864,6 +1068,7 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
         wheel,
         spindle,
         helpers: piece_helpers,
+        bounds: _,
     } in pieces
     {
         // the body parts come first: a same-named helper on a wheel part never takes the driver's seat
@@ -1439,18 +1644,18 @@ mod tests {
         Some((app, root))
     }
 
-    /// A Red Farm Hauler (slave template 146, model 1553) drawn at the origin and announced in `Units`, with the
-    /// summon portal systems ticking. The tests send the `SCSlaveCreatedPacket` themselves.
-    fn hauler() -> Option<(App, Db, Entity)> {
+    /// A vehicle root (model `model`) for slave template `template`, announced in `Units` at the origin with the
+    /// summon portal/emergence systems ticking. The tests send the `SCSlaveCreatedPacket` themselves.
+    fn vehicle_app(template: u32, model: u32) -> Option<(App, Db, Entity)> {
         use bevy::time::TimeUpdateStrategy;
         if !aa_cry::pak_available() {
             return None;
         }
         let db = Db::open()?;
         let book = super::super::combat::skills::SkillBook::open()?;
-        let look = db.vehicle_look(1553).expect("the Red Farm Hauler's look");
-        let max_hp = db.slave_max_hp(146, 50).expect("the Red Farm Hauler's MaxHealth");
-        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let look = db.vehicle_look(model).expect("the vehicle's look");
+        let max_hp = db.slave_max_hp(template, 50).expect("the slave's MaxHealth");
+        let unit = slave_unit_kind(7, template, template, model, max_hp, max_hp);
         let mut units = Units::default();
         units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
         let mut app = App::new();
@@ -1472,7 +1677,14 @@ mod tests {
         .add_message::<NetEvent>();
         app.add_systems(
             Update,
-            (track_summon_portals, spawn_summon_portals, despawn_summon_portals).chain(),
+            (
+                track_summon_portals,
+                spawn_summon_portals,
+                animate_summon_emergence,
+                end_summon_portals,
+                cleanup_summon_portals,
+            )
+                .chain(),
         );
         let mut state = SystemState::<(Commands, CryAssets, Res<ClipLibrary>)>::new(app.world_mut());
         let pieces = {
@@ -1501,6 +1713,11 @@ mod tests {
         Some((app, db, root))
     }
 
+    /// The owner test's Red Farm Hauler (slave template 146, model 1553).
+    fn hauler() -> Option<(App, Db, Entity)> {
+        vehicle_app(146, 1553)
+    }
+
     fn portal_effects(app: &mut App) -> Vec<(String, bool, f32)> {
         app.world_mut()
             .query::<(&aa_fx::Effect, &SummonPortalEffect)>()
@@ -1509,11 +1726,23 @@ mod tests {
             .collect()
     }
 
+    fn created(tl_id: u16, hide: bool) -> NetEvent {
+        NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
+            owner_obj_id: 1,
+            tl_id,
+            obj_id: 7,
+            hide_spawn_effect: hide,
+            raw_id: 0,
+            creator_name: "owner".into(),
+        })))
+    }
+
     /// `SCSlaveCreatedPacket` without `hideSpawnEffect` on slave 146 (Red Farm Hauler) plays the `slaves` row's
-    /// `portal_spawn_fx_id` 1263 (`portal_tank_spawn`) at the cart once, for `portal_time` 1.0 s.
+    /// `portal_spawn_fx_id` 1263 (`portal_tank_spawn`) once, at the clip-plane point, and moves the cart out of the
+    /// plane over `portal_time` 1.0 s (`FUN_3909ea30` / `FUN_39097220`).
     #[test]
     fn a_created_vehicle_plays_its_summon_portal_once() {
-        let Some((mut app, db, _root)) = hauler() else { return };
+        let Some((mut app, db, root)) = hauler() else { return };
         let portal = db.slave_summon_portal(146).expect("the Red Farm Hauler's summon portal");
         assert_eq!(portal, super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 });
         let book = super::super::combat::skills::SkillBook::open().expect("the game database");
@@ -1531,15 +1760,7 @@ mod tests {
             "the group's FxSound item"
         );
 
-        app.world_mut()
-            .write_message(NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
-                owner_obj_id: 1,
-                tl_id: 1,
-                obj_id: 7,
-                hide_spawn_effect: false,
-                raw_id: 0,
-                creator_name: "owner".into(),
-            }))));
+        app.world_mut().write_message(created(1, false));
         app.update();
         let effects = portal_effects(&mut app);
         assert_eq!(effects.len(), 2, "{effects:?}");
@@ -1548,43 +1769,68 @@ mod tests {
             assert!(!primed, "a summon portal must not start primed");
             assert!((*scale - 3.0).abs() < 1e-6, "{name} scale {scale}");
         }
-        // the pending id was consumed: later frames play it once
+        // the cart starts two extents behind its position, the portal at one extent
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        let end = emergence.end;
+        let axis = emergence.axis;
+        assert!(emergence.extent > 0.5, "extent {}", emergence.extent);
+        assert!(axis.y.abs() < 1e-6 && (axis.length() - 1.0).abs() < 1e-4, "{axis:?}");
+        assert!((emergence.plane - (end - axis * emergence.extent)).length() < 1e-4);
+        assert!((emergence.start - (end - axis * (2.0 * emergence.extent))).length() < 1e-4);
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        // the emergence may run in this same schedule, so allow one frame of progress from the start
+        let path = (emergence.end - emergence.start).length().max(1e-4);
+        let progress = (transform.translation - emergence.start).length() / path;
+        assert!(progress < 0.1, "the cart starts behind the plane: {progress}");
+        // the portal hangs at the plane point, oriented by the unit, not at the cart centre
+        let (anchor_entity, _anchor, anchor_transform) = app
+            .world_mut()
+            .query::<(Entity, &SummonPortalAnchor, &Transform)>()
+            .iter(app.world())
+            .map(|(entity, anchor, transform)| (entity, *anchor, *transform))
+            .find(|(_, anchor, _)| anchor.root == root)
+            .expect("the portal anchor");
+        assert!((anchor_transform.translation - emergence.plane).length() < 1e-4, "{anchor_transform:?}");
+        assert!(anchor_transform.rotation.angle_between(transform.rotation) < 1e-4);
+        let children = app.world().get::<Children>(anchor_entity).expect("the portal's children");
+        assert_eq!(children.len(), 2, "the portal particles hang at the anchor");
+        // the pending timeline id was consumed: later frames play it once
         for _ in 0..5 {
             app.update();
         }
         assert_eq!(portal_effects(&mut app).len(), 2, "the portal plays once");
-        // `portal_time` is 1.0 s
+        let moved = app.world().get::<Transform>(root).unwrap().translation;
+        assert!((moved - emergence.start).length() > 0.0, "the cart is emerging");
+        // `portal_time` is 1.0 s: the cart reaches its position and the effects stop emitting
         for _ in 0..40 {
             app.update();
         }
-        assert!(portal_effects(&mut app).is_empty(), "the portal outlives portal_time");
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        assert!(emergence.ended, "the emergence ends after portal_time");
+        assert!((app.world().get::<Transform>(root).unwrap().translation - end).length() < 1e-4);
+        assert!(portal_effects(&mut app).is_empty(), "the portal stops emitting at the end");
     }
 
     /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
     /// (`SCUnitState` with no `SCSlaveCreatedPacket`) plays none, and `hideSpawnEffect` suppresses it.
     #[test]
     fn a_vehicle_streamed_in_later_plays_no_summon_portal() {
-        let Some((mut app, _db, _root)) = hauler() else { return };
+        let Some((mut app, _db, root)) = hauler() else { return };
         for _ in 0..5 {
             app.update();
         }
         assert!(portal_effects(&mut app).is_empty(), "a streamed-in vehicle has no creation packet");
-        app.world_mut()
-            .write_message(NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
-                owner_obj_id: 1,
-                tl_id: 1,
-                obj_id: 7,
-                hide_spawn_effect: true,
-                raw_id: 0,
-                creator_name: "owner".into(),
-            }))));
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "no emergence");
+        app.world_mut().write_message(created(1, true));
         for _ in 0..5 {
             app.update();
         }
         assert!(portal_effects(&mut app).is_empty(), "hideSpawnEffect suppresses the portal");
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "hideSpawnEffect skips the emergence");
     }
 
-    /// The `slaves` row of the owner test's `/slave spawn 146`, and a slave without a portal (the rowboat, 15).
+    /// The `slaves` row of the owner test's `/slave spawn 146`, a slave without a portal (the rowboat, 15), and the
+    /// zero-time rows (`FUN_390cf130` only starts an emergence when the time is above 0).
     #[test]
     fn slave_146_has_the_portal_tank_spawn_group() {
         let Some(db) = Db::open() else { return };
@@ -1593,6 +1839,59 @@ mod tests {
             Some(super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 })
         );
         assert_eq!(db.slave_summon_portal(15), None);
+        for template in [54, 94, 115] {
+            let portal = db.slave_summon_portal(template).expect("a zero-time portal row");
+            assert_eq!(portal.time, 0.0, "slave {template}");
+        }
+    }
+
+    /// A slave whose `portal_time` is 0 (slave 54, the tank) gets no portal and no emergence.
+    #[test]
+    fn a_zero_portal_time_starts_no_emergence() {
+        let Some((mut app, db, root)) = vehicle_app(54, 1008) else { return };
+        assert_eq!(db.slave_summon_portal(54).map(|p| p.time), Some(0.0));
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        assert!(portal_effects(&mut app).is_empty(), "portal_time 0 plays no portal");
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "portal_time 0 starts no emergence");
+        assert!(
+            app.world().resource::<SummonPortals>().0.is_empty(),
+            "the timeline id is consumed"
+        );
+    }
+
+    /// `FUN_39097140` plays the prefab's authored `portal_exhaust` on the emerging unit (the galleons have one;
+    /// the tractor does not).
+    #[test]
+    fn the_prefabs_portal_exhaust_is_spawned_on_the_unit() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let variant = "prefab://Prefabs/galleon.xml/galleon.step_10galleon_normal";
+        let named = super::super::data::prefab_effects_named(variant);
+        let exhaust = named
+            .iter()
+            .find(|named| named.name.eq_ignore_ascii_case("portal_exhaust"))
+            .expect("the galleon's portal_exhaust");
+        assert!(
+            exhaust.effect.effect.eq_ignore_ascii_case("X2_EFFECTS.e_effect.caravel_portal_water"),
+            "{}",
+            exhaust.effect.effect
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let root = app.world_mut().spawn(Transform::default()).id();
+        let mut state = SystemState::<Commands>::new(app.world_mut());
+        let spawned = {
+            let mut commands = state.get_mut(app.world_mut()).unwrap();
+            spawn_portal_exhaust(&mut commands, root, variant, 10.0)
+        };
+        state.apply(app.world_mut());
+        assert_eq!(spawned.len(), 1);
+        let effect = app.world().get::<aa_fx::Effect>(spawned[0]).expect("the exhaust effect");
+        assert!(effect.name.eq_ignore_ascii_case("X2_EFFECTS.e_effect.caravel_portal_water"));
+        assert_eq!(app.world().get::<ChildOf>(spawned[0]).unwrap().parent(), root);
+        assert!(app.world().get::<SummonPortalEffect>(spawned[0]).is_some());
     }
 
     /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine

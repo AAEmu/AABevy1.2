@@ -543,6 +543,13 @@ impl EmitterState {
         self.target = None;
     }
 
+    /// Stops new particles while the live ones keep drawing and ageing out (the 1.2 effect end event 5).
+    pub fn stop_emitting(&mut self) {
+        self.off = true;
+        self.done = true;
+        self.target = None;
+    }
+
     /// No particles and nothing more to emit.
     pub fn finished(&self) -> bool {
         self.done && self.particles.is_empty()
@@ -1698,6 +1705,14 @@ impl EffectSim {
         self.emitters.iter().all(|e| e.finished())
     }
 
+    /// Stops every emitter from spawning new particles; the live ones keep drawing and ageing out (the 1.2 effect
+    /// end event 5).
+    pub fn stop_emitting(&mut self) {
+        for e in &mut self.emitters {
+            e.stop_emitting();
+        }
+    }
+
     /// Forgets every particle (the effect went out of range).
     pub fn reset(&mut self) {
         for e in &mut self.emitters {
@@ -2104,6 +2119,24 @@ mod tests {
             s.step(&c);
         }
         assert_eq!(s.alive(), 2, "the second one after 2 s");
+    }
+
+    #[test]
+    fn stop_emitting_keeps_the_live_particles_until_they_fade() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Continuous="true" Count="1" ParticleLifeTime="0.5" Texture="textures/x.dds" Speed="0""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        assert!(!s.finished());
+        s.stop_emitting();
+        for _ in 0..20 {
+            s.step(&c);
+        }
+        assert!(!s.finished(), "the live particle is still fading");
+        for _ in 0..20 {
+            s.step(&c);
+        }
+        assert!(s.finished(), "the last particle has aged out");
     }
 
     #[test]

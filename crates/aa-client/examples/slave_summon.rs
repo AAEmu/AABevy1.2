@@ -1,13 +1,14 @@
-//! The summon portal of a newly created slave (the owner test's `/slave spawn 146`, the Red Farm Hauler): the
-//! `slaves.portal_spawn_fx_id` group 1263 `portal_tank_spawn` plays at the cart when `SCSlaveCreatedPacket` arrives
-//! without `hideSpawnEffect` (`FUN_39349600`), scaled by `portal_scale` 3 and lasting `portal_time` 1 s. A vehicle the
-//! server only streams in later (no creation packet) and a creation with `hideSpawnEffect` play none.
+//! The summon emergence of a newly created slave (the owner test's `/slave spawn 146`, the Red Farm Hauler):
+//! `SCSlaveCreatedPacket` without `hideSpawnEffect` starts the unit two bounding extents behind its position, behind
+//! the portal plane, and moves it out over `portal_time` 1 s (`FUN_3909ea30` / `FUN_39097220`); the portal
+//! (`slaves.portal_spawn_fx_id` 1263 `portal_tank_spawn`, scale 3) hangs at the plane. A vehicle the server only
+//! streams in later (no creation packet) and a creation with `hideSpawnEffect` play none.
 //!
-//! `cargo run -p aa-client --example slave_summon -- --mute --offscreen-shot shots/aa-client/slave_summon.png --shot-after 2.0`
+//! `cargo run -p aa-client --example slave_summon -- --mute --offscreen-shot shots/aa-client/slave_summon.png --shot-after 2.2`
 //!
-//! The creation packet is sent once the scene is drawn (1.4 s in), so the screencap sees the cart and its portal.
-//! Without `--shot*` the example checks the portal 0.3 s after the packet, checks it is gone after `portal_time`, and
-//! exits non-zero on a mismatch.
+//! The creation packet is sent once the scene is drawn (1.4 s in), so the screencap sees the cart emerging through its
+//! portal. Without `--shot*` the example checks the start/plane, the end after `portal_time`, and the particles
+//! fading out, and exits non-zero on a mismatch.
 
 #![allow(dead_code)]
 #[path = "../src/graphics.rs"]
@@ -56,17 +57,19 @@ const MODEL: u32 = 1553;
 const SUMMONED: u32 = 901;
 const STREAMED: u32 = 902;
 const GAP: f32 = 9.0;
-/// When the creation packet is sent (after the carts and their textures are drawn), when to check the portal and
-/// when it must be gone (just past `portal_time` 1.0).
+/// When the creation packet is sent (after the carts and their textures are drawn), when the emergence is checked,
+/// when it must have ended (`portal_time` 1.0) and when the effect particles must be gone.
 const ANNOUNCE_AT: f32 = 1.4;
 const DRAWN_AT: f32 = 1.7;
-const GONE_AT: f32 = 3.0;
+const ENDED_AT: f32 = 3.0;
+const GONE_AT: f32 = 6.0;
 
 #[derive(Resource, Default)]
 struct Check {
     start: Option<Instant>,
     announced: bool,
     drawn: bool,
+    ended: bool,
     gone: bool,
 }
 
@@ -96,6 +99,7 @@ fn main() -> AppExit {
             aa_dev::DevPlugin,
             aa_cry::CryPlugin,
             aa_anim::AnimPlugin,
+            aa_fx::FxPlugin,
             aa_world::pipelines::build,
         ))
         .init_state::<Screen>()
@@ -112,7 +116,9 @@ fn main() -> AppExit {
             (
                 ingame::vehicle::track_summon_portals,
                 ingame::vehicle::spawn_summon_portals,
-                ingame::vehicle::despawn_summon_portals,
+                ingame::vehicle::animate_summon_emergence,
+                ingame::vehicle::end_summon_portals,
+                ingame::vehicle::cleanup_summon_portals,
                 check,
             )
                 .chain(),
@@ -231,12 +237,15 @@ fn check(
     mut check: ResMut<Check>,
     mut writer: MessageWriter<aa_net::NetEvent>,
     effects: Query<(&aa_fx::Effect, &ingame::vehicle::SummonPortalEffect)>,
+    portal_fx: Query<&aa_fx::Effect>,
+    roots: Query<(&Transform, &ingame::vehicle::SummonEmergence)>,
+    anchors: Query<(&ingame::vehicle::SummonPortalAnchor, &Transform)>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let start = *check.start.get_or_insert_with(Instant::now);
     let elapsed = start.elapsed().as_secs_f32();
     // `SCSlaveCreatedPacket` for the first cart only; the second one is the streamed-in control. Sent after the scene is
-    // up so a screencap sees the cart under its portal.
+    // up so a screencap sees the cart emerging through its portal.
     if !check.announced && elapsed >= ANNOUNCE_AT {
         writer.write(aa_net::NetEvent(aa_net::Event::Slave(
             aa_net::slave::SlaveEvent::Created(aa_net::slave::SlaveCreated {
@@ -256,13 +265,35 @@ fn check(
         assert_eq!(names.len(), 2, "the summoned cart's portal: {names:?}");
         assert!(names.iter().any(|name| name.ends_with("portal_tank_main")), "{names:?}");
         assert!(names.iter().any(|name| name.ends_with("portal_tank_main_start")), "{names:?}");
-        info!("slave_summon: portal {}", names.join(", "));
+        let (transform, emergence) = roots.single().expect("the summoned cart's emergence");
+        assert!(!emergence.ended, "the emergence is still running");
+        let path = (emergence.end - emergence.start).length();
+        let progress = (transform.translation - emergence.start).length() / path;
+        assert!(progress > 0.0 && progress < 1.0, "the cart is emerging: {progress}");
+        assert!((emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length() < 1e-3);
+        let (_, anchor) = anchors.single().expect("the portal anchor");
+        assert!((anchor.translation - emergence.plane).length() < 1e-3, "{anchor:?}");
+        info!(
+            "slave_summon: emergence start {:?} plane {:?} end {:?}, portal {}",
+            emergence.start,
+            emergence.plane,
+            emergence.end,
+            names.join(", ")
+        );
         check.drawn = true;
     }
-    if check.drawn && !check.gone && elapsed >= GONE_AT {
-        let names: Vec<&str> = effects.iter().map(|(effect, _)| effect.name.as_str()).collect();
-        assert!(names.is_empty(), "the portal outlives portal_time: {names:?}");
-        info!("slave_summon: ok (the streamed-in cart and the portal expiry match 1.2)");
+    if check.drawn && !check.ended && elapsed >= ENDED_AT {
+        let (transform, emergence) = roots.single().expect("the summoned cart's emergence");
+        assert!(emergence.ended, "the emergence ends at portal_time");
+        assert!((transform.translation - emergence.end).length() < 1e-3, "{:?}", transform.translation);
+        assert!(effects.is_empty(), "the portal stops emitting at the end event 5");
+        info!("slave_summon: emergence ended at {:?}", emergence.end);
+        check.ended = true;
+    }
+    if check.ended && !check.gone && elapsed >= GONE_AT {
+        let left: Vec<&str> = portal_fx.iter().map(|effect| effect.name.as_str()).filter(|name| name.contains("portal_tank")).collect();
+        assert!(left.is_empty(), "the portal particles fade out: {left:?}");
+        info!("slave_summon: ok (emergence, portal end and the streamed-in control match 1.2)");
         check.gone = true;
         if !aa_dev::args()
             .iter()

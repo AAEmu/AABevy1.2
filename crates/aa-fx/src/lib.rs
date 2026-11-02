@@ -293,6 +293,14 @@ impl FxRun {
         self.finished
     }
 
+    /// Stops spawning new particles; the live ones play out and the entity despawns when `despawn_when_finished`
+    /// is set (the real client's effect end event 5).
+    pub fn stop_emitting(&mut self) {
+        if let Some(sim) = self.sim.as_mut() {
+            sim.stop_emitting();
+        }
+    }
+
     /// Radius in metres within which the effect runs.
     pub fn radius(&self) -> f32 {
         self.radius
