@@ -13,6 +13,16 @@
 //!   0.6: wading slows a player down from 0.3 m of water (none) to 1 m (to 0.6 times the speed).
 //! * The swim locomotion groups (`lmg_files/fist_mo_swim_run.lmg`) are authored for 3.0 m/s forward and to the side and
 //!   2.4 m/s (0.8 times) backwards, which the client's `swim_back_speed_mul` agrees with.
+//! * The swim movement mode (`FUN_3912ce00`) rotates the movement request by the view quaternion at `param_2 + 0x2d0`
+//!   (x2game.dll.c:230934-230966) and takes its z as the vertical: it is part of the **3-D direction** (x right, y forward,
+//!   z up), so its z steers the depth while forward / back are held and W / S follow the camera pitch. X
+//!   (`default_binding.g`: `x down`) and Space dive / rise on their own; only a swimmer pressing nothing floats up at
+//!   `swim_buoy_speed`.
+//! * Near the surface the aimed vertical is held to the floating height (`local_c`, x2game.dll.c:230972-230995 and
+//!   231050-231074): its threshold and rate are `DAT_3999ccd0` = 0.3 and `DAT_399a323c` = 2.5 (read from
+//!   `x2game_unpacked.dll` `.rdata`), and the hold fades with `|relWaterLevel|` over 1 m. The blend itself ramps: 1.2 adds
+//!   `dt * local_c` to `param_1[0x29]` (clamped to 1) and resets it when `local_c` reaches 0, so a gentle course cannot bob
+//!   the swimmer out of the water and a steep dive (`|vz| >= 0.7 m/s`) is not held.
 //!
 //! **The swim height.** The swim clips are authored with the body about 1.3 m above the entity's origin (`fist_mo_swim_f`: pelvis
 //! at 1.34 m, the body lying horizontally; `fist_ba_idle_swim`: upright, head at 1.83 m), so a swimmer's origin hangs about 1.3 m
@@ -42,6 +52,11 @@ pub const UP_MUL: f32 = 0.7;
 pub const DOWN_MUL: f32 = 0.5;
 /// `swim_buoy_speed`: the speed (m/s) a diver floats back to the surface at.
 pub const BUOY_SPEED: f32 = 2.0;
+/// `FUN_3912ce00`'s surface hold (x2game.dll.c:230972-230995): the desired vertical speed at which the hold starts to fade
+/// (`DAT_3999ccd0`, 0.3 in `x2game_unpacked.dll` `.rdata`) and its rate (`DAT_399a323c`, 2.5). The hold also fades with the
+/// distance from the floating height (`|relWaterLevel|`, clamped to 1 m).
+pub const SURFACE_HOLD_START: f32 = 0.3;
+pub const SURFACE_HOLD_RATE: f32 = 2.5;
 /// A swimmer walks again when the water over the ground is this much shallower than it takes to start swimming (m), so that
 /// the shore line does not flicker (`swim_jump_end_depth`).
 pub const LEAVE_MARGIN: f32 = 0.2;
@@ -135,6 +150,9 @@ pub struct Swim {
     pub vertical: f32,
     /// The body is diving (see [`DEEP`]).
     pub deep: bool,
+    /// Ramped surface-hold blend (1.2's `param_1[0x29]`, 0..1): grows while a pressed course is held near the surface,
+    /// resets when the course is steep or the body is deep (see [`wanted_vz`]).
+    pub hold: f32,
 }
 
 /// Water at the player: the depth over the ground it would stand on and the surface.
@@ -166,22 +184,67 @@ pub fn should_swim(swimming: bool, feet: f32, wet: Option<Wet>, enter: f32) -> b
     }
 }
 
-/// Speed (m/s) in the local frame (x right, y forward) of a swimmer pressing `dir`.
-pub fn local_velocity(dir: Vec2) -> Vec2 {
+/// The 3-D direction (x right, y forward, z up, m/s) of a swimmer pressing `dir` with the camera pitched `pitch` (radians,
+/// positive looks up). The swim movement mode (`FUN_3912ce00`) rotates the request by the view quaternion at
+/// `param_2 + 0x2d0` (x2game.dll.c:230934-230966) and takes its z as the vertical, so forward/back follow the camera:
+/// looking down and pressing forward dives, looking up and pressing forward surfaces. The pressed direction is normalised
+/// and then scaled by the swim speed, so the total speed stays at the clips' 3.0 m/s (2.4 backwards, `swim_back_speed_mul`);
+/// strafing stays horizontal.
+pub fn aimed_velocity(dir: Vec2, pitch: f32) -> Vec3 {
     let d = dir.normalize_or_zero();
+    if d == Vec2::ZERO {
+        return Vec3::ZERO;
+    }
     let speed = if d.y < -0.1 { BASE_SPEED * BACK_MUL } else { BASE_SPEED };
-    d * speed
+    let (sin, cos) = pitch.sin_cos();
+    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * speed
 }
 
-/// The vertical speed (m/s) a swimmer wants: `vertical` is -1 (X), 0 or 1 (Space); `z` its height, `rest` the height the body
-/// floats at (surface minus swim height).
-pub fn wanted_vz(vertical: f32, z: f32, rest: f32) -> f32 {
+/// The fraction of 1.2's surface hold at a desired vertical speed `desired_vz` and height `z` for a body whose floating
+/// height is `rest` (`FUN_3912ce00`: `local_c = (1 - clamp((|desired_z| - 0.3) * 2.5, 0, 1)) * (1 - clamp(|relWaterLevel|,
+/// 0, 1))`, x2game.dll.c:230972-230995). It is 1 for a level or gentle course at the floating height, falls to 0 for a
+/// steep dive (`|desired_vz| >= 0.7 m/s`) or more than 1 m from the floating height.
+pub fn surface_hold(desired_vz: f32, z: f32, rest: f32) -> f32 {
+    let steep = ((desired_vz.abs() - SURFACE_HOLD_START) * SURFACE_HOLD_RATE).clamp(0.0, 1.0);
+    let depth = (rest - z).abs().clamp(0.0, 1.0);
+    (1.0 - steep) * (1.0 - depth)
+}
+
+/// The vertical speed (m/s) a swimmer wants: `vertical` is -1 (X), 0 or 1 (Space); `course` is the aimed vertical speed of
+/// a pressed direction (the camera pitch, see [`aimed_velocity`]), `z` its height, `rest` the height the body floats at
+/// (surface minus swim height) and `dt` the frame time. Near the surface a pressed course is blended toward the water-level
+/// offset by [`surface_hold`] (x2game.dll.c:231050-231074), so looking slightly up or down keeps the body at the surface and
+/// the course can never lift it above `rest`; only a swimmer pressing nothing floats up (1.2's `swim_buoy_speed`).
+///
+/// `hold` is 1.2's ramped blend factor (`param_1[0x29]`): it grows by `dt * local_c` each frame while the hold is positive
+/// (clamped to 1) and resets to 0 as soon as the course is steep or deep enough for `local_c` to reach 0, so the hold fades
+/// in over about a second instead of snapping on.
+pub fn wanted_vz(vertical: f32, course: Option<f32>, z: f32, rest: f32, dt: f32, hold: &mut f32) -> f32 {
     if vertical < 0.0 {
+        *hold = 0.0;
         -BASE_SPEED * DOWN_MUL
-    } else if vertical > 0.0 && z < rest - 0.05 {
-        BASE_SPEED * UP_MUL
+    } else if vertical > 0.0 {
+        *hold = 0.0;
+        if z < rest - 0.05 { BASE_SPEED * UP_MUL } else { 0.0 }
+    } else if let Some(vz) = course {
+        let local_c = surface_hold(vz, z, rest);
+        let wanted = if local_c > 0.0 {
+            // 1.2 ramps the blend by dt * local_c (x2game.dll.c:231050-231074); the offset is applied as a speed with
+            // the unramped local_c, as there
+            *hold = (*hold + dt * local_c).clamp(0.0, 1.0);
+            let per_frame = (rest - z) / dt.max(1e-4);
+            let target = (per_frame * local_c).clamp(-BASE_SPEED, BASE_SPEED);
+            vz + (target - vz) * *hold
+        } else {
+            *hold = 0.0;
+            vz
+        };
+        if z >= rest - 0.05 && wanted > 0.0 { 0.0 } else { wanted.clamp(-BASE_SPEED, BASE_SPEED) }
     } else {
-        // buoyancy: float to the resting height, slowing down near it
+        // buoyancy: float to the resting height, slowing down near it. The request is zero here, but 1.2 still computes
+        // `local_c` from that desired vertical and keeps the blend ticking while it is positive.
+        let local_c = surface_hold(0.0, z, rest);
+        *hold = if local_c > 0.0 { (*hold + dt * local_c).clamp(0.0, 1.0) } else { 0.0 };
         ((rest - z) * 4.0).clamp(-BUOY_SPEED, BUOY_SPEED)
     }
 }
@@ -316,23 +379,107 @@ mod tests {
 
     #[test]
     fn swim_speed_depends_on_the_direction() {
-        assert_eq!(local_velocity(Vec2::ZERO), Vec2::ZERO);
-        assert!((local_velocity(Vec2::Y).length() - 3.0).abs() < 1e-5);
-        assert!((local_velocity(Vec2::X).length() - 3.0).abs() < 1e-5);
-        assert!((local_velocity(-Vec2::Y).length() - 2.4).abs() < 1e-5);
-        assert!((local_velocity(Vec2::new(1.0, -1.0)).length() - 2.4).abs() < 1e-5);
+        let flat = |dir| aimed_velocity(dir, 0.0).truncate();
+        assert_eq!(flat(Vec2::ZERO), Vec2::ZERO);
+        assert!((flat(Vec2::Y).length() - 3.0).abs() < 1e-5);
+        assert!((flat(Vec2::X).length() - 3.0).abs() < 1e-5);
+        assert!((flat(-Vec2::Y).length() - 2.4).abs() < 1e-5);
+        assert!((flat(Vec2::new(1.0, -1.0)).length() - 2.4).abs() < 1e-5);
+    }
+
+    #[test]
+    fn swimming_follows_the_camera_pitch() {
+        let aimed = aimed_velocity(Vec2::Y, 0.0);
+        assert!((aimed - Vec3::new(0.0, 3.0, 0.0)).length() < 1e-5);
+        let down = aimed_velocity(Vec2::Y, -45f32.to_radians());
+        assert!((down.length() - 3.0).abs() < 1e-5, "{down:?}");
+        assert!((down.y - 2.1213).abs() < 1e-3 && (down.z + 2.1213).abs() < 1e-3, "{down:?}");
+        let up = aimed_velocity(Vec2::Y, 45f32.to_radians());
+        assert!(up.z > 2.12 && (up.y - 2.1213).abs() < 1e-3, "{up:?}");
+        // backwards follows the camera the other way, at the back speed
+        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians());
+        assert!((back.length() - 2.4).abs() < 1e-5 && back.z > 1.69, "{back:?}");
+        // strafing stays horizontal at the full speed whatever the pitch
+        let side = aimed_velocity(Vec2::X, -60f32.to_radians());
+        assert!((side - Vec3::X * 3.0).length() < 1e-5, "{side:?}");
+        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0), Vec3::ZERO);
+    }
+
+    const DT: f32 = 1.0 / 60.0;
+
+    #[test]
+    fn the_surface_hold_follows_the_decompile() {
+        // at the floating height a level course holds, a gentle one still holds, a steep one does not
+        assert_eq!(surface_hold(0.0, 98.7, 98.7), 1.0);
+        assert!((surface_hold(0.52, 98.7, 98.7) - 0.45).abs() < 1e-5);
+        assert_eq!(surface_hold(2.12, 98.7, 98.7), 0.0);
+        // the hold fades to nothing 1 m below the floating height
+        assert!((surface_hold(0.0, 97.7, 98.7) - 0.0).abs() < 1e-5);
+        assert!((surface_hold(0.0, 98.2, 98.7) - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_gentle_course_stays_at_the_surface_and_a_steep_one_dives() {
+        let (rest, up10, down10, down45) = (98.7f32, 10f32.to_radians(), -10f32.to_radians(), -45f32.to_radians());
+        let course = |pitch: f32| aimed_velocity(Vec2::Y, pitch).z;
+        // +10 degrees at the floating height must not push the body out of the water
+        assert_eq!(wanted_vz(0.0, Some(course(up10)), rest, rest, DT, &mut 1.0), 0.0);
+        assert!(wanted_vz(0.0, Some(course(up10)), rest + 0.1, rest, DT, &mut 1.0) <= 0.0, "the course lifted the body above rest");
+        // -10 degrees holds the surface: simulate 2 s and stay within a hand's width of the floating height
+        let mut z = rest;
+        let mut hold = 0.0;
+        for _ in 0..120 {
+            z = (z + wanted_vz(0.0, Some(course(down10)), z, rest, DT, &mut hold) * DT).max(rest - 10.0);
+        }
+        assert!((z - rest).abs() < 0.1, "a gentle downward course left the surface: {z}");
+        // -45 degrees is steep enough for the hold to let go and dive
+        let mut z = rest;
+        let mut hold = 0.0;
+        for _ in 0..120 {
+            z += wanted_vz(0.0, Some(course(down45)), z, rest, DT, &mut hold) * DT;
+        }
+        assert!(z < rest - 2.0, "a steep downward course did not dive: {z}");
+    }
+
+    #[test]
+    fn the_surface_hold_ramps_up_over_time_and_resets() {
+        // 1.2 adds dt * local_c to the blend each frame (clamped to 1), so a level course takes about a second to take full
+        // hold instead of snapping on
+        let mut hold = 0.0;
+        assert_eq!(wanted_vz(0.0, Some(0.0), 98.7, 98.7, DT, &mut hold), 0.0);
+        assert!((hold - DT).abs() < 1e-6, "{hold}");
+        for _ in 1..60 {
+            wanted_vz(0.0, Some(0.0), 98.7, 98.7, DT, &mut hold);
+        }
+        assert!((hold - 1.0).abs() < 1e-5, "{hold}");
+        // a steep dive (local_c = 0) clears it, and so do the dive / rise keys
+        wanted_vz(0.0, Some(-2.12), 98.7, 98.7, DT, &mut hold);
+        assert_eq!(hold, 0.0);
+        wanted_vz(0.0, Some(0.0), 98.7, 98.7, DT, &mut hold);
+        assert!(hold > 0.0);
+        wanted_vz(-1.0, None, 98.7, 98.7, DT, &mut hold);
+        assert_eq!(hold, 0.0);
+        // it also ticks while floating with no key held (the request is zero there), and clears when the body is deep
+        wanted_vz(0.0, None, 98.7, 98.7, DT, &mut hold);
+        assert!((hold - DT).abs() < 1e-6, "{hold}");
+        wanted_vz(0.0, None, 96.0, 98.7, DT, &mut hold);
+        assert_eq!(hold, 0.0);
     }
 
     #[test]
     fn a_swimmer_floats_up_dives_and_surfaces() {
+        let steady = |vertical: f32, course: Option<f32>, z: f32, rest: f32| wanted_vz(vertical, course, z, rest, DT, &mut 1.0);
         // 1 m under the resting height floats up at the buoyancy speed, level with it stays
-        assert_eq!(wanted_vz(0.0, 98.8, 99.8), BUOY_SPEED);
-        assert!(wanted_vz(0.0, 99.8, 99.8).abs() < 1e-5);
-        assert!(wanted_vz(0.0, 100.3, 99.8) < 0.0);
-        assert_eq!(wanted_vz(-1.0, 99.8, 99.8), -1.5);
-        assert!((wanted_vz(1.0, 98.0, 99.8) - 2.1).abs() < 1e-5);
+        assert_eq!(steady(0.0, None, 98.8, 99.8), BUOY_SPEED);
+        assert!(steady(0.0, None, 99.8, 99.8).abs() < 1e-5);
+        assert!(steady(0.0, None, 100.3, 99.8) < 0.0);
+        assert_eq!(steady(-1.0, None, 99.8, 99.8), -1.5);
+        assert!((steady(1.0, None, 98.0, 99.8) - 2.1).abs() < 1e-5);
         // pressing up at the surface does not push the body out of it
-        assert!(wanted_vz(1.0, 99.8, 99.8).abs() < 1e-5);
+        assert!(steady(1.0, None, 99.8, 99.8).abs() < 1e-5);
+        // swimming forward with the camera pitched down dives and a level camera holds the depth
+        assert!((steady(0.0, Some(-2.12), 97.0, 99.8) + 2.12).abs() < 1e-5);
+        assert_eq!(steady(0.0, Some(0.0), 97.0, 99.8), 0.0);
         assert_eq!(approach(0.0, 10.0, 20.0, 0.1), 2.0);
         assert_eq!(approach(-8.0, 0.0, 35.0, 0.1), -4.5);
     }

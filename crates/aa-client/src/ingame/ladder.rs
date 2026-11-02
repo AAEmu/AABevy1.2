@@ -13,8 +13,18 @@
 //!   phase and the frame from the model's `$ladder` element (`Db::ladder_kind`,
 //!   [`super::doodad_model::LadderHelper`]);
 //! * F (`do_interaction_1`) grabs the nearest climbable doodad within 1.5 m (the reach
-//!   `FUN_390c1130` uses without an actor-model reach block); the local body is placed at once,
-//!   before the server answers, and `CSHang` is sent (`FUN_39363410`);
+//!   `FUN_390c1130` uses without an actor-model reach block); a right click on a ladder is taken
+//!   as the same use-target grab (inferred: `FUN_393b8f40` is the only `CSHang` sender found,
+//!   but no right-click-on-ladder capture exists). The owner's real 1.2 client grabbed a ship
+//!   ladder while walking toward it (2026-11-01 ~13:45, `CSHang` on the doodad); a decompile
+//!   path that starts a hang on contact was not found, so this client keeps F/right-click and
+//!   does not grab on proximity. The local body is placed at once, before the server answers,
+//!   and `CSHang` is sent (`FUN_39363410`). The fixed-frame kinds (1/4/5/8/9) stand on the
+//!   `$ladder` helper's front (+Y), computed in the doodad's world frame (a ship ladder includes
+//!   the hull transform, so grabbing from the deck still puts the body outside the wall); kinds
+//!   2/3/6/7/10 keep the player's own side (`FUN_3916c520` builds their rotation from the player
+//!   quaternion). A picked ladder lights up (`use_target_highlight`) and only takes the click
+//!   when it is the nearest hit along the ray;
 //! * W/S move along the ladder. 1.2 has no climb-speed constant: the vertical motion is the
 //!   clip's root motion, scaled by the buffs' `ladder_speed_mul` (unit attribute 93 [0x5d]). The
 //!   clip's root speed is the fallback when the model has no climb clips (1.5 m/s,
@@ -23,16 +33,25 @@
 //!   (constant). On a ladder of a parented doodad (a ship's side ladder) it also carries the
 //!   `0x20` block with the hull id, the hull-local primary position and the world backup;
 //! * reaching the top starts the exit (local reason 2, no climb bit for its duration; after 0.5 s
-//!   the body steps onto the platform and `CSUnhang` 1 is sent), the bottom stands again
-//!   (`CSUnhang` 1), F lets go (1), Space jumps forward (6, the mode-6 velocities), a vanished
-//!   ladder releases with reason 0 (the 1.2 "my ladder is missing" path) and death releases with
-//!   reason 0xb (`FUN_39137320`, the only native 0xb site).
+//!   the body steps onto the platform and `CSUnhang` 1 is sent), a vanished ladder releases with
+//!   reason 0 (the 1.2 "my ladder is missing" path) and death releases with reason 0xb
+//!   (`FUN_39137320`, the only native 0xb site);
+//! * a plain Space jump sends `CSUnhang` 7, the mode-7 back-hop away from the ladder (`-2.0`
+//!   forward, `4.0` up, a `-0.3 m` nudge along forward). A+Space sends the mode-4 side hop and
+//!   D+Space the mode-5 side hop (`-/+2.0` local X, `4.0` up, `-/+0.3 m` along X): the owner's
+//!   2026-11-01 14:20 session captured 4 for A and 5 for D on a ship ladder. An earlier
+//!   2026-11-01 capture saw 7 with no lateral input (also with W held); 6 was not captured.
+//!   Mode 6 is the forward leap (`4.5` forward, `7.0` up).
 //!
-//! Capture-pending (not settled by the decompile): which key produces each of the exit modes
-//! 3-9; the exact `deltaMovement` and velocity while climbing; the lateral `y` of the climb data
-//! on nets and guardrails (this client climbs centred, `y = 0`); the top step distance and the
-//! camera pitch clamp; and how a remote client animates a hanger (the client packet consumer was
-//! not traced). The remote side here uses the `SCHung` target's kind and the climb data.
+//! Inferred (neither captured nor found in the decompile): F releases with reason 1 and the
+//! bottom exit sends reason 1. The only native reason-1 sender is `FUN_39134930`, when the top
+//! exit's `OnLadder` state turns off.
+//!
+//! Capture-pending (not settled by the decompile): which input produces modes 3, 6, 8 and 9;
+//! the exact `deltaMovement` and velocity while climbing; the lateral `y` of the climb data on
+//! nets and guardrails (this client climbs centred, `y = 0`); the top step distance and the camera
+//! pitch clamp; and how a remote client animates a hanger (the client packet consumer was not
+//! traced). The remote side here uses the `SCHung` target's kind and the climb data.
 
 use aa_anim::Animator;
 use aa_net::climb;
@@ -61,9 +80,15 @@ pub const FALLBACK_CLIMB_SPEED: f32 = 1.5;
 pub const TOP_EXIT_SECS: f32 = 0.5;
 /// How far the body steps over the top on the way out (m; capture-pending).
 pub const TOP_STEP: f32 = 0.6;
-/// The mode-6 forward jump (`FUN_39135570`: 4.5 m/s forward, 7.0 m/s up).
-const JUMP_FORWARD: f32 = 4.5;
-const JUMP_UP: f32 = 7.0;
+/// The mode-4/5/7 hop and the mode-6 leap (`FUN_39135570`; constants from the dump:
+/// `DAT_3999cffc` 2.0, `_DAT_3999eda8` 4.0, `DAT_3999ccd0` 0.3, `_DAT_399a26e8` 4.5,
+/// `_DAT_3999f0e4` 7.0).
+const HOP_SPEED: f32 = 2.0;
+const HOP_UP: f32 = 4.0;
+const HOP_NUDGE: f32 = 0.3;
+/// The mode-6 forward leap (no captured trigger).
+const LEAP_FORWARD: f32 = 4.5;
+const LEAP_UP: f32 = 7.0;
 /// How far the bottom exit snaps down (or up) to the ground before it counts as a fall (m).
 const BOTTOM_SNAP: f32 = 0.6;
 
@@ -89,7 +114,14 @@ pub struct LadderWorld<'w> {
     pub hull_poses: Option<Res<'w, DeckHullPoses>>,
     pub sprint: Option<Res<'w, super::sprint::Sprint>>,
     pub claim: ResMut<'w, LadderClaim>,
+    pub grab: ResMut<'w, LadderGrab>,
 }
+
+/// A HUD request to grab the climb doodad `obj_id` (a right click on it; inferred from the native
+/// use-target path). [`control_ladder`] consumes it; a request for a doodad out of reach or not
+/// climbable does nothing.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LadderGrab(pub Option<u32>);
 
 /// The ladder the local player hangs on.
 #[derive(Component, Clone, Debug)]
@@ -128,16 +160,55 @@ pub struct Exit {
 
 /// Why the local player left (`CSUnhang` reason, `Player::LeaveLadder`).
 pub mod reason {
-    /// The ladder doodad disappeared.
+    /// The ladder doodad disappeared (`FUN_39137470` "my ladder is missing" -> `FUN_39132ba0(0)`).
     pub const LADDER_MISSING: i32 = 0;
-    /// A generic release / the end of the top exit.
+    /// The end of the top exit: `FUN_39134930` sends it when the exit's `OnLadder` state turns
+    /// off. Our F release and bottom exit also send 1: inferred, with no native site found for
+    /// either.
     pub const RELEASE: i32 = 1;
-    /// The forward jump off (`FUN_39135570` mode 6).
-    pub const FORWARD_JUMP: i32 = 6;
+    /// A+Space: hop to the local -X side (`FUN_39135570` mode 4). Captured in the owner's
+    /// 2026-11-01 14:20 session on a ship ladder.
+    pub const LEFT_HOP: i32 = 4;
+    /// D+Space: hop to the local +X side (`FUN_39135570` mode 5). Same capture.
+    pub const RIGHT_HOP: i32 = 5;
+    /// The mode-6 forward leap (4.5 forward, 7.0 up, anim `jumpMP01`). No capture and no known
+    /// trigger; kept for the mode table.
+    pub const FORWARD_LEAP: i32 = 6;
+    /// A plain jump off the ladder: the mode-7 back-hop away from it (-2.0 forward, 4.0 up, a
+    /// -0.3 m nudge along forward). Captured for Space with no lateral input, also with W held.
+    pub const JUMP_OFF: i32 = 7;
     /// The unit died while hanging: the value-change callback (`FUN_39137320`) leaves with 0xb
     /// when the value reaches 0. It is the only native 0xb site (no release on mount, skill,
     /// glide or stance).
     pub const LADDER_LOST: i32 = 0xb;
+}
+
+/// One jump off the ladder: the `CSUnhang` reason, the horizontal carry (m/s), the up speed and
+/// the position nudge (m) before the release movement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Jump {
+    reason: i32,
+    velocity: Vec2,
+    nudge: Vec2,
+    up: f32,
+}
+
+/// The jump physics of `Player::LeaveLadder` (`FUN_39135570`): mode 4 hops to the local -X side,
+/// 5 to +X, 6 is the forward leap and 7 the back-hop away from the ladder. `forward` and `right`
+/// are the horizontal game-unit vectors of the climber's facing.
+fn jump_physics(reason: i32, forward: Vec2, right: Vec2) -> Jump {
+    let (dir, speed, nudge, up) = match reason {
+        reason::LEFT_HOP => (-right, HOP_SPEED, HOP_NUDGE, HOP_UP),
+        reason::RIGHT_HOP => (right, HOP_SPEED, HOP_NUDGE, HOP_UP),
+        reason::FORWARD_LEAP => (forward, LEAP_FORWARD, 0.0, LEAP_UP),
+        _ => (-forward, HOP_SPEED, HOP_NUDGE, HOP_UP),
+    };
+    Jump {
+        reason,
+        velocity: dir * speed,
+        nudge: dir * nudge,
+        up,
+    }
 }
 
 /// The clip family of a climb kind.
@@ -533,10 +604,14 @@ fn nearest_ladder(
     doodads: &Doodads,
     db: Option<&Db>,
     pos: Vec3,
+    want: Option<u32>,
 ) -> Option<LadderHit> {
     let db = db?;
     let mut best: Option<(f32, LadderHit)> = None;
     for (doodad, visual, entity) in ladders {
+        if want.is_some_and(|id| id != doodad.obj_id) {
+            continue;
+        }
         let Some(helper) = visual.ladder else {
             continue;
         };
@@ -559,7 +634,7 @@ fn nearest_ladder(
         if dist > REACH {
             continue;
         }
-        if best.as_ref().is_none_or(|b| dist < b.0) {
+        if want.is_some() || best.as_ref().is_none_or(|b| dist < b.0) {
             best = Some((
                 dist,
                 LadderHit {
@@ -576,6 +651,9 @@ fn nearest_ladder(
                     length,
                 },
             ));
+            if want.is_some() {
+                break;
+            }
         }
     }
     best.map(|(_, hit)| hit)
@@ -646,6 +724,7 @@ fn land_after_climb(
                 speed: 0.0,
                 vertical: 0.0,
                 deep: false,
+                hold: 0.0,
             });
             mover.grounded = false;
             mover.vz = 0.0;
@@ -718,6 +797,17 @@ pub fn control_ladder(
         actions.pressed("moveforward", 0) as i32 as f32
             - actions.pressed("moveback", 0) as i32 as f32
     };
+    // The lateral key held at the jump picks the side hop: A+Space -> 4 (local -X) and
+    // D+Space -> 5 (local +X), captured 2026-11-01 14:20 on a ship ladder. A/D are
+    // `turnleft`/`turnright`; the strafe pair (`moveleft`/`moveright`) is the same lateral
+    // intent, so the left actions send 4.
+    let lateral = if typing {
+        0.0
+    } else {
+        let left = actions.pressed("moveleft", 0) || actions.pressed("turnleft", 0);
+        let right = actions.pressed("moveright", 0) || actions.pressed("turnright", 0);
+        right as i32 as f32 - left as i32 as f32
+    };
 
     if dead {
         world.claim.0 = None;
@@ -737,12 +827,16 @@ pub fn control_ladder(
     let Some(ladder) = ladder else {
         // a teleport or a mount took the ladder away without `release`: drop the climb pose
         motion.climb = None;
+        // a right click on a ladder is a use of it (the native use-target path `FUN_393b8f40`
+        // is the only CSHang sender); it names the doodad, so the nearest is not enough
+        let requested = world.grab.0.take();
         let found = nearest_ladder(
             &ladders,
             &transforms,
             &doodads,
             world.db.as_deref(),
             mover.pos,
+            requested,
         );
         // the native grab gate 1.4(b) (`FUN_393b8f40`): a unit BOUND to a vehicle (`+0x3af0`,
         // its seat at `+0x3af4`), on a seat, in a skill move or flying does not hang; a swimmer
@@ -760,7 +854,7 @@ pub fn control_ladder(
         } else {
             found.as_ref().map(|hit| hit.obj_id)
         };
-        if !used || blocked {
+        if (!used && requested.is_none()) || blocked {
             return;
         }
         let Some(LadderHit {
@@ -780,14 +874,25 @@ pub fn control_ladder(
             return;
         };
         let helper_forward_game = bevy_to_cry(root_rotation * helper.forward).normalize_or_zero();
-        let mut normal = Vec3::new(mover.pos.x - closest.x, mover.pos.y - closest.y, 0.0);
-        if normal.length_squared() < 1e-6 {
-            normal = helper_forward_game;
-            normal.z = 0.0;
-        }
+        // The fixed-frame kinds (1/4/5/8/9) stand on the ladder's own front side (its `$ladder`
+        // helper +Y, `FUN_3916c520` keeps the identity hang rotation for them). The relative
+        // kinds (2 rope, 3 wood, 6, 7 mast, 10 big tree) build the hang rotation from the
+        // player's own quaternion (`FUN_3916c520`, :270103-270167), not from where the player
+        // stands: the body lies opposite the player's facing (inferred from the quaternion; the
+        // native frame's body offset is not decoded). A ship ladder is used from the deck, inside
+        // the hull: for the fixed kinds a player-relative normal would put the body inside the
+        // wall and send the jump further in.
+        let fixed_frame = matches!(kind, 1 | 4 | 5 | 8 | 9);
+        let mut normal = if fixed_frame {
+            helper_forward_game
+        } else {
+            let f = player::forward(mover.facing);
+            Vec3::new(-f.x, -f.y, 0.0)
+        };
+        normal.z = 0.0;
         normal = normal.normalize_or_zero();
         if normal == Vec3::ZERO {
-            // Straight below a vertical ladder: face its helper's side.
+            // On the segment: use the helper's front.
             normal = helper_forward_game;
             normal.z = 0.0;
             normal = normal.normalize_or_zero();
@@ -862,6 +967,7 @@ pub fn control_ladder(
         return;
     };
     world.claim.0 = Some(ladder.obj_id);
+    world.grab.0 = None;
 
     let mut ladder = ladder.clone();
     // No posture change releases the ladder: the only native 0xb site is the death check above.
@@ -939,12 +1045,18 @@ pub fn control_ladder(
     let facing = facing_of_normal(normal);
 
     if jump {
-        let forward = player::forward(facing);
-        mover.vz = JUMP_UP;
+        let jump_reason = match lateral {
+            side if side < 0.0 => reason::LEFT_HOP,
+            side if side > 0.0 => reason::RIGHT_HOP,
+            _ => reason::JUMP_OFF,
+        };
+        let jump = jump_physics(jump_reason, player::forward(facing), player::right(facing));
+        mover.pos += Vec3::new(jump.nudge.x, jump.nudge.y, 0.0);
+        mover.vz = jump.up;
         mover.grounded = false;
         commands
             .entity(entity)
-            .insert(player::CarriedVelocity(forward * JUMP_FORWARD));
+            .insert(player::CarriedVelocity(jump.velocity));
         release(
             &mut commands,
             entity,
@@ -952,7 +1064,7 @@ pub fn control_ladder(
             &mut motion,
             &mut state,
             &mut out,
-            reason::FORWARD_JUMP,
+            jump.reason,
         );
         return;
     }
@@ -1239,6 +1351,7 @@ pub fn drive_climb(
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LadderClaim>()
+        .init_resource::<LadderGrab>()
         .add_systems(
             Update,
             control_ladder

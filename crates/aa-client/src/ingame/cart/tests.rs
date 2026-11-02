@@ -799,3 +799,85 @@ fn the_effective_yaw_rate_fades_out_below_turn_full_speed() {
         "above the fade the effective rate is the wire rate"
     );
 }
+
+#[test]
+fn a_slave_attached_to_another_slave_is_not_driven_as_a_world_cart() {
+    use super::super::DevOptions;
+    use super::super::data::MountSpeed;
+    use super::super::mount::LocalSeat;
+    use super::super::player::LocalPlayer;
+    use aa_net::model::UnitStateAttachments;
+    use bevy::prelude::*;
+
+    let mut cannon = crate::ingame::seating::fixture_unit(7, 42, None);
+    cannon.kind = UnitKind::Slave {
+        id: 8,
+        tl_id: 1,
+        template_id: 10,
+        summoner_id: 0,
+    };
+    cannon.pos = Pos::new(-4.5703, -3.6836, 4.8404);
+    cannon.state_attachments = Some(UnitStateAttachments {
+        first_point: 3,
+        first_obj_id: Some(60),
+        bonding_obj_id: None,
+    });
+    let world = Vec3::new(12008.822, 9022.671, 105.118);
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .init_resource::<crate::settings::Actions>()
+        .init_resource::<DevOptions>()
+        .init_resource::<CartDrive>()
+        .insert_resource(LocalMount(Some(LocalSeat {
+            mount: 7,
+            point: 1,
+            drives: true,
+            cart: true,
+            ship: false,
+            turret: false,
+            speed: MountSpeed::default(),
+            lift: 0.0,
+        })))
+        .init_resource::<Views>()
+        .init_resource::<Units>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, drive_cart);
+    app.world_mut()
+        .resource_mut::<Units>()
+        .by_id
+        .insert(7, cannon);
+    let player = app
+        .world_mut()
+        .spawn((
+            LocalPlayer { obj_id: 1 },
+            Mover {
+                pos: world,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<Time>()
+        .advance_by(std::time::Duration::from_secs_f32(0.2));
+    app.update();
+    assert_eq!(
+        app.world().get::<Mover>(player).unwrap().pos,
+        world,
+        "a parent-local cannon point was used as the player's world position"
+    );
+    let sends: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .filter(|event| matches!(&event.0, aa_net::Command::MoveVehicle(_)))
+        .collect();
+    assert!(
+        sends.is_empty(),
+        "a slave attached to another slave sent a world-space vehicle body"
+    );
+}

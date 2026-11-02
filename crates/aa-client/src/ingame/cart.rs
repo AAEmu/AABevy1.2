@@ -471,6 +471,12 @@ pub fn drive_cart(
         drive.stop();
         return;
     };
+    // An attached child slave (a cannon on a ship) reports a parent-local point: a world-space
+    // cart controller would move the player to that offset instead of the parent's world pose.
+    if super::units::unit_parent(unit).is_some() {
+        drive.stop();
+        return;
+    }
     if !driver_of(&unit.kind, s.point) {
         drive.stop();
         return;

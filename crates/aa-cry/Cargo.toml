@@ -17,6 +17,8 @@ web-time = "1"
 
 [dev-dependencies]
 aa-dev.workspace = true
+# Conditional-translation checks for the prepass shader (`clip_discard` with BINDLESS on/off).
+wesl = "0.6"
 # Match the world's renderer in projector/filter GPU checks without enabling these for every library consumer.
 bevy = { workspace = true, features = ["pbr_light_textures", "pbr_clustered_decals"] }
 

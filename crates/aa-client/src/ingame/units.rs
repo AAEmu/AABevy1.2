@@ -48,7 +48,7 @@ const SPAWN_MAX_WAIT: f32 = 0.2;
 /// Unit and doodad preparations on the workers at once; the nearest are started first.
 const MAX_JOBS: usize = 16;
 /// The server's own cap for a transform parent chain (`aaemu-game` `world/mod.rs:50`).
-const MAX_PARENT_DEPTH: usize = 16;
+pub(crate) const MAX_PARENT_DEPTH: usize = 16;
 /// Units are drawn (and animated) within this distance of the camera (m) and inside the view.
 const DRAW_RADIUS: f32 = 110.0;
 const ANIMATE_RADIUS: f32 = 60.0;
@@ -372,6 +372,8 @@ struct View {
     parent: Option<u32>,
     /// Receipt which created this incarnation, not a same-identity refresh.
     announced_after: Option<usize>,
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame: (min, max) metres.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 impl View {
@@ -537,6 +539,20 @@ impl Views {
     /// The entity drawing the doodad `obj_id`, when it is drawn.
     pub fn doodad_entity(&self, obj_id: u32) -> Option<Entity> {
         self.doodads.get(&obj_id).and_then(|v| v.entity)
+    }
+
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame (metres), when the model
+    /// is built with them. The interaction gap measures to these (the native `FUN_3989bf90` uses the doodad's
+    /// real collision shape; the model bounds are the closest recovered shape).
+    pub(crate) fn doodad_bounds(&self, obj_id: u32) -> Option<(Vec3, Vec3)> {
+        self.doodads.get(&obj_id).and_then(|v| v.bounds)
+    }
+
+    /// The model phase changed: keep the drawn model's bounds until its replacement is built.
+    pub(crate) fn set_doodad_bounds(&mut self, obj_id: u32, bounds: Option<(Vec3, Vec3)>) {
+        if let Some(view) = self.doodads.get_mut(&obj_id) {
+            view.bounds = bounds;
+        }
     }
 
     /// Source lifetime of the currently rendered doodad root.
@@ -768,7 +784,7 @@ pub(crate) fn unit_world_pose_in(unit: &Unit, units: &Units) -> Option<(Vec3, f3
     ))
 }
 
-fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
+pub(crate) fn unit_world_transform(unit: &Unit, units: &Units, depth: usize) -> Option<Transform> {
     let Some(parent_id) = unit_parent(unit) else {
         return Some(placement(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw(), unit_scale(unit)));
     };
@@ -797,6 +813,22 @@ fn doodad_root_transform(doodad: &aa_net::model::Doodad, scale: f32) -> Transfor
         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
         scale: Vec3::splat(scale),
     }
+}
+
+/// The world transform of a doodad's model (prefab-local Cry metres) and the same model bounds in that
+/// transform's local Bevy frame, as an oriented box for the right-click interaction gap: a rotated doodad
+/// is measured against its real box, not an axis-aligned box around it. Parented doodads are not composed
+/// here (their parent transform is not in the HUD); callers fall back to the centre/sim-radius for those.
+pub(crate) fn doodad_bounds_local(
+    doodad: &aa_net::model::Doodad,
+    bounds: (Vec3, Vec3),
+    scale: f32,
+) -> (Transform, Vec3, Vec3) {
+    let transform = doodad_root_transform(doodad, if scale > 0.0 { scale } else { 1.0 });
+    let (lo, hi) = bounds;
+    let a = cry_to_bevy(lo);
+    let b = cry_to_bevy(hi);
+    (transform, a.min(b), a.max(b))
 }
 
 /// Where a doodad stands in the world (game coordinates): the packet position for an ordinary doodad, or the parent
@@ -1184,6 +1216,7 @@ pub fn sync_views(
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
                 let DoodadBuild { path, model: prepared, func_group_id, growth } = build;
+                let bounds = prepared.as_ref().and_then(|p| p.bounds);
                 // the announced `time_left` has been running down since it was announced, also while the doodad was not drawn
                 let since_announced_ms = (time.elapsed_secs() - view.announced_at) * 1000.0;
                 let entity = prepared.map(|prepared| {
@@ -1207,6 +1240,7 @@ pub fn sync_views(
                 });
                 drop(t_doodad);
                 let view = views.doodads.entry(id).or_default();
+                view.bounds = bounds;
                 match entity {
                     Some(e) => {
                         view.entity = Some(e);
@@ -2219,7 +2253,7 @@ impl Asleep {
 pub fn cull_units(
     mut commands: Commands,
     camera: Query<(&GlobalTransform, &Projection), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
-    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, Has<Asleep>)>,
+    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, (Has<Asleep>, Has<super::vehicle::EmergenceHidden>))>,
     children: Query<&Children>,
     meshes: Query<(), With<Mesh3d>>,
     timers: Option<Res<aa_world::profile::Timers>>,
@@ -2237,16 +2271,18 @@ pub fn cull_units(
     let (anim_lod, shadow_radius) = tuning();
     // half angle of the view cone's diagonal
     let half_diag = ((vfov * 0.5).tan() * (1.0 + aspect * aspect).sqrt()).atan();
-    for (entity, transform, mut visibility, mut unit, animator, asleep) in &mut units {
+    for (entity, transform, mut visibility, mut unit, animator, (asleep, emerging)) in &mut units {
         let to = transform.translation() + Vec3::Y - cam_pos;
         let d = to.length();
         let in_view = d < 3.0 || (to / d).dot(forward).acos() < half_diag + (2.0 / d.max(2.0)).atan() + 0.1;
-        let show = d < DRAW_RADIUS && in_view && hidden_mount != Some(unit.obj_id);
+        let visible = d < DRAW_RADIUS && in_view && hidden_mount != Some(unit.obj_id);
+        // a summoned vehicle waits for its clipped materials (`vehicle::EmergenceHidden`); it still animates
+        let show = visible && !emerging;
         let want = if show { Visibility::Inherited } else { Visibility::Hidden };
         if *visibility != want {
             *visibility = want;
         }
-        let animate = show && d < ANIMATE_RADIUS;
+        let animate = visible && d < ANIMATE_RADIUS;
         let awake = animator.is_some();
         if animate && asleep {
             commands.queue(move |world: &mut World| {
@@ -2274,7 +2310,7 @@ pub fn cull_units(
         }
         // shadows only near the camera
         let casting = d < shadow_radius * if unit.casting { 1.1 } else { 0.9 };
-        if casting != unit.casting && show {
+        if casting != unit.casting && visible {
             unit.casting = casting;
             for e in children.iter_descendants(entity) {
                 if meshes.contains(e) {

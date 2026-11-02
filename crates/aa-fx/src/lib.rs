@@ -248,6 +248,39 @@ impl Effect {
         self.scale = scale;
         self
     }
+
+    /// Whether to run this effect ahead when it starts (`bPrime`). Only a continuing effect may be primed: a
+    /// one-shot burst would be advanced past its lifetime before its first frame and would never be seen.
+    pub fn primes(&self, def: &EffectDef) -> bool {
+        self.prime && !def.one_shot()
+    }
+}
+
+/// Whether a finished effect retires its entity: anything with [`Effect::despawn_when_finished`], unless the
+/// dev `force_loop` keeps it. A `Continuous` effect with a finite `EmitterLifeTime` also finishes and must retire.
+fn retires_when_finished(effect: &Effect) -> bool {
+    effect.despawn_when_finished && !effect.force_loop
+}
+
+/// Whether a finished run stays finished when it is deactivated (out of range): a placed burst must not replay
+/// when the camera comes back. A continuing effect starts again.
+fn keeps_finished(def: Option<&EffectDef>) -> bool {
+    def.is_some_and(|def| def.one_shot())
+}
+
+/// Start a simulation: a continuing effect is primed, a burst starts at t=0 (`Effect::primes`). Used by
+/// [`resolve`] for both the first start and a loop restart, so tests call this same decision.
+pub(crate) fn start_simulation(
+    effect: &Effect,
+    def: &EffectDef,
+    sim: &mut EffectSim,
+    ctx: &StepCtx,
+) {
+    if effect.primes(def) {
+        sim.prime(ctx);
+    } else {
+        sim.primed = true;
+    }
 }
 
 /// Runtime state of an [`Effect`] (inserted with it).
@@ -270,6 +303,9 @@ pub struct FxRun {
     /// The light particles of the last step (world space), see [`FxSettings::max_lights`].
     lights: Vec<LightSample>,
     wind: wind::Run,
+    /// A `stop_emitting` request that outlives its simulation: a rebuilt sim starts stopped and a looping effect
+    /// never restarts (the real client's effect end event 5).
+    stopped: bool,
 }
 
 impl FxRun {
@@ -291,6 +327,31 @@ impl FxRun {
     /// Every emitter has finished.
     pub fn is_finished(&self) -> bool {
         self.finished
+    }
+
+    /// Stops spawning new particles for good; the live ones play out and the entity despawns when
+    /// `despawn_when_finished` is set (the real client's effect end event 5). The request survives a simulation that
+    /// is dropped out of range and rebuilt.
+    pub fn stop_emitting(&mut self) {
+        self.stopped = true;
+        if let Some(sim) = self.sim.as_mut() {
+            sim.stop_emitting();
+        }
+    }
+
+    /// The effect was stopped for good ([`FxRun::stop_emitting`]).
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
+    /// The longest particle lifetime of the effect, when its library def is resolved.
+    pub fn max_particle_life(&self) -> Option<f32> {
+        self.def.as_ref().map(|def| def.max_particle_life())
+    }
+
+    /// Whether a finished simulation starts again: a looping (or dev-forced) effect that has not been stopped.
+    pub(crate) fn restarts(&self, effect: &Effect) -> bool {
+        !self.stopped && (effect.force_loop || self.def.as_ref().is_some_and(|d| d.loops()))
     }
 
     /// Radius in metres within which the effect runs.
@@ -552,7 +613,8 @@ fn classify(view: Res<FxView>, queue: Res<FxQueue>, settings: Res<FxSettings>, m
         let d = gt.translation().distance(view.pos);
         let active = run.sim.is_some();
         let over_budget = beyond.contains(&e);
-        if ((!active && !run.finished && d < run.radius && !over_budget) || (active || run.finished) && (d > run.radius * 1.15 || over_budget))
+        if ((!active && !run.finished && d < run.radius && !over_budget)
+            || (active && (d > run.radius * 1.15 || over_budget)))
             && let Ok(mut v) = queue.0.lock()
         {
             v.push((d, e, !active && !run.finished));
@@ -628,7 +690,8 @@ fn apply(
                 commands.entity(m).despawn();
             }
             run.sim = None;
-            run.finished = false;
+            let keep_finished = keeps_finished(run.def.as_deref());
+            run.finished = run.finished && keep_finished;
             run.uploaded_units.clear();
             commands.entity(entity).remove::<FxActive>();
             continue;
@@ -710,7 +773,10 @@ fn apply(
             states.push(st);
             handles.push(handle);
         }
-        run.sim = Some(EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base));
+        let mut sim = EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base);
+        // a stop requested while the effect was out of range applies to the new simulation at once
+        stop_sim(&run, &mut sim);
+        run.sim = Some(sim);
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
@@ -720,6 +786,13 @@ fn apply(
         commands.entity(entity).insert(FxActive);
     }
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// A simulation built for a run honours a stop that was requested while the effect was out of range.
+pub(crate) fn stop_sim(run: &FxRun, sim: &mut EffectSim) {
+    if run.stopped {
+        sim.stop_emitting();
+    }
 }
 
 /// Gives the mesh emitters of active effects their mesh, material and entity once the model is loaded.
@@ -888,10 +961,10 @@ fn simulate(
                 }
             }
             if ready {
-                if effect.prime {
-                    sim.prime(&ctx);
-                } else {
-                    sim.primed = true;
+                match run.def.as_deref() {
+                    Some(def) => start_simulation(effect, def, &mut sim, &ctx),
+                    // never leave a simulation waiting for a definition it cannot get
+                    None => sim.primed = true,
                 }
             }
             run.sim = Some(sim);
@@ -916,17 +989,17 @@ fn simulate(
                 && run.wind.holding(time.elapsed_secs_f64(), settings.quality);
             if hold_wind { run.finished = false; }
             if sim.finished() && !hold_wind {
-                if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
+                if run.restarts(effect) {
                     sim.reset();
                     run.wind.restart(time.elapsed_secs_f64());
-                    if effect.prime {
-                        sim.prime(&ctx);
-                    } else {
-                        sim.primed = true;
+                    if let Some(def) = run.def.as_deref() {
+                        start_simulation(effect, def, &mut sim, &ctx);
                     }
                 } else {
                     run.finished = true;
-                    if effect.despawn_when_finished && let Ok(mut d) = despawn.lock() {
+                    if retires_when_finished(effect)
+                        && let Ok(mut d) = despawn.lock()
+                    {
                         d.push(entity);
                     }
                 }
@@ -1178,5 +1251,117 @@ mod tests {
         let lib = library::Library::parse(xml).unwrap();
         assert!(lib.get("A.HELD").unwrap().loops());
         assert!(!lib.get("A.ONCE").unwrap().loops());
+    }
+
+    #[test]
+    fn a_burst_is_never_primed_and_retires_when_finished() {
+        let xml = r#"<ParticleLibrary Name="T">
+            <Particles Name="a.fire"><Params/><Childs><Particles Name="x"><Params Continuous="true" Texture="t.dds"/></Particles></Childs></Particles>
+            <Particles Name="a.burst"><Params/><Childs><Particles Name="x"><Params ParticleLifeTime="6" Texture="t.dds"/></Particles></Childs></Particles>
+            </ParticleLibrary>"#;
+        let lib = library::Library::parse(xml).unwrap();
+        let fire = lib.get("A.FIRE").unwrap();
+        let burst = lib.get("A.BURST").unwrap();
+        assert!(!fire.one_shot());
+        assert!(burst.one_shot());
+        // `Effect::new` asks for priming, but a burst must start at t=0 so its first frames are visible
+        let mut effect = Effect::new("T.A.BURST");
+        assert!(!effect.primes(burst));
+        assert!(Effect::new("T.A.FIRE").primes(fire));
+        // and a finished effect with the flag retires; a placed burst keeps `finished` when it is deactivated
+        effect.despawn_when_finished = true;
+        assert!(retires_when_finished(&effect));
+        effect.despawn_when_finished = false;
+        assert!(!retires_when_finished(&effect));
+        let mut fire_effect = Effect::new("T.A.FIRE");
+        fire_effect.despawn_when_finished = true;
+        assert!(retires_when_finished(&fire_effect), "a finite continuous effect retires too");
+        assert!(keeps_finished(Some(burst)));
+        assert!(!keeps_finished(Some(fire)));
+        assert!(!keeps_finished(None));
+    }
+
+    #[test]
+    fn a_finished_placed_burst_does_not_replay_when_the_view_returns() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use bevy::asset::AssetPlugin;
+        use bevy::transform::TransformPlugin;
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            TransformPlugin,
+            FxPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<Image>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>();
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera3d::default(),
+                Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ))
+            .id();
+        let effect = app
+            .world_mut()
+            .spawn((
+                Effect {
+                    despawn_when_finished: false,
+                    no_body: true,
+                    ..Effect::new("X2_EFFECTS.housing_test.small_ship_exp")
+                },
+                Transform::default(),
+            ))
+            .id();
+        // run the burst quickly; it stays placed (no despawn)
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .set_relative_speed(30.0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut was_active = false;
+        while !app
+            .world()
+            .get::<FxRun>(effect)
+            .expect("the placed burst")
+            .is_finished()
+        {
+            assert!(std::time::Instant::now() < deadline, "the burst never finished");
+            app.update();
+            was_active |= app
+                .world()
+                .get::<FxRun>(effect)
+                .expect("the placed burst")
+                .is_active();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(was_active, "the burst ran at least once");
+        // leave the radius: the finished run deactivates but stays finished
+        app.world_mut()
+            .get_mut::<Transform>(camera)
+            .expect("the camera")
+            .translation = Vec3::new(1000.0, 0.0, 0.0);
+        for _ in 0..10 {
+            app.update();
+        }
+        let run = app.world().get::<FxRun>(effect).expect("the placed burst");
+        assert!(!run.is_active(), "out of range");
+        assert!(run.is_finished(), "a placed burst stays finished");
+        // return: it must not start again
+        app.world_mut()
+            .get_mut::<Transform>(camera)
+            .expect("the camera")
+            .translation = Vec3::new(0.0, 0.0, 5.0);
+        for _ in 0..30 {
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let run = app.world().get::<FxRun>(effect).expect("the placed burst");
+        assert!(!run.is_active(), "the finished burst does not replay");
+        assert!(run.is_finished());
+        assert!(app.world().get_entity(effect).is_ok(), "it stays placed");
     }
 }
