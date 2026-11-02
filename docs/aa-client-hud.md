@@ -3291,12 +3291,18 @@ order.
   Speed and calls `Update` each frame, so the motion rows are live.
   `GetSiegeWeaponSpeed` (`FUN_394aabd0`) returns the velocity's length signed by its component
   along the body's forward axis in m/s; `GetSiegeWeaponTurnSpeed` (`FUN_394aae90`) returns the
-  angular velocity's z times 57.29578 in degrees/s. Both require `FUN_39345f10` to report a slave
-  seat and return nil otherwise. A driven cart uses its controller speed/yaw rate
-  (`CartDrive::motion`); a remote slave uses its last type-2/3 movement, reading 0 after
-  `SPEED_STALE_AFTER` of silence. The unit text is the database's `ui_texts` category 31
-  (`m/s`, `degree/s`; the 15:05 capture's client data says `degrees/s`).
-  `GetVehicleInfo` stays nil: `FUN_394ab270` needs the native
+  angular velocity's z times 57.29578 in degrees/s. Both inline only the first `FUN_39345f10`
+  branch (the player's `+0x3af0` attachment, unit type 2); the native second branch (`this+0x18`)
+  is not ported. Outside that branch they return the native fall-through number 0, never nil,
+  because `slave_info.alb` multiplies the value. A driven cart uses its controller speed and
+  effective yaw rate (`CartDrive::motion`; the rate is the wire `0.4 * steering` faded by
+  `(speed / 0.5).clamp(-1, 1)`, so a parked cart reads 0); a remote slave uses its last type-2/3
+  movement, reading 0 after `SPEED_STALE_AFTER` of silence. Ships (slave kinds 1..=4 and 9) read
+  0: the native gates on physics class 3 (living) or 4 (wheeled), and this port has no ship case
+  for those getters. The unit text is the database's `ui_texts` category 31 (`m/s`, `degree/s`;
+  the 15:05 capture's client data says `degrees/s`). Leaving the seat raises
+  `SIEGEWEAPON_UNBOUND` (event 98, `FUN_393628a0` / `FUN_39345dc0`), which `mode_action.alb` F5
+  uses to hide the window. `GetVehicleInfo` stays nil: `FUN_394ab270` needs the native
   vehicle object's `+0x2a0` state, which this port has no source for, and the captured hauler
   shows no gear/brake/traction block. A mate's bar is only `command_unmount`
   (`FUN_392045f0`), so it has no "?" entry. The window's stock X closes it. The ignored

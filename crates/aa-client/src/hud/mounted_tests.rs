@@ -361,6 +361,24 @@ fn original_summon_info_rows_follow_the_seated_hauler() -> Result<(), Box<dyn st
     "#,
         )
         .exec()?;
+    super::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitDetached {
+            obj_id: 100,
+            reason: 0,
+        },
+        None,
+    );
+    rt.lua
+        .load(
+            r#"
+        assert(not slaveInfoFrame:IsVisible(), 'SIEGEWEAPON_UNBOUND hides the window')
+        assert(X2SiegeWeapon:GetSiegeWeaponSpeed() == 0)
+        assert(X2SiegeWeapon:GetSiegeWeaponTurnSpeed() == 0)
+    "#,
+        )
+        .exec()?;
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     Ok(())
 }

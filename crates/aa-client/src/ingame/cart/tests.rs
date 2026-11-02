@@ -780,3 +780,22 @@ fn the_captured_slope_drive_matches_pitch_roll_and_z() {
         last.pitch
     );
 }
+
+/// The Summon Info turn-speed row reads the rate the controller integrates, not the wire
+/// `angVel`: a parked cart with A/D held does not turn, even though the captured packet keeps
+/// `0.4 * steering`.
+#[test]
+fn the_effective_yaw_rate_fades_out_below_turn_full_speed() {
+    let mut controller = CartController::new(Pos::new(10.0, 20.0, 30.0), 0.0);
+    controller.step(0.05, 0.0, 1.0);
+    assert_eq!(controller.effective_yaw_rate(), 0.0, "parked, not rotating");
+    assert_eq!(controller.angular_velocity()[2], YAW_RATE_PER_STEER * controller.steering);
+    for _ in 0..60 {
+        controller.step(0.05, 1.0, 1.0);
+    }
+    assert!(controller.speed >= TURN_FULL_SPEED);
+    assert!(
+        (controller.effective_yaw_rate() - YAW_RATE_PER_STEER * controller.steering).abs() < 1e-6,
+        "above the fade the effective rate is the wire rate"
+    );
+}
