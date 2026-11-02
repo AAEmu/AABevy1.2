@@ -556,6 +556,12 @@ poller never returns 5: dying is entered by the death path below.
   prefab is spawned (`Part::animation`; `FUN_39109d20`), with or without a `Dead` marker. On the Red Farm
   Hauler this is the captured tip/roll (video 41-43.5, `dead_01` 3.33 s); `examples/vehicle_ship_death`
   and the dying-prefab unit test check the authored clip is the one the body plays.
+* **Wreck lifetime.** There is no client wreck/corpse timer for a slave. `SCSlaveRemoved` only clears the
+  owned-slave timeline (`FUN_391d4660` -> `FUN_39345cb0` -> `FUN_39345780`); the drawn unit stays in the
+  world. `SCUnitsRemoved` removes it (`FUN_391d4cd0` -> `FUN_39366480`). The 2026-11-02 frames show the
+  Red Farm Hauler wreck still drawn at video 60 s (the nameplate and red cargo are visible; the earlier
+  "gone at ~55.3 s" reading was a camera pan), i.e. until the server's packet at log 12:36:02, 21 s after
+  death. The Bevy path does the same (`units::receive_moves`: only `UnitsRemoved` despawns a unit root).
 * **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
   their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule accepts that (the mesh is
   still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). A sweep of every

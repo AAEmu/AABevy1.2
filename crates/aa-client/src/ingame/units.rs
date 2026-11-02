@@ -2024,6 +2024,41 @@ mod lifecycle_tests {
         assert_eq!(views.doodads[&7].doodad_source.as_ref().unwrap().template_id,8065);
     }
 
+    /// `SCSlaveRemoved` only clears the owned-slave timeline (`FUN_39345cb0`); the wreck stays drawn
+    /// until the server's `SCUnitsRemoved` (`FUN_39366480`). The 2026-11-02 capture's cart wreck was
+    /// still there at video 60-61 s (SCUnitsRemoved at log 12:36:02, ~21 s after death), so the ~15 s
+    /// "wreck timer" in the capture summary is a camera-pan misread, not a client timer.
+    #[test]
+    fn a_removed_slave_keeps_its_wreck_until_the_unit_is_removed() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .add_systems(Update, receive_moves);
+        let wreck = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .units
+            .insert(7, View { entity: Some(wreck), ..View::default() });
+        app.world_mut()
+            .write_message(NetEvent(Event::Slave(aa_net::slave::SlaveEvent::Removed {
+                obj_id: 7,
+                tl_id: 1,
+            })));
+        app.update();
+        assert!(
+            app.world().get_entity(wreck).is_ok(),
+            "SCSlaveRemoved does not remove the wreck"
+        );
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitsRemoved(vec![7])));
+        app.update();
+        assert!(
+            app.world().get_entity(wreck).is_err(),
+            "SCUnitsRemoved removes the wreck"
+        );
+    }
+
     #[test]
     fn unit_replacement_rejects_old_workers_before_clearing_current_preparation() {
         let mut app = App::new();
