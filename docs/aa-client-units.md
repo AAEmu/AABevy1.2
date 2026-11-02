@@ -442,19 +442,23 @@ refraction sphere and glow); the authored particle lifetimes produce the streak 
 orientation comes from the unit's quaternion in `FUN_3909ea30` (`+0x64` is the unit rotation, `+0x74` the plane
 point), which is what `SummonPortalAnchor` uses.
 
-The clip plane is implemented: `apply_emergence_clip` gives every mesh of the emerging vehicle a per-vehicle
-`IllumMaterial` clone whose `clip_plane` is `(axis, -axis·plane)`, and `illum.wesl` / `illum_prepass.wesl` discard
-fragments behind it (so the hidden part also does not write depth or shadows); `restore_emergence_clip` puts the
-shared materials back after `portal_time`. Parts that are not `IllumMaterial` (none of the vehicle parts in the
-data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in for the
-native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's `FxSound`
-item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2 list.
+The clip plane is implemented: `apply_emergence_clip` hides the unit for the first frame and gives every mesh a
+per-vehicle `IllumMaterial` clone whose `clip_plane` is `(axis, -axis·plane)`; `illum.wesl` discards behind it under
+the `ILLUM_CLIP` shader define (ordinary materials keep their early depth), and `illum_prepass.wesl` does the same in
+the prepass. An opaque clone becomes `AlphaMode::Mask`, which is what makes bevy_pbr build a fragment stage for the
+depth-only prepass and shadow pipelines (`MAY_DISCARD`); without it the hidden part still wrote depth and cast a
+shadow. `restore_emergence_clip` puts the shared materials back after `portal_time`, but only on a mesh that still
+holds its clipped clone (a stealth material change wins). Parts that are not `IllumMaterial` (none of the vehicle
+parts in the data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in
+for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's
+`FxSound` item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2
+list.
 
 Sea variant (Eznan Cutter, slave 21): the data gives group 619 `배포탈_열림x10`, scale 10.0, time 7.0 s, whose single
 item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), and the client plays it at
-the plane. The capture's 45-60° tilted rise/righting with spray is not part of the emergence code (it only moves the
-unit and leaves its rotation): the tilt is the server's unit rotation and is followed by `units::move_units`; the
-client does not add one. The parts still below the sea are not modelled.
+the plane. The capture's 45-60° tilted rise/righting with spray is **a client gap**: the emergence client adds no
+tilt or righting and leaves the unit rotation to `units::move_units`, so it cannot produce the captured pitch on its
+own; the parts still below the sea are not modelled either.
 
 ### Damage states (S15)
 

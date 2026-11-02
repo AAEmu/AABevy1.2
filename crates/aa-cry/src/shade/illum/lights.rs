@@ -255,7 +255,7 @@ impl From<&Bindings> for IllumData {
 }
 
 impl AsBindGroup for IllumExt {
-    type Data = ();
+    type Data = bool;
     type Param = (
         (
             Res<'static, RenderAssets<GpuImage>>,
@@ -268,7 +268,9 @@ impl AsBindGroup for IllumExt {
     fn label() -> &'static str {
         "IllumExt"
     }
-    fn bind_group_data(&self) -> Self::Data {}
+    fn bind_group_data(&self) -> Self::Data {
+        self.clip_plane != Vec4::ZERO
+    }
     fn bindless_slot_count() -> Option<BindlessSlabResourceLimit> {
         Bindings::bindless_slot_count()
     }

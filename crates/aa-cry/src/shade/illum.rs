@@ -360,6 +360,22 @@ impl MaterialExtension for IllumExt {
     fn prepass_fragment_shader() -> ShaderRef {
         "embedded://aa_cry/shade/illum_prepass.wesl".into()
     }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialExtensionPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        key: bevy::pbr::MaterialExtensionKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // Only a clipped material pays for the branch/discard in the main pass; ordinary Illum materials keep their
+        // early depth.
+        if key.bind_group_data
+            && let Some(fragment) = descriptor.fragment.as_mut()
+        {
+            fragment.shader_defs.push("ILLUM_CLIP".into());
+        }
+        Ok(())
+    }
 }
 
 /// Registers [`IllumMaterial`] and the systems that specialize tagged StandardMaterials.
@@ -776,6 +792,60 @@ mod tests {
                 assert_eq!(material.extension.params.gain.x, 1.0);
                 assert_eq!(material.extension.back, BackLightParams::default());
             }
+        }
+    }
+
+    /// `clip_discard` in the prepass must preprocess with BINDLESS on and off; the bindless `let clip` has to be
+    /// inside `@if(BINDLESS)` too, or a non-bindless build sees it unconditional and the `@else` redeclares `clip`.
+    #[test]
+    fn the_prepass_clip_discard_preprocesses_with_bindless_on_and_off() {
+        let source = include_str!("illum_prepass.wesl");
+        let start = source.find("fn clip_discard").expect("the clip_discard function");
+        let tail = &source[start..];
+        let end = tail.find("
+}
+").expect("the end of clip_discard") + 3;
+        let function = tail[..end].replace("prepass_io::VertexOutput", "VertexOutput");
+        let module = format!(
+            r#"struct VertexOutput {{
+    @builtin(position) position: vec4<f32>,
+    world_position: vec4<f32>,
+    @builtin(instance_index) instance_index: u32,
+}}
+struct Mesh {{ material_and_lightmap_bind_group_slot: u32 }}
+struct Clip {{ clip: vec4<f32> }}
+struct IllumIndices {{ data: u32 }}
+var<private> mesh: array<Mesh, 1>;
+var<private> illum_array: array<Clip, 1>;
+var<private> illum_indices: array<IllumIndices, 1>;
+var<private> illum_uniform: Clip;
+{function}
+"#
+        );
+        for bindless in [false, true] {
+            let mut unit: wesl::syntax::TranslationUnit = module
+                .parse()
+                .unwrap_or_else(|e| panic!("WESL parses (bindless {bindless}): {e:?}"));
+            let mut features = wesl::Features::new();
+            features.set("BINDLESS", bindless);
+            wesl::pass::condcomp(&mut unit, &features)
+                .unwrap_or_else(|e| panic!("condcomp (bindless {bindless}): {e:?}"));
+            let wgsl = unit.to_string();
+            let body = wgsl.split("fn clip_discard").nth(1).unwrap_or_default();
+            let clip_decls = body.matches("let clip =").count();
+            assert_eq!(clip_decls, 1, "one clip declaration (bindless {bindless}):
+{wgsl}");
+            if bindless {
+                assert!(body.contains("illum_array[illum_indices[slot].data].clip"), "{wgsl}");
+                assert!(!body.contains("illum_uniform.clip"), "{wgsl}");
+            } else {
+                assert!(body.contains("illum_uniform.clip"), "{wgsl}");
+                assert!(!body.contains("illum_array"), "{wgsl}");
+            }
+            // the preprocessed text is valid WGSL/WESL syntax
+            let _: wesl::syntax::TranslationUnit = wgsl
+                .parse()
+                .unwrap_or_else(|e| panic!("the preprocessed module parses (bindless {bindless}): {e:?}"));
         }
     }
 

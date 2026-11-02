@@ -204,7 +204,8 @@ pub struct SummonPortalAnchor {
 /// the emergence window ends. The clone is per vehicle so shared materials of other objects are untouched.
 #[derive(Component, Default)]
 pub struct EmergenceClip {
-    originals: Vec<(Entity, Handle<IllumMaterial>)>,
+    /// `(mesh entity, original handle, clipped handle)`: the restore only touches a mesh that still holds its clone.
+    originals: Vec<(Entity, Handle<IllumMaterial>, Handle<IllumMaterial>)>,
     added: Vec<Handle<IllumMaterial>>,
 }
 
@@ -338,16 +339,20 @@ pub fn spawn_summon_portals(
         }
         // the prefab's own inactive `portal_exhaust` follows the moving unit (FUN_39097140 / FUN_39097220)
         spawn_portal_exhaust(&mut commands, root, &damage.variant, now + f64::from(portal.time));
-        commands.entity(root).insert(SummonEmergence {
-            start,
-            end,
-            plane,
-            axis,
-            extent,
-            started: now,
-            duration: portal.time,
-            ended: false,
-        });
+        commands.entity(root).insert((
+            SummonEmergence {
+                start,
+                end,
+                plane,
+                axis,
+                extent,
+                started: now,
+                duration: portal.time,
+                ended: false,
+            },
+            // the first rendered frame must already be clipped: hide the model until the material clones are in
+            Visibility::Hidden,
+        ));
     }
     for tl_id in resolved {
         portals.forget(tl_id);
@@ -391,9 +396,8 @@ fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, un
 }
 
 /// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`), unless the local
-/// player is driving it (`Driven`, `cart::drive_cart` owns the transform then). The model clip plane (1.2's model
-/// vfunc 0xf8) is not implemented on the Bevy `StandardMaterial` path, so the hull may show behind the portal during
-/// the emergence; the portal effect covers most of that seam.
+/// player is driving it (`Driven`, `cart::drive_cart` owns the transform then). The portal-plane clip (1.2's model
+/// vfunc 0xf8) is applied by [`apply_emergence_clip`] and restored by [`restore_emergence_clip`].
 pub fn animate_summon_emergence(
     time: Res<Time>,
     mut roots: Query<(&mut Transform, &mut SummonEmergence), Without<super::mount::Driven>>,
@@ -423,11 +427,19 @@ pub fn animate_summon_emergence(
 pub fn apply_emergence_clip(
     mut commands: Commands,
     illum: Option<ResMut<Assets<IllumMaterial>>>,
+    time: Res<Time>,
     mut roots: Query<(Entity, &SummonEmergence, Option<&mut EmergenceClip>)>,
     children: Query<&Children>,
     materials: Query<&MeshMaterial3d<IllumMaterial>>,
 ) {
+    let now = time.elapsed_secs_f64();
     let Some(mut illum) = illum else {
+        // no render-side Illum materials (a headless example/test): nothing to clip, do not keep the unit hidden
+        for (root, emergence, _) in &mut roots {
+            if !emergence.ended {
+                commands.entity(root).insert(Visibility::Inherited);
+            }
+        }
         return;
     };
     for (root, emergence, clip) in &mut roots {
@@ -445,6 +457,7 @@ pub fn apply_emergence_clip(
             -emergence.axis.dot(emergence.plane),
         );
         let mut stack = vec![root];
+        let mut clipped_any = false;
         while let Some(entity) = stack.pop() {
             if let Ok(kids) = children.get(entity) {
                 stack.extend(kids.iter());
@@ -453,7 +466,7 @@ pub fn apply_emergence_clip(
                 continue;
             };
             if clip.added.iter().any(|added| added.id() == handle.0.id())
-                || clip.originals.iter().any(|(seen, _)| *seen == entity)
+                || clip.originals.iter().any(|(seen, ..)| *seen == entity)
             {
                 continue;
             }
@@ -462,13 +475,25 @@ pub fn apply_emergence_clip(
             };
             let mut material = original.clone();
             material.extension.clip_plane = plane;
+            // The depth-only prepass/shadow pipelines have no fragment stage unless the material can discard
+            // (bevy_pbr's prepass: MAY_DISCARD). An opaque vehicle clone becomes alpha-masked so `clip_discard`
+            // runs there too; the base alpha is 1, so the visible shading is unchanged.
+            if matches!(material.base.alpha_mode, AlphaMode::Opaque) {
+                material.base.alpha_mode = AlphaMode::Mask(0.5);
+            }
             let clipped = illum.add(material);
             commands.entity(entity).insert(MeshMaterial3d(clipped.clone()));
-            clip.originals.push((entity, handle.0.clone()));
+            clip.originals.push((entity, handle.0.clone(), clipped.clone()));
             clip.added.push(clipped);
+            clipped_any = true;
             if clip.originals.len() >= 256 {
                 break;
             }
+        }
+        // the unit was hidden at the start so the first rendered frame is already clipped; if nothing could be
+        // clipped (no Illum part), show it after a short grace instead of leaving it invisible
+        if clipped_any || (clip.originals.is_empty() && now - emergence.started > 0.25) {
+            commands.entity(root).insert(Visibility::Inherited);
         }
     }
 }
@@ -480,6 +505,7 @@ pub fn restore_emergence_clip(
     mut commands: Commands,
     mut roots: Query<(Entity, &mut SummonEmergence, Option<&mut EmergenceClip>)>,
     alive: Query<()>,
+    materials: Query<&MeshMaterial3d<IllumMaterial>>,
 ) {
     let now = time.elapsed_secs_f64();
     for (root, mut emergence, clip) in &mut roots {
@@ -493,11 +519,17 @@ pub fn restore_emergence_clip(
         let Some(mut clip) = clip else {
             continue;
         };
-        for (entity, original) in clip.originals.drain(..) {
-            if alive.get(entity).is_ok() {
+        for (entity, original, clipped) in clip.originals.drain(..) {
+            // stealth or another system may have replaced the material meanwhile: only undo our own clone
+            if alive.get(entity).is_ok()
+                && materials
+                    .get(entity)
+                    .is_ok_and(|handle| handle.0.id() == clipped.id())
+            {
                 commands.entity(entity).insert(MeshMaterial3d(original));
             }
         }
+        commands.entity(root).insert(Visibility::Inherited);
         commands.entity(root).remove::<EmergenceClip>();
     }
 }
@@ -1973,6 +2005,57 @@ mod tests {
         assert!(app.world().get::<EmergenceClip>(root).is_none());
     }
 
+    /// A material replaced while the emergence runs (stealth) is not restored over: only the clipped clone is undone.
+    #[test]
+    fn the_restore_does_not_undo_a_replaced_material() {
+        use bevy::asset::AssetPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<IllumMaterial>();
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let root = app
+            .world_mut()
+            .spawn(SummonEmergence {
+                start: Vec3::new(0.0, 0.0, 2.0),
+                end: Vec3::ZERO,
+                plane: Vec3::new(0.0, 0.0, 1.0),
+                axis: Vec3::new(0.0, 0.0, -1.0),
+                extent: 1.0,
+                started: 0.0,
+                duration: 1.0,
+                ended: false,
+            })
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original), ChildOf(root)))
+            .id();
+        app.add_systems(Update, (apply_emergence_clip, restore_emergence_clip).chain());
+        app.update();
+        app.update();
+        let other = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        app.world_mut()
+            .entity_mut(mesh)
+            .insert(MeshMaterial3d(other.clone()));
+        app.world_mut().get_mut::<SummonEmergence>(root).unwrap().ended = true;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            other.id(),
+            "a replaced material is left alone"
+        );
+    }
+
     /// `SCSlaveCreatedPacket` without `hideSpawnEffect` on slave 146 (Red Farm Hauler) plays the `slaves` row's
     /// `portal_spawn_fx_id` 1263 (`portal_tank_spawn`) once, at the clip-plane point, and moves the cart out of the
     /// plane over `portal_time` 1.0 s (`FUN_3909ea30` / `FUN_39097220`).
@@ -2015,7 +2098,8 @@ mod tests {
         assert!(emergence.extent > 0.5, "extent {}", emergence.extent);
         assert!(axis.y.abs() < 1e-6 && (axis.length() - 1.0).abs() < 1e-4, "{axis:?}");
         let rotation = app.world().get::<Transform>(root).expect("the root").rotation;
-        let mut hull_forward = rotation * Vec3::NEG_Z;
+        // the model's forward is cry +Y (`cry_to_bevy(+Y)` is Bevy -Z); the axis must be the unit's forward
+        let mut hull_forward = rotation * aa_world::cry_to_bevy(Vec3::Y);
         hull_forward.y = 0.0;
         let hull_forward = hull_forward.normalize_or_zero();
         assert!((axis - hull_forward).length() < 1e-5, "axis {axis:?} vs hull forward {hull_forward:?}");
@@ -2124,6 +2208,32 @@ mod tests {
             app.world().resource::<SummonPortals>().pending.is_empty(),
             "the timeline id is consumed"
         );
+    }
+
+    /// The red cargo/boiler is the `add` subset at the model's **+Y** end (the bed `wood` is behind it): cry +Y is
+    /// the forward the emergence moves along, so the captured "cargo end first" is the +forward direction, not a
+    /// flipped axis.
+    #[test]
+    fn the_red_cargo_end_is_the_model_forward_end() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let model = aa_cry::mesh::Model::load("objects/env/06_unit/05_carriage/transfers_trailer_c.chr")
+            .expect("the Red Farm Hauler body");
+        let mtl = aa_cry::material::Material::load("objects/env/06_unit/05_carriage/transfers_trailer_c.mtl")
+            .expect("its materials");
+        let mesh = model.meshes.first().expect("the body mesh");
+        let subset = |name: &str| {
+            mesh.subsets
+                .iter()
+                .find(|s| mtl.sub(s.material_id as usize).is_some_and(|m| m.name == name))
+                .unwrap_or_else(|| panic!("the {name} subset"))
+        };
+        let cargo = subset("add");
+        let bed = subset("wood");
+        assert!(cargo.center.y > 0.0, "cargo at +Y: {:?}", cargo.center);
+        assert!(cargo.center.y > bed.center.y, "cargo ahead of the bed: {cargo:?} {bed:?}");
+        assert_eq!(aa_world::cry_to_bevy(Vec3::Y), Vec3::NEG_Z, "cry +Y is the Bevy forward");
     }
 
     /// The fallback cap despawns a summon effect that is not under a portal anchor (the prefab's `portal_exhaust` is

@@ -166,6 +166,7 @@ fn fragment(in: prepass_io::VertexOutput) {
 fn clip_discard(in: prepass_io::VertexOutput) {
 @if(BINDLESS)
     let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
+@if(BINDLESS)
     let clip = illum_array[illum_indices[slot].data].clip;
 @else
     let clip = illum_uniform.clip;

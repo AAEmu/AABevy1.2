@@ -4,7 +4,7 @@
 //! (`slaves.portal_spawn_fx_id` 1263 `portal_tank_spawn`, scale 3) hangs at the plane. A vehicle the server only
 //! streams in later (no creation packet) and a creation with `hideSpawnEffect` play none.
 //!
-//! `cargo run -p aa-client --example slave_summon -- --mute --offscreen-shot shots/aa-client/slave_summon.png --shot-after 2.2`
+//! `cargo run -p aa-client --example slave_summon -- --mute --offscreen-shot shots/aa-client/slave_summon.png --shot-after 3.0`
 //!
 //! The creation packet is sent once the scene is drawn (1.4 s in), so the screencap sees the cart emerging through its
 //! portal. Without `--shot*` the example checks the start/plane, the end after `portal_time`, and the particles
