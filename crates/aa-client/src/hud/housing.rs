@@ -32,8 +32,10 @@ use crate::ingame::housing::placement::{Builder, BuilderSignal};
 use crate::ingame::player::placement;
 use crate::ingame::shipyard::DrawnShipyards;
 
-/// The demolition skill (`interaction_effects.wi_id` 94, `WI_DEMOLISH`) `X2House:Demolish` casts at the house.
-const DEMOLISH_SKILL: u32 = 11404;
+/// The demolition skill `X2House:Demolish` casts at the house: `DAT_39ac99e0`, 12945 in the data image
+/// (`FUN_39478740`). It has `interaction_effects.wi_id` 94 (`WI_DEMOLISH`) and a 20 s `skills.casting_time`, like
+/// the 11404 copy.
+const DEMOLISH_SKILL: u32 = 12945;
 /// The tax certificates (`TaxItem` feature): one per gold of tax (`housing::hooks::construction_certificates`).
 const TAX_CERTIFICATE: u32 = 31891;
 const BOUND_TAX_CERTIFICATE: u32 = 31892;
@@ -153,11 +155,23 @@ enum Signal {
     NameChanged,
     Permission,
     InfoUpdated,
-    SetSell,
-    CancelSell,
-    Bought,
+    SetSell(String),
+    CancelSell(String),
+    SellFailed,
+    CancelFailed,
+    BuyFailed,
+    Bought(String),
     Sold(String),
     Deco,
+}
+
+/// The sale request the server has not answered yet (`SCHouseSetForSale` / `SCHouseResetForSale` /
+/// `SCHouseSold` or a refusal `SCErrorMsg` in `0x286..=0x293`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pending {
+    Sell,
+    Cancel,
+    Buy,
 }
 
 /// A refused action to show (`ERROR_MSG` name and the `$1` argument, usually the item).
@@ -171,6 +185,8 @@ struct Notice {
 struct View {
     current: Option<Current>,
     me: u32,
+    /// The player's own character name (`XlCompareString` with the sell-to name, `FUN_3932c640`).
+    me_name: String,
     money: i64,
     zone: String,
     /// Bag counts: tax certificates (bound and not), appraisal certificates.
@@ -179,6 +195,8 @@ struct View {
     commands: Vec<Command>,
     signals: Vec<Signal>,
     notices: Vec<Notice>,
+    /// Set by a sale button (operation and house), cleared by its receipt or a refusal in the sale error range.
+    pending: Option<(Pending, u16)>,
     builder_next: bool,
     builder_prev: bool,
     /// Dev hooks: a scripted interaction, a pinned builder spot and clicks.
@@ -204,6 +222,17 @@ fn certificates_for(copper: i64) -> i64 {
 /// `GetHouseSaleItemInfo`: the appraisal certificates a sale price costs.
 fn appraisals_for(copper: i64) -> i64 {
     ((copper.max(0) + COPPER_PER_APPRAISAL - 1) / COPPER_PER_APPRAISAL).max(1)
+}
+
+/// `FUN_398970E0`: the castle categories (2..=5, 14) cannot be put up for sale.
+fn is_castle(category_id: u32) -> bool {
+    (2..=5).contains(&category_id) || category_id == 14
+}
+
+/// The design's `housings` row, for the sale gates; `None` where `FUN_3963B390` returns 0.
+fn housing_template(bridge: &Shared, design: u32) -> Option<super::data::housing::HousingTemplate> {
+    let data = bridge.borrow();
+    data.game.get().and_then(|g| g.housing.housings.get(&design)).cloned()
 }
 
 /// A money amount the scripts pass as a number or a decimal string.
@@ -636,7 +665,9 @@ fn install_tax(lua: &Lua, h: &Table, state: &State) -> mlua::Result<()> {
     Ok(())
 }
 
-/// The sale form and buying a house that is for sale.
+/// The sale form and buying a house that is for sale. The client gates are `FUN_3932C640` (sell),
+/// `FUN_3932C800` (cancel) and `FUN_3932E020` (buy); the server's answer is `SCHouseSetForSale` /
+/// `SCHouseResetForSale` / `SCHouseSold`, or an `SCErrorMsg` in `0x286..=0x293`.
 fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::Result<()> {
     let (s, b) = (state.clone(), bridge.clone());
     h.set(
@@ -644,18 +675,34 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
         lua.create_function(move |lua, _: Value| {
             let v = s.0.borrow();
             let t = lua.create_table()?;
-            let Some(c) = v.current.as_ref() else { return Ok(t) };
-            let (price, target, target_id) = c.snapshot.as_ref().map_or((0, String::new(), 0), |s| (i64::from(s.sell_price.max(0)), s.sell_to_name.clone(), s.sell_to_player_id));
+            let Some(c) = v.current.as_ref() else {
+                return Ok(t);
+            };
+            let (price, target, target_id) =
+                c.snapshot.as_ref().map_or((0, String::new(), 0), |s| {
+                    (
+                        i64::from(s.sell_price.max(0)),
+                        s.sell_to_name.clone(),
+                        s.sell_to_player_id,
+                    )
+                });
             let on_sale = price > 0;
-            let sellable = template(&b, c.design, |t| t.is_sellable);
+            // `FUN_3947A4D0`: canSell is the design's `is_sellable`, the owner and not a castle; it does not
+            // look at construction or an existing sale. canBuy only needs a price and, when there is one, a
+            // designated buyer who is me.
+            let (sellable, castle) = housing_template(&b, c.design).map_or((false, false), |t| {
+                (t.is_sellable, is_castle(t.category_id))
+            });
             t.set("onSale", on_sale)?;
             t.set("price", price.to_string())?;
             t.set("gold", price / 10_000)?;
             t.set("silver", price / 100 % 100)?;
             t.set("copper", price % 100)?;
-            t.set("targetName", target)?;
-            t.set("canSell", c.mine && sellable && !c.under_construction())?;
-            t.set("canBuy", on_sale && !c.mine && (target_id == 0 || target_id == v.me))?;
+            if target_id != 0 {
+                t.set("targetName", target)?;
+            }
+            t.set("canSell", c.mine && sellable && !castle)?;
+            t.set("canBuy", on_sale && (target_id == 0 || target_id == v.me))?;
             Ok(t)
         })?,
     )?;
@@ -671,45 +718,185 @@ fn install_sale(lua: &Lua, h: &Table, bridge: &Shared, state: &State) -> mlua::R
             Ok(t)
         })?,
     )?;
-    let s = state.clone();
+    // `FUN_3932C640`, in its order: owner 0x282, castle 0x283, under construction 0x29c, already for sale
+    // 0x286, template (silent when missing), not sellable 0x284, appraisal certificates 0x287, own name 0x2a9.
+    let (s, b) = (state.clone(), bridge.clone());
     h.set(
         "SetHouseForSale",
-        lua.create_function(move |_, (_, g, sv, c, name): (Value, Value, Value, Value, Option<String>)| {
-            let mut v = s.0.borrow_mut();
-            let price = copper(&g, &sv, &c);
-            let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) else { return Ok(()) };
-            if !(1..=i64::from(i32::MAX)).contains(&price) {
-                v.notices.push(Notice { name: "HOUSE_CANNOT_SELL_AS_TOO_LOW_PRICE", arg: None });
-                return Ok(());
-            }
-            v.commands.push(Command::House(HouseCommand::Sell { tl, money_amount: price as u32, sell_to: name.unwrap_or_default() }));
-            Ok(())
-        })?,
+        lua.create_function(
+            move |_, (_, g, sv, c, name): (Value, Value, Value, Value, Option<String>)| {
+                let mut v = s.0.borrow_mut();
+                let price = copper(&g, &sv, &c);
+                let Some((tl, design, mine, under_construction, for_sale)) =
+                    v.current.as_ref().map(|c| {
+                        (
+                            c.tl_id,
+                            c.design,
+                            c.mine,
+                            c.under_construction(),
+                            c.snapshot.as_ref().is_some_and(|s| s.sell_price != 0),
+                        )
+                    })
+                else {
+                    return Ok(());
+                };
+                if !mine {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_NOT_OWNER",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                let template = housing_template(&b, design);
+                let category = template.as_ref().map_or(0, |t| t.category_id);
+                if is_castle(category) {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_CASTLE",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                if under_construction {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_UNDER_CONSTRUCTION",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                if for_sale {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_ALREADY_FOR_SALE",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                let Some(template) = template else {
+                    return Ok(());
+                };
+                if !template.is_sellable {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_TYPE",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                if v.appraisals < appraisals_for(price) {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_AS_NOT_ENOUGH_SEAL",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                let sell_to = name.unwrap_or_default();
+                if sell_to == v.me_name {
+                    v.notices.push(Notice {
+                        name: "HOUSE_CANNOT_SELL_TO_ONESELF",
+                        arg: None,
+                    });
+                    return Ok(());
+                }
+                // The native gates above have no price check (the form's button keeps the price
+                // in range); a script call outside the 32-bit money range is dropped silently
+                // rather than wrapped into a huge price.
+                if !(0..=i64::from(i32::MAX)).contains(&price) {
+                    return Ok(());
+                }
+                v.commands.push(Command::House(HouseCommand::Sell {
+                    tl,
+                    money_amount: price as u32,
+                    sell_to,
+                }));
+                v.pending = Some((Pending::Sell, tl));
+                Ok(())
+            },
+        )?,
     )?;
+    // `FUN_3932C800`: owner 0x28b, then a sale to cancel 0x28c.
     let s = state.clone();
     h.set(
         "CancelHouseForSale",
         lua.create_function(move |_, _: Value| {
             let mut v = s.0.borrow_mut();
-            if let Some(tl) = v.current.as_ref().filter(|c| c.mine).map(|c| c.tl_id) {
-                v.commands.push(Command::House(HouseCommand::CancelSell { tl }));
+            let Some((tl, mine, for_sale)) = v.current.as_ref().map(|c| {
+                (
+                    c.tl_id,
+                    c.mine,
+                    c.snapshot.as_ref().is_some_and(|s| s.sell_price != 0),
+                )
+            }) else {
+                return Ok(());
+            };
+            if !mine {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_CANCEL_SELL_AS_NOT_OWNER",
+                    arg: None,
+                });
+                return Ok(());
             }
+            if !for_sale {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_CANCEL_SELL_AS_NOT_FOR_SALE",
+                    arg: None,
+                });
+                return Ok(());
+            }
+            v.commands
+                .push(Command::House(HouseCommand::CancelSell { tl }));
+            v.pending = Some((Pending::Cancel, tl));
             Ok(())
         })?,
     )?;
+    // `FUN_3932E020`: owner 0x28f, not for sale 0x28e, designated buyer 0x290, money 0x291.
     let s = state.clone();
     h.set(
         "BuyHouse",
         lua.create_function(move |_, _: Value| {
             let mut v = s.0.borrow_mut();
-            let Some((tl, price)) = v.current.as_ref().and_then(|c| c.snapshot.as_ref().map(|s| (c.tl_id, s.sell_price.max(0) as u32))) else { return Ok(()) };
-            if price == 0 {
-                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE", arg: None });
-            } else if i64::from(price) > v.money {
-                v.notices.push(Notice { name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY", arg: None });
-            } else {
-                v.commands.push(Command::House(HouseCommand::Buy { tl, money_amount: price }));
+            let Some((tl, mine, price, target)) = v.current.as_ref().and_then(|c| {
+                c.snapshot.as_ref().map(|s| {
+                    (
+                        c.tl_id,
+                        c.mine,
+                        s.sell_price.max(0) as u32,
+                        s.sell_to_player_id,
+                    )
+                })
+            }) else {
+                return Ok(());
+            };
+            if mine {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_BUY_AS_OWNER",
+                    arg: None,
+                });
+                return Ok(());
             }
+            if price == 0 {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_BUY_AS_NOT_FOR_SALE",
+                    arg: None,
+                });
+                return Ok(());
+            }
+            if target != 0 && target != v.me {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_BUY_AS_NOT_DESIGNATED_BUYER",
+                    arg: None,
+                });
+                return Ok(());
+            }
+            if i64::from(price) > v.money {
+                v.notices.push(Notice {
+                    name: "HOUSE_CANNOT_BUY_AS_NOT_ENOUGH_MONEY",
+                    arg: None,
+                });
+                return Ok(());
+            }
+            v.commands.push(Command::House(HouseCommand::Buy {
+                tl,
+                money_amount: price,
+            }));
+            v.pending = Some((Pending::Buy, tl));
             Ok(())
         })?,
     )?;
@@ -803,9 +990,13 @@ fn fire(rt: &UiRuntime, state: &State, signal: Signal) {
         Signal::NameChanged => rt.fire_event("UNIT_NAME_CHANGED", ()),
         Signal::Permission => rt.fire_event("HOUSE_PERMISSION_UPDATED", ()),
         Signal::InfoUpdated => rt.fire_event("HOUSE_INFO_UPDATED", ()),
-        Signal::SetSell => rt.fire_event("HOUSE_SET_SELL_SUCCESS", ()),
-        Signal::CancelSell => rt.fire_event("HOUSE_CANCEL_SELL_SUCCESS", ()),
-        Signal::Bought => rt.fire_event("HOUSE_BUY_SUCCESS", ()),
+        // `FUN_3932B680` / `FUN_3932B790` pass the packet's house name; `FUN_3932B8A0` too.
+        Signal::SetSell(name) => rt.fire_event("HOUSE_SET_SELL_SUCCESS", name),
+        Signal::CancelSell(name) => rt.fire_event("HOUSE_CANCEL_SELL_SUCCESS", name),
+        Signal::SellFailed => rt.fire_event("HOUSE_SET_SELL_FAIL", ()),
+        Signal::CancelFailed => rt.fire_event("HOUSE_CANCEL_SELL_FAIL", ()),
+        Signal::BuyFailed => rt.fire_event("HOUSE_BUY_FAIL", ()),
+        Signal::Bought(name) => rt.fire_event("HOUSE_BUY_SUCCESS", name),
         Signal::Sold(name) => rt.fire_event("HOUSE_SALE_SUCCESS", name),
         Signal::Deco => rt.fire_event("HOUSE_DECO_UPDATED", ()),
     }
@@ -997,9 +1188,9 @@ pub(crate) fn sync(
         builder_signals.p1().clear();
         return;
     };
-    let (me, pos, money, zone) = {
+    let (me, me_name, pos, money, zone) = {
         let d = bridge.0.borrow();
-        (d.character_id, d.pos, d.snapshot.money, d.snapshot.zone.clone())
+        (d.character_id, d.snapshot.name.clone(), d.pos, d.snapshot.money, d.snapshot.zone.clone())
     };
     let blocked = super::blocks_look_pointer(&bridge.0.borrow(), MouseButton::Right);
     let picked = pointer
@@ -1009,6 +1200,7 @@ pub(crate) fn sync(
     let mut last_tax = v.last_tax.take();
     v.pointer_picked = picked;
     v.me = me;
+    v.me_name = me_name;
     v.money = money;
     v.zone = zone;
     let count = |t: u32| inventory.bag.iter().flatten().filter(|i| i.template_id == t).map(|i| i64::from(i.count)).sum::<i64>();
@@ -1061,7 +1253,34 @@ pub(crate) fn sync(
 
     // the server
     let open = v.current.as_ref().map(|c| (c.obj_id, c.tl_id));
+    // A pending sale request belongs to the house it was sent for: once another house (or none)
+    // is open, a later refusal must not raise that house's fail event in the new window.
+    if v
+        .pending
+        .is_some_and(|(_, tl)| open.is_none_or(|(_, open_tl)| open_tl != tl))
+    {
+        v.pending = None;
+    }
     for NetEvent(event) in events.read() {
+        if let Event::ServerError { code } = event {
+            // A sale request the server refuses raises the fail event the scripts listen to
+            // (`0x106` sell, `0x107` buy, `0x108` cancel, `FUN_39214380`). The error set is the sell
+            // range 0x282..=0x28A plus 0x29C/0x2A9, the cancel DB error 0x28D, the buy range
+            // 0x28E..=0x293, and the castle 0x283 and `INVALID_HOUSE_INFO` 0x266 the buy/sell ops
+            // really send; the pending operation, not the code, names the event. The native raiser is
+            // a packed thunk, so the trigger is inferred (capture-pending C5). Without a pending sale
+            // request the ordinary `SYSMSG` text stands.
+            if matches!(*code, 0x266 | 0x282..=0x293 | 0x29c | 0x2a9)
+                && let Some((kind, _)) = v.pending.take()
+            {
+                v.signals.push(match kind {
+                    Pending::Sell => Signal::SellFailed,
+                    Pending::Cancel => Signal::CancelFailed,
+                    Pending::Buy => Signal::BuyFailed,
+                });
+            }
+            continue;
+        }
         let Event::Housing(e) = event else {
             if let (Event::UnitNameChanged { obj_id, .. }, Some((open_obj, _))) = (event, open)
                 && *obj_id == open_obj
@@ -1082,16 +1301,79 @@ pub(crate) fn sync(
                 last_tax = Some(info.clone());
                 v.signals.push(Signal::Tax);
             }
-            HousingEvent::BuildProgress { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::Step),
-            HousingEvent::PermissionChanged { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::Permission),
-            HousingEvent::RecoverToggle { tl_id, .. } | HousingEvent::OwnerNameChanged { tl_id, .. } if ours(tl_id) => v.signals.push(Signal::InfoUpdated),
-            HousingEvent::SetForSale(sale) if ours(&sale.tl_id) => v.signals.extend([Signal::SetSell, Signal::InfoUpdated]),
-            HousingEvent::ResetForSale { tl_id, .. } if ours(tl_id) => v.signals.extend([Signal::CancelSell, Signal::InfoUpdated]),
-            HousingEvent::Sold { tl_id, new_owner_id, house_name, .. } => {
-                if *new_owner_id == me && me != 0 {
-                    v.signals.push(Signal::Bought);
-                } else if ours(tl_id) {
+            HousingEvent::BuildProgress { tl_id, .. } if ours(tl_id) => {
+                v.signals.push(Signal::Step)
+            }
+            HousingEvent::PermissionChanged { tl_id, .. } if ours(tl_id) => {
+                v.signals.push(Signal::Permission)
+            }
+            HousingEvent::RecoverToggle { tl_id, .. }
+            | HousingEvent::OwnerNameChanged { tl_id, .. }
+                if ours(tl_id) =>
+            {
+                v.signals.push(Signal::InfoUpdated)
+            }
+            // `FUN_3932B680` / `FUN_3932B790`: the house is looked up by tl; the success event goes to
+            // its owner even when another house (or no house) is open, and only `HOUSE_INFO_UPDATED` is
+            // limited to the open house.
+            HousingEvent::SetForSale(sale) => {
+                if v.pending.is_some_and(|(_, tl)| tl == sale.tl_id) {
+                    v.pending = None;
+                }
+                let mine = me != 0
+                    && houses
+                        .by_tl_id
+                        .get(&sale.tl_id)
+                        .is_some_and(|h| h.snapshot.owner_id == me);
+                if mine {
+                    v.signals.push(Signal::SetSell(sale.house_name.clone()));
+                }
+                if ours(&sale.tl_id) {
+                    v.signals.push(Signal::InfoUpdated);
+                }
+            }
+            HousingEvent::ResetForSale { tl_id, house_name } => {
+                if v.pending.is_some_and(|(_, tl)| tl == *tl_id) {
+                    v.pending = None;
+                }
+                let mine = me != 0
+                    && houses
+                        .by_tl_id
+                        .get(tl_id)
+                        .is_some_and(|h| h.snapshot.owner_id == me);
+                if mine {
+                    v.signals.push(Signal::CancelSell(house_name.clone()));
+                }
+                if ours(tl_id) {
+                    v.signals.push(Signal::InfoUpdated);
+                }
+            }
+            // `FUN_3932B8A0`: the open house asks for its tax first and raises `HOUSE_INFO_UPDATED`,
+            // then the seller (`0x109`) or the buyer (`0x10B`) gets the receipt with the house name.
+            HousingEvent::Sold {
+                tl_id,
+                previous_owner_id,
+                new_owner_id,
+                house_name,
+                ..
+            } => {
+                if v.pending.is_some_and(|(_, pending_tl)| pending_tl == *tl_id) {
+                    v.pending = None;
+                }
+                if ours(tl_id) {
+                    v.commands
+                        .push(Command::House(HouseCommand::RequestTax { tl: *tl_id }));
+                    v.signals.push(Signal::InfoUpdated);
+                }
+                if me != 0 && me == *previous_owner_id {
                     v.signals.push(Signal::Sold(house_name.clone()));
+                } else if me != 0 && me == *new_owner_id {
+                    v.signals.push(Signal::Bought(house_name.clone()));
+                }
+            }
+            HousingEvent::Demolished { tl_id } | HousingEvent::MyHouseRemoved { tl_id } => {
+                if v.pending.is_some_and(|(_, pending_tl)| pending_tl == *tl_id) {
+                    v.pending = None;
                 }
             }
             HousingEvent::State(s) if ours(&s.tl_id) => v.signals.push(Signal::InfoUpdated),

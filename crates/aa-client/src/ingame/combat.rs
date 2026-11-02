@@ -1364,7 +1364,7 @@ fn tool_event(event: &Event) -> Option<(u32, u32)> {
 /// after a skill request (`+0x5fc5` / `+0x5fc6`). Ten seconds after the last refresh the derived flag `+0x5fc4` falls and the
 /// model leaves its combat idle; the stance byte is not touched. A dead unit has no idle (the reset path zeroes `+0x5fc0`).
 #[allow(clippy::type_complexity)]
-fn tick_combat_idle(time: Res<Time>, mut commands: Commands, mut units: Query<(Entity, Has<CombatStance>, Option<&mut CombatIdle>, Has<Dead>)>) {
+fn tick_combat_idle(time: Res<Time>, mut commands: Commands, mut units: Query<(Entity, Has<CombatStance>, Option<&mut CombatIdle>, Has<Dead>), Or<(With<CombatStance>, With<CombatIdle>)>>) {
     let now = time.elapsed_secs_f64();
     for (unit, stance, idle, dead) in &mut units {
         if dead {

@@ -98,9 +98,22 @@ pub fn spawn_parts(commands: &mut Commands, cry: &mut CryAssets, root: Entity, p
 }
 
 /// The model a house unit shows now: the received house state's (it follows the build progress), else the unit's.
+/// A demolished house keeps its last state's model: `FUN_3932A300` only sets the demolished flag and starts
+/// `destroy_effect`, it does not remove the unit or its model.
 pub fn model_of(unit: &Unit, houses: &Houses) -> Option<u32> {
-    let UnitKind::Housing { tl_id, template_id, build_step } = unit.kind else { return None };
-    let snapshot = houses.by_tl_id.get(&tl_id).filter(|h| !h.demolished).map(|h| h.snapshot.model_id).filter(|m| *m != 0);
+    let UnitKind::Housing {
+        tl_id,
+        template_id,
+        build_step,
+    } = unit.kind
+    else {
+        return None;
+    };
+    let snapshot = houses
+        .by_tl_id
+        .get(&tl_id)
+        .map(|h| h.snapshot.model_id)
+        .filter(|m| *m != 0);
     snapshot
         .or((unit.model_id != 0).then_some(unit.model_id))
         .or_else(|| data::get().and_then(|d| d.model_at_step(template_id, i32::from(build_step))))
@@ -190,11 +203,11 @@ pub fn sync_houses(
         d.transform = Some(transform);
         info!("housing: house {obj_id} {:?} drawn with model {model_id} at ({:.1}, {:.1}, {:.1})", unit.name, pos.x, pos.y, pos.z);
     }
-    // gone, or too far
+    // gone or too far
     let gone: Vec<u32> = drawn
         .houses
         .keys()
-        .filter(|id| units.get(**id).is_none_or(|u| flat(u, me) > HOUSE_RADIUS * 1.2))
+        .filter(|id| drops(**id, &units, me))
         .copied()
         .collect();
     for id in gone {
@@ -225,11 +238,141 @@ fn flat(unit: &Unit, me: Vec3) -> f32 {
     Vec2::new(unit.pos.x - me.x, unit.pos.y - me.y).length()
 }
 
+/// Whether the drawn house `obj_id` leaves the scene: its unit is gone or it is beyond `HOUSE_RADIUS * 1.2`.
+/// A demolished house stays standing (`SCHouseDemolished` only clears the owner).
+fn drops(obj_id: u32, units: &Units, me: Vec3) -> bool {
+    units
+        .get(obj_id)
+        .is_none_or(|u| flat(u, me) > HOUSE_RADIUS * 1.2)
+}
+
 /// Leaving the game drops every drawn house.
 pub fn clear(mut commands: Commands, mut drawn: ResMut<DrawnHouses>) {
     for (_, d) in drawn.houses.drain() {
         if let Some(e) = d.entity {
             commands.entity(e).despawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aa_net::Pos;
+    use aa_net::housing::{House, HouseSnapshot};
+    use aa_net::model::{Equipment, ModelParams};
+
+    fn unit(obj_id: u32, tl_id: u16, model_id: u32, x: f32) -> Unit {
+        Unit {
+            bounty_money: None,
+            pvp_honor: 0,
+            pvp_kills: 0,
+            obj_id,
+            name: "Farm".into(),
+            kind: UnitKind::Housing {
+                tl_id,
+                template_id: 171,
+                build_step: -1,
+            },
+            owner_name: "Owner".into(),
+            pos: Pos::new(x, 0.0, 0.0),
+            rotation: [0.0; 3],
+            scale: 1.0,
+            level: 1,
+            model_id,
+            equipment: Equipment::default(),
+            model_params: ModelParams::default(),
+            hp: 100,
+            mp: 0,
+            max_hp: 100,
+            max_mp: 0,
+            dead: false,
+            race_gender: 0,
+            movement: None,
+            faction_id: 0,
+            expedition_id: 0,
+            appellation: 0,
+            flags: 0,
+            gm_modes: [0; 4],
+            skills: vec![],
+            passive_buffs: vec![],
+            ability_exp: vec![],
+            active_abilities: vec![],
+            buffs: vec![],
+            anim_action: 0,
+            house_posture: None,
+            turret: None,
+            state_attachments: None,
+            attached_to: None,
+            doodad_bond: None,
+        }
+    }
+
+    fn houses(tl_id: u16, snapshot_model: u32) -> Houses {
+        let mut houses = Houses::default();
+        houses.by_tl_id.insert(
+            tl_id,
+            House {
+                snapshot: HouseSnapshot {
+                    tl_id,
+                    db_id: u32::from(tl_id),
+                    obj_id: 900,
+                    template_id: 171,
+                    model_id: snapshot_model,
+                    co_owner_id: 0,
+                    owner_id: 42,
+                    owner_name: "Owner".into(),
+                    account_id: 17,
+                    permission: 0,
+                    all_actions: 0,
+                    current_actions: 0,
+                    tax: 0,
+                    x: 0,
+                    y: 0,
+                    z: 0.0,
+                    name: "Farm".into(),
+                    allow_recover: true,
+                    sell_price: 0,
+                    sell_to_player_id: 0,
+                    sell_to_name: String::new(),
+                },
+                demolished: false,
+                build_pay: None,
+                tax: None,
+                sale: None,
+            },
+        );
+        houses
+    }
+
+    #[test]
+    fn a_demolished_house_keeps_its_model_and_stays_in_the_scene() {
+        let mut units = Units::default();
+        units.by_id.insert(900, unit(900, 7, 1083, 0.0));
+        let mut houses = houses(7, 1082);
+        assert_eq!(
+            model_of(&units.by_id[&900], &houses),
+            Some(1082),
+            "the received state's model"
+        );
+        // Without a snapshot the unit's own model stands.
+        houses.by_tl_id.get_mut(&7).unwrap().snapshot.model_id = 0;
+        assert_eq!(
+            model_of(&units.by_id[&900], &houses),
+            Some(1083),
+            "the unit's model"
+        );
+        // `SCHouseDemolished` only clears the owner: the last model stays and the entity is not dropped.
+        houses.by_tl_id.get_mut(&7).unwrap().snapshot.model_id = 1082;
+        houses.by_tl_id.get_mut(&7).unwrap().demolished = true;
+        assert_eq!(
+            model_of(&units.by_id[&900], &houses),
+            Some(1082),
+            "the demolished house keeps standing"
+        );
+        assert!(!drops(900, &units, Vec3::ZERO));
+        // Gone unit and out of range still drop.
+        assert!(drops(901, &units, Vec3::ZERO));
+        assert!(drops(900, &units, Vec3::new(HOUSE_RADIUS * 1.3, 0.0, 0.0)));
     }
 }
