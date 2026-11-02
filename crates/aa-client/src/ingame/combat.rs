@@ -44,7 +44,8 @@ use aa_anim::{Animator, ClipLibrary};
 use aa_fx::{ChrEffect, Effect, FxSettings, Ground};
 use aa_net::buff::BuffCaster;
 use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, hit_type, target_kind};
-use aa_net::state::{Skills, Units};
+use aa_net::model::UnitKind;
+use aa_net::state::{Player, Skills, Units};
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
 use aa_world::sky::SunLight;
 use aa_world::{TerrainQuery, WaterQuery, cry_to_bevy};
@@ -753,6 +754,7 @@ struct Stage<'w, 's> {
     clips: Res<'w, ClipLibrary>,
     book: Res<'w, SkillBook>,
     emotes: Option<Res<'w, super::emote::Emotes>>,
+    player: Option<Res<'w, Player>>,
     net_units: Res<'w, Units>,
     /// A skill aimed at a doodad (a Memory Tome ...) is aimed at its position (object ids are shared by units and doodads).
     net_doodads: Res<'w, aa_net::state::Doodads>,
@@ -1706,6 +1708,23 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 st.commands.entity(target).insert((CombatStance, CombatIdle::at(now)));
                 if let Some(attacker) = caster {
                     st.commands.entity(attacker).insert((CombatStance, CombatIdle::at(now)));
+                }
+                // The third `FUN_390b36f0` of the damage handler: a blow on the local player's own mate flags the owner
+                // too. The decompile tests the TARGET (`+0x410 == 5` mate, `+0x420` owner character id equal to the local
+                // character id), looks the owner up by character id (`FUN_3935e370`) and needs it alive (`+0x3c26` /
+                // `+0x3c27` zero); the caster is not tested, so a blow the mate deals flags the mate and its victim only.
+                let own = st
+                    .player
+                    .as_ref()
+                    .and_then(|p| p.spawn.as_ref())
+                    .map(|spawn| (spawn.character().id, spawn.obj_id))
+                    .filter(|(char_id, _)| *char_id != 0);
+                if let Some((char_id, obj_id)) = own
+                    && st.net_units.get(d.target_obj_id).is_some_and(|u| matches!(&u.kind, UnitKind::Mate { owner_id, .. } if *owner_id == char_id))
+                    && let Some(owner) = st.local.iter().find(|(_, l)| l.obj_id == obj_id).map(|(e, _)| e)
+                    && !dead(obj_id, Some(owner))
+                {
+                    st.commands.entity(owner).insert((CombatStance, CombatIdle::at(now)));
                 }
             }
             if let Some(attacker) = caster.filter(|c| *c != target) {
@@ -2994,6 +3013,62 @@ mod tests {
         world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::UnitDamaged(damage(100, hit_type::MELEE_HIT))));
         schedule.run(&mut world);
         assert!(world.get::<CombatStance>(local).is_none() && world.get::<CombatStance>(rat).is_none(), "a dead target is no blow");
+    }
+
+    /// `FUN_39391670`'s third `FUN_390b36f0`: a blow on the local player's own mate (`+0x410 == 5`, `+0x420` the local
+    /// character id) also sets the owner's battle flag when the owner (`FUN_3935e370`) is alive. The check is on the
+    /// target only: a blow the mate deals flags the mate and its victim, not the owner; another owner's mate and a dead
+    /// owner are left out.
+    #[test]
+    fn a_blow_on_the_local_players_mate_flags_the_owner() {
+        let Some(book) = SkillBook::open() else { return };
+        let spawn = crate::hud::fixture_spawn();
+        let (owner_obj, owner_char) = (spawn.obj_id, spawn.character().id);
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetEvent>>();
+        world.insert_resource(Player { spawn: Some(spawn.clone()) });
+        let owner = world.spawn((LocalPlayer { obj_id: owner_obj }, GlobalTransform::default())).id();
+        let mate = world.spawn((LocalPlayer { obj_id: 200 }, GlobalTransform::default())).id();
+        let attacker = world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default())).id();
+        let mut mate_unit = spawn.unit.clone();
+        mate_unit.obj_id = 200;
+        mate_unit.kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char };
+        world.resource_mut::<Units>().by_id.insert(200, mate_unit);
+        let mut schedule = Schedule::default();
+        schedule.add_systems((handle_events, bevy::ecs::schedule::ApplyDeferred).chain());
+        let hit = |from: u32, on: u32, tl: u32| Fake::event("hit", &[tl, 2, 100], from, on, None).expect("a hit event");
+        // the attacker strikes the mate: all three flags
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 1)));
+        schedule.run(&mut world);
+        for unit in [owner, mate, attacker] {
+            assert!(world.get::<CombatStance>(unit).is_some(), "the mate's owner is flagged too");
+        }
+        // the mate strikes the attacker: the owner's flag is not the mate's to set
+        world.entity_mut(owner).remove::<(CombatStance, CombatIdle)>();
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(200, 2, 2)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "a blow dealt by the mate leaves the owner alone");
+        assert!(world.get::<CombatStance>(mate).is_some() && world.get::<CombatStance>(attacker).is_some());
+        // the mate belongs to another character: no owner flag
+        world.resource_mut::<Units>().by_id.get_mut(&200).unwrap().kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char + 1 };
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 3)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "another character's mate is not the player's");
+        // the owner is dead: `FUN_39391670` needs the owner alive (`+0x3c26` / `+0x3c27` zero)
+        world.resource_mut::<Units>().by_id.get_mut(&200).unwrap().kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char };
+        world.entity_mut(owner).insert(Dead { at: 0.0 });
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 4)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "a dead owner is not flagged");
     }
 
     /// Putting the weapon away zeroes `+0x5fc0` (`FUN_39360920`), so the combat idle ends with it; the stance byte is separate.

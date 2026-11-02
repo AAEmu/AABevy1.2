@@ -242,7 +242,10 @@ anim_actions.mainhand_tool_id / offhand_tool_id -> the same for an NPC pose (the
   * The **battle flag** (`combat.rs` `CombatStance`, `X2Unit + 0x3bba`). Set by `SCCombatEngaged` (`OnCombatEngaged`,
     `FUN_391d69a0` -> `FUN_390b36f0`) and by a real blow dealt or taken (`FUN_39391670`, 742913, from the damage handler, both
     sides): the decompile requires a caster (`+0x50 != 0`), a hit (`+0x6e != 0`: not a miss or a zero), and both units alive
-    (neither `+0x3c26` nor `+0x3c27`). A heal handler also re-sets an engaged target (`FUN_393992d0`). It is cleared only by
+    (neither `+0x3c26` nor `+0x3c27`). A blow on the local player's own mate also flags the local **owner**: the third
+    `FUN_390b36f0` needs the target's `+0x410 == 5` (mate) and `+0x420` equal to the local character id, looks the owner up by
+    character id (`FUN_3935e370`) and requires it alive; the caster is not tested, so a blow the mate deals flags only the mate
+    and its victim. A heal handler also re-sets an engaged target (`FUN_393992d0`). It is cleared only by
     `SCCombatCleared` (`OnCombatCleared`, `FUN_391d6a60` -> the unit's vtable `+0x48` = `FUN_39355ec0` -> `FUN_390b3710`); a
     clear on a unit that is not flagged changes nothing. It is **not** set by a skill start, and it has no timer.
   * The **10 s deadline** (`CombatIdle`, `X2Unit + 0x5fc0` / `+0x5fc4`, `FUN_39355ee0`). Every update, while the battle flag is
