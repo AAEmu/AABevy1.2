@@ -34,6 +34,9 @@ mod sound;
 #[path = "../src/task.rs"]
 mod task;
 
+use aa_cry::shade::illum::IllumMaterial;
+use bevy::math::Vec4;
+use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 use std::time::Instant;
 
@@ -117,8 +120,10 @@ fn main() -> AppExit {
                 ingame::vehicle::track_summon_portals,
                 ingame::vehicle::spawn_summon_portals,
                 ingame::vehicle::animate_summon_emergence,
+                ingame::vehicle::apply_emergence_clip,
                 ingame::vehicle::end_summon_portals,
                 ingame::vehicle::despawn_summon_portal_effects,
+                ingame::vehicle::restore_emergence_clip,
                 ingame::vehicle::cleanup_summon_portals,
                 check,
             )
@@ -234,6 +239,7 @@ fn scene(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check(
     mut check: ResMut<Check>,
     mut writer: MessageWriter<aa_net::NetEvent>,
@@ -241,6 +247,8 @@ fn check(
     portal_fx: Query<&aa_fx::Effect>,
     roots: Query<(&Transform, &ingame::vehicle::SummonEmergence)>,
     anchors: Query<(&ingame::vehicle::SummonPortalAnchor, &Transform)>,
+    illum: Option<Res<Assets<IllumMaterial>>>,
+    materials: Query<&MeshMaterial3d<IllumMaterial>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let start = *check.start.get_or_insert_with(Instant::now);
@@ -274,6 +282,17 @@ fn check(
         assert!((emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length() < 1e-3);
         let (_, anchor) = anchors.single().expect("the portal anchor");
         assert!((anchor.translation - emergence.plane).length() < 1e-3, "{anchor:?}");
+        let clipped = illum
+            .as_deref()
+            .map(|illum| {
+                materials
+                    .iter()
+                    .filter_map(|handle| illum.get(&handle.0))
+                    .filter(|material| material.extension.clip_plane != Vec4::ZERO)
+                    .count()
+            })
+            .unwrap_or(0);
+        assert!(clipped > 0, "the emerging cart's Illum materials are clipped at the plane");
         info!(
             "slave_summon: emergence start {:?} plane {:?} end {:?}, portal {}",
             emergence.start,
@@ -291,6 +310,17 @@ fn check(
             effects.iter().all(|(_, marker)| marker.stopped),
             "the portal stops emitting at the end event 5"
         );
+        let clipped = illum
+            .as_deref()
+            .map(|illum| {
+                materials
+                    .iter()
+                    .filter_map(|handle| illum.get(&handle.0))
+                    .filter(|material| material.extension.clip_plane != Vec4::ZERO)
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(clipped, 0, "the clip plane is restored after portal_time");
         info!("slave_summon: emergence ended at {:?}", emergence.end);
         check.ended = true;
     }

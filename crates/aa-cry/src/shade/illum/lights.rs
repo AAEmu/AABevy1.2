@@ -226,6 +226,7 @@ struct Bindings {
     back: super::BackLightParams,
     motion: super::motion::MotionData,
     alpha: Vec4,
+    clip: Vec4,
     #[texture(51)]
     #[sampler(52)]
     gloss_map: Option<Handle<Image>>,
@@ -248,6 +249,7 @@ impl From<&Bindings> for IllumData {
             back: b.back,
             motion: b.motion,
             alpha: b.alpha,
+            clip: b.clip,
         }
     }
 }
@@ -299,6 +301,7 @@ impl AsBindGroup for IllumExt {
             lights: gpu.image.clone(),
             motion: motion.as_ref().map_or_default(|m| m.data),
             alpha: super::alpha_of(self.params),
+            clip: self.clip_plane,
             opacity_map: motion.and_then(|m| m.opacity_map),
             clock: gpu.clock.clone(),
         }

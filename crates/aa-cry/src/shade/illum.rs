@@ -319,6 +319,9 @@ pub struct IllumData {
     back: BackLightParams,
     motion: motion::MotionData,
     alpha: Vec4,
+    /// World-space clip plane `(normal.xyz, d)`: a fragment is discarded where `dot(normal, world) + d < 0`.
+    /// Zero on ordinary materials.
+    clip: Vec4,
 }
 
 /// The material extension (bindless like `StandardMaterial`, see `backlight::CharBackExt`: data array at binding
@@ -332,6 +335,9 @@ pub struct IllumExt {
     pub gloss_map: Option<Handle<Image>>,
     /// The environment cube map.
     pub env_map: Option<Handle<Image>>,
+    /// World-space clip plane `(normal.xyz, d)`: a fragment is discarded where `dot(normal, world) + d < 0`.
+    /// Zero on ordinary materials.
+    pub clip_plane: Vec4,
 }
 
 impl From<&IllumExt> for IllumData {
@@ -341,6 +347,7 @@ impl From<&IllumExt> for IllumData {
             back: e.back,
             motion: motion_of(e.params).map_or_default(|m| m.data),
             alpha: alpha_of(e.params),
+            clip: e.clip_plane,
         }
     }
 }
@@ -449,6 +456,7 @@ fn swap_materials(
                     },
                     gloss_map: entry.gloss_map.clone(),
                     env_map: entry.env_map.clone(),
+                    clip_plane: Vec4::ZERO,
                 },
             });
             mirrors.0.insert(id, strong.id());

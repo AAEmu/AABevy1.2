@@ -34,6 +34,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use aa_anim::{AnimSet, Animator, ClipLibrary, pose::BoundClip};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
+use aa_cry::shade::illum::IllumMaterial;
 use aa_cry::workers::Workers;
 use aa_cry::{CryLoader, PreparedModel};
 use aa_net::state::Units;
@@ -41,7 +42,8 @@ use aa_net::slave::SlaveEvent;
 use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
-use bevy::math::Affine3A;
+use bevy::math::{Affine3A, Vec4};
+use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 
@@ -196,6 +198,14 @@ pub struct SummonPortalAnchor {
     pub root: Entity,
     /// `Time::elapsed_secs_f64` when `portal_time` ends; the anchor then goes once its effects are gone.
     pub until: f64,
+}
+
+/// The per-mesh `IllumMaterial` clones carrying the portal clip plane (`FUN_3909ea30` model vfunc 0xf8), restored when
+/// the emergence window ends. The clone is per vehicle so shared materials of other objects are untouched.
+#[derive(Component, Default)]
+pub struct EmergenceClip {
+    originals: Vec<(Entity, Handle<IllumMaterial>)>,
+    added: Vec<Handle<IllumMaterial>>,
 }
 
 /// Remembers the slaves `SCSlaveCreatedPacket` announced without `hideSpawnEffect`, and forgets a timeline id whose
@@ -403,6 +413,92 @@ pub fn animate_summon_emergence(
             transform.translation = emergence.end;
             emergence.ended = true;
         }
+    }
+}
+
+/// Gives every mesh of an emerging vehicle a clone of its `IllumMaterial` with the portal clip plane, so the part
+/// still behind the ring is discarded (`FUN_3909ea30` model vfunc 0xf8: plane at `pos - axis * extent`, normal
+/// `axis`). It runs every frame while the emergence lasts, so parts swapped in during it are clipped too; the
+/// material is per vehicle, other objects keep the shared asset.
+pub fn apply_emergence_clip(
+    mut commands: Commands,
+    illum: Option<ResMut<Assets<IllumMaterial>>>,
+    mut roots: Query<(Entity, &SummonEmergence, Option<&mut EmergenceClip>)>,
+    children: Query<&Children>,
+    materials: Query<&MeshMaterial3d<IllumMaterial>>,
+) {
+    let Some(mut illum) = illum else {
+        return;
+    };
+    for (root, emergence, clip) in &mut roots {
+        if emergence.ended {
+            continue;
+        }
+        let Some(mut clip) = clip else {
+            commands.entity(root).insert(EmergenceClip::default());
+            continue;
+        };
+        let plane = Vec4::new(
+            emergence.axis.x,
+            emergence.axis.y,
+            emergence.axis.z,
+            -emergence.axis.dot(emergence.plane),
+        );
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            if let Ok(kids) = children.get(entity) {
+                stack.extend(kids.iter());
+            }
+            let Ok(handle) = materials.get(entity) else {
+                continue;
+            };
+            if clip.added.iter().any(|added| added.id() == handle.0.id())
+                || clip.originals.iter().any(|(seen, _)| *seen == entity)
+            {
+                continue;
+            }
+            let Some(original) = illum.get(&handle.0) else {
+                continue;
+            };
+            let mut material = original.clone();
+            material.extension.clip_plane = plane;
+            let clipped = illum.add(material);
+            commands.entity(entity).insert(MeshMaterial3d(clipped.clone()));
+            clip.originals.push((entity, handle.0.clone()));
+            clip.added.push(clipped);
+            if clip.originals.len() >= 256 {
+                break;
+            }
+        }
+    }
+}
+
+/// Restores the original `IllumMaterial` handles when the emergence window ends, including when the local player
+/// drives the unit (the animation is skipped then, but the clip still ends after `portal_time`).
+pub fn restore_emergence_clip(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut roots: Query<(Entity, &mut SummonEmergence, Option<&mut EmergenceClip>)>,
+    alive: Query<()>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (root, mut emergence, clip) in &mut roots {
+        let elapsed = now - emergence.started;
+        if !emergence.ended {
+            if elapsed < f64::from(emergence.duration) {
+                continue;
+            }
+            emergence.ended = true;
+        }
+        let Some(mut clip) = clip else {
+            continue;
+        };
+        for (entity, original) in clip.originals.drain(..) {
+            if alive.get(entity).is_ok() {
+                commands.entity(entity).insert(MeshMaterial3d(original));
+            }
+        }
+        commands.entity(root).remove::<EmergenceClip>();
     }
 }
 
@@ -998,8 +1094,10 @@ impl Plugin for VehiclePlugin {
                     spawn_summon_portals.after(super::units::sync_views),
                     // the emergence drives the root after the server position, like the 1.2 unit state does
                     animate_summon_emergence.after(super::units::move_units),
+                    apply_emergence_clip,
                     end_summon_portals,
                     despawn_summon_portal_effects,
+                    restore_emergence_clip,
                     cleanup_summon_portals,
                 )
                     .chain(),
@@ -1749,8 +1847,10 @@ mod tests {
                 track_summon_portals,
                 spawn_summon_portals,
                 animate_summon_emergence,
+                apply_emergence_clip,
                 end_summon_portals,
                 despawn_summon_portal_effects,
+                restore_emergence_clip,
                 cleanup_summon_portals,
             )
                 .chain(),
@@ -1812,6 +1912,65 @@ mod tests {
             raw_id: 0,
             creator_name: "owner".into(),
         })))
+    }
+
+    /// The emergence clip plane reaches a per-vehicle `IllumMaterial` clone and the original handle is restored at
+    /// the end (the shader discards behind the plane; the galleon/cart screenshot shows it).
+    #[test]
+    fn the_emergence_clip_plane_is_applied_and_restored() {
+        use bevy::asset::AssetPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<IllumMaterial>();
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let root = app
+            .world_mut()
+            .spawn(SummonEmergence {
+                start: Vec3::new(0.0, 0.0, 2.0),
+                end: Vec3::ZERO,
+                plane: Vec3::new(0.0, 0.0, 1.0),
+                axis: Vec3::new(0.0, 0.0, -1.0),
+                extent: 1.0,
+                started: 0.0,
+                duration: 1.0,
+                ended: false,
+            })
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original.clone()), ChildOf(root)))
+            .id();
+        app.add_systems(Update, (apply_emergence_clip, restore_emergence_clip).chain());
+        app.update();
+        app.update();
+        let clipped = app
+            .world()
+            .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+            .expect("the mesh material")
+            .0
+            .clone();
+        assert_ne!(clipped.id(), original.id(), "the mesh got its own clipped material");
+        let material = app
+            .world()
+            .resource::<Assets<IllumMaterial>>()
+            .get(&clipped)
+            .expect("the clipped material");
+        assert_eq!(material.extension.clip_plane, Vec4::new(0.0, 0.0, -1.0, 1.0));
+        app.world_mut().get_mut::<SummonEmergence>(root).unwrap().ended = true;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            original.id(),
+            "the original material is restored"
+        );
+        assert!(app.world().get::<EmergenceClip>(root).is_none());
     }
 
     /// `SCSlaveCreatedPacket` without `hideSpawnEffect` on slave 146 (Red Farm Hauler) plays the `slaves` row's
@@ -1935,6 +2094,21 @@ mod tests {
             let portal = db.slave_summon_portal(template).expect("a zero-time portal row");
             assert_eq!(portal.time, 0.0, "slave {template}");
         }
+        // the sea variant (Eznan Cutter, 21) uses the water-column group, not the tank ring
+        let cutter = db.slave_summon_portal(21).expect("the Eznan Cutter's summon portal");
+        assert_eq!((cutter.fx_group, cutter.scale, cutter.time), (619, 10.0, 7.0));
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let items: Vec<String> = book
+            .fx_group(cutter.fx_group)
+            .iter()
+            .map(|item| item.effect.clone())
+            .filter(|name| !name.is_empty())
+            .collect();
+        assert!(
+            items.iter().any(|name| name.contains("shipportal_open_main_x15")),
+            "the cutter's water column: {items:?}"
+        );
+        assert!(!items.iter().any(|name| name.contains("portal_tank")), "{items:?}");
     }
 
     /// A slave whose `portal_time` is 0 (slave 54, the tank) gets no portal and no emergence.

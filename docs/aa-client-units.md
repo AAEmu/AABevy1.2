@@ -433,13 +433,28 @@ continuous or rebuilt simulation cannot linger. A vehicle that merely streams in
 client, so it has no entry and plays none; a creation with `hideSpawnEffect` plays none either. Both controls are in
 `examples/slave_summon.rs` and the unit tests.
 
-Approximation: 1.2 also clips the model at the portal plane (model vfunc 0xf8) and toggles the model's enable state
-around the emergence (model vfunc 0x1a4). The clip plane is **not implemented** in this slice: a per-material
-discard needs an `ExtendedMaterial`/shader extension across the vehicle's `StandardMaterial` parts, and the hull can
-show behind the portal while it emerges (the portal effect covers most of the seam). The enable call has no direct
-equivalent. `h` stands in for the native `[bounds+0x28]` with the largest horizontal half extent of the combined
-model bounds. The group's `FxSound` item is not played yet (the particle portal is); the pending list survives
-visibility loss like the 1.2 list.
+The 2026-11-02 original-client capture (`<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`, owner
+recording) confirms the result: an upright golden oval ring ~2x the cart height whose plane is perpendicular to the
+cart's length, the cart slides out along its own long axis (cargo end first) over `portal_time` 1.0 s, the part still
+behind the ring is invisible, the ring stays at the start end, and it fades into golden streaks for about 1 s after
+the cart arrives (~2 s visible). The static `_main_start` item is the one-frame white-violet flash (a 0.25 s
+refraction sphere and glow); the authored particle lifetimes produce the streak fade after the end event. The ring's
+orientation comes from the unit's quaternion in `FUN_3909ea30` (`+0x64` is the unit rotation, `+0x74` the plane
+point), which is what `SummonPortalAnchor` uses.
+
+The clip plane is implemented: `apply_emergence_clip` gives every mesh of the emerging vehicle a per-vehicle
+`IllumMaterial` clone whose `clip_plane` is `(axis, -axis·plane)`, and `illum.wesl` / `illum_prepass.wesl` discard
+fragments behind it (so the hidden part also does not write depth or shadows); `restore_emergence_clip` puts the
+shared materials back after `portal_time`. Parts that are not `IllumMaterial` (none of the vehicle parts in the
+data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in for the
+native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's `FxSound`
+item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2 list.
+
+Sea variant (Eznan Cutter, slave 21): the data gives group 619 `배포탈_열림x10`, scale 10.0, time 7.0 s, whose single
+item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), and the client plays it at
+the plane. The capture's 45-60° tilted rise/righting with spray is not part of the emergence code (it only moves the
+unit and leaves its rotation): the tilt is the server's unit rotation and is followed by `units::move_units`; the
+client does not add one. The parts still below the sea are not modelled.
 
 ### Damage states (S15)
 

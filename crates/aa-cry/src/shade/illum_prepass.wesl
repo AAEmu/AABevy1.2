@@ -58,6 +58,7 @@ fn fragment(
     pbr_functions::visibility_range_dither(in.position, in.visibility_range_dither);
 
 @if(!MESHLET_MESH_MATERIAL_PASS)
+    clip_discard(in);
     sample_alpha_and_discard(in);
 
     var out: prepass_io::FragmentOutput;
@@ -158,7 +159,19 @@ fn fragment(
 @else
 @fragment
 fn fragment(in: prepass_io::VertexOutput) {
+    clip_discard(in);
     sample_alpha_and_discard(in);
+}
+
+fn clip_discard(in: prepass_io::VertexOutput) {
+@if(BINDLESS)
+    let slot = mesh[in.instance_index].material_and_lightmap_bind_group_slot & 0xffffu;
+    let clip = illum_array[illum_indices[slot].data].clip;
+@else
+    let clip = illum_uniform.clip;
+    if (dot(clip.xyz, in.world_position.xyz) + clip.w < 0.0) {
+        discard;
+    }
 }
 
 fn sample_alpha_and_discard(in: prepass_io::VertexOutput) {
