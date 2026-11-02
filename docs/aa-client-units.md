@@ -584,8 +584,19 @@ death") is the evidence for the ship half of S15; the prefabs are the game's own
   `effect_fire` emitter is `X2_EFFECTS.e_effect.ship_damage_fireflame` (the captured aft-deck fire at 25 %).
   `the_eznan_cutters_damage_effects_and_doodads_are_readable` checks the four hp doodads, the 16 drop doodads and
   both effects against the real data.
+* **Death has no explosion.** `models.dying_time` is 0 and `ship_models` has no dying column; state 6 is
+  `galleon.dead`, which names only the active `X2_EFFECTS.e_effect.caraval_water_destroy` burst and no `_dead_effect`.
+  The old damage prefab's smoke is dropped with the swap (the capture's smoke clears within 1 s), while its fire is
+  re-spawned at the same authored anchors (`carry_ship_fire`) so the wreck keeps burning, as in the capture
+  (`ship_sinking_t358.66`, `ship_sunk_burning_t365`).
 * **Debris.** The server's `DistributeSlaveDropDoodads` (`slave_drop_doodads`: 1327, 1322, 1323, 1324 and 12 x 1330)
   creates 16 doodads around the hull; Bevy draws them like any `SCDoodadsCreated` doodad.
+* **List and sink.** The original client's sink is not in the decompiled ship update (no damage-state gate) and the
+  server removes the ship from its physics at death, so `WreckSink` reproduces the captured motion client side: a
+  smoothstep over 12 s, 14 m down, with a bow-up pitch and a heel (`WRECK_SINK_*`). The mechanism is **inferred**
+  from the capture (the engine physics that produced it was not recovered); the hull is still visible at 365 s
+  (~12.6 s after death). It runs after `units::move_units`, so it is applied over the server pose; a heal removes
+  it. `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
 
 Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed

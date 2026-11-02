@@ -14,7 +14,8 @@
 //! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). A
 //! rigged part also plays its `AnimObject`'s authored `<Animation>` (`Animation`, `bPlaying`, `bLoop`;
 //! `Part::animation`), the dying cart's tip/roll. The new prefab is read on the workers (`VehicleSwaps`);
-//! the old parts stay until it is ready.
+//! the old parts stay until it is ready. A dead ship starts [`WreckSink`] and keeps the previous prefab's
+//! fire (`carry_ship_fire`); the wreck itself stays until the server's `SCUnitsRemoved` (no client timer).
 //!
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
@@ -111,6 +112,64 @@ pub struct VehicleDamage {
     /// The dead prefab's one-shot `_spawn_effect*` already played for this death: an HP-0 update shows 6 first,
     /// then the death's 6 -> 5 -> 6 route must not play them a second time. Cleared when a living state is adopted.
     pub dead_effect_played: bool,
+}
+
+/// How long a destroyed ship takes to sink below the sea after its dead prefab is applied. The
+/// 2026-11-02 capture (`2026-11-02-vehicle-visuals-capture.md`, "Eznan Cutter damage and death") shows
+/// the hull listing and going under over ~12 s, still burning; the original client has no traced sink
+/// function (the ship model update has no damage-state gate and the server stops moving the hull), so
+/// the rate is measured from the capture (inferred).
+pub const WRECK_SINK_TIME: f64 = 12.0;
+
+/// How far the wreck drops by the end of [`WRECK_SINK_TIME`]. The dead galleon hull is ~20 m tall;
+/// the capture's bow is the only part left above the water at 365 s, ~12.6 s after death.
+pub const WRECK_SINK_DEPTH: f32 = 14.0;
+
+/// Bow-up pitch at the end of the sink, and the list to port. The capture shows the bow still above
+/// water at 365 s while the stern is under, with a visible heel (inferred).
+pub const WRECK_SINK_PITCH: f32 = 0.14;
+pub const WRECK_SINK_ROLL: f32 = 0.18;
+
+/// A dead ship's sink: the pose it started from and the [`Time::elapsed_secs_f64`] of the dead swap.
+/// The original client's hull list/sink is not in the decompiled ship update (it has no damage-state
+/// gate) and the server removes the ship from its physics at death, so the captured motion is client
+/// side; the original mechanism (engine buoyancy/physics) is not recovered (inferred).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct WreckSink {
+    pub base: Transform,
+    pub started: f64,
+}
+
+impl WreckSink {
+    fn at(base: &Transform, now: f64) -> Self {
+        Self { base: *base, started: now }
+    }
+}
+
+/// The sinks of dead ships: lower the root and add the capture's gentle bow-up pitch and heel,
+/// over [`WRECK_SINK_TIME`]. Runs after `units::move_units` (which writes the server pose) and after
+/// [`finish_damage_swaps`]. A heal or resurrection removes the sink and restores the server pose.
+pub fn sink_ship_wrecks(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut sinks: Query<(Entity, &mut WreckSink, &VehicleDamage, &mut Transform)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, sink, damage, mut transform) in &mut sinks {
+        if damage.state != 6 {
+            commands.entity(entity).remove::<WreckSink>();
+            *transform = sink.base;
+            continue;
+        }
+        let p = ((now - sink.started) / WRECK_SINK_TIME).clamp(0.0, 1.0) as f32;
+        // smoothstep: the hull settles slowly at first, like the captured list
+        let ease = p * p * (3.0 - 2.0 * p);
+        transform.translation = sink.base.translation - Vec3::Y * (WRECK_SINK_DEPTH * ease);
+        transform.rotation = sink.base.rotation
+            * Quat::from_axis_angle(Vec3::X, WRECK_SINK_PITCH * ease)
+            * Quat::from_axis_angle(Vec3::Z, WRECK_SINK_ROLL * ease);
+        transform.scale = sink.base.scale;
+    }
 }
 
 /// A body part root spawned by [`spawn`]: replaced when the damage state changes.
@@ -1418,6 +1477,23 @@ pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str,
     }
 }
 
+/// The fire the damaged ship prefab was already showing when it died. The 2026-11-02 capture keeps the
+/// aft-deck fire burning through the ~12 s sink (`ship_sinking_t358.66`, `ship_sunk_burning_t365`), while
+/// the dead prefab (`galleon.dead`) names only the water-destroy burst. A ship swap into dead therefore
+/// re-spawns the previous prefab's active fire emitters at the same authored anchors. The original
+/// client almost certainly keeps the old prefab's live particle entities instead; the target poses and
+/// effect are the damaged prefab's, so the result matches the capture (inferred).
+fn carry_ship_fire(commands: &mut Commands, root: Entity, previous: &str) {
+    if previous.to_ascii_lowercase().starts_with("prefab://") {
+        for named in super::data::prefab_effects_named(previous) {
+            let name = named.name.to_ascii_lowercase();
+            if named.active && name.contains("fire") && !name.starts_with('_') {
+                spawn_effect(commands, root, &named.effect, false);
+            }
+        }
+    }
+}
+
 /// The state check of `FUN_390eb610`: while the unit is dying (5) it only checks the dying window
 /// (`FUN_390eaac0`); otherwise the unit's health picks the state. A death (`SCUnitDeath`, i.e. `unit.dead`, or
 /// an announcement at 0 hp) enters dying first (`FUN_390e7ad0`), even when an earlier HP-0 update already showed
@@ -1536,11 +1612,12 @@ pub fn update_damage(
 pub fn finish_damage_swaps(
     mut commands: Commands,
     units: Option<Res<Units>>,
+    db: Option<Res<Db>>,
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
     swaps: ResMut<VehicleSwaps>,
     time: Res<Time>,
-    mut roots: Query<(Entity, &mut VehicleDamage)>,
+    mut roots: Query<(Entity, &mut VehicleDamage, &Transform)>,
     stale: Query<(Entity, &ChildOf), Or<(With<VehiclePart>, With<VehicleEffect>)>>,
 ) {
     let mut done = Vec::new();
@@ -1552,7 +1629,7 @@ pub fn finish_damage_swaps(
     }
     let now = time.elapsed_secs_f64();
     for built in done {
-        let Ok((root, mut damage)) = roots.get_mut(built.root) else {
+        let Ok((root, mut damage, pose)) = roots.get_mut(built.root) else {
             continue;
         };
         if damage.requested != Some(built.state) {
@@ -1593,8 +1670,20 @@ pub fn finish_damage_swaps(
         commands.entity(root).remove::<super::turret::TurretGun>();
         add_parts(&mut commands, &mut cry, &clips, built.pieces, root);
         spawn_state_effects(&mut commands, root, &built.variant, effects);
+        let ship = units
+            .as_deref()
+            .and_then(|units| units.by_id.get(&built.obj_id))
+            .zip(db.as_deref())
+            .is_some_and(|(unit, db)| db.is_ship(unit.model_id));
         if built.state == 6 {
             damage.dead_effect_played = true;
+            if ship {
+                // the capture keeps the damaged prefab's fire burning through the sink
+                carry_ship_fire(&mut commands, root, &damage.variant);
+                commands.entity(root).insert(WreckSink::at(pose, now));
+            }
+        } else {
+            commands.entity(root).remove::<WreckSink>();
         }
         adopt_state(&mut damage, built.state);
         damage.variant = built.variant;
@@ -2869,6 +2958,78 @@ mod tests {
         );
     }
 
+    /// The Eznan Cutter (slave 21, model 393): death has no explosion (`dying_time` 0, and `galleon.dead`
+    /// has no `_dead_effect`), the damaged prefab's aft-deck fire keeps burning, the hull sinks over
+    /// [`WRECK_SINK_TIME`] with the captured bow-up list, and the dead prefab's water-destroy effect is
+    /// drawn. See the 2026-11-02 capture, "Eznan Cutter damage and death".
+    #[test]
+    fn a_dead_ship_sinks_burning_without_an_explosion() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(393) else { return };
+        let variants = db.vehicle_variants(393).expect("the Eznan Cutter's rows");
+        let max_hp = db.slave_max_hp(21, 50).expect("Eznan Cutter template 21's MaxHealth");
+        let hp = max_hp * 25 / 100;
+        let unit = slave_unit_kind(7, 21, 21, 393, hp, max_hp);
+        let variant = variants.for_state(4).to_string();
+        assert!(variant.ends_with("galleon.damaged75"), "{variant}");
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            4,
+            variant,
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let fire = |app: &mut App| effect_names(app, root);
+        {
+            let names = fire(&mut app);
+            assert!(
+                names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+                "the 25 % prefab burns: {names:?}"
+            );
+        }
+        die(&mut app);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(dead.variant.ends_with("galleon.dead"), "{}", dead.variant);
+        let names = fire(&mut app);
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+            "the damaged prefab's fire keeps burning through the sink: {names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.caraval_water_destroy"),
+            "the dead prefab's water-destroy effect: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+            "no explosion: {names:?}"
+        );
+        // the captured ~12 s sink: lower the hull and list it
+        let sink = *app.world().get::<WreckSink>(root).expect("the dead ship sinks");
+        assert_eq!(sink.base.translation, Vec3::ZERO);
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        app.world_mut().get_mut::<WreckSink>(root).unwrap().started = now - WRECK_SINK_TIME;
+        app.update();
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y < -10.0,
+            "the dead hull sinks well below the waterline: {transform:?}"
+        );
+        assert!(
+            transform.rotation.angle_between(sink.base.rotation) > 0.05,
+            "the dead hull lists: {transform:?}"
+        );
+    }
+
     /// The Eznan Cutter's damage stages and wreck use the real prefab effects: the 25 % hull
     /// (`galleon.damaged75`) burns at its aft deck, the dead look has no `_dead_effect` explosion and
     /// carries the water-destroy burst. Its hp25/50/75 repair doodads (`slave_healing_point_doodads`)
@@ -3095,11 +3256,16 @@ mod tests {
                         dead_effect_played: false,
                     },
                 ));
+                // a freshly announced unit draws its state's standing effects (units::spawn_unit)
+                spawn_state_effects(&mut commands, root, &variant, false);
                 commands.insert_resource(DamageRoot(root));
             },
         );
         if finish {
-            app.add_systems(Update, (update_damage, finish_damage_swaps).chain());
+            app.add_systems(
+                Update,
+                (update_damage, finish_damage_swaps, sink_ship_wrecks).chain(),
+            );
         } else {
             app.add_systems(Update, update_damage);
         }
