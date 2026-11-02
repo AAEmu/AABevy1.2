@@ -57,6 +57,20 @@ impl EffectDef {
         self.emitters.iter().filter(|e| e.def.draws()).count()
     }
 
+    /// The longest particle lifetime of the effect (nested emitters included), seconds: how long the last particle
+    /// can survive after emission stops.
+    pub fn max_particle_life(&self) -> f32 {
+        fn walk(node: &Node, out: &mut f32) {
+            *out = out.max(node.def.particle_life.max());
+            for child in &node.children {
+                walk(child, out);
+            }
+        }
+        let mut out = 0.0;
+        walk(&self.root, &mut out);
+        out.max(0.0)
+    }
+
     /// The first emitter that emits a mesh (`Geometry`): the model path and the `.mtl` it is drawn with (empty: the model's own).
     /// The particle simulation does not draw these; an application that wants the mesh (an arrow in flight) spawns it itself.
     pub fn geometry(&self) -> Option<(&str, &str)> {

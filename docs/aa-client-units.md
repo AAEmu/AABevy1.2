@@ -397,6 +397,79 @@ state 5/6 and freezes the `engine` handle; the Bevy client gates on the damage s
 Animator on the child part, so `vehicle::stop_dead_vehicles` stops the idle there and plays the death clip. This is the
 pre-existing dead-01 gap for vehicle corpses, fixed on the vehicle path.
 
+### Summon emergence and portal (`SummonPortals`, `SummonEmergence`)
+
+The summon visual is an **emergence**, not a standing portal. The server broadcasts `SCSlaveCreatedPacket` (SC061,
+`OnSlaveCreated` `FUN_391d45d0`) around the owner before the unit state. `FUN_3934a6c0` (x2game.dll.c:681528) keeps a
+pending list keyed on the **timeline id** (packet `+0xc`, unit `+0x41c`): when `hideSpawnEffect` is clear it pushes
+that id (`FUN_3934a530`). `X2::GameClient::SlaveManager::Update` (`FUN_39349cb0`) calls `FUN_39349600`
+(x2game.dll.c:680653), which resolves the timeline id to the unit (`FUN_3935e3f0`), reads the slave's `slaves` row
+(`FUN_396d2570`) and calls the world's slot `0x2a8` = `FUN_390cf130` (x2game.dll.c:167908) with
+`portal_spawn_fx_id` (+0x58), `portal_scale` (+0x54) and `portal_time` (+0x5c).
+
+`FUN_390cf130` starts the emergence only when the time is above `DAT_3999c484` (0.0; confirmed in
+`x2game_unpacked.dll`), so slaves 54, 94 and 115 (time 0) get none. Otherwise `FUN_390ca1e0` allocates the emergence
+object (`FUN_39097140`, which starts the model's `portal_exhaust`) and `FUN_3909ea30` (x2game.dll.c:136679) sets it
+up:
+
+* the axis is the unit's forward (cry +Y) from the model transform's quaternion, projected to the horizontal plane and
+  normalised (`x = 2(qy qx - qw qz)`, `y = 2(qy² + qw²) - 1`, `z = 0`; `DAT_3999cffc` = 2.0);
+* `h = [bounds + 0x28]` (a bounding extent); the unit starts at `pos - axis * 2h`, the clip plane is at
+  `pos - axis * h` with normal `axis` (model vfunc 0xf8);
+* the portal group is anchored at the plane point (not the unit centre), oriented by the unit and scaled by
+  `unit_scale * portal_scale`;
+* `FUN_39097220` (x2game.dll.c:132165) moves the unit from the start to `pos` over `portal_time` ms
+  (`DAT_3999d1b0` = 1000.0) and plays the prefab's `portal_exhaust` each frame; `FUN_39097390` restores `pos`, clears
+  the clip plane, re-enables the model (vfunc 0x1a4(1)), stops `portal_exhaust` and sends the portal effect's end
+  event 5 (`FUN_393ed520(fx, 5, ...)`): emission stops and the live particles fade out.
+
+The ids are `fx_groups` rows, not `effects` rows: slave 146 (Red Farm Hauler, model 1553) is group 1263
+`portal_tank_spawn`, scale 3.0, time 1.0 s. Group 1263 holds the `FxParticle` items
+`abillity_skill_table_m.system_skill.portal_tank_main` and `..._main_start` and the `FxSound`
+`Sounds/x2eventsounds:portal:portal_tank` (`fx_items` 1742 / 1744 / 1760). 67 of the 140 `slaves` rows carry a spawn
+portal and every one is a `VehicleModel` or `ShipModel`; slave 15 (the rowboat) has none. The tractor body's `.cal`
+has no spawn clip (only `fist_ba_relaxed_idle` and `dead_01`), so the emergence plus its portal is the summon visual.
+
+`vehicle::track_summon_portals` keeps the SC061 timeline ids whose `hideSpawnEffect` is false in `SummonPortals`
+(until the unit root exists, like the 1.2 pending list, capped at 64). A later creation with `hideSpawnEffect` for
+the same timeline id clears the wait, and an entry whose unit never appears expires 10 s after the packet (1.2
+resolves against unit existence, not drawing). `spawn_summon_portals` resolves the ids in one pass over the drawn
+roots, skips `portal_time <= 0`, starts
+`SummonEmergence` and the world-anchored portal at the plane point, and plays the prefab's `portal_exhaust` if it has
+one (the galleons do, the tractor does not). `animate_summon_emergence` moves the unit root from the start to its
+position; `end_summon_portals` stops emission at `portal_time` (`FxRun::stop_emitting`), and
+`despawn_summon_portal_effects` removes each effect after its longest particle life (with a fallback cap) so a
+continuous or rebuilt simulation cannot linger. A vehicle that merely streams into view later was never announced by SC061 near the
+client, so it has no entry and plays none; a creation with `hideSpawnEffect` plays none either. Both controls are in
+`examples/slave_summon.rs` and the unit tests.
+
+The 2026-11-02 original-client capture (`<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`, owner
+recording) confirms the result: an upright golden oval ring ~2x the cart height whose plane is perpendicular to the
+cart's length, the cart slides out along its own long axis (cargo end first) over `portal_time` 1.0 s, the part still
+behind the ring is invisible, the ring stays at the start end, and it fades into golden streaks for about 1 s after
+the cart arrives (~2 s visible). The static `_main_start` item is the one-frame white-violet flash (a 0.25 s
+refraction sphere and glow); the authored particle lifetimes produce the streak fade after the end event. The ring's
+orientation comes from the unit's quaternion in `FUN_3909ea30` (`+0x64` is the unit rotation, `+0x74` the plane
+point), which is what `SummonPortalAnchor` uses.
+
+The clip plane is implemented: `apply_emergence_clip` hides the unit for the first frame and gives every mesh a
+per-vehicle `IllumMaterial` clone whose `clip_plane` is `(axis, -axis·plane)`; `illum.wesl` discards behind it under
+the `ILLUM_CLIP` shader define (ordinary materials keep their early depth), and `illum_prepass.wesl` does the same in
+the prepass. An opaque clone becomes `AlphaMode::Mask`, which is what makes bevy_pbr build a fragment stage for the
+depth-only prepass and shadow pipelines (`MAY_DISCARD`); without it the hidden part still wrote depth and cast a
+shadow. `restore_emergence_clip` puts the shared materials back after `portal_time`, but only on a mesh that still
+holds its clipped clone (a stealth material change wins). Parts that are not `IllumMaterial` (none of the vehicle
+parts in the data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in
+for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's
+`FxSound` item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2
+list.
+
+Sea variant (Eznan Cutter, slave 21): the data gives group 619 `배포탈_열림x10`, scale 10.0, time 7.0 s, whose single
+item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), and the client plays it at
+the plane. The capture's 45-60° tilted rise/righting with spray is **a client gap**: the emergence client adds no
+tilt or righting and leaves the unit rotation to `units::move_units`, so it cannot produce the captured pitch on its
+own; the parts still below the sea are not modelled either.
+
 ### Damage states (S15)
 
 The drawn body follows the unit's health. `vehicle::model_state` is `FUN_3989f8b0` (x2game.dll.c:1935601):

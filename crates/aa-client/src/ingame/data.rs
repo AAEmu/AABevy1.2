@@ -1010,6 +1010,34 @@ impl Db {
             .map_or(0.0, |time| time.max(0.0) as f32)
     }
 
+    /// The summon portal of a slave template (`slaves.portal_spawn_fx_id`, an `fx_groups` row, with `portal_scale`
+    /// and `portal_time` in seconds). `OnSlaveCreated` pushes the slave's object id into `SlaveManager`'s pending
+    /// list unless `SCSlaveCreatedPacket.hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`), and
+    /// `FUN_39349600` plays this group on the unit with those two values. 67 slaves (the vehicles and ships) have
+    /// one; the other rows, and a missing row, give `None`.
+    pub fn slave_summon_portal(&self, template_id: u32) -> Option<SummonPortal> {
+        let l = self.lookups.lock().unwrap();
+        let portal = l
+            .conn
+            .query_row(
+                "SELECT portal_spawn_fx_id, portal_scale, portal_time FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| {
+                    Ok(SummonPortal {
+                        fx_group: r.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as u32,
+                        scale: r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) as f32,
+                        time: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0) as f32,
+                    })
+                },
+            )
+            .ok()?;
+        (portal.fx_group != 0).then(|| SummonPortal {
+            scale: if portal.scale > 0.0 { portal.scale } else { 1.0 },
+            time: portal.time.max(0.0),
+            ..portal
+        })
+    }
+
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
     /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
     /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
@@ -1680,6 +1708,16 @@ fn ship_steer_vel_from_conn(conn: &Connection, model_id: u32) -> f32 {
     .flatten()
     .filter(|v| v.is_finite() && *v > 0.0)
     .map_or(DEFAULT_SHIP_STEER_VEL, |v| v as f32)
+}
+
+/// The summon portal of a slave (`slaves.portal_spawn_fx_id`): an effect group of `fx_groups`, its scale and how long
+/// it lasts (`portal_time`), as `FUN_39349600` hands them to the world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SummonPortal {
+    /// `fx_groups.id` (1263 `portal_tank_spawn` for slave 146); 0 in the row means none.
+    pub fx_group: u32,
+    pub scale: f32,
+    pub time: f32,
 }
 
 /// What a vehicle or ship is drawn from ([`Db::vehicle_look`]).

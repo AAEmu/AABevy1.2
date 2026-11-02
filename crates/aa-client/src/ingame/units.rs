@@ -2219,7 +2219,7 @@ impl Asleep {
 pub fn cull_units(
     mut commands: Commands,
     camera: Query<(&GlobalTransform, &Projection), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
-    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, Has<Asleep>)>,
+    mut units: Query<(Entity, &GlobalTransform, &mut Visibility, &mut RemoteUnit, Option<&mut Animator>, (Has<Asleep>, Has<super::vehicle::EmergenceHidden>))>,
     children: Query<&Children>,
     meshes: Query<(), With<Mesh3d>>,
     timers: Option<Res<aa_world::profile::Timers>>,
@@ -2237,16 +2237,18 @@ pub fn cull_units(
     let (anim_lod, shadow_radius) = tuning();
     // half angle of the view cone's diagonal
     let half_diag = ((vfov * 0.5).tan() * (1.0 + aspect * aspect).sqrt()).atan();
-    for (entity, transform, mut visibility, mut unit, animator, asleep) in &mut units {
+    for (entity, transform, mut visibility, mut unit, animator, (asleep, emerging)) in &mut units {
         let to = transform.translation() + Vec3::Y - cam_pos;
         let d = to.length();
         let in_view = d < 3.0 || (to / d).dot(forward).acos() < half_diag + (2.0 / d.max(2.0)).atan() + 0.1;
-        let show = d < DRAW_RADIUS && in_view && hidden_mount != Some(unit.obj_id);
+        let visible = d < DRAW_RADIUS && in_view && hidden_mount != Some(unit.obj_id);
+        // a summoned vehicle waits for its clipped materials (`vehicle::EmergenceHidden`); it still animates
+        let show = visible && !emerging;
         let want = if show { Visibility::Inherited } else { Visibility::Hidden };
         if *visibility != want {
             *visibility = want;
         }
-        let animate = show && d < ANIMATE_RADIUS;
+        let animate = visible && d < ANIMATE_RADIUS;
         let awake = animator.is_some();
         if animate && asleep {
             commands.queue(move |world: &mut World| {
@@ -2274,7 +2276,7 @@ pub fn cull_units(
         }
         // shadows only near the camera
         let casting = d < shadow_radius * if unit.casting { 1.1 } else { 0.9 };
-        if casting != unit.casting && show {
+        if casting != unit.casting && visible {
             unit.casting = casting;
             for e in children.iter_descendants(entity) {
                 if meshes.contains(e) {

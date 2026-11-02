@@ -303,6 +303,9 @@ pub struct FxRun {
     /// The light particles of the last step (world space), see [`FxSettings::max_lights`].
     lights: Vec<LightSample>,
     wind: wind::Run,
+    /// A `stop_emitting` request that outlives its simulation: a rebuilt sim starts stopped and a looping effect
+    /// never restarts (the real client's effect end event 5).
+    stopped: bool,
 }
 
 impl FxRun {
@@ -324,6 +327,31 @@ impl FxRun {
     /// Every emitter has finished.
     pub fn is_finished(&self) -> bool {
         self.finished
+    }
+
+    /// Stops spawning new particles for good; the live ones play out and the entity despawns when
+    /// `despawn_when_finished` is set (the real client's effect end event 5). The request survives a simulation that
+    /// is dropped out of range and rebuilt.
+    pub fn stop_emitting(&mut self) {
+        self.stopped = true;
+        if let Some(sim) = self.sim.as_mut() {
+            sim.stop_emitting();
+        }
+    }
+
+    /// The effect was stopped for good ([`FxRun::stop_emitting`]).
+    pub fn is_stopped(&self) -> bool {
+        self.stopped
+    }
+
+    /// The longest particle lifetime of the effect, when its library def is resolved.
+    pub fn max_particle_life(&self) -> Option<f32> {
+        self.def.as_ref().map(|def| def.max_particle_life())
+    }
+
+    /// Whether a finished simulation starts again: a looping (or dev-forced) effect that has not been stopped.
+    pub(crate) fn restarts(&self, effect: &Effect) -> bool {
+        !self.stopped && (effect.force_loop || self.def.as_ref().is_some_and(|d| d.loops()))
     }
 
     /// Radius in metres within which the effect runs.
@@ -745,7 +773,10 @@ fn apply(
             states.push(st);
             handles.push(handle);
         }
-        run.sim = Some(EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base));
+        let mut sim = EffectSim::new(states, settings.light * effect.brightness, settings.emissive * effect.brightness, settings.hdr_base);
+        // a stop requested while the effect was out of range applies to the new simulation at once
+        stop_sim(&run, &mut sim);
+        run.sim = Some(sim);
         run.meshes = handles;
         run.warmup = 2;
         run.acc_dt = 0.0;
@@ -755,6 +786,13 @@ fn apply(
         commands.entity(entity).insert(FxActive);
     }
     stats.manage_ms += t0.elapsed().as_secs_f32() * 1000.0;
+}
+
+/// A simulation built for a run honours a stop that was requested while the effect was out of range.
+pub(crate) fn stop_sim(run: &FxRun, sim: &mut EffectSim) {
+    if run.stopped {
+        sim.stop_emitting();
+    }
 }
 
 /// Gives the mesh emitters of active effects their mesh, material and entity once the model is loaded.
@@ -951,7 +989,7 @@ fn simulate(
                 && run.wind.holding(time.elapsed_secs_f64(), settings.quality);
             if hold_wind { run.finished = false; }
             if sim.finished() && !hold_wind {
-                if effect.force_loop || run.def.as_ref().is_some_and(|d| d.loops()) {
+                if run.restarts(effect) {
                     sim.reset();
                     run.wind.restart(time.elapsed_secs_f64());
                     if let Some(def) = run.def.as_deref() {

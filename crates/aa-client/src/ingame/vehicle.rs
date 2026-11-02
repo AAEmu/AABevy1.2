@@ -17,6 +17,12 @@
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
 //!
+//! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) emerges from its
+//! `slaves.portal_spawn_fx_id` portal: the unit starts two bounding extents behind its position, behind the portal
+//! plane, and moves out over `portal_time` while the portal hangs at the plane (`FUN_3909ea30` / `FUN_39097220`,
+//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). A vehicle that merely
+//! streams into view later has no creation packet, so it plays none.
+//!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
 //! bone (`super::attachments`) go away with the old parts on a swap: re-anchoring them by bone name is
@@ -28,12 +34,16 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use aa_anim::{AnimSet, Animator, ClipLibrary, pose::BoundClip};
 use aa_cry::scene::{CryAssets, ModelOptions, Shading, spawn_loaded};
+use aa_cry::shade::illum::IllumMaterial;
 use aa_cry::workers::Workers;
 use aa_cry::{CryLoader, PreparedModel};
 use aa_net::state::Units;
+use aa_net::slave::SlaveEvent;
+use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
 use aa_world::cry_to_bevy;
-use bevy::math::Affine3A;
+use bevy::math::{Affine3A, Vec4};
+use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 
@@ -108,6 +118,485 @@ pub struct VehiclePart;
 /// A particle entity spawned with a damage variant: replaced when the state changes.
 #[derive(Component)]
 pub struct VehicleEffect;
+
+/// The unit-space bounding extent of the vehicle's body at spawn (`[bounds+0x28]` of the 1.2 model). The summon
+/// emergence puts the portal plane one extent behind the unit and its start two extents behind.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct VehicleExtent(pub f32);
+
+/// The timeline ids (packet `+0xc`, unit `+0x41c`) whose summon portal is still pending, and the
+/// `Time::elapsed_secs_f64` of their `SCSlaveCreatedPacket`. `OnSlaveCreated` pushes the timeline id into
+/// `SlaveManager`'s pending list unless `hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`); `FUN_39349600`
+/// resolves it against the unit (`FUN_3935e3f0`). A vehicle that only streams into view later has no entry.
+#[derive(Resource, Default)]
+pub struct SummonPortals {
+    pending: HashMap<u16, f64>,
+}
+
+/// Most timeline ids kept waiting: a unit that is never drawn must not grow this map for the whole session.
+pub const SUMMON_PORTALS_MAX: usize = 64;
+
+/// How long a creation packet waits for its unit to appear. 1.2 resolves against unit existence, not drawing, but an
+/// entry that never resolves (created out of range and never streamed in) must expire; a drawn unit appears in well
+/// under this window.
+pub const SUMMON_PENDING_TTL: f64 = 10.0;
+
+impl SummonPortals {
+    fn announce(&mut self, tl_id: u16, now: f64) {
+        if self.pending.len() >= SUMMON_PORTALS_MAX && !self.pending.contains_key(&tl_id)
+            && let Some(oldest) = self.pending.iter().min_by(|a, b| a.1.total_cmp(b.1)).map(|(id, _)| *id)
+        {
+            self.pending.remove(&oldest);
+        }
+        // a reused timeline id restarts the wait instead of keeping the old packet's deadline
+        self.pending.insert(tl_id, now);
+    }
+
+    fn forget(&mut self, tl_id: u16) {
+        self.pending.remove(&tl_id);
+    }
+}
+
+/// The 1.2 summon emergence (`FUN_3909ea30` / `FUN_39097220`): the unit starts at `start = end - axis * 2 * extent`,
+/// behind the portal plane at `end - axis * extent`, and moves to `end` over `slaves.portal_time`.
+/// `FUN_39097390` restores `end` and sends the portal effect's end event 5.
+#[derive(Component, Clone, Copy, Debug)]
+#[allow(dead_code)] // `plane`, `axis` and `extent` are read by `examples/slave_summon` and the tests
+pub struct SummonEmergence {
+    pub start: Vec3,
+    pub end: Vec3,
+    /// The clip-plane point and portal anchor: `end - axis * extent` (`FUN_3909ea30` state +0x74).
+    pub plane: Vec3,
+    /// The unit's forward axis projected to the horizontal plane.
+    pub axis: Vec3,
+    /// The model's bounding extent (`[bounds+0x28]`); the start is two of these behind the unit.
+    pub extent: f32,
+    pub started: f64,
+    pub duration: f32,
+    pub ended: bool,
+}
+
+/// Safety cap for a summon effect whose library def never resolved (no client pak or a failed read).
+const SUMMON_EFFECT_CAP: f64 = 30.0;
+
+/// A summon portal effect: it stops emitting at `until`, its live particles fade, and the fallback cap
+/// `despawn_at` removes it even if the simulation never finishes (the 1.2 end event 5 plus a bounded life).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SummonPortalEffect {
+    /// The `Time::elapsed_secs_f64` at which emission stops.
+    pub until: f64,
+    /// The `Time::elapsed_secs_f64` at which the entity is removed whatever the simulation does.
+    pub despawn_at: f64,
+    /// The end event was sent (the stop is not repeated every frame).
+    pub stopped: bool,
+}
+
+/// The world anchor of a summon portal group at the clip-plane point (`FUN_3909ea30`): it does not move with the
+/// emerging unit. It is despawned with its unit, or after its effects have faded.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct SummonPortalAnchor {
+    pub root: Entity,
+    /// `Time::elapsed_secs_f64` when `portal_time` ends; the anchor then goes once its effects are gone.
+    pub until: f64,
+}
+
+/// The per-mesh `IllumMaterial` clones carrying the portal clip plane (`FUN_3909ea30` model vfunc 0xf8), restored when
+/// the emergence window ends. The clone is per vehicle so shared materials of other objects are untouched.
+#[derive(Component, Default)]
+pub struct EmergenceClip {
+    /// `(mesh entity, original handle, clipped handle)`: the restore only touches a mesh that still holds its clone.
+    originals: Vec<(Entity, Handle<IllumMaterial>, Handle<IllumMaterial>)>,
+    added: Vec<Handle<IllumMaterial>>,
+}
+
+/// Remembers the slaves `SCSlaveCreatedPacket` announced without `hideSpawnEffect`, and forgets a timeline id whose
+/// later creation is hidden. Entries expire in [`spawn_summon_portals`] so a packet for a unit that never appears
+/// cannot linger.
+pub fn track_summon_portals(
+    events: Option<MessageReader<NetEvent>>,
+    mut portals: ResMut<SummonPortals>,
+    time: Res<Time>,
+) {
+    let Some(mut events) = events else {
+        return;
+    };
+    let now = time.elapsed_secs_f64();
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::Slave(SlaveEvent::Created(created)) if created.hide_spawn_effect => {
+                // a hidden creation for the same timeline id supersedes a pending visible one
+                portals.forget(created.tl_id);
+            }
+            Event::Slave(SlaveEvent::Created(created)) => portals.announce(created.tl_id, now),
+            Event::Slave(SlaveEvent::Removed { tl_id, .. }) => portals.forget(*tl_id),
+            _ => {}
+        }
+    }
+}
+
+/// Starts the summon emergence and portal of every waiting slave whose unit is drawn. The original `FUN_39349600`
+/// (x2game.dll.c:680653) finds the unit by timeline id (`FUN_3935e3f0`), reads the slave row's `+0x58` (spawn fx
+/// group), `+0x54` (scale) and `+0x5c` (time), and calls the world slot `0x2a8` = `FUN_390cf130`
+/// (x2game.dll.c:167908). That only starts an emergence when the time is above `DAT_3999c484` (0.0), through
+/// `FUN_390ca1e0` -> `FUN_3909ea30` (x2game.dll.c:136679): it anchors the fx at `pos - forward * extent`, scale
+/// `unit_scale * portal_scale`, puts the unit at `pos - forward * 2 * extent` and clips it at the plane while
+/// `FUN_39097220` (x2game.dll.c:132165) moves it to `pos` over `portal_time`.
+///
+/// The pending map is keyed by timeline id and resolved in one pass over the drawn roots (no per-pending scan); an
+/// entry older than [`SUMMON_PENDING_TTL`] is dropped.
+pub fn spawn_summon_portals(
+    mut commands: Commands,
+    db: Option<Res<Db>>,
+    book: Option<Res<super::combat::skills::SkillBook>>,
+    units: Option<Res<Units>>,
+    mut portals: ResMut<SummonPortals>,
+    time: Res<Time>,
+    roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform, Option<&VehicleExtent>)>,
+) {
+    if portals.pending.is_empty() {
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    portals
+        .pending
+        .retain(|_, announced| now - *announced <= SUMMON_PENDING_TTL);
+    if portals.pending.is_empty() {
+        return;
+    }
+    let (Some(db), Some(book), Some(units)) = (db, book, units) else {
+        return;
+    };
+    let mut resolved = Vec::new();
+    for (root, remote, damage, transform, extent) in &roots {
+        let Some(unit) = units.by_id.get(&remote.obj_id) else {
+            continue;
+        };
+        let aa_net::model::UnitKind::Slave { tl_id, .. } = unit.kind else {
+            continue;
+        };
+        if !portals.pending.contains_key(&tl_id) {
+            continue;
+        }
+        resolved.push(tl_id);
+        let Some(portal) = db.slave_summon_portal(unit.kind.template_id()) else {
+            continue;
+        };
+        // `FUN_390cf130` only starts the emergence when `portal_time > DAT_3999c484` (0.0): slaves 54, 94 and 115
+        // (time 0) get no portal.
+        if portal.time <= 0.0 {
+            continue;
+        }
+        let extent = extent.map_or(1.0, |extent| extent.0);
+        // the unit's forward (cry +Y) in Bevy is -Z, projected to the horizontal plane like the native axis
+        let mut axis = transform.rotation * Vec3::NEG_Z;
+        axis.y = 0.0;
+        let axis = axis.normalize_or_zero();
+        let axis = if axis == Vec3::ZERO { Vec3::NEG_Z } else { axis };
+        let end = transform.translation;
+        let plane = end - axis * extent;
+        let start = end - axis * (2.0 * extent);
+        // the portal hangs at the clip-plane point, oriented by the unit, scaled by unit_scale x portal_scale
+        let anchor = commands
+            .spawn((
+                Transform {
+                    translation: plane,
+                    rotation: transform.rotation,
+                    ..default()
+                },
+                Visibility::default(),
+                SummonPortalAnchor {
+                    root,
+                    until: now + f64::from(portal.time),
+                },
+            ))
+            .id();
+        let unit_scale = transform.scale.y.max(0.0);
+        for item in book.fx_group(portal.fx_group).iter() {
+            // the group's FxSound item has no effect name; 1.2 plays it with the portal, this slice draws the particles
+            if item.effect.is_empty() {
+                continue;
+            }
+            commands.spawn((
+                aa_fx::Effect {
+                    scale: portal.scale * item.scale * unit_scale,
+                    prime: false,
+                    item: true,
+                    no_body: true,
+                    despawn_when_finished: true,
+                    ..aa_fx::Effect::new(item.effect.clone())
+                },
+                Transform {
+                    translation: cry_to_bevy(item.offset),
+                    ..default()
+                },
+                ChildOf(anchor),
+                SummonPortalEffect {
+                    until: now + f64::from(portal.time),
+                    despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
+                    stopped: false,
+                },
+            ));
+        }
+        // the prefab's own inactive `portal_exhaust` follows the moving unit (FUN_39097140 / FUN_39097220)
+        spawn_portal_exhaust(&mut commands, root, &damage.variant, now + f64::from(portal.time));
+        commands.entity(root).insert((
+            SummonEmergence {
+                start,
+                end,
+                plane,
+                axis,
+                extent,
+                started: now,
+                duration: portal.time,
+                ended: false,
+            },
+            // the first rendered frame must already be clipped: hide the model until the material clones are in
+            // (`units::cull_units` owns the root's `Visibility` and honours this marker)
+            EmergenceHidden,
+        ));
+    }
+    for tl_id in resolved {
+        portals.forget(tl_id);
+    }
+}
+
+/// Plays the prefab's authored `portal_exhaust` particle (inactive in the prefab) on the unit during the emergence,
+/// as `FUN_39097140` does at the start and `FUN_39097220` keeps alive each frame; `FUN_39097390` stops it.
+fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, until: f64) -> Vec<Entity> {
+    let mut spawned = Vec::new();
+    for named in super::data::prefab_effects_named(variant) {
+        if !named.name.eq_ignore_ascii_case("portal_exhaust") {
+            continue;
+        }
+        let effect = named.effect;
+        let entity = commands
+            .spawn((
+                aa_fx::Effect {
+                    scale: effect.scale,
+                    prime: false,
+                    item: true,
+                    despawn_when_finished: true,
+                    ..aa_fx::Effect::new(effect.effect.clone())
+                },
+                Transform {
+                    translation: cry_to_bevy(effect.pos),
+                    rotation: cry_rot_to_bevy(effect.rot),
+                    ..default()
+                },
+                ChildOf(root),
+                SummonPortalEffect {
+                    until,
+                    despawn_at: until + SUMMON_EFFECT_CAP,
+                    stopped: false,
+                },
+            ))
+            .id();
+        spawned.push(entity);
+    }
+    spawned
+}
+
+/// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`), unless the local
+/// player is driving it (`Driven`, `cart::drive_cart` owns the transform then). The portal-plane clip (1.2's model
+/// vfunc 0xf8) is applied by [`apply_emergence_clip`] and restored by [`restore_emergence_clip`].
+pub fn animate_summon_emergence(
+    time: Res<Time>,
+    mut roots: Query<(&mut Transform, &mut SummonEmergence), Without<super::mount::Driven>>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (mut transform, mut emergence) in &mut roots {
+        if emergence.ended {
+            continue;
+        }
+        let progress = if emergence.duration > 0.0 {
+            ((now - emergence.started) as f32 / emergence.duration).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        transform.translation = emergence.start.lerp(emergence.end, progress);
+        if progress >= 1.0 {
+            transform.translation = emergence.end;
+            emergence.ended = true;
+        }
+    }
+}
+
+/// Gives every mesh of an emerging vehicle a clone of its `IllumMaterial` with the portal clip plane, so the part
+/// still behind the ring is discarded (`FUN_3909ea30` model vfunc 0xf8: plane at `pos - axis * extent`, normal
+/// `axis`). It runs every frame while the emergence lasts, so parts swapped in during it are clipped too; the
+/// material is per vehicle, other objects keep the shared asset.
+/// Keeps a summoned vehicle hidden until its clipped material copies are in place. A marker rather than
+/// `Visibility`, because [`super::units::cull_units`] rewrites the root's `Visibility` every frame.
+#[derive(Component)]
+pub struct EmergenceHidden;
+
+pub fn apply_emergence_clip(
+    mut commands: Commands,
+    illum: Option<ResMut<Assets<IllumMaterial>>>,
+    time: Res<Time>,
+    mut roots: Query<(Entity, &SummonEmergence, Option<&mut EmergenceClip>)>,
+    children: Query<&Children>,
+    materials: Query<&MeshMaterial3d<IllumMaterial>>,
+) {
+    let now = time.elapsed_secs_f64();
+    let Some(mut illum) = illum else {
+        // no render-side Illum materials (a headless example/test): nothing to clip, do not keep the unit hidden
+        for (root, emergence, _) in &mut roots {
+            if !emergence.ended {
+                commands.entity(root).remove::<EmergenceHidden>();
+            }
+        }
+        return;
+    };
+    for (root, emergence, clip) in &mut roots {
+        if emergence.ended {
+            continue;
+        }
+        let Some(mut clip) = clip else {
+            commands.entity(root).insert(EmergenceClip::default());
+            continue;
+        };
+        let plane = Vec4::new(
+            emergence.axis.x,
+            emergence.axis.y,
+            emergence.axis.z,
+            -emergence.axis.dot(emergence.plane),
+        );
+        let mut stack = vec![root];
+        let mut clipped_any = false;
+        while let Some(entity) = stack.pop() {
+            if let Ok(kids) = children.get(entity) {
+                stack.extend(kids.iter());
+            }
+            let Ok(handle) = materials.get(entity) else {
+                continue;
+            };
+            if clip.added.iter().any(|added| added.id() == handle.0.id())
+                || clip.originals.iter().any(|(seen, ..)| *seen == entity)
+            {
+                continue;
+            }
+            let Some(original) = illum.get(&handle.0) else {
+                continue;
+            };
+            let mut material = original.clone();
+            material.extension.clip_plane = plane;
+            // The depth-only prepass/shadow pipelines have no fragment stage unless the material can discard
+            // (bevy_pbr's prepass: MAY_DISCARD). An opaque vehicle clone becomes alpha-masked so `clip_discard`
+            // runs there too; the base alpha is 1, so the visible shading is unchanged.
+            if matches!(material.base.alpha_mode, AlphaMode::Opaque) {
+                material.base.alpha_mode = AlphaMode::Mask(0.5);
+            }
+            let clipped = illum.add(material);
+            commands.entity(entity).insert(MeshMaterial3d(clipped.clone()));
+            clip.originals.push((entity, handle.0.clone(), clipped.clone()));
+            clip.added.push(clipped);
+            clipped_any = true;
+            if clip.originals.len() >= 256 {
+                break;
+            }
+        }
+        // the unit was hidden at the start so the first rendered frame is already clipped; if nothing could be
+        // clipped (no Illum part), show it after a short grace instead of leaving it invisible
+        if clipped_any || (clip.originals.is_empty() && now - emergence.started > 0.25) {
+            commands.entity(root).remove::<EmergenceHidden>();
+        }
+    }
+}
+
+/// Restores the original `IllumMaterial` handles when the emergence window ends, including when the local player
+/// drives the unit (the animation is skipped then, but the clip still ends after `portal_time`).
+pub fn restore_emergence_clip(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut roots: Query<(Entity, &mut SummonEmergence, Option<&mut EmergenceClip>)>,
+    alive: Query<()>,
+    materials: Query<&MeshMaterial3d<IllumMaterial>>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (root, mut emergence, clip) in &mut roots {
+        let elapsed = now - emergence.started;
+        if !emergence.ended {
+            if elapsed < f64::from(emergence.duration) {
+                continue;
+            }
+            emergence.ended = true;
+        }
+        // shown again even when no clip was ever inserted (the window ended before the first clip frame)
+        commands.entity(root).remove::<EmergenceHidden>();
+        let Some(mut clip) = clip else {
+            continue;
+        };
+        for (entity, original, clipped) in clip.originals.drain(..) {
+            // stealth or another system may have replaced the material meanwhile: only undo our own clone
+            if alive.get(entity).is_ok()
+                && materials
+                    .get(entity)
+                    .is_ok_and(|handle| handle.0.id() == clipped.id())
+            {
+                commands.entity(entity).insert(MeshMaterial3d(original));
+            }
+        }
+        commands.entity(root).remove::<EmergenceHidden>();
+        commands.entity(root).remove::<EmergenceClip>();
+    }
+}
+
+/// The end of the emergence (`FUN_39097390`): send the portal effect end event 5 (`FUN_393ed520(fx, 5, ...)`) by
+/// stopping emission and letting the live particles fade, instead of killing the effect. The effect still has a
+/// bounded life: `despawn_at` is reset to `until + the library's longest particle life`, and a safety-cap system
+/// removes it even when the stopped simulation never reports finished.
+pub fn end_summon_portals(
+    time: Res<Time>,
+    mut effects: Query<(Entity, &mut SummonPortalEffect, &mut aa_fx::FxRun)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (_entity, mut effect, mut run) in &mut effects {
+        if effect.stopped || now < effect.until {
+            continue;
+        }
+        run.stop_emitting();
+        effect.stopped = true;
+        effect.despawn_at = now + f64::from(run.max_particle_life().unwrap_or(10.0)) + 0.25;
+    }
+}
+
+/// Removes a summon effect after `until` + its longest particle life (the fallback cap included), so a continuous
+/// effect that never finishes and a stopped sim that is rebuilt cannot linger.
+pub fn despawn_summon_portal_effects(
+    time: Res<Time>,
+    mut commands: Commands,
+    effects: Query<(Entity, &SummonPortalEffect)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, effect) in &effects {
+        if now >= effect.despawn_at {
+            commands.entity(entity).try_despawn();
+        }
+    }
+}
+
+/// Drops a portal anchor with its unit, or once its effects have faded. A safety window bounds a failed read of the
+/// prefab's effects.
+pub fn cleanup_summon_portals(
+    time: Res<Time>,
+    mut commands: Commands,
+    anchors: Query<(Entity, &SummonPortalAnchor)>,
+    children: Query<&Children>,
+    roots: Query<()>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, anchor) in &anchors {
+        let root_gone = roots.get(anchor.root).is_err();
+        let empty = match children.get(entity) {
+            Ok(children) => children.is_empty(),
+            Err(_) => true,
+        };
+        if root_gone || (now >= anchor.until && (empty || now >= anchor.until + 10.0)) {
+            commands.entity(entity).try_despawn();
+        }
+    }
+}
 
 /// A body prefab being read on the workers for [`VehicleDamage::requested`].
 struct VehicleSwapBuilt {
@@ -377,21 +866,31 @@ pub fn bounds(look: &VehicleLook) -> Option<(Vec3, Vec3)> {
             );
             continue;
         };
-        let placement = affine(&part);
-        for i in 0..8 {
-            let corner = Vec3::new(
-                if i & 1 == 0 { lo.x } else { hi.x },
-                if i & 2 == 0 { lo.y } else { hi.y },
-                if i & 4 == 0 { lo.z } else { hi.z },
-            );
-            let p = placement.transform_point3(corner);
-            out = Some(match out {
-                None => (p, p),
-                Some((a, b)) => (a.min(p), b.max(p)),
-            });
-        }
+        let (a, b) = placed_bounds(affine(&part), lo, hi);
+        out = Some(match out {
+            None => (a, b),
+            Some((lo, hi)) => (lo.min(a), hi.max(b)),
+        });
     }
     out
+}
+
+/// The bounds of a model's eight corners after placing it in unit space.
+fn placed_bounds(placement: Affine3A, lo: Vec3, hi: Vec3) -> (Vec3, Vec3) {
+    let mut out: Option<(Vec3, Vec3)> = None;
+    for i in 0..8 {
+        let corner = Vec3::new(
+            if i & 1 == 0 { lo.x } else { hi.x },
+            if i & 2 == 0 { lo.y } else { hi.y },
+            if i & 4 == 0 { lo.z } else { hi.z },
+        );
+        let p = placement.transform_point3(corner);
+        out = Some(match out {
+            None => (p, p),
+            Some((a, b)) => (a.min(p), b.max(p)),
+        });
+    }
+    out.unwrap_or((lo, hi))
 }
 
 /// A prepared part: a static model, or a rigged `.chr` (its models, spawned through [`super::creature::spawn`]).
@@ -403,6 +902,8 @@ pub struct Piece {
     wheel: Option<f32>,
     spindle: Option<SpindleArms>,
     helpers: HashMap<String, Affine3A>,
+    /// Unit-space model bounds (cry axes) of this piece, for the summon emergence extent.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 enum PieceModel {
@@ -449,7 +950,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                 let rigged = part.model.ends_with(".cdf")
                     || (part.model.ends_with(".chr")
                         && aa_anim::pose::shared_rig(&part.model).is_ok_and(|r| !r.is_empty()));
-                let (model, radius, helpers) = if rigged {
+                let (model, radius, helpers, bounds) = if rigged {
                     let models: Vec<PreparedModel> =
                         super::creature::model_files(&part.model, None)
                             .into_iter()
@@ -459,13 +960,18 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                             .collect();
                     // a `.chr` part is its own main model: read the helpers off the prepared model, not a second load
                     let helpers = part_helpers(&part, &models.first()?.loaded().model);
-                    (PieceModel::Rigged(models), None, helpers)
+                    let bounds = models
+                        .iter()
+                        .find_map(|m| m.loaded().model.bounds())
+                        .map(|(lo, hi)| placed_bounds(affine(&part), lo, hi));
+                    (PieceModel::Rigged(models), None, helpers, bounds)
                 } else {
                     match loader.prepare_model(&part.model, &static_options(&part)) {
                         Ok(m) => {
                             let radius = wheel.and_then(|_| wheel_radius(&m.loaded().model));
                             let helpers = part_helpers(&part, &m.loaded().model);
-                            (PieceModel::Static(m), radius, helpers)
+                            let bounds = m.loaded().model.bounds().map(|(lo, hi)| placed_bounds(affine(&part), lo, hi));
+                            (PieceModel::Static(m), radius, helpers, bounds)
                         }
                         Err(e) => {
                             debug!("vehicle part {}: {e}", part.model);
@@ -479,6 +985,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                     wheel: radius,
                     spindle,
                     helpers,
+                    bounds,
                 })
             },
         )
@@ -614,15 +1121,32 @@ pub(crate) struct VehiclePlugin;
 
 impl Plugin for VehiclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (stop_dead_vehicles, stop_dead_new_bodies, resume_vehicle_idle, start_vehicle_idle).chain(),
-        )
-        // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
-        .add_systems(
-            PostUpdate,
-            steer_spindles.after(AnimSet).before(TransformSystems::Propagate),
-        );
+        app.init_resource::<SummonPortals>()
+            .add_systems(
+                Update,
+                (stop_dead_vehicles, stop_dead_new_bodies, resume_vehicle_idle, start_vehicle_idle).chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    track_summon_portals,
+                    // the portal waits for the frame `units::sync_views` draws the slave's root
+                    spawn_summon_portals.after(super::units::sync_views),
+                    // the emergence drives the root after the server position, like the 1.2 unit state does
+                    animate_summon_emergence.after(super::units::move_units),
+                    apply_emergence_clip,
+                    end_summon_portals,
+                    despawn_summon_portal_effects,
+                    restore_emergence_clip,
+                    cleanup_summon_portals,
+                )
+                    .chain(),
+            )
+            // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
+            .add_systems(
+                PostUpdate,
+                steer_spindles.after(AnimSet).before(TransformSystems::Propagate),
+            );
     }
 }
 
@@ -705,15 +1229,38 @@ pub fn spawn(
     pieces: Vec<Piece>,
     transform: Transform,
 ) -> Entity {
+    let extent = piece_extent(&pieces);
     let root = commands
         .spawn((
             transform,
             Visibility::default(),
             VehicleMotion::at(&transform),
+            VehicleExtent(extent),
         ))
         .id();
     add_parts(commands, cry, clips, pieces, root);
     root
+}
+
+/// The unit-space bounding extent of a vehicle's prepared parts: `FUN_3909ea30` reads the model's `[bounds+0x28]`
+/// and the summon emergence puts the clip plane there, with the start another extent behind it. This uses the
+/// largest horizontal half extent of the combined bounds (cry x / y).
+fn piece_extent(pieces: &[Piece]) -> f32 {
+    let mut lo = Vec3::splat(f32::MAX);
+    let mut hi = Vec3::splat(f32::MIN);
+    let mut any = false;
+    for piece in pieces {
+        if let Some((a, b)) = piece.bounds {
+            lo = lo.min(a);
+            hi = hi.max(b);
+            any = true;
+        }
+    }
+    if !any {
+        return 1.0;
+    }
+    let size = hi - lo;
+    (size.x.max(size.y) * 0.5).clamp(0.25, 50.0)
 }
 
 /// Spawns the prepared parts as children of `root` and installs the seat helpers and spindle they define.
@@ -727,6 +1274,7 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
         wheel,
         spindle,
         helpers: piece_helpers,
+        bounds: _,
     } in pieces
     {
         // the body parts come first: a same-named helper on a wheel part never takes the driver's seat
@@ -1304,6 +1852,500 @@ mod tests {
         state.apply(app.world_mut());
         app.update();
         Some((app, root))
+    }
+
+    /// A vehicle root (model `model`) for slave template `template`, announced in `Units` at the origin with the
+    /// summon portal/emergence systems ticking. The tests send the `SCSlaveCreatedPacket` themselves.
+    fn vehicle_app(template: u32, model: u32) -> Option<(App, Db, Entity)> {
+        use bevy::time::TimeUpdateStrategy;
+        if !aa_cry::pak_available() {
+            return None;
+        }
+        let db = Db::open()?;
+        let book = super::super::combat::skills::SkillBook::open()?;
+        let look = db.vehicle_look(model).expect("the vehicle's look");
+        let max_hp = db.slave_max_hp(template, 50).expect("the slave's MaxHealth");
+        let unit = slave_unit_kind(7, template, template, model, max_hp, max_hp);
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            aa_cry::CryPlugin,
+            aa_anim::AnimPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<Image>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<bevy::mesh::skinning::SkinnedMeshInverseBindposes>()
+        .insert_resource(TimeUpdateStrategy::ManualDuration(std::time::Duration::from_secs_f32(1.0 / 30.0)))
+        .insert_resource(db.clone())
+        .insert_resource(book)
+        .insert_resource(units)
+        .init_resource::<SummonPortals>()
+        .add_message::<NetEvent>();
+        app.add_systems(
+            Update,
+            (
+                track_summon_portals,
+                spawn_summon_portals,
+                animate_summon_emergence,
+                apply_emergence_clip,
+                end_summon_portals,
+                despawn_summon_portal_effects,
+                restore_emergence_clip,
+                cleanup_summon_portals,
+            )
+                .chain(),
+        );
+        let mut state = SystemState::<(Commands, CryAssets, Res<ClipLibrary>)>::new(app.world_mut());
+        let pieces = {
+            let (_, mut cry, _) = state.get_mut(app.world_mut()).unwrap();
+            prepare(&cry.loader(), &look)
+        };
+        let root = {
+            let (mut commands, mut cry, clips) = state.get_mut(app.world_mut()).unwrap();
+            let root = spawn(&mut commands, &mut cry, &clips, pieces, Transform::default());
+            commands.entity(root).insert((
+                RemoteUnit::announced(&unit),
+                VehicleDamage {
+                    state: 1,
+                    variant: look.normal.clone(),
+                    max_hp,
+                    requested: None,
+                    dying_start: None,
+                    dying_time: 0.0,
+                    death_seen: false,
+                    dead_effect_played: false,
+                },
+            ));
+            root
+        };
+        state.apply(app.world_mut());
+        Some((app, db, root))
+    }
+
+    /// The owner test's Red Farm Hauler (slave template 146, model 1553).
+    fn hauler() -> Option<(App, Db, Entity)> {
+        vehicle_app(146, 1553)
+    }
+
+    fn portal_effects(app: &mut App) -> Vec<(String, bool, f32)> {
+        app.world_mut()
+            .query::<(&aa_fx::Effect, &SummonPortalEffect)>()
+            .iter(app.world())
+            .map(|(effect, _)| (effect.name.clone(), effect.prime, effect.scale))
+            .collect()
+    }
+
+    fn portal_markers(app: &mut App) -> Vec<(String, bool, f64)> {
+        app.world_mut()
+            .query::<(&aa_fx::Effect, &SummonPortalEffect)>()
+            .iter(app.world())
+            .map(|(effect, marker)| (effect.name.clone(), marker.stopped, marker.despawn_at))
+            .collect()
+    }
+
+    fn created(tl_id: u16, hide: bool) -> NetEvent {
+        NetEvent(Event::Slave(SlaveEvent::Created(aa_net::slave::SlaveCreated {
+            owner_obj_id: 1,
+            tl_id,
+            obj_id: 7,
+            hide_spawn_effect: hide,
+            raw_id: 0,
+            creator_name: "owner".into(),
+        })))
+    }
+
+    /// The emergence clip plane reaches a per-vehicle `IllumMaterial` clone and the original handle is restored at
+    /// the end (the shader discards behind the plane; the galleon/cart screenshot shows it).
+    #[test]
+    fn the_emergence_clip_plane_is_applied_and_restored() {
+        use bevy::asset::AssetPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<IllumMaterial>();
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let root = app
+            .world_mut()
+            .spawn(SummonEmergence {
+                start: Vec3::new(0.0, 0.0, 2.0),
+                end: Vec3::ZERO,
+                plane: Vec3::new(0.0, 0.0, 1.0),
+                axis: Vec3::new(0.0, 0.0, -1.0),
+                extent: 1.0,
+                started: 0.0,
+                duration: 1.0,
+                ended: false,
+            })
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original.clone()), ChildOf(root)))
+            .id();
+        app.add_systems(Update, (apply_emergence_clip, restore_emergence_clip).chain());
+        app.update();
+        app.update();
+        let clipped = app
+            .world()
+            .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+            .expect("the mesh material")
+            .0
+            .clone();
+        assert_ne!(clipped.id(), original.id(), "the mesh got its own clipped material");
+        let material = app
+            .world()
+            .resource::<Assets<IllumMaterial>>()
+            .get(&clipped)
+            .expect("the clipped material");
+        assert_eq!(material.extension.clip_plane, Vec4::new(0.0, 0.0, -1.0, 1.0));
+        app.world_mut().get_mut::<SummonEmergence>(root).unwrap().ended = true;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            original.id(),
+            "the original material is restored"
+        );
+        assert!(app.world().get::<EmergenceClip>(root).is_none());
+    }
+
+    /// A material replaced while the emergence runs (stealth) is not restored over: only the clipped clone is undone.
+    #[test]
+    fn the_restore_does_not_undo_a_replaced_material() {
+        use bevy::asset::AssetPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<IllumMaterial>();
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let root = app
+            .world_mut()
+            .spawn(SummonEmergence {
+                start: Vec3::new(0.0, 0.0, 2.0),
+                end: Vec3::ZERO,
+                plane: Vec3::new(0.0, 0.0, 1.0),
+                axis: Vec3::new(0.0, 0.0, -1.0),
+                extent: 1.0,
+                started: 0.0,
+                duration: 1.0,
+                ended: false,
+            })
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((MeshMaterial3d(original), ChildOf(root)))
+            .id();
+        app.add_systems(Update, (apply_emergence_clip, restore_emergence_clip).chain());
+        app.update();
+        app.update();
+        let other = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        app.world_mut()
+            .entity_mut(mesh)
+            .insert(MeshMaterial3d(other.clone()));
+        app.world_mut().get_mut::<SummonEmergence>(root).unwrap().ended = true;
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            other.id(),
+            "a replaced material is left alone"
+        );
+    }
+
+    /// `SCSlaveCreatedPacket` without `hideSpawnEffect` on slave 146 (Red Farm Hauler) plays the `slaves` row's
+    /// `portal_spawn_fx_id` 1263 (`portal_tank_spawn`) once, at the clip-plane point, and moves the cart out of the
+    /// plane over `portal_time` 1.0 s (`FUN_3909ea30` / `FUN_39097220`).
+    #[test]
+    fn a_created_vehicle_plays_its_summon_portal_once() {
+        let Some((mut app, db, root)) = hauler() else { return };
+        let portal = db.slave_summon_portal(146).expect("the Red Farm Hauler's summon portal");
+        assert_eq!(portal, super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 });
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let items: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter(|item| !item.effect.is_empty())
+            .map(|item| item.effect.clone())
+            .collect();
+        assert_eq!(items.len(), 2, "{items:?}");
+        assert!(items.iter().any(|name| name.ends_with("portal_tank_main")), "{items:?}");
+        assert!(items.iter().any(|name| name.ends_with("portal_tank_main_start")), "{items:?}");
+        assert!(
+            book.fx_group(portal.fx_group).iter().any(|item| item.effect.is_empty() && item.sound.is_some()),
+            "the group's FxSound item"
+        );
+
+        // a non-identity hull yaw: the emergence axis must be the hull's forward, not world -Z
+        let yaw = 0.8;
+        app.world_mut().get_mut::<Transform>(root).unwrap().rotation = Quat::from_rotation_y(yaw);
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        let effects = portal_effects(&mut app);
+        assert_eq!(effects.len(), 2, "{effects:?}");
+        for (name, primed, scale) in &effects {
+            assert!(items.iter().any(|item| item == name), "{name}");
+            assert!(!primed, "a summon portal must not start primed");
+            assert!((*scale - 3.0).abs() < 1e-6, "{name} scale {scale}");
+        }
+        // the cart starts two extents behind its position, the portal at one extent
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        let end = emergence.end;
+        let axis = emergence.axis;
+        assert!(emergence.extent > 0.5, "extent {}", emergence.extent);
+        assert!(axis.y.abs() < 1e-6 && (axis.length() - 1.0).abs() < 1e-4, "{axis:?}");
+        let rotation = app.world().get::<Transform>(root).expect("the root").rotation;
+        // the model's forward is cry +Y (`cry_to_bevy(+Y)` is Bevy -Z); the axis must be the unit's forward
+        let mut hull_forward = rotation * aa_world::cry_to_bevy(Vec3::Y);
+        hull_forward.y = 0.0;
+        let hull_forward = hull_forward.normalize_or_zero();
+        assert!((axis - hull_forward).length() < 1e-5, "axis {axis:?} vs hull forward {hull_forward:?}");
+        assert!((emergence.plane - (end - axis * emergence.extent)).length() < 1e-4);
+        assert!((emergence.start - (end - axis * (2.0 * emergence.extent))).length() < 1e-4);
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        // the emergence may run in this same schedule, so allow one frame of progress from the start
+        let path = (emergence.end - emergence.start).length().max(1e-4);
+        let progress = (transform.translation - emergence.start).length() / path;
+        assert!(progress < 0.1, "the cart starts behind the plane: {progress}");
+        // the portal hangs at the plane point, oriented by the unit, not at the cart centre
+        let (anchor_entity, _anchor, anchor_transform) = app
+            .world_mut()
+            .query::<(Entity, &SummonPortalAnchor, &Transform)>()
+            .iter(app.world())
+            .map(|(entity, anchor, transform)| (entity, *anchor, *transform))
+            .find(|(_, anchor, _)| anchor.root == root)
+            .expect("the portal anchor");
+        assert!((anchor_transform.translation - emergence.plane).length() < 1e-4, "{anchor_transform:?}");
+        assert!(anchor_transform.rotation.angle_between(transform.rotation) < 1e-4);
+        let children = app.world().get::<Children>(anchor_entity).expect("the portal's children");
+        assert_eq!(children.len(), 2, "the portal particles hang at the anchor");
+        // the pending timeline id was consumed: later frames play it once
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(portal_effects(&mut app).len(), 2, "the portal plays once");
+        let moved = app.world().get::<Transform>(root).unwrap().translation;
+        assert!((moved - emergence.start).length() > 0.0, "the cart is emerging");
+        // `portal_time` is 1.0 s: the cart reaches its position and the effects stop emitting
+        for _ in 0..40 {
+            app.update();
+        }
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        assert!(emergence.ended, "the emergence ends after portal_time");
+        assert!((app.world().get::<Transform>(root).unwrap().translation - end).length() < 1e-4);
+        let markers = portal_markers(&mut app);
+        assert_eq!(markers.len(), 2, "the effect is not killed by the end event");
+        assert!(markers.iter().all(|(_, stopped, _)| *stopped), "the end event stopped emission: {markers:?}");
+        // a continuous/never-finished effect still has a bounded life: the fallback cap despawns it
+        for _ in 0..360 {
+            app.update();
+        }
+        assert!(portal_markers(&mut app).is_empty(), "the stopped effect is despawned by its cap");
+    }
+
+    /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
+    /// (`SCUnitState` with no `SCSlaveCreatedPacket`) plays none, and `hideSpawnEffect` suppresses it.
+    #[test]
+    fn a_vehicle_streamed_in_later_plays_no_summon_portal() {
+        let Some((mut app, _db, root)) = hauler() else { return };
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(portal_effects(&mut app).is_empty(), "a streamed-in vehicle has no creation packet");
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "no emergence");
+        app.world_mut().write_message(created(1, true));
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(portal_effects(&mut app).is_empty(), "hideSpawnEffect suppresses the portal");
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "hideSpawnEffect skips the emergence");
+    }
+
+    /// The `slaves` row of the owner test's `/slave spawn 146`, a slave without a portal (the rowboat, 15), and the
+    /// zero-time rows (`FUN_390cf130` only starts an emergence when the time is above 0).
+    #[test]
+    fn slave_146_has_the_portal_tank_spawn_group() {
+        let Some(db) = Db::open() else { return };
+        assert_eq!(
+            db.slave_summon_portal(146),
+            Some(super::super::data::SummonPortal { fx_group: 1263, scale: 3.0, time: 1.0 })
+        );
+        assert_eq!(db.slave_summon_portal(15), None);
+        for template in [54, 94, 115] {
+            let portal = db.slave_summon_portal(template).expect("a zero-time portal row");
+            assert_eq!(portal.time, 0.0, "slave {template}");
+        }
+        // the sea variant (Eznan Cutter, 21) uses the water-column group, not the tank ring
+        let cutter = db.slave_summon_portal(21).expect("the Eznan Cutter's summon portal");
+        assert_eq!((cutter.fx_group, cutter.scale, cutter.time), (619, 10.0, 7.0));
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let items: Vec<String> = book
+            .fx_group(cutter.fx_group)
+            .iter()
+            .map(|item| item.effect.clone())
+            .filter(|name| !name.is_empty())
+            .collect();
+        assert!(
+            items.iter().any(|name| name.contains("shipportal_open_main_x15")),
+            "the cutter's water column: {items:?}"
+        );
+        assert!(!items.iter().any(|name| name.contains("portal_tank")), "{items:?}");
+    }
+
+    /// A slave whose `portal_time` is 0 (slave 54, the tank) gets no portal and no emergence.
+    #[test]
+    fn a_zero_portal_time_starts_no_emergence() {
+        let Some((mut app, db, root)) = vehicle_app(54, 1008) else { return };
+        assert_eq!(db.slave_summon_portal(54).map(|p| p.time), Some(0.0));
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        assert!(portal_effects(&mut app).is_empty(), "portal_time 0 plays no portal");
+        assert!(app.world().get::<SummonEmergence>(root).is_none(), "portal_time 0 starts no emergence");
+        assert!(
+            app.world().resource::<SummonPortals>().pending.is_empty(),
+            "the timeline id is consumed"
+        );
+    }
+
+    /// The red cargo/boiler is the `add` subset at the model's **+Y** end (the bed `wood` is behind it): cry +Y is
+    /// the forward the emergence moves along, so the captured "cargo end first" is the +forward direction, not a
+    /// flipped axis.
+    #[test]
+    fn the_red_cargo_end_is_the_model_forward_end() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let model = aa_cry::mesh::Model::load("objects/env/06_unit/05_carriage/transfers_trailer_c.chr")
+            .expect("the Red Farm Hauler body");
+        let mtl = aa_cry::material::Material::load("objects/env/06_unit/05_carriage/transfers_trailer_c.mtl")
+            .expect("its materials");
+        let mesh = model.meshes.first().expect("the body mesh");
+        let subset = |name: &str| {
+            mesh.subsets
+                .iter()
+                .find(|s| mtl.sub(s.material_id as usize).is_some_and(|m| m.name == name))
+                .unwrap_or_else(|| panic!("the {name} subset"))
+        };
+        let cargo = subset("add");
+        let bed = subset("wood");
+        assert!(cargo.center.y > 0.0, "cargo at +Y: {:?}", cargo.center);
+        assert!(cargo.center.y > bed.center.y, "cargo ahead of the bed: {cargo:?} {bed:?}");
+        assert_eq!(aa_world::cry_to_bevy(Vec3::Y), Vec3::NEG_Z, "cry +Y is the Bevy forward");
+    }
+
+    /// The fallback cap despawns a summon effect that is not under a portal anchor (the prefab's `portal_exhaust` is
+    /// parented to the unit root), even when no simulation ever reports finished.
+    #[test]
+    fn a_summon_effect_is_despawned_at_its_cap() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((
+                aa_fx::Effect::new("T.a"),
+                SummonPortalEffect {
+                    until: 0.0,
+                    despawn_at: 0.0,
+                    stopped: true,
+                },
+            ))
+            .id();
+        app.add_systems(Update, despawn_summon_portal_effects);
+        app.update();
+        assert!(app.world().get_entity(entity).is_err(), "the cap removes the effect");
+    }
+
+    /// A later `hideSpawnEffect` creation for the same timeline id clears the pending wait, and an entry whose unit
+    /// never appears expires after [`SUMMON_PENDING_TTL`].
+    #[test]
+    fn a_hidden_creation_clears_the_pending_entry_and_old_entries_expire() {
+        let Some((mut app, _db, _root)) = hauler() else { return };
+        app.world_mut().write_message(created(99, false));
+        app.update();
+        assert!(app.world().resource::<SummonPortals>().pending.contains_key(&99));
+        app.world_mut().write_message(created(99, true));
+        app.update();
+        assert!(
+            !app.world().resource::<SummonPortals>().pending.contains_key(&99),
+            "a hidden creation clears the pending timeline id"
+        );
+        app.world_mut().write_message(created(98, false));
+        app.update();
+        assert!(app.world().resource::<SummonPortals>().pending.contains_key(&98));
+        for _ in 0..320 {
+            app.update();
+        }
+        assert!(
+            !app.world().resource::<SummonPortals>().pending.contains_key(&98),
+            "an unresolved packet expires"
+        );
+    }
+
+    /// The local player's drive (`Driven`, `cart::drive_cart`) owns the transform: the emergence must not fight it.
+    #[test]
+    fn a_driven_vehicle_keeps_its_emergence_from_moving_it() {
+        let Some((mut app, _db, root)) = hauler() else { return };
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        app.world_mut().entity_mut(root).insert(super::super::mount::Driven);
+        let placed = Vec3::new(4.0, 0.0, 0.0);
+        app.world_mut().get_mut::<Transform>(root).unwrap().translation = placed;
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(root).unwrap().translation,
+            placed,
+            "drive_cart owns the transform of a driven cart"
+        );
+        assert!(app.world().get::<SummonEmergence>(root).is_some());
+    }
+
+    /// `FUN_39097140` plays the prefab's authored `portal_exhaust` on the emerging unit (the galleons have one;
+    /// the tractor does not).
+    #[test]
+    fn the_prefabs_portal_exhaust_is_spawned_on_the_unit() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let variant = "prefab://Prefabs/galleon.xml/galleon.step_10galleon_normal";
+        let named = super::super::data::prefab_effects_named(variant);
+        let exhaust = named
+            .iter()
+            .find(|named| named.name.eq_ignore_ascii_case("portal_exhaust"))
+            .expect("the galleon's portal_exhaust");
+        assert!(
+            exhaust.effect.effect.eq_ignore_ascii_case("X2_EFFECTS.e_effect.caravel_portal_water"),
+            "{}",
+            exhaust.effect.effect
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let root = app.world_mut().spawn(Transform::default()).id();
+        let mut state = SystemState::<Commands>::new(app.world_mut());
+        let spawned = {
+            let mut commands = state.get_mut(app.world_mut()).unwrap();
+            spawn_portal_exhaust(&mut commands, root, variant, 10.0)
+        };
+        state.apply(app.world_mut());
+        assert_eq!(spawned.len(), 1);
+        let effect = app.world().get::<aa_fx::Effect>(spawned[0]).expect("the exhaust effect");
+        assert!(effect.name.eq_ignore_ascii_case("X2_EFFECTS.e_effect.caravel_portal_water"));
+        assert_eq!(app.world().get::<ChildOf>(spawned[0]).unwrap().parent(), root);
+        assert!(app.world().get::<SummonPortalEffect>(spawned[0]).is_some());
     }
 
     /// `UpdateIdleAnim` (`FUN_390d6690`): the Farm Wagon's body loops `fist_ba_relaxed_idle`, so its engine
