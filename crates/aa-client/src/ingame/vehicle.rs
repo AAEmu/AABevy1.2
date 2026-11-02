@@ -11,8 +11,10 @@
 //! down to the next lower non-empty row). A death enters dying (5) first, shows that prefab for
 //! `models.dying_time`, then switches to dead (6) (`FUN_390e7ad0`, `FUN_390eaac0`). The variant prefab's
 //! active particle entities (the fire and smoke of the damaged and dead looks) are drawn with it, and a
-//! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). The
-//! new prefab is read on the workers ([`VehicleSwaps`]); the old parts stay until it is ready.
+//! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). A
+//! rigged part also plays its `AnimObject`'s authored `<Animation>` (`Animation`, `bPlaying`, `bLoop`;
+//! `Part::animation`), the dying cart's tip/roll. The new prefab is read on the workers (`VehicleSwaps`);
+//! the old parts stay until it is ready.
 //!
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
@@ -796,6 +798,7 @@ fn body_parts(look: &VehicleLook) -> Vec<Part> {
                     pos: Vec3::ZERO,
                     rot: Quat::IDENTITY,
                     scale: Vec3::ONE,
+                    animation: None,
                 }]
             })
             .unwrap_or_default()
@@ -832,6 +835,7 @@ fn assemble(look: &VehicleLook) -> Vec<Placed> {
                         pos,
                         rot: rot.normalize(),
                         scale,
+                        animation: None,
                     },
                     wheel: Some(slot),
                     spindle: None,
@@ -1312,15 +1316,27 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
                 for m in models {
                     cry.finish_model(m);
                 }
-                // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn
-                let spawned = super::creature::spawn_with_idle(commands, cry, clips, &part.model, None, placed, false);
+                // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn;
+                // an `AnimObject` that names a playing animation (the dying prefab's `dead_01`) starts that
+                // instead (`FUN_39109d20` reads `Animation` / `bPlaying`).
+                let spawned = super::creature::spawn_with_idle(
+                    commands,
+                    cry,
+                    clips,
+                    &part.model,
+                    None,
+                    placed,
+                    false,
+                    part.animation.as_ref(),
+                );
                 if let Some(bodies) = &spawned
                     && let Some(idle) = &bodies.idle
                 {
                     commands.entity(bodies.root).insert(VehicleIdle {
                         clip: idle.clone(),
                         dead: bodies.dead.clone(),
-                        stopped: false,
+                        // a one-shot authored animation (dead_01) stays on its last frame; the idle must not replace it
+                        stopped: bodies.authored == Some(false),
                     });
                 }
                 spawned.map(|spawned| spawned.root)
@@ -1702,6 +1718,7 @@ mod tests {
             pos: Vec3::ZERO,
             rot: Quat::IDENTITY,
             scale: Vec3::ONE,
+            animation: None,
         };
         assert_eq!(static_options(&part).shading, Shading::Full);
         let rigged = model_options(None, true);
@@ -2399,6 +2416,77 @@ mod tests {
         let bone = app.world().get::<Transform>(joint).expect("the spindle bone transform").rotation;
         let turned = animated.angle_between(bone);
         assert!(turned > 0.05, "the idle overwrote the steered spindle (the bone is {turned} from its pose)");
+    }
+
+    /// The dying prefab's `AnimObject` starts its authored `dead_01` on its own (`Animation="dead_01"`,
+    /// `bPlaying="1"` in `vehicle_tractor.tractor_body_dying`; `FUN_39109d20` reads both): the cart tips and
+    /// rolls without waiting for a `Dead` marker. The clip is 3.33 s and the body's bones move.
+    #[test]
+    fn the_dying_prefab_plays_its_authored_dead_01_and_tips_the_body() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1553) else { return };
+        let variants = db.vehicle_variants(1553).expect("the Red Farm Hauler's rows");
+        let variant = variants.for_state(5).to_string();
+        assert!(variant.ends_with("tractor_body_dying"), "{variant}");
+        let max_hp = db.slave_max_hp(146, 50).expect("the Red Farm Hauler's MaxHealth");
+        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            5,
+            variant,
+            max_hp,
+            false,
+        );
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 30.0),
+        ));
+        app.update();
+        let body = app
+            .world_mut()
+            .query_filtered::<Entity, With<VehicleIdle>>()
+            .iter(app.world())
+            .next()
+            .expect("the dying body carries its idle");
+        let source = app
+            .world()
+            .get::<aa_anim::Animator>(body)
+            .and_then(|a| a.current.as_ref())
+            .and_then(|p| p.clip.source.as_deref())
+            .map(str::to_string);
+        assert!(
+            source.as_deref().is_some_and(|s| s.contains("dead_01")),
+            "the prefab's authored dead_01 starts without Dead: {source:?}"
+        );
+        assert!(
+            app.world().get::<VehicleIdle>(body).is_some_and(|idle| idle.stopped),
+            "a one-shot authored animation keeps the idle from replacing it"
+        );
+        let bones = |app: &mut App| {
+            app.world_mut()
+                .query::<(&Name, &Transform)>()
+                .iter(app.world())
+                .map(|(name, transform)| (name.as_str().to_string(), transform.rotation))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let before = bones(&mut app);
+        for _ in 0..30 {
+            app.update();
+        }
+        let after = bones(&mut app);
+        let moved = before
+            .iter()
+            .filter_map(|(name, rotation)| after.get(name).map(|now| (name, rotation.angle_between(*now))))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("the body's bones");
+        assert!(
+            moved.1 > 0.02,
+            "dead_01 tips the cart: only {moved:?} moved"
+        );
     }
 
     /// A destroyed vehicle stops its idle and plays the body's `dead_01` (its Animator is a child of the root that

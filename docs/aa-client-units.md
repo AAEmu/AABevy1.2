@@ -335,6 +335,16 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+A rigged prefab part also starts the animation its `AnimObject` names (`Part::animation`, `PrefabAnimation`):
+`FUN_39109d20` (x2game.dll.c:207400-207580) reads the `<Animation>` block's `Animation` and `bPlaying` while it builds
+the prefab object, and `bLoop` makes it loop. The dying Red Farm Hauler is the first case in the data: prefab
+`vehicle_tractor.tractor_body_dying` uses `transfers_trailer_a_body_dead.cdf` with `Animation="dead_01" bPlaying="1"`,
+and `dead_01.caf` is 3.33 s with 22 tracks (21 bound; `Bip01`, `Bone_Center*`, `Bone_Front*`, the wheels). The
+2026-11-02 capture shows exactly that: the cart burns, then tips and rolls onto its side between video 41 and 43.5 s,
+before the dead-prefab explosion at 43.6 (dying_time 3.3, death 39.4). The galleon's flag
+(`objects/env/06_unit/01_ship/galleon/galleon_flag0.chr`, `Animation="spreaded" bLoop="1" bPlaying="1"`) uses the same
+path. A one-shot authored animation keeps `VehicleIdle` stopped so the idle cannot replace its last frame.
+
 ### Engine idle and engine sound (`VehicleIdle`, `start_vehicle_idle`, `VehicleSound`)
 
 1.2 starts the prefab body's loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init and refresh
@@ -542,8 +552,10 @@ poller never returns 5: dying is entered by the death path below.
 * **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
   (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying
-  body is drawn. The prefab's own `Animation="dead_01"` attribute is not selected by the part reader; the
-  `.cdf` is spawned with its default pose, which is the remaining approximation of the dying look.
+  body is drawn, and the part's authored `Animation="dead_01" bPlaying="1"` now plays as soon as the
+  prefab is spawned (`Part::animation`; `FUN_39109d20`), with or without a `Dead` marker. On the Red Farm
+  Hauler this is the captured tip/roll (video 41-43.5, `dead_01` 3.33 s); `examples/vehicle_ship_death`
+  and the dying-prefab unit test check the authored clip is the one the body plays.
 * **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
   their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule accepts that (the mesh is
   still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). A sweep of every

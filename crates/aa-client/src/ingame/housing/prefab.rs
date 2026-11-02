@@ -22,6 +22,32 @@ pub struct Part {
     pub pos: Vec3,
     pub rot: Quat,
     pub scale: Vec3,
+    /// The `AnimObject`'s authored animation when it starts playing (`bPlaying="1"`), e.g. the dying
+    /// trailer's `dead_01` or the galleon flag's looping `spreaded`.
+    pub animation: Option<PrefabAnimation>,
+}
+
+/// An animation named by a prefab `AnimObject`'s `<Animation>` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefabAnimation {
+    pub name: String,
+    pub looping: bool,
+}
+
+/// The `<Animation>` block of an `AnimObject`: `Animation="dead_01"` and `bPlaying="1"` start it,
+/// `bLoop="1"` loops it (`FUN_39109d20` reads both properties while it builds the prefab object).
+fn animation(body: &str) -> Option<PrefabAnimation> {
+    let props = body.get(body.find("<Properties")?..)?;
+    let playing = attr(props, "bPlaying")?.trim();
+    if !matches!(playing, "1" | "true" | "True") {
+        return None;
+    }
+    let name = attr(props, "Animation")?.trim();
+    if name.is_empty() || name.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    let looping = matches!(attr(props, "bLoop").unwrap_or("").trim(), "1" | "true" | "True");
+    Some(PrefabAnimation { name: name.to_string(), looping })
 }
 
 fn vec3(text: &str) -> Option<Vec3> {
@@ -84,6 +110,10 @@ pub fn parts_of(xml: &str, name: &str) -> Vec<Part> {
             pos: attr(tag, "Pos").and_then(vec3).unwrap_or(Vec3::ZERO),
             rot: attr(tag, "Rotate").and_then(quat).unwrap_or(Quat::IDENTITY),
             scale: attr(tag, "Scale").and_then(scale).unwrap_or(Vec3::ONE),
+            animation: match attr(tag, "EntityClass") {
+                Some("AnimObject") => animation(body),
+                _ => None,
+            },
         });
     }
     out
@@ -112,6 +142,7 @@ mod tests {
    <Object Type="Brush" Name="barrel" Pos="1.5,-2,0.25" Rotate="0.70710671,0,0,0.70710683" Scale="0.88,0.88,0.88" Prefab="Objects\env\barrel.cgf"/>
    <Object Type="Entity" Name="interaction_11" Pos="-4.1,0.2,2.3" Rotate="0.7132,0,0,0.7009" EntityClass="AnimObject">
     <Properties bCanShatter="1" object_Model="game/Objects/env/01_nuia/001_housing/housing_house/nuia_housing_window_a.cga" object_ModelFrozen="">
+     <Animation bAlwaysUpdate="0" Animation="opened" bLoop="1" bPlaying="1" Speed="1"/>
      <Physics bPhysicalize="1"/>
     </Properties>
    </Object>
@@ -145,6 +176,11 @@ mod tests {
         let turned = parts[1].rot * Vec3::X;
         assert!((turned - Vec3::Y).length() < 1e-4, "{turned}");
         assert_eq!(parts[3].pos, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            parts[2].animation,
+            Some(PrefabAnimation { name: "opened".into(), looping: true }),
+            "the AnimObject's authored, playing animation"
+        );
         assert!(parts_of(XML, "missing").is_empty());
     }
 
