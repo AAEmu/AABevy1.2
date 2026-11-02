@@ -409,7 +409,7 @@ and the walk to the mount before mounting is in the mount-walk checkpoint above.
   `examples/vehicle_damage`, the threshold/max-HP/variant/dying/swap/turret unit tests and the `aa-cry`
   dead-hull test.
 
-Still open across these slices: hanging (S13), the speed-driven exhaust / splash scales and the engine sound of S15,
+Still open across these slices: the speed-driven exhaust / splash scales and the engine sound of S15,
 auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote vehicle smoothing (S8) and gliders
 (S14) landed with their own captures, and the walk to the mount before mounting is in the mount-walk checkpoint above. The detailed pending checks are in
 
@@ -417,11 +417,22 @@ auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote 
   (kind 1/6 ladder, 2 rope, 3 wood, 4 net, 5 horizontal rope, 7 mast, 8 guardrail, 9 45-degree ladder,
   10 tree) and whose model has an exact `$ladder` helper; the climb segment is the box of the mesh chunk
   that helper names (`FUN_393aaad0`), not the whole model. F grabs the nearest one within the 1.5 m use
-  reach and the body is placed before the server answers (`CSHang` 0x0cb). The grab is refused on a
-  seat, glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its seat `+0x3af4`,
-  `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck does not refuse it,
-  and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates accept
-  claims F over NPC talk and loot-all. W/S climb with the clip's root speed scaled by the buffs'
+  reach and the body is placed before the server answers (`CSHang` 0x0cb). A right click on a ladder
+  is taken as the same use-target grab: inferred, since `FUN_393b8f40` is the only `CSHang` sender
+  found but there is no right-click-on-ladder capture. The owner's real 1.2 client grabbed a ship
+  ladder while walking toward it (2026-11-01 ~13:45, `CSHang` on the doodad); a contact-trigger path
+  was not found in the decompile, so proximity grab is not implemented. The fixed-frame kinds
+  (1/4/5/8/9) stand on the `$ladder` helper's front (+Y) side in the doodad's world frame, so a
+  ladder parented to a hull uses the hull transform and a grab from the deck puts the body outside
+  the wall, not between the rungs and the deck; kinds 2/3/6/7/10 take the side from the player's
+  facing (`FUN_3916c520`). A picked ladder lights up (`use_target_highlight`) and only takes the
+  click when it is the nearest hit along the ray; a ladder parented to the picked slave beats that
+  slave's loose box (the masts/sails entry), while a nearer unit or doodad keeps the click; an
+  out-of-reach ladder click is left to that path instead of being swallowed. The grab is refused on a seat,
+  glider or skill move and while the unit is BOUND to a vehicle (`+0x3af0`, its seat `+0x3af4`,
+  `FUN_393b8f40`); a deck walker sends its own moves with `+0x3af0` null, so a deck does not refuse
+  it, and water does not either (there is no swim gate in `FUN_393630e0`); only a grab the gates
+  accept claims F over NPC talk and loot-all. W/S climb with the clip's root speed scaled by the buffs'
   `ladder_speed_mul`, and every hanging `CSMoveUnit` carries actor flag `0x40`, gcId 1 and the grab's
   climb data (`FUN_390cbee0` bit layout, truncating, angle 127 for kinds 1/4/5/8/9). The sender sends
   every 0.1 s while climbing, one `moving: false` stop packet no sooner than the native 100 ms minimum
@@ -434,15 +445,21 @@ auto-walk, mount jump clips, larger ships, and the copper boiler colour; remote 
   the step. The bottom stands on the terrain or a brush (a dock or a lower deck, the same support query
   movement uses) or starts swimming (never `grounded` in the air). Death is the only native 0xb site
   (`FUN_39137320`: the value reaches 0) and sends `CSUnhang` 0xb alone; mounting, a moving skill, a
-  stance change or a glider does not release a hang. F releases and Space jumps (mode 6). Remote hangers
-  use the `SCHung` target's kind and the climb data; a hull hanger rides the drawn hull. Covered by
-  `examples/ladder_climb`, byte-exact climb tests in `aa-net/src/climb.rs`, the
-  start/stop/top/bottom/moving-hull/rotated-hull/gate/water/death/F-claim tests in `ingame/ladder` and
-  `hud/doodad`, the clip mapping test against the player graph, and remote hanger tests in
-  `ingame/units`. Open (capture-pending): which key produces exit modes 3-9, the exact climb
-  `deltaMovement`/velocity, net/guardrail lateral `y`, top-step distance, camera pitch clamp, and the
-  remote client's own hanger animation consumer. Mount-start while already hanging is not gated by this
-  client and not released (the native has no such release); capture-pending.
+  stance change or a glider does not release a hang. A plain Space jump sends `CSUnhang` 7, the
+  `FUN_39135570` mode-7 back-hop away from the ladder (-2.0 forward, 4.0 up, a -0.3 m nudge), not
+  the mode-6 forward leap; A+Space sends mode 4 (local -X) and D+Space mode 5 (local +X) with the
+  -/+2.0, 4.0 and -/+0.3 numbers. The 2026-11-01 original-client capture saw 7 with no lateral
+  input (also with W held); the owner's 14:20 session that day (ship ladder) captured A+Space -> 4
+  and D+Space -> 5, while 6 was never captured. F release and the bottom exit send 1 here:
+  inferred, since the only native 1 sender is `FUN_39134930` during a running top exit. Remote
+  hangers use the `SCHung` target's kind and the climb data; a hull hanger rides the drawn hull.
+  Covered by `examples/ladder_climb`, byte-exact climb tests in `aa-net/src/climb.rs`, the
+  start/stop/top/bottom/jump/moving-hull/rotated-hull/ship-ladder/front-side/right-click/gate/water/
+  death/F-claim tests in `ingame/ladder`, the ladder pick test in `hud/doodad`, the clip mapping
+  test against the player graph, and remote hanger tests in `ingame/units`. Open (capture-pending): which input produces modes 3/6/8/9, the
+  exact climb `deltaMovement`/velocity, net/guardrail lateral `y`, top-step distance, camera pitch
+  clamp, and the remote client's own hanger animation consumer. Mount-start while already hanging
+  is not gated by this client and not released (the native has no such release); capture-pending.
 
 Still open across these slices: vehicle state/FX (S15), auto-walk, mount jump clips, larger ships, and
 the copper boiler colour; remote vehicle smoothing (S8) and gliders (S14) landed with their own captures, and the walk
