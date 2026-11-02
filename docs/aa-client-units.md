@@ -343,8 +343,7 @@ a rigged prefab part gets a [`VehicleIdle`] with the idle bound from its `.cal`,
 it (looping) whenever the body's `Animator` has no clip, the Bevy analogue of the 1.2 init/refresh.
 `creature::spawn_with_idle(..., play_idle = false)` keeps the generic creature idle from starting a vehicle body first.
 The exclusion is inherent: the driver only runs on prefab vehicle/ship bodies, and a body in damage state 5 or 6 keeps
-the loop stopped. The Bevy client has no dying state yet (PR #69 adds vehicle damage), so it gates on `Dead`
-(state 6) only. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
+the loop stopped. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
 `1277 tower_cannon`, `1293 hwang_ferrari`, `1323/1371/1406 speedcar1-3`, `1442 food_truck`, `1444 speedcar_decal`,
 `1460/1461/1462 speedcar_*_ucc`, `1464 tractor_b`, `1465 sigetank`, `1526 siegetank_prologue`, `1553 tractor_c`,
 `2 trebuchet`, `5 siege_tower`, `8000009 small_tractor`, `892/898/899 siegetank_a-c`, `990 siege_catapult_a`); three
@@ -378,8 +377,8 @@ resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_
 are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
 for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
 parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
-state 5/6 and freezes the `engine` handle; the Bevy client has no dying state yet (PR #69), so it gates on `Dead`
-(state 6) and removes both sounds there - a deviation to revisit with #69. A resurrection puts the engine back and
+state 5/6 and freezes the `engine` handle; the Bevy client gates on the damage state 5 (dying) or `Dead`
+(state 6) and removes both sounds there. A resurrection puts the engine back and
 `vehicle::resume_vehicle_idle` starts the idle again.
 
 `VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
@@ -449,7 +448,13 @@ poller never returns 5: dying is entered by the death path below.
   objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
   inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2 active `_spawn` + 2 active named
   particles (`caravel_cruise_pool`, `airship_smoke`); only the exact speed-driven names are filtered, the
-  other active authored emitters stay.
+  other active authored emitters stay. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
+  `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
+  Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
+  (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A
+  burst (no `Continuous` emitter, like the explosion) is never primed: priming would advance its whole
+  life past the first frame. Vehicle prefab effects retire when finished, and the dead `_dead_effect`
+  plays only on a worsening transition into 6, not for a slave that arrives already dead.
 * **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
   (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying

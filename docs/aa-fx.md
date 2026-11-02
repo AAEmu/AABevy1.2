@@ -42,7 +42,11 @@ test), activate/deactivate (a few per frame), simulate (`par_iter_mut`), upload 
 * An effect outside its radius costs one distance test and holds nothing. The radius follows the effect's extent
   (`CameraMaxDistance` and the size/speed/lifetime of its emitters), capped by `FxSettings::max_distance` (x3 for big ones).
 * Beyond 45% of the radius the spawn rate thins (down to 40%) and the update rate halves; the effect fades out near the radius.
-* On activation an effect is primed (about 10 coarse steps) so that it looks established at once; `prime=false` skips it.
+* On activation a continuing effect (an emitter with `Continuous`) is primed (about 10 coarse steps) so that it looks
+  established at once; `prime=false` skips it. A one-shot burst is never primed: advancing it would finish it before
+  its first frame.
+* A finished effect with `despawn_when_finished` retires; a finished burst that stays (a placed world effect) keeps
+  `finished` across deactivation, so a camera re-entry does not replay it.
 * The budget is an atomic counter: spawning stops when it is used up, so a crowd cannot run away.
 * Meshes are children of the effect entity with the quads in effect-local space (no per-frame transform work), `Aabb` from the
   quad bounds, `NotShadowCaster`, depth tested, no depth write, transparent phase (refraction materials: transmissive phase).
