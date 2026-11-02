@@ -389,6 +389,15 @@ pub enum Command {
     Ranking { character_id:u32,command:crate::RankingCommand },
     /// The portal book and portals: record, rename, open, delete, enter, the visited sub zone ([`crate::portal`]).
     Portal(crate::portal::PortalCommand),
+    /// `CSTeleportEnded` at `pos`: the destination of an `SCTeleportUnit` is loaded and the server accepts
+    /// movement again. The native handler (`FUN_391d6ed0`) calls `FUN_3930c9e0` directly or parks the packet
+    /// (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); `FUN_391a4e00` is the `CSTeleportEnded`
+    /// builder (x2game.dll.c:320775). The owner capture 2026-11-01 answered a 5 m hop at once, a cross-map
+    /// jump after 2 s and the far one after 12 s; the app sends this when its own load is down.
+    TeleportEnded { pos: Pos },
+    /// `CSNotifyInGameCompleted`: the 1.2 client sends it again after a teleport's load (owner capture
+    /// 2026-11-01: 13:44:02 after the 13:44:00 `CSTeleportEnded`; 14:17:16 after 14:17:14).
+    NotifyInGameCompleted,
     /// Housing requests (`CS*House*`), see [`crate::housing::HouseCommand`].
     House(crate::housing::HouseCommand),
     /// Plant `item_id` as the doodad template `id` (`CSCreateDoodad`).
@@ -1568,6 +1577,16 @@ impl Session {
                     self.emit(Event::PortalRequestRejected { command, message: "portal request was not sent".into() });
                 }
             }
+            Command::TeleportEnded { pos } => {
+                if self.phase == Phase::InWorld {
+                    self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
+                }
+            }
+            Command::NotifyInGameCompleted => {
+                if self.phase == Phase::InWorld {
+                    self.send_game(game::ClientMsg::NotifyInGameCompleted).await;
+                }
+            }
             Command::Ranking{character_id,command}=>{
                 let invalid=if self.phase!=Phase::InWorld || character_id==0 || self.selected!=character_id || self.selected_state.as_ref().is_none_or(|s|s.character.id!=character_id){Some("ranking request belongs to an inactive character")}
                 else if let crate::RankingCommand::RequestSnapshots{rank_id}=command {let cache=self.received_rankings.borrow();if cache.character_id!=Some(character_id)||!cache.by_id.contains_key(&rank_id){Some("ranking snapshot requires an actual received board for this character")}else{None}}
@@ -2344,10 +2363,10 @@ impl Session {
             M::Crime(e) => self.emit(Event::Crime(e)),
             M::Appellation(e) => self.emit(Event::Appellation(e)),
             M::Portal(e) => {
-                // `SCNaviTeleport` (a navi doodad): the 1.2 client moves the player as for `SCTeleportUnit` (reason 0, yaw 0)
-                // and answers `CSTeleportEnded`, the server holds movement until then
+                // `SCNaviTeleport` (a navi doodad): the 1.2 client moves as for `SCTeleportUnit`
+                // (`FUN_391dc8c0` calls `FUN_3930c9e0`, reason 0, yaw 0); the app owns the
+                // `CSTeleportEnded` answer like `SCTeleportUnit`.
                 if let crate::portal::PortalEvent::NaviTeleport { pos } = e {
-                    self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
                     self.emit(Event::Teleported { pos, yaw: 0.0, reason: 0 });
                 }
                 self.emit(Event::Portal(e));
@@ -2432,10 +2451,11 @@ impl Session {
             M::LunagemSocketingResult { raw_result, item_id, template_id, raw_install } => self.emit(Event::LunagemSocketingResult { raw_result, item_id, template_id, raw_install }),
             M::LunastoneSocketingResult { raw_result, item_id, template_id } => self.emit(Event::LunastoneSocketingResult { raw_result, item_id, template_id }),
             M::BuffLearned { obj_id, buff_id } => self.emit(Event::PassiveBuffLearned { obj_id, buff_id }),
-            M::Teleport { pos, yaw, reason, .. } => {
-                self.send_game(game::ClientMsg::TeleportEnded { pos }).await;
-                self.emit(Event::Teleported { pos, yaw, reason });
-            }
+            // `SCTeleportUnit`: the native handler (`FUN_391d6ed0`) either calls `FUN_3930c9e0` or
+            // defers the packet (`FUN_3901b980`, retried after >= 500 ms by `FUN_3901bc30`); it does not
+            // answer on receipt. The owner capture 2026-11-01 answered a 5 m hop at once and cross-map
+            // jumps 2 s / 12 s later. The app owns the answer (`Command::TeleportEnded`).
+            M::Teleport { pos, yaw, reason, .. } => self.emit(Event::Teleported { pos, yaw, reason }),
             M::DoodadsCreated(v) => self.emit(Event::DoodadsSpawned(v)),
             M::DoodadsRemoved(v) => self.emit(Event::DoodadsRemoved(v)),
             M::DoodadChanged { obj_id, data } => self.emit(Event::DoodadChanged { obj_id, data }),
@@ -5325,8 +5345,15 @@ mod tests {
         assert!(events.try_recv().is_err());
     }
 
+    async fn frame(peer: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let n = peer.read_u16_le().await.unwrap();
+        let mut frame = vec![0; n as usize];
+        peer.read_exact(&mut frame).await.unwrap();
+        frame
+    }
+
     #[tokio::test]
-    async fn navi_teleport_moves_the_player_and_answers_teleport_ended() {
+    async fn navi_teleport_moves_the_player_and_waits_for_the_client_to_report_the_load() {
         use crate::portal::PortalEvent;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
@@ -5340,10 +5367,37 @@ mod tests {
         session.game_msg(Ok(game::ServerMsg::Portal(PortalEvent::NaviTeleport { pos }))).await;
         assert!(matches!(events.try_recv(), Ok(Event::Teleported { pos: p, yaw, reason: 0 }) if p == pos && yaw == 0.0));
         assert!(matches!(events.try_recv(), Ok(Event::Portal(PortalEvent::NaviTeleport { .. }))));
-        let n = peer.read_u16_le().await.unwrap();
-        let mut frame = vec![0; n as usize];
-        peer.read_exact(&mut frame).await.unwrap();
-        assert_eq!(frame, game::ClientMsg::TeleportEnded { pos }.encode(0));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), peer.read_u8()).await.is_err(),
+            "the 1.2 client answers SCNaviTeleport only after the destination is loaded"
+        );
+        session.command(Command::TeleportEnded { pos }).await;
+        assert_eq!(frame(&mut peer).await, game::ClientMsg::TeleportEnded { pos }.encode(0));
+        session.command(Command::NotifyInGameCompleted).await;
+        assert_eq!(frame(&mut peer).await, game::ClientMsg::NotifyInGameCompleted.encode(1));
+    }
+
+    #[tokio::test]
+    async fn sc_teleport_unit_waits_for_the_client_to_report_the_destination_loaded() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (connection, accepted) = tokio::join!(GameConn::connect(&addr), listener.accept());
+        let (mut peer, _) = accepted.unwrap();
+        let (tx, mut events) = unbounded_channel();
+        let mut session = Session::new(tx, ClientOptions::default());
+        session.game = Some(connection.unwrap());
+        session.phase = Phase::InWorld;
+        let pos = Pos::new(12_000.0, 9_000.5, 110.0);
+        session
+            .game_msg(Ok(game::ServerMsg::Teleport { reason: 14, error: 0, pos, yaw: 0.5 }))
+            .await;
+        assert!(matches!(events.try_recv(), Ok(Event::Teleported { pos: p, yaw, reason: 14 }) if p == pos && yaw == 0.5));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), peer.read_u8()).await.is_err(),
+            "the native handler does not answer SCTeleportUnit on receipt (FUN_3930c9e0 starts the load)"
+        );
+        session.command(Command::TeleportEnded { pos }).await;
+        assert_eq!(frame(&mut peer).await, game::ClientMsg::TeleportEnded { pos }.encode(0));
     }
 
     #[tokio::test]
