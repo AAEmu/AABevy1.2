@@ -372,6 +372,8 @@ struct View {
     parent: Option<u32>,
     /// Receipt which created this incarnation, not a same-identity refresh.
     announced_after: Option<usize>,
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame: (min, max) metres.
+    bounds: Option<(Vec3, Vec3)>,
 }
 
 impl View {
@@ -537,6 +539,13 @@ impl Views {
     /// The entity drawing the doodad `obj_id`, when it is drawn.
     pub fn doodad_entity(&self, obj_id: u32) -> Option<Entity> {
         self.doodads.get(&obj_id).and_then(|v| v.entity)
+    }
+
+    /// The drawn doodad model's combined LOD 0 bounds in the prefab local Cry frame (metres), when the model
+    /// is built with them. The interaction gap measures to these (the native `FUN_3989bf90` uses the doodad's
+    /// real collision shape; the model bounds are the closest recovered shape).
+    pub(crate) fn doodad_bounds(&self, obj_id: u32) -> Option<(Vec3, Vec3)> {
+        self.doodads.get(&obj_id).and_then(|v| v.bounds)
     }
 
     /// Source lifetime of the currently rendered doodad root.
@@ -797,6 +806,31 @@ fn doodad_root_transform(doodad: &aa_net::model::Doodad, scale: f32) -> Transfor
         rotation: cry_rot_to_bevy(Quat::from_xyzw(x, y, z, w).normalize()),
         scale: Vec3::splat(scale),
     }
+}
+
+/// The world-space box of a doodad's model bounds (prefab-local Cry metres) placed by its packet transform,
+/// for the right-click interaction gap. Parented doodads are not composed here (their parent transform is
+/// not in the HUD); callers fall back to the centre/sim-radius for those.
+pub(crate) fn doodad_bounds_world(
+    doodad: &aa_net::model::Doodad,
+    bounds: (Vec3, Vec3),
+    scale: f32,
+) -> (Vec3, Vec3) {
+    let transform = doodad_root_transform(doodad, if scale > 0.0 { scale } else { 1.0 });
+    let (lo, hi) = bounds;
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for i in 0..8 {
+        let corner = Vec3::new(
+            if i & 1 == 0 { lo.x } else { hi.x },
+            if i & 2 == 0 { lo.y } else { hi.y },
+            if i & 4 == 0 { lo.z } else { hi.z },
+        );
+        let point = transform.transform_point(cry_to_bevy(corner));
+        min = min.min(point);
+        max = max.max(point);
+    }
+    (min, max)
 }
 
 /// Where a doodad stands in the world (game coordinates): the packet position for an ordinary doodad, or the parent
@@ -1184,6 +1218,7 @@ pub fn sync_views(
                 }
                 let t_doodad = timers.as_deref().map(|t| t.time("units.spawn_doodad"));
                 let DoodadBuild { path, model: prepared, func_group_id, growth } = build;
+                let bounds = prepared.as_ref().and_then(|p| p.bounds);
                 // the announced `time_left` has been running down since it was announced, also while the doodad was not drawn
                 let since_announced_ms = (time.elapsed_secs() - view.announced_at) * 1000.0;
                 let entity = prepared.map(|prepared| {
@@ -1207,6 +1242,7 @@ pub fn sync_views(
                 });
                 drop(t_doodad);
                 let view = views.doodads.entry(id).or_default();
+                view.bounds = bounds;
                 match entity {
                     Some(e) => {
                         view.entity = Some(e);

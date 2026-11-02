@@ -1106,9 +1106,11 @@ pub(in crate::hud) fn drive_npc(
                     .action_time(selected, time.elapsed().as_millis() as u32)
                     && resolved(selected.scope, &data, player, &units)
                     && units.get(selected.npc().0).is_some_and(|unit| {
+                        let world = super::super::slave::replicated_pose(&units);
+                        let me = super::super::slave::player_centre(&data, &world);
                         super::npc_in_reach(
                             &data,
-                            data.pos,
+                            me,
                             Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
                             unit,
                         )
@@ -1172,11 +1174,13 @@ pub(in crate::hud) fn drive_npc(
     let intents = std::mem::take(&mut bridge.0.borrow_mut().dialog.npc_flow.intents);
     for intent in intents {
         let mut data = bridge.0.borrow_mut();
+        let world = super::super::slave::replicated_pose(&units);
+        let me = super::super::slave::player_centre(&data, &world);
         let current = identity(&data, player) == Some(intent.identity)
             && units.get(intent.npc.0).is_some_and(|unit| !unit.dead && matches!(unit.kind, UnitKind::Npc {template_id,..} if template_id==intent.npc.1)
                 && super::npc_in_reach(
                     &data,
-                    data.pos,
+                    me,
                     Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z),
                     unit,
                 ));

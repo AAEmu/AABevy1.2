@@ -114,6 +114,9 @@ pub struct NpcInfo {
     pub kind: i64,
     /// `npcs.npc_template_id`: with the grade and kind the key of the HP formula's variables.
     pub template: i64,
+    /// `npcs.npc_tendency_id`: 2 is the neutral/attackable tendency (`FUN_39837800`'s `+0x40` flag is
+    /// approximated with it; a 1/absent tendency NPC such as Amutar 3443 is not attackable).
+    pub tendency: i64,
     pub faction_id: i64,
     pub show_name_tag: bool,
 }
@@ -678,7 +681,7 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, name, level, npc_grade_id, npc_kind_id, faction_id, show_name_tag, npc_template_id FROM npcs")?;
+            let mut q = conn.prepare("SELECT id, name, level, npc_grade_id, npc_kind_id, faction_id, show_name_tag, npc_template_id, npc_tendency_id FROM npcs")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
@@ -692,6 +695,7 @@ impl GameData {
                         faction_id: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                         show_name_tag: r.get::<_, Option<String>>(6)?.as_deref() != Some("f"),
                         template: r.get::<_, Option<i64>>(7)?.unwrap_or(0),
+                        tendency: r.get::<_, Option<i64>>(8)?.unwrap_or(0),
                     },
                 );
             }

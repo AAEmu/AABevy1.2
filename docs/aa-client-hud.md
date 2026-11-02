@@ -386,7 +386,7 @@ End!" (`combat_death`), everything is dark while Recall is cast and only the tel
 | 2 | the skill's unit requirements (`unit_reqs`, `or_unit_reqs`): level, ability level, race, gender, a worn item in a slot (a sword in the main hand) or by template, an owned item, a learned skill, "not in combat" (Recall, Dash, the dances), a buff on me / on the target, a shield, a bow or an instrument. Quests, doodads, zones and factions count as met: the server decides | `Snapshot`, `Inventory`, `Skills`, `Buffs` |
 | 3 | buffs on the player: stun, sleep, knock down (every skill but those with `source_stun`), blank minded, silence (magic skills), crippled (melee and ranged) | `buffs` flags |
 | 4 | the player is casting (every other slot is dark, the skill being cast stays lit) or channeling; a cast whose end never came stops counting 2 s after it should have ended | `Skills.casting` |
-| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`). The auto attacks 2/3/4 and every `target_relation_id` 4 skill also need a **hostile** target (`CanAutoAttackTargetUnit` `FUN_393be4e0`, error 0x22): a neutral quest NPC such as Amutar is refused, not attacked (2026-11-01) | `TargetSnap` |
+| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`). The auto attacks 2/3/4 and every `target_relation_id` 4 skill also need the attackable bit of `FUN_39838880` (`CanAutoAttackTargetUnit` `FUN_393be4e0`): an NPC is attackable with `npc_tendency_id` 2 (the `+0x40` approximation), a character unless friendly; refusal is 0x22 `INVALID_TARGET` or 0x2f `PROTECTED_FACTION` with the faction value, as `FUN_39898e60` chooses. Amutar (tendency 1) is refused, Cocky Trainee 1485 (tendency 2) is attackable (2026-11-01) | `TargetSnap` |
 | 6 | range: the skill's `min_range` / `max_range`, or the reach of the weapon in the equipment slot `weapon_slot_for_range_id` names (fists 3 m, a sword 4); edge to edge, so 1 m is taken off the centre distance | both positions |
 | 7 | mana `((ability level - 1) * 1.6 + 8) * 3 / 3.65 * mana_level_md + mana_cost` (the skill's own ability level), labor points | `Snapshot.mp`, the ability exp |
 
@@ -1001,10 +1001,13 @@ invented interaction acknowledgement. The broader native interaction chooser and
 end-distance behavior are still pending.
 
 The NPC talk/use reach is the common interaction reach of `FUN_393bf270` / `FUN_39093860`: a 3D
-surface gap strictly under `DAT_39ac79fc` 9.0 (3.0 m), or 12.25 (3.5 m) while `+0x3c26` is set,
-not the old six-metre centre distance. A right click beyond it walks to the NPC (`FUN_390a6af0`,
-the same scripted-forward walk the mount and doodad approaches use) and `CSStartInteraction` is
-sent only when the gap is inside the reach (2026-11-01). Sending revalidates the selected mailbox against all
+surface gap strictly under `DAT_39ac79fc` 9.0 (3.0 m), or `DAT_39ac7a00` 12.25 (3.5 m) for a **dead
+target** (`+0x3c26` is the target's dead flag, set by `FUN_390b4df0`; `FUN_393be4e0` reports
+`TARGET_DIED`), not the old six-metre centre distance and not a mounted player. A right click beyond
+it walks to the NPC (`FUN_390a6af0`, the same scripted-forward walk the mount and doodad approaches
+use) and `CSStartInteraction` is sent only when the gap is inside the reach (2026-11-01). A target
+change, F, an in-reach doodad use or a click on another/hostile unit cancels the walk; a seated or
+driving player does not start it (the forward key would drive the vehicle). Sending revalidates the selected mailbox against all
 currently nearby mailboxes, rather than requiring it to remain the nearest. Hotkey consumption
 now completes before gameplay input, so Ctrl-E does not also move the character right.
 

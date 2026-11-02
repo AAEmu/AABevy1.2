@@ -347,6 +347,9 @@ pub(super) struct View {
     approach: Option<Approach>,
     /// The coffer window was closed.
     coffer_close: bool,
+    /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
+    /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
+    bounds: HashMap<u32, (Vec3, Vec3)>,
     pointer_pick: Option<u32>,
     arrived: Option<u32>,
 }
@@ -437,10 +440,22 @@ fn skill_reach(max_range: f32) -> f32 {
 fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> Option<f32> {
     let o = doodads.by_id.get(&obj_id)?;
     let pos = doodad_world(o, units)?;
+    let scale = if o.scale > 0.0 { o.scale } else { 1.0 };
+    // The native predicate measures to the doodad's real colliders. Use the drawn model's bounds when the
+    // model is ready; the sim radius (often 0) is only a fallback while it is not, and for parented
+    // doodads whose parent transform the HUD does not compose here.
+    if o.parent_obj_id == 0
+        && let Some(bounds) = data.doodad.bounds.get(&obj_id).copied()
+    {
+        let (lo, hi) = crate::ingame::units::doodad_bounds_world(o, bounds, scale);
+        let player = aa_world::cry_to_bevy(data.pos);
+        let nearest = player.clamp(lo, hi);
+        return Some(player.distance(nearest) - data.player_radius);
+    }
     let radius = data
         .game
         .get()
-        .map_or(0.0, |g| g.doodad.radius(o.template_id) * if o.scale > 0.0 { o.scale } else { 1.0 });
+        .map_or(0.0, |g| g.doodad.radius(o.template_id) * scale);
     Some(super::slave::surface_gap(data.pos, data.player_radius, pos, radius))
 }
 
@@ -895,6 +910,13 @@ fn track(
     let hover = ray.and_then(|r| pick(r, &d, &doodads, &units, own, &world)).or_else(|| script.hovering.then(|| nearest_usable(&d, &doodads, &units)).flatten());
     d.doodad.hover = hover;
     let arrived = walk_to(&mut d, &doodads, &units, time.elapsed_secs(), moving, &mut cameras, &mut dev);
+    // The interaction gap measures to the drawn model's bounds; cache them for the doodads the pointer,
+    // the bar or the walk is about (the clicked one may be far and not in `focus`).
+    for id in [clicked, arrived, d.doodad.hover, d.doodad.preferred, d.doodad.focus.as_ref().map(|f| f.obj_id)].into_iter().flatten() {
+        if let Some(bounds) = views.doodad_bounds(id) {
+            d.doodad.bounds.insert(id, bounds);
+        }
+    }
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
@@ -1149,8 +1171,9 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     };
     let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
     d.doodad.preferred = Some(obj_id);
-    // a doodad use is a new target action: a mount walk to the pet must not keep steering
+    // a doodad use is a new target action: a mount walk to the pet or a talk walk must not keep steering
     super::pets::cancel_mount_walk(d);
+    super::dialog::cancel_walk(d);
     // a click that replaces a running doodad walk takes the forward key it was holding
     if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
@@ -2122,6 +2145,29 @@ mod tests {
     }
 
     #[test]
+    fn a_large_workbench_measures_to_its_model_bounds_not_its_centre() {
+        // sim_radius is 0 for most templates (Owl Mailbox, warehouses, workbenches); a large model
+        // whose body keeps the player 4 m from its centre is still inside the 2.1 m interaction gap
+        // when the gap is measured to its drawn model bounds (the collider approximation).
+        let mut data = HudData::default();
+        data.pos = Vec3::new(0.0, -4.0, 0.0);
+        data.player_radius = 0.5;
+        data.doodad
+            .bounds
+            .insert(7, (Vec3::new(-3.0, -2.0, 0.0), Vec3::new(3.0, 2.0, 3.0)));
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(7, world_doodad(7, 850, 1, Vec3::ZERO));
+        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(
+            (gap - 1.5).abs() < 1e-4,
+            "the 3 x 2 m body leaves 1.5 m from its side (centre distance would be 4 m): {gap}"
+        );
+        assert!(gap < INTERACTION_DISTANCE);
+    }
+
+    #[test]
     fn the_right_click_use_range_is_the_interaction_gap_not_the_skill_range() {
         // `max_interaction_doodad_distance` (2.1 m surface gap, `FUN_39093800`) is the right-click use reach;
         // `skills.max_range` only decides the bar's offer. A 100 m tome skill clicked at 3 m walks instead of
@@ -2208,6 +2254,25 @@ mod tests {
             app.world().resource::<Harness>().acted,
             vec![7],
             "no second action"
+        );
+        assert_eq!(shared.borrow().doodad.chosen.len(), 1);
+    }
+
+    #[test]
+    fn an_in_reach_doodad_use_cancels_a_running_npc_walk() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 1.0)]);
+        crate::hud::dialog::start_walk(&mut shared.borrow_mut(), (20, 42), 5.0, 0.0, None);
+        assert!(shared.borrow().dialog.approach.is_some());
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.player = Vec3::ZERO;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().dialog.approach.is_none(),
+            "the in-reach doodad use ends the talk walk"
         );
         assert_eq!(shared.borrow().doodad.chosen.len(), 1);
     }

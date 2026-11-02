@@ -53,12 +53,13 @@ use super::quests::{CinemaDef, PlayerFacts, Texts, kind};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
 /// `FUN_393bf270` / `FUN_39093860`: the common interaction reach, the 3D surface gap strictly under
-/// `DAT_39ac79fc` 9.0, i.e. 3.0 m on foot, and `DAT_39ac7a00` 12.25 (3.5 m) while the player's `+0x3c26`
-/// mounted byte is set. The same predicate gates the interaction skill a talk uses (`FUN_393be280`) and
-/// the right-click pick: the 2026-10-28 capture sent `CSStartInteraction` at 2.46 m and nothing at 4.57 m.
+/// `DAT_39ac79fc` 9.0, i.e. 3.0 m for a live target, and `DAT_39ac7a00` 12.25 (3.5 m) for a dead one:
+/// `+0x3c26` is the **target's** dead flag (`FUN_390b4df0` sets it; `FUN_393be4e0` reports `TARGET_DIED`).
+/// The same predicate gates the interaction skill a talk uses (`FUN_393be280`) and the right-click pick:
+/// the 2026-10-28 capture sent `CSStartInteraction` at 2.46 m and nothing at 4.57 m.
 const INTERACT_REACH: f32 = 3.0;
-/// The mounted reach, `DAT_39ac7a00` 12.25 squared.
-const MOUNTED_INTERACT_REACH: f32 = 3.5;
+/// The dead-target reach, `DAT_39ac7a00` 12.25 squared (corpse/loot).
+const DEAD_INTERACT_REACH: f32 = 3.5;
 /// How long a walk to an NPC may go without getting nearer before it is given up, seconds (the doodad walk's
 /// bound; the native click-to-move has no recovered timeout).
 const NPC_WALK_STUCK_SECS: f32 = 3.0;
@@ -106,6 +107,9 @@ struct PointerTalk {
 pub struct Approach {
     /// Object id and template of the NPC clicked.
     pub npc: (u32, u32),
+    /// The authoritative target when the walk started: a different `Some` target (a new pick) cancels
+    /// it; the old target going away (`None`) does not (the mount walk's rule).
+    target: Option<u32>,
     /// The nearest gap so far, metres, and when it was reached (`Time::elapsed_secs`).
     best: f32,
     best_at: f32,
@@ -658,9 +662,10 @@ impl ScriptedTalk {
     }
 }
 
-/// The interaction reach: 3.0 m on foot, 3.5 m on a mate (`FUN_393bf270`'s `+0x3c26` mounted variant).
-fn interact_reach(d: &HudData) -> f32 {
-    if d.mounted.riding_mate() { MOUNTED_INTERACT_REACH } else { INTERACT_REACH }
+/// The interaction reach: 3.0 m for a live target, 3.5 m for a dead one (`FUN_393bf270`'s `+0x3c26`
+/// target-dead variant; `FUN_39093860` compares strictly).
+fn interact_reach(unit: &Unit) -> f32 {
+    if unit.dead { DEAD_INTERACT_REACH } else { INTERACT_REACH }
 }
 
 /// The unit's scaled actor-model radius, the same `Unit.ModelSize` source the server and `api::distance_to` use.
@@ -677,7 +682,7 @@ fn npc_gap(d: &HudData, me: Vec3, at: Vec3, unit: &Unit) -> f32 {
 /// Whether an NPC is inside the interaction reach. `FUN_39093860` returns inside only while the gap is
 /// strictly under the limit, so exactly 3.0 m (3.5 m mounted) is already out.
 fn npc_in_reach(d: &HudData, me: Vec3, at: Vec3, unit: &Unit) -> bool {
-    npc_gap(d, me, at, unit) < interact_reach(d)
+    npc_gap(d, me, at, unit) < interact_reach(unit)
 }
 
 /// What a right click on an NPC does.
@@ -706,7 +711,7 @@ fn plan_npc_click(
         .filter(|u| !u.dead && super::plates::relation_of(game, own_faction, u) != "hostile")?;
     let UnitKind::Npc { template_id, .. } = unit.kind else { return None };
     let gap = npc_gap(d, me, at, unit);
-    Some(if gap < interact_reach(d) {
+    Some(if gap < interact_reach(unit) {
         NpcClick::Talk((obj_id, template_id))
     } else {
         NpcClick::Walk((obj_id, template_id), gap)
@@ -735,7 +740,7 @@ fn nearest_npc(
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
             let at = world(u).unwrap_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
             let gap = npc_gap(d, me, at, u);
-            if gap >= range || super::plates::relation_of(game, own_faction, u) == "hostile" {
+            if gap >= range.min(interact_reach(u)) || super::plates::relation_of(game, own_faction, u) == "hostile" {
                 return None;
             }
             if wanted && game.is_none_or(|g| g.quests.mark(template_id, facts).is_none()) {
@@ -857,6 +862,7 @@ pub fn talk_input(
         && d.loot.nearest.is_none()
         && (scripted_key == Some('f') || (!d.doodad.claims_key() && !ladder_owns_key));
     if let Some(obj_id) = super::slave::action_target(&units, picked) {
+        cancel_walk(&mut d);
         super::slave::interact(&mut d, &units, target.obj_id, obj_id);
         if scripted_pick == Some(obj_id) {
             // The script's `interact` only completes once this path ran; taking the pick alone
@@ -874,20 +880,36 @@ pub fn talk_input(
         });
         match plan_npc_click(&d, &units, own_faction, me, obj_id, at) {
             Some(NpcClick::Walk(npc, gap)) => {
-                info!("hud: {} is {gap:.1} m away (reach {:.1} m): walking there", units.get(obj_id).map_or("?", |u| u.name.as_str()), interact_reach(&d));
-                start_walk(&mut d, npc, gap, now);
+                if seated_or_driving(&d) {
+                    info!("hud: {} is {gap:.1} m away but the player is seated: not walking", units.get(obj_id).map_or("?", |u| u.name.as_str()));
+                    cancel_walk(&mut d);
+                    return None;
+                }
+                let reach = units.get(obj_id).map_or(INTERACT_REACH, interact_reach);
+                info!("hud: {} is {gap:.1} m away (reach {reach:.1} m): walking there", units.get(obj_id).map_or("?", |u| u.name.as_str()));
+                start_walk(&mut d, npc, gap, now, target.obj_id);
                 None
             }
-            Some(NpcClick::Talk(npc)) => Some(npc),
-            None => None,
+            Some(NpcClick::Talk(npc)) => {
+                cancel_walk(&mut d);
+                Some(npc)
+            }
+            None => {
+                // a hostile unit or a non-NPC: the click is not a talk, and it ends a running walk
+                cancel_walk(&mut d);
+                None
+            }
         }
     });
+    if interact_key || scripted_talk {
+        // F / a scripted talk is a new action: it ends a running walk
+        cancel_walk(&mut d);
+    }
     let keyboard_npc = if scripted_talk {
         nearest_npc(&d, me, &units, own, own_faction, &player_facts, 60.0, true, &|unit| {
             pick.pose(unit, &units).map(|(pos, _)| pos)
         })
     } else if interact_key {
-        let range = interact_reach(&d);
         nearest_npc(
             &d,
             me,
@@ -895,7 +917,7 @@ pub fn talk_input(
             own,
             own_faction,
             &player_facts,
-            range,
+            60.0,
             false,
             &|unit| pick.pose(unit, &units).map(|(pos, _)| pos),
         )
@@ -920,11 +942,12 @@ fn dispatch_talk(shared: &Shared, npc: (u32, u32), target: Option<u32>) {
 
 /// Starts the walk to an NPC that was right clicked beyond the interaction reach. A mount walk and a doodad
 /// walk give way (they hold the same forward key).
-pub(super) fn start_walk(data: &mut HudData, npc: (u32, u32), gap: f32, now: f32) {
+pub(super) fn start_walk(data: &mut HudData, npc: (u32, u32), gap: f32, now: f32, target: Option<u32>) {
     super::pets::cancel_mount_walk(data);
     data.doodad.cancel_walk();
     data.dialog.approach = Some(Approach {
         npc,
+        target,
         best: gap,
         best_at: now,
     });
@@ -933,6 +956,13 @@ pub(super) fn start_walk(data: &mut HudData, npc: (u32, u32), gap: f32, now: f32
 /// Ends a walk to an NPC because another walk (a mount or a doodad) takes over. Returns whether one ran.
 pub(super) fn cancel_walk(data: &mut HudData) -> bool {
     data.dialog.approach.take().is_some()
+}
+
+/// The player is on a seat or driving: a forward key would drive the vehicle, so the talk walk must not run.
+fn seated_or_driving(data: &HudData) -> bool {
+    data.mounted.player_attachment().is_some()
+        || data.mounted.local_cart.is_some()
+        || data.doodad.seated
 }
 
 /// What one frame of the walk to a right-clicked NPC decides.
@@ -956,13 +986,17 @@ fn step_npc_walk(
     me: Vec3,
     at: Vec3,
     now: f32,
+    target: Option<u32>,
     interrupted: bool,
 ) -> NpcWalk {
     let Some(mut approach) = data.dialog.approach else { return NpcWalk::Idle };
     let alive = units.get(approach.npc.0).is_some_and(|u| {
         !u.dead && matches!(u.kind, UnitKind::Npc { template_id, .. } if template_id == approach.npc.1)
     });
-    if interrupted || !alive {
+    // A new `Some` target (Tab / left click) is the player taking over; a walk while seated or driving
+    // must not hold W (it would drive the vehicle).
+    let new_target = target.is_some() && target != approach.target;
+    if interrupted || !alive || new_target || seated_or_driving(data) {
         data.dialog.approach = None;
         return NpcWalk::Cancelled;
     }
@@ -971,7 +1005,7 @@ fn step_npc_walk(
         return NpcWalk::Cancelled;
     };
     let gap = npc_gap(data, me, at, unit);
-    if gap < interact_reach(data) {
+    if gap < interact_reach(unit) {
         data.dialog.approach = None;
         return NpcWalk::Arrived(approach.npc);
     }
@@ -1029,7 +1063,7 @@ pub fn walk_to_npc(
                 .and_then(|a| units.get(a.npc.0))
                 .and_then(|u| poses.get(u, &units))
                 .map_or(Vec3::ZERO, |(pos, _)| pos);
-            step = step_npc_walk(&mut d, &units, me, at, time.elapsed_secs(), interrupted);
+            step = step_npc_walk(&mut d, &units, me, at, time.elapsed_secs(), target.obj_id, interrupted);
         }
         let other_walk = d.doodad.walking() || super::pets::walking(&d);
         match step {
@@ -1394,7 +1428,7 @@ mod tests {
             template_id: 7,
             owner_id: 0,
         };
-        npc.pos = aa_net::Pos::new(105.0, 100.0, 0.0);
+        npc.pos = aa_net::Pos::new(102.0, 100.0, 0.0);
         let mut units = Units::default();
         units.by_id.insert(slave.obj_id, slave);
         units.by_id.insert(npc.obj_id, npc);
@@ -1439,6 +1473,20 @@ mod tests {
             None,
             "the stale HUD point would be 105 m away"
         );
+        // `drive_npc` uses the same seat point (not the stale `data.pos`) for its late range rejection.
+        let npc_unit = units.get(21).unwrap();
+        assert!(npc_in_reach(
+            &state.borrow(),
+            me,
+            Vec3::new(102.0, 100.0, 0.0),
+            npc_unit
+        ));
+        assert!(!npc_in_reach(
+            &state.borrow(),
+            state.borrow().pos,
+            Vec3::new(102.0, 100.0, 0.0),
+            npc_unit
+        ));
     }
 
     #[test]
@@ -1548,6 +1596,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_dead_target_uses_the_3_5_m_reach() {
+        let mut unit = npc(20, 42, 3.0);
+        assert_eq!(interact_reach(&unit), INTERACT_REACH);
+        unit.dead = true;
+        assert_eq!(interact_reach(&unit), DEAD_INTERACT_REACH);
+    }
+
     fn npc_walk_app(npc_at: f32) -> (App, Shared) {
         let spawn = crate::hud::fixture_spawn();
         let data = HudData {
@@ -1577,6 +1633,11 @@ mod tests {
             .insert_resource(Player {
                 spawn: Some(spawn.clone()),
             })
+            .insert_resource(Doodads::default())
+            .insert_resource(HudPointerOverUi::default())
+            .insert_resource(ButtonInput::<MouseButton>::default())
+            .insert_resource(ScriptedTalk::default())
+            .init_resource::<crate::script::ScriptPick>()
             .init_resource::<Quests>()
             .init_resource::<PlayerStats>()
             .init_resource::<Inventory>()
@@ -1586,7 +1647,10 @@ mod tests {
             .insert_non_send(HudBridge(shared.clone()))
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
-            .add_systems(Update, (npc::track_npc, walk_to_npc, drive_npc).chain());
+            .add_systems(
+                Update,
+                (npc::track_npc, talk_input, walk_to_npc, talk_pointer, drive_npc).chain(),
+            );
         app.world_mut().spawn((
             crate::ingame::player::Mover {
                 pos: Vec3::ZERO,
@@ -1604,6 +1668,15 @@ mod tests {
         (app, shared)
     }
 
+    fn with_ui(app: &mut App) -> bool {
+        if !aa_world::pak_available() {
+            return false;
+        }
+        let Ok(rt) = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0) else { return false };
+        app.insert_non_send(rt);
+        true
+    }
+
     fn w_held(app: &App) -> bool {
         app.world()
             .resource::<crate::ingame::DevOptions>()
@@ -1613,12 +1686,8 @@ mod tests {
 
     #[test]
     fn an_out_of_reach_npc_click_walks_and_sends_the_interaction_only_on_arrival() {
-        if !aa_world::pak_available() {
-            return;
-        }
-        let Ok(rt) = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0) else { return };
         let (mut app, shared) = npc_walk_app(10.0);
-        app.insert_non_send(rt);
+        if !with_ui(&mut app) { return; }
         let spawn = app.world().resource::<Player>().spawn.clone().unwrap();
         app.world_mut()
             .write_message(NetEvent(Event::PlayerSpawn(Box::new(spawn))));
@@ -1627,7 +1696,9 @@ mod tests {
         app.world_mut()
             .write_message(NetEvent(Event::UnitSpawned(Box::new(npc))));
         app.update();
-        start_walk(&mut shared.borrow_mut(), (20, 42), 9.5, 0.0);
+        app.world_mut()
+            .resource_mut::<crate::script::ScriptPick>()
+            .right_for_test(20);
         app.update();
         assert!(shared.borrow().dialog.approach.is_some());
         assert!(w_held(&app), "the walk holds the forward key");
@@ -1661,10 +1732,140 @@ mod tests {
         );
     }
 
+
+    fn npc_events(app: &mut App) {
+        let spawn = app.world().resource::<Player>().spawn.clone().unwrap();
+        app.world_mut()
+            .write_message(NetEvent(Event::PlayerSpawn(Box::new(spawn))));
+        app.world_mut().write_message(NetEvent(Event::EnteredWorld));
+        let npc = app.world().resource::<Units>().get(20).unwrap().clone();
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(npc))));
+        app.update();
+    }
+
+    fn right_click(app: &mut App, obj_id: u32) {
+        app.world_mut()
+            .resource_mut::<crate::script::ScriptPick>()
+            .right_for_test(obj_id);
+        app.update();
+    }
+
+    fn commands(app: &mut App) -> Vec<Command> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|c| c.0)
+            .collect()
+    }
+
+    #[test]
+    fn an_in_reach_right_click_sends_exactly_one_cs_start_interaction() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        // A far click starts the walk; the next in-reach right click cancels it and talks.
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_some());
+        shared.borrow_mut().pos = Vec3::new(8.5, 0.0, 0.0);
+        right_click(&mut app, 20);
+        assert!(
+            shared.borrow().dialog.approach.is_none(),
+            "the in-reach click cancels the walk"
+        );
+        assert!(!w_held(&app));
+        let started = commands(&mut app)
+            .into_iter()
+            .filter(|c| matches!(c, Command::Interact(Interact::Start { npc_obj_id: 20, .. })))
+            .count();
+        assert_eq!(started, 1, "exactly one CSStartInteraction");
+    }
+
+    #[test]
+    fn an_in_reach_click_on_another_npc_cancels_the_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        let mut far = npc(21, 42, 30.0);
+        far.name = "Far NPC".into();
+        app.world_mut().resource_mut::<Units>().by_id.insert(21, far);
+        right_click(&mut app, 21);
+        assert_eq!(
+            shared.borrow().dialog.approach.map(|a| a.npc.0),
+            Some(21),
+            "the far NPC starts the walk"
+        );
+        shared.borrow_mut().pos = Vec3::new(8.5, 0.0, 0.0);
+        right_click(&mut app, 20);
+        assert!(
+            shared.borrow().dialog.approach.is_none(),
+            "the in-reach talk to the other NPC ends the walk"
+        );
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_new_target_cancels_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_some());
+        app.world_mut().resource_mut::<Target>().obj_id = Some(99);
+        app.update();
+        assert!(shared.borrow().dialog.approach.is_none());
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn f_cancels_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_some());
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .tap_for_test("do_interaction_1");
+        app.update();
+        assert!(shared.borrow().dialog.approach.is_none());
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_click_on_another_unit_cancels_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_some());
+        let mut other = crate::hud::fixture_spawn().unit;
+        other.obj_id = 30;
+        other.kind = UnitKind::Character { char_id: 30 };
+        app.world_mut()
+            .resource_mut::<Units>()
+            .by_id
+            .insert(30, other);
+        right_click(&mut app, 30);
+        assert!(shared.borrow().dialog.approach.is_none());
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_seated_player_does_not_hold_w_for_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        shared.borrow_mut().doodad.seated = true;
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_none());
+        assert!(!w_held(&app));
+    }
+
     #[test]
     fn a_lost_npc_cancels_the_walk_without_a_talk() {
         let (mut app, shared) = npc_walk_app(10.0);
-        start_walk(&mut shared.borrow_mut(), (20, 42), 9.5, 0.0);
+        start_walk(&mut shared.borrow_mut(), (20, 42), 9.5, 0.0, None);
         app.update();
         app.world_mut().resource_mut::<Units>().by_id.clear();
         shared.borrow_mut().pos = Vec3::new(8.5, 0.0, 0.0);

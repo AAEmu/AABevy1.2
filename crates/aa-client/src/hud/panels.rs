@@ -107,6 +107,12 @@ pub struct TargetSnap {
     pub faction_name: String,
     /// `"friendly"`, `"neutral"` or `"hostile"` towards the player.
     pub relation: &'static str,
+    /// `CanAutoAttackTargetUnit`'s attackable bit (`FUN_39838880` 0x100). For an NPC this is its
+    /// `npc_tendency_id` 2 (the neutral/attackable tendency, approximating `FUN_39837800`'s `+0x40`);
+    /// a character is attackable unless friendly (force attack/bloodlust flags are not ported).
+    pub attackable: bool,
+    /// The unit's faction id, for the `PROTECTED_FACTION` refusal detail.
+    pub faction_id: i64,
     pub grade: &'static str,
     pub race: u8,
     pub gender: u8,
@@ -389,6 +395,11 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // the maxima come from the database's formulas; the highest seen is the fallback
         let unit_buffs = world.get_resource::<Buffs>().map_or(&[][..], |b| b.of(u.obj_id));
         let (max_hp, max_mp) = game.and_then(|g| super::stats::unit_max(g, u, unit_buffs)).unwrap_or((u.max_hp, u.max_mp));
+        let relation = game.map_or("neutral", |g| g.relation(own_faction, faction));
+        let attackable = match u.kind {
+            UnitKind::Npc { .. } => relation == "hostile" || npc.is_some_and(|n| n.tendency == 2),
+            _ => relation != "friendly",
+        };
         p.target = Some(TargetSnap {
             obj_id: u.obj_id,
             npc_type: match u.kind { UnitKind::Npc { template_id, .. } => Some(template_id), _ => None },
@@ -404,7 +415,9 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             unit_type,
             detail,
             faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
-            relation: game.map_or("neutral", |g| g.relation(own_faction, faction)),
+            relation,
+            attackable,
+            faction_id: i64::from(faction),
             grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
             race,
             gender,
@@ -751,6 +764,69 @@ mod tests {
 
     use super::*;
     use aa_net::state::NativeCooldown;
+
+    #[test]
+    fn an_npcs_tendency_sets_the_attackable_bit() {
+        use aa_net::model::UnitKind;
+        use crate::hud::data::NpcInfo;
+        let mut game = GameData::default();
+        game.factions.insert(101, "Mine".into());
+        game.factions.insert(2, "Neutral".into());
+        game.npcs.insert(
+            42,
+            NpcInfo {
+                name: "Amutar".into(),
+                level: 15,
+                grade: 1,
+                kind: 14,
+                template: 9,
+                tendency: 1,
+                faction_id: 2,
+                show_name_tag: true,
+            },
+        );
+        game.npcs.insert(
+            43,
+            NpcInfo {
+                name: "Cocky Trainee".into(),
+                level: 32,
+                grade: 1,
+                kind: 1,
+                template: 9,
+                tendency: 2,
+                faction_id: 2,
+                show_name_tag: true,
+            },
+        );
+        let mut units = Units::default();
+        for (obj_id, template) in [(7, 42), (8, 43)] {
+            let mut unit = crate::hud::fixture_spawn().unit;
+            unit.obj_id = obj_id;
+            unit.kind = UnitKind::Npc {
+                template_id: template,
+                owner_id: 0,
+            };
+            unit.faction_id = 2;
+            units.by_id.insert(obj_id, unit);
+        }
+        let mut app = App::new();
+        app.insert_resource(units).init_resource::<Target>().init_resource::<Buffs>();
+        let attackable = |app: &mut App, obj_id| {
+            app.world_mut().resource_mut::<Target>().obj_id = Some(obj_id);
+            let (panels, _, _) = refresh(
+                app.world(),
+                Some(&game),
+                101,
+                1,
+                Instant::now(),
+                &Snapshot::default(),
+                Vec3::ZERO,
+            );
+            panels.target.unwrap().attackable
+        };
+        assert!(!attackable(&mut app, 7), "tendency 1 (Amutar) is not attackable");
+        assert!(attackable(&mut app, 8), "tendency 2 is attackable");
+    }
 
     #[test]
     fn action_bar_page_keys_rotate_the_four_pages() {
