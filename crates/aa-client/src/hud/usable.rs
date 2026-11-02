@@ -550,7 +550,7 @@ impl Env<'_> {
         // attackable bit is the non-friendly relation (`FUN_39837800`'s `+0x40` and the force-attack/
         // bloodlust flags are not recovered). `FUN_39898e60` picks the refusal from `FUN_39838880`'s reason
         // byte: reasons 5/6 are 0x30 `PROTECTED_LEVEL` (the operand is the level threshold 10 of
-        // `FUN_37a90`; the result detail is 0, and `skill_protected_level` takes no argument); reason 1 is
+        // `FUN_39837a90`; the result detail is 0, and `skill_protected_level` takes no argument); reason 1 is
         // 0x2f `PROTECTED_FACTION` (the value is `target+0x3adc`, unconfirmed); everything else is 0x22
         // `INVALID_TARGET`.
         if r.auto_attack || r.target_relation == 4 {
@@ -918,7 +918,7 @@ mod tests {
         assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(4, 0.0), None);
     }
 
-    /// `FUN_39838880` reasons 5/6 -> 0x30 `PROTECTED_LEVEL`: the level threshold of `FUN_37a90` is 10 and
+    /// `FUN_39838880` reasons 5/6 -> 0x30 `PROTECTED_LEVEL`: the level threshold of `FUN_39837a90` is 10 and
     /// `FUN_39898e60` writes no detail (`skill_protected_level` takes no argument).
     #[test]
     fn the_low_level_protection_is_protected_level() {

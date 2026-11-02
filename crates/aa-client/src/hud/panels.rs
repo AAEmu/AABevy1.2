@@ -420,7 +420,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // 1.2 has no recovered attackability test here (`FUN_39837800` only calls the type-3 vtable's
         // `+0x40`, whose source is not decoded): neutral units, NPC or character, stay attackable as
         // before; only a FRIENDLY one is refused.
-        // `FUN_39838880` reasons 5/6 (`FUN_37a90`: level <= 10; the zone protection of `FUN_39027eb0` +
+        // `FUN_39838880` reasons 5/6 (`FUN_39837a90`: level <= 10; the zone protection of `FUN_39027eb0` +
         // `FUN_39837b90`): a hostile target where the attacker (`me.level`) or the target (`u.level`) is
         // level 10 or below and the zone is protected for its faction. The native code reads each unit's
         // own zone; the HUD has only the player's (`Snapshot::zone_faction`), so both sides use it
@@ -887,7 +887,7 @@ mod tests {
     }
 
     /// `FUN_39838880` reasons 5/6: a hostile target is protected while the attacker or the target is level
-    /// 10 or below (`FUN_37a90`) and the zone is protected for that side's faction (`FUN_39027eb0` +
+    /// 10 or below (`FUN_39837a90`) and the zone is protected for that side's faction (`FUN_39027eb0` +
     /// `FUN_39837b90`). Both sides use the player's zone here (inferred).
     #[test]
     fn the_low_level_zone_protection_gates_hostile_attacks() {
@@ -922,7 +922,7 @@ mod tests {
         };
         // the attacker is level 10 in a zone its own faction holds (reason 5)
         assert_eq!(check(&mut app, 10, 101, 32), (true, false));
-        // level 11 is outside `FUN_37a90`'s level <= 10
+        // level 11 is outside `FUN_39837a90`'s level <= 10
         assert_eq!(check(&mut app, 11, 101, 32), (false, true));
         // the target is level 10 in a zone its own faction holds (reason 6)
         assert_eq!(check(&mut app, 32, 102, 10), (true, false));
