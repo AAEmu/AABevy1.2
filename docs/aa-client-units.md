@@ -678,18 +678,17 @@ and explicit controls").
 * **Passenger leaving.** With the own attachment point above 1 on a slave, the explicit dismount
   skill/button sends the parent's 0x032 through `FUN_39362170`, throttled to one request per
   1500 ms (`_DAT_3a169948`). That branch has no speed check, unlike the driver's `FUN_39345aa0`.
-  Movement input currently does **not** leave the seat. This is an owner request on Bevy, not a
-  1.2 capture: the native behaviour is under investigation and capture-pending. The decompile
-  suggests native 1.2 does unbind a passenger on W/S: `FUN_39406540` (`InputManager::Update`)
-  calls `FUN_39404d50` at :843283-843297, whose forward/back flags call `FUN_39362170`
-  (:700266); that sends 0x032 when the parent type is 2 and the attach point is not 0/1, with
-  the 1500 ms throttle. The input update skips that path when its input-block flag
-  `*param_1 != 0` calls `FUN_39402b30` (resets the axis/controller state and calls the model's
-  +0x44), when `FUN_39055fa0` or the `+0x480` flag is set (UI/script input capture), or when
-  the player's model controller `local_60[0x74]` is set (a scripted/vehicle controller owns the
-  body). Those are input gates, not a passenger-seat exception, so with normal input the
-  decompile path still reaches the unbind. Bevy keeps the seat until the owner's real-client
-  check settles it.
+  Movement input does **not** leave the seat. This is now captured on the real 1.2 client
+  (2026-11-02 12:30, owner, Red Farm Hauler passenger via G;
+  `handoff/2026-11-01-owner-session/README.md`): W between 12:30:00 and 12:30:06 sent NOTHING
+  (no CSMoveUnit, no CSDiscardSlave); the 12:30:06 CSDiscardSlave came from the R dismount
+  skill. The decompile path `FUN_39406540` (`InputManager::Update`) -> `FUN_39404d50`
+  (:843283-843297) -> `FUN_39362170` (:700266) does send 0x032 for parent type 2 / attach point
+  not 0/1, so for a passenger it must be blocked by one of its guards: the input-block flag
+  `*param_1 != 0` (calls `FUN_39402b30`, which resets the axis/controller state and calls the
+  model's +0x44), `FUN_39055fa0` / the `+0x480` flag (UI/script input capture), or the player's
+  model controller `local_60[0x74]` (a scripted/vehicle controller owns the body). Which guard
+  applies is unresolved. The client keeps the seat.
 * **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
@@ -777,8 +776,9 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
   a moved cart transform (capture-pending S11-C4).
 * **Leaving.** The local driver uses `DiscardSiegeWeapon`/the speed-guarded 0x032 (S5); a passenger
   sends the same 0x032 from the explicit dismount skill/button (1500 ms throttle). Movement input
-  currently keeps the seat (owner request on Bevy; native W/S is capture-pending, the decompile
-  suggests it unbinds). On `SCUnitDetached` the local seat clears and the mover
+  keeps the seat: the 2026-11-02 12:30 real 1.2 capture sent nothing on W (the R skill did the
+  unbind); the decompile path must be blocked for passengers by one of its guards (unresolved).
+  On `SCUnitDetached` the local seat clears and the mover
   starts from the seat helper, as before.
 
 Capture-pending (S11):

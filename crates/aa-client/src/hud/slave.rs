@@ -41,10 +41,12 @@
 //! timeline, `this+0x14`), refused with 0x67 while that bound slave's speed squared is above
 //! 25.0 (`_DAT_3999f85c`). A passenger (attach point above 1) leaves through the same explicit
 //! dismount path (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that
-//! branch has no speed check. Whether a passenger's W/S should leave is capture-pending: the
-//! owner asked for no movement unbind on Bevy, while the 1.2 decompile (`FUN_39406540` ->
-//! `FUN_39404d50` -> `FUN_39362170`, 1500 ms throttle) suggests W/S sends 0x032; this client
-//! currently keeps the seat. The speed source is unverified (see the docs).
+//! branch has no speed check. The 2026-11-02 12:30 real 1.2 capture (owner, Red Farm Hauler
+//! passenger via G; `handoff/2026-11-01-owner-session/README.md`) pressed W and the client sent
+//! nothing (no CSMoveUnit, no CSDiscardSlave); the 12:30:06 CSDiscardSlave came from the R
+//! dismount skill. So 1.2 keeps a passenger seated on W, and the decompile `FUN_39406540` ->
+//! `FUN_39404d50` -> `FUN_39362170` path must be blocked for passengers by one of its guards
+//! (unresolved which). This client keeps the seat. The speed source is unverified (see docs).
 
 use std::time::Duration;
 
@@ -494,8 +496,9 @@ pub(super) fn bind(
 /// bound slave is the one speed-checked (refused above 5 m/s with 0x67), even when the player is
 /// seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
 /// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
-/// one request per 1500 ms (`_DAT_3a169948`). Movement input is currently not wired to it; the
-/// native W/S behaviour is capture-pending (owner request on Bevy, decompile suggests it does).
+/// one request per 1500 ms (`_DAT_3a169948`). The 2026-11-02 12:30 1.2 capture showed a
+/// passenger's W sends nothing; the decompile input path is blocked for passengers by one of its
+/// guards (unresolved), so this client does not wire movement to it.
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
