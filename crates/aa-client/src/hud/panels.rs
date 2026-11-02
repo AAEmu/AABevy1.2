@@ -108,8 +108,13 @@ pub struct TargetSnap {
     /// `"friendly"`, `"neutral"` or `"hostile"` towards the player.
     pub relation: &'static str,
     /// `CanAutoAttackTargetUnit`'s attackable bit (`FUN_39838880` 0x100): every unit is attackable
-    /// except a friendly one; the type-3 `+0x40` and the force-attack/bloodlust flags are not recovered.
+    /// except a friendly one and a hostile one under the level protection below; the type-3 `+0x40` and
+    /// the force-attack/bloodlust flags are not recovered.
     pub attackable: bool,
+    /// `FUN_39838880` reasons 5/6: the level-10 protection (`skill_protected_level`) applies to this
+    /// hostile target, because the attacker or the target is level 10 or below and the zone is held by
+    /// its faction.
+    pub protected_level: bool,
     /// The unit's faction id, for the `PROTECTED_FACTION` refusal detail.
     pub faction_id: i64,
     pub grade: &'static str,
@@ -415,7 +420,20 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // 1.2 has no recovered attackability test here (`FUN_39837800` only calls the type-3 vtable's
         // `+0x40`, whose source is not decoded): neutral units, NPC or character, stay attackable as
         // before; only a FRIENDLY one is refused.
-        let attackable = relation != "friendly";
+        // `FUN_39838880` reasons 5/6 (`FUN_37a90`: level <= 10; the zone protection of `FUN_39027eb0` +
+        // `FUN_39837b90`): a hostile target where the attacker (`me.level`) or the target (`u.level`) is
+        // level 10 or below and the zone is protected for its faction. The native code reads each unit's
+        // own zone; the HUD has only the player's (`Snapshot::zone_faction`), so both sides use it
+        // (inferred, capture-pending).
+        let protected_level = relation == "hostile"
+            && own_faction != 0
+            && faction != 0
+            && me.zone_faction != 0
+            && game.is_some_and(|g| {
+                let protected = |f: u32| g.relation(f, me.zone_faction) == "friendly";
+                (me.level <= 10 && protected(own_faction)) || (u.level <= 10 && protected(faction))
+            });
+        let attackable = relation != "friendly" && !protected_level;
         p.target = Some(TargetSnap {
             obj_id: u.obj_id,
             npc_type: match u.kind { UnitKind::Npc { template_id, .. } => Some(template_id), _ => None },
@@ -433,6 +451,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
             faction_name: game.and_then(|g| g.factions.get(&faction).cloned()).unwrap_or_default(),
             relation,
             attackable,
+            protected_level,
             faction_id: i64::from(faction),
             grade: GameData::grade_name(npc.map_or(1, |n| n.grade)),
             race,
@@ -865,6 +884,51 @@ mod tests {
         assert!(attackable(&mut app, 7), "a neutral NPC (Amutar-like) is attackable");
         assert!(attackable(&mut app, 8), "another neutral NPC is attackable");
         assert!(!attackable(&mut app, 9), "a friendly NPC is not attackable");
+    }
+
+    /// `FUN_39838880` reasons 5/6: a hostile target is protected while the attacker or the target is level
+    /// 10 or below (`FUN_37a90`) and the zone is protected for that side's faction (`FUN_39027eb0` +
+    /// `FUN_39837b90`). Both sides use the player's zone here (inferred).
+    #[test]
+    fn the_low_level_zone_protection_gates_hostile_attacks() {
+        use aa_net::model::UnitKind;
+        let mut game = GameData::default();
+        game.factions.insert(101, "Mine".into());
+        game.factions.insert(102, "Theirs".into());
+        game.relations.insert((101, 102), 1);
+        let mut units = Units::default();
+        let mut unit = crate::hud::fixture_spawn().unit;
+        unit.obj_id = 7;
+        unit.kind = UnitKind::Npc {
+            template_id: 0,
+            owner_id: 0,
+        };
+        unit.faction_id = 102;
+        unit.level = 32;
+        units.by_id.insert(7, unit);
+        let mut app = App::new();
+        app.insert_resource(units).init_resource::<Target>().init_resource::<Buffs>();
+        let check = |app: &mut App, level: u8, zone: u32, target_level: u8| {
+            app.world_mut().resource_mut::<Target>().obj_id = Some(7);
+            app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().level = target_level;
+            let me = Snapshot {
+                level,
+                zone_faction: zone,
+                ..Snapshot::default()
+            };
+            let (panels, _, _) = refresh(app.world(), Some(&game), 101, 1, Instant::now(), &me, Vec3::ZERO);
+            let t = panels.target.unwrap();
+            (t.protected_level, t.attackable)
+        };
+        // the attacker is level 10 in a zone its own faction holds (reason 5)
+        assert_eq!(check(&mut app, 10, 101, 32), (true, false));
+        // level 11 is outside `FUN_37a90`'s level <= 10
+        assert_eq!(check(&mut app, 11, 101, 32), (false, true));
+        // the target is level 10 in a zone its own faction holds (reason 6)
+        assert_eq!(check(&mut app, 32, 102, 10), (true, false));
+        assert_eq!(check(&mut app, 32, 102, 11), (false, true));
+        // no zone faction: no protection
+        assert_eq!(check(&mut app, 10, 0, 10), (false, true));
     }
 
     #[test]
