@@ -1415,7 +1415,10 @@ fn discard_siege_weapon_lua_wrapper_queues_the_same_unbind()
 #[ignore = "requires the original UI (game pak)"]
 fn fast_slave_unbind_refusal_shows_sysmsg_through_the_lua_wrapper()
 -> Result<(), Box<dyn std::error::Error>> {
+    // the UI runtime first: building it can take longer than the 500 ms the speed report stays fresh
+    let rt = runtime();
     let (state, _units) = setup(&[wheeled_car(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    install_discard(&rt, &state);
     state
         .borrow()
         .game
@@ -1433,8 +1436,6 @@ fn fast_slave_unbind_refusal_shows_sysmsg_through_the_lua_wrapper()
             movement,
         },
     );
-    let rt = runtime();
-    install_discard(&rt, &state);
     rt.lua.load("X2SiegeWeapon:DiscardSiegeWeapon()").exec()?;
     assert!(state.borrow().requests.is_empty());
     assert_eq!(

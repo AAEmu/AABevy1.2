@@ -325,6 +325,9 @@ pub(crate) fn territory_fixture() { territory::fixture::run(); }
 pub(crate) fn house_owner_fixture() { housing::fixture::run(); }
 
 #[allow(dead_code)]
+pub(crate) fn house_sale_fixture() { housing::fixture::run_sale(); }
+
+#[allow(dead_code)]
 pub(crate) fn npc_fixture() { dialog::npc_fixture(); }
 
 #[allow(dead_code)]
