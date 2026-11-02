@@ -87,17 +87,19 @@ pub const DEFAULT_SHIP_STEER_VEL: f32 = 6.0;
 
 /// How fast a mount of a model goes with a rider (m/s): the run speed of its relaxed stance (`game_stances.ai_move_speed_run`,
 /// stance 2: a Lilyut horse 9, a donkey 7.2) and the walking and backward factors of its actor model. The speed follows a
-/// wanted one at the actor model's `game_inertia` (slowing, 4 for a horse) or `game_inertia_accel` (speeding up, 11) rate;
-/// the 2026-11-02 capture's Leomorph ramps 0 -> 5.9 m/s in the first 103 ms packet and coasts 12.65 -> 8.3 -> 0.7 -> 0
+/// wanted one at the actor model's `game_inertia` (no input, 4 for a horse) or `game_inertia_accel` (any move request, 11)
+/// rate; the 1.2 loader reads the two columns as `inertia` / `inertiaAccel` (x2game `166815` / `166823`, the row copy at
+/// `221108` / `221118`), and CryPhysics chooses between them (`aaemu-physics entities/living/step.rs:171-179`). The
+/// 2026-11-02 capture's Leomorph ramps 0 -> 5.9 m/s in the first 103 ms packet and coasts 12.65 -> 8.3 -> 0.7 -> 0
 /// over 0.1 / 0.7 / 1.5 s, which is exactly those two exponential rates (feel capture 1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MountSpeed {
     pub run: f32,
     pub walk: f32,
     pub backward: f32,
-    /// `actor_models.game_inertia`: response rate (1/s) while slowing down.
+    /// `actor_models.game_inertia`: response rate (1/s) with no input; 0 means no inertia.
     pub inertia: f32,
-    /// `actor_models.game_inertia_accel`: response rate (1/s) while speeding up.
+    /// `actor_models.game_inertia_accel`: response rate (1/s) for a move request; 0 means no inertia.
     pub accel: f32,
 }
 

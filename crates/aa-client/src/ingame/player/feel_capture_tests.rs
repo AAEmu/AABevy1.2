@@ -6,8 +6,8 @@ use crate::ingame::mount::{LocalMount, LocalSeat};
 use crate::settings::Actions;
 use std::time::Duration;
 
-/// `control_player` over an empty terrain (a flat, collisionless test world): the movement rules, the jump
-/// and the packet cadence are what matters here, not the heightmap.
+/// `control_player` over the real `main_world`, at a chosen point: the movement rules, the jump, the
+/// packets and the slope probe are what matter here.
 struct Feel {
     app: App,
     player: Entity,
@@ -17,8 +17,11 @@ struct Feel {
 impl Feel {
     fn new() -> Feel {
         // a flat, dry spot of the captured area (the capture's start, 15512/15306, is on a slope)
+        Feel::at(15480.0, 15282.0)
+    }
+
+    fn at(x: f32, y: f32) -> Feel {
         let terrain = TerrainQuery::new("main_world");
-        let (x, y) = (15480.0, 15282.0);
         let z = terrain.ground_at(x, y).map_or(134.86328, |g| g.height);
         let mut app = App::new();
         app.init_resource::<Time>()
@@ -516,14 +519,10 @@ fn movement_packets_are_ten_hertz_and_idle_has_a_three_second_heartbeat() {
     assert_eq!(movement.velocity, [0; 3]);
 }
 
-/// feel capture 1, mount: the speed follows the wanted one at `game_inertia_accel` 11 and `game_inertia`
-/// 4 - 5.9 m/s at the first 103 ms packet, 8.85 by 0.5 s, and a coast 12.65 -> 8.3 -> 0.7 -> 0 over
-/// 3.2-3.3 m - and the released velocity keeps moving with flags 0 until the stop packet.
+/// The mount's inertia is CryPhysics' rate choice (`aaemu-physics entities/living/step.rs:171-179`):
+/// `vel_requested` non-zero uses `inertia_accel` (11), no input uses `inertia` (4), and 0 is instant.
 #[test]
-fn a_mount_ramps_and_coasts_at_the_captured_rates() {
-    if !aa_cry::pak_available() {
-        return;
-    }
+fn mount_speed_uses_inertia_accel_for_a_request_and_inertia_without_one() {
     let mount_speed = MountSpeed {
         run: 9.0,
         walk: 0.2,
@@ -564,6 +563,36 @@ fn a_mount_ramps_and_coasts_at_the_captured_rates() {
     assert!((3.1..=3.4).contains(&distance), "slide {distance} m");
     assert!((0.9..=1.6).contains(&t));
 
+    // a turn at speed is a move request: `inertia_accel` 11, not the old "target not faster" rule (4)
+    let carried = Vec2::new(0.0, 9.0);
+    let turn = Vec2::new(9.0, 0.0);
+    let turned = mount_velocity(carried, turn, mount_speed, dt);
+    let expected = carried + (turn - carried) * (1.0 - (-11.0f32 * dt).exp());
+    assert!(close(turned.x, expected.x, 1e-5) && close(turned.y, expected.y, 1e-5), "{turned:?}");
+    // the same speed with no input is slowing: `inertia` 4
+    let coasted = mount_velocity(carried, Vec2::ZERO, mount_speed, dt);
+    assert!(close(coasted.y, 9.0 * (-0.4f32).exp(), 1e-5), "{coasted:?}");
+    // a 0 rate means no inertia: the new velocity is the target, not a freeze
+    let instant = MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 0.0, accel: 0.0 };
+    assert_eq!(mount_velocity(Vec2::ZERO, Vec2::new(0.0, 9.0), instant, dt), Vec2::new(0.0, 9.0));
+    assert_eq!(mount_velocity(Vec2::new(0.0, 9.0), Vec2::ZERO, instant, dt), Vec2::ZERO);
+}
+
+/// feel capture 1, mount: the first packet is 5.9 m/s and 8.85 by 0.5 s, and a release coasts
+/// 12.65 -> 8.3 -> 0.7 -> 0 over 3.2-3.3 m; the released velocity keeps moving with flags 0 until the
+/// explicit zero stop packet.
+#[test]
+fn a_mount_ramps_and_coasts_at_the_captured_rates() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mount_speed = MountSpeed {
+        run: 9.0,
+        walk: 0.2,
+        backward: 0.2,
+        inertia: 4.0,
+        accel: 11.0,
+    };
     let mut f = Feel::new();
     f.mount(mount_speed);
     f.hold("moveforward");
@@ -602,8 +631,11 @@ fn a_mount_ramps_and_coasts_at_the_captured_rates() {
         "the release packet keeps the old velocity"
     );
     let mut coast = 0;
+    let mut coast_packets = Vec::new();
     for _ in 0..15 {
-        coast += f.tick(0.1).len();
+        let packets = f.tick(0.1);
+        coast += packets.len();
+        coast_packets.extend(packets);
     }
     let slid = f.mover().pos.distance(start);
     // from the base 9 m/s: v / inertia = 2.25 m; the capture's 3.2-3.3 m is its 12.65 m/s decel
@@ -615,6 +647,12 @@ fn a_mount_ramps_and_coasts_at_the_captured_rates() {
     );
     assert!(coast > 0);
     assert_eq!(speed(f.mover()), 0.0);
+    // the coast ends with an explicit v=0 stop packet (the capture's last mount row)
+    let final_stop = coast_packets
+        .last()
+        .expect("the mount's final stop packet")
+        .to_movement(0);
+    assert_eq!((final_stop.flags, final_stop.velocity), (move_flags::STOPPING, [0; 3]));
 }
 
 /// feel capture 1, slopes: the 3D speed is 5.30 at 11 degrees, 5.06 at 21 and 4.1-4.2 at 38-41, with the
@@ -637,4 +675,103 @@ fn slopes_take_the_captured_share_of_the_run_speed() {
             "symmetric"
         );
     }
+}
+
+/// The slope probe behind the capture's `cos^2`: a real 10.8 degree terrain segment, a brush (the old
+/// cave floor) and a ledge (a drop greater than `DROP`) all give the expected horizontal/vertical shares.
+#[test]
+fn the_slope_probe_reads_terrain_brushes_and_ledges() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let terrain = TerrainQuery::new("main_world");
+    let collision = WorldCollision::new("main_world", terrain.clone());
+    // the capture's downhill segment (15512.2,15306.28 -> 15511.9,15303.0), probed uphill
+    let pos = Vec3::new(15512.2, 15306.28, 131.17058);
+    let here = terrain.ground_at(pos.x, pos.y).unwrap().height;
+    let ahead = terrain.ground_at(pos.x, pos.y + SLOPE_PROBE).unwrap().height;
+    let probe = step_slope(&terrain, &collision, pos, Vec2::Y, STEP_UP);
+    assert!(close(probe.factor, slope_factor(ahead - here, SLOPE_PROBE), 1e-6));
+    assert!(close(probe.tan, (ahead - here) / SLOPE_PROBE, 1e-6));
+    assert!(probe.factor < 0.999 && probe.tan > 0.0, "{probe:?}");
+    // downhill is the mirror and uses the same slope
+    let down = step_slope(&terrain, &collision, pos, -Vec2::Y, STEP_UP);
+    assert!(close(down.factor, slope_factor(here - terrain.ground_at(pos.x, pos.y - SLOPE_PROBE).unwrap().height, SLOPE_PROBE), 1e-6));
+
+    // a brush (the known cave floor under a terrain hole) has its own footing: no slope share
+    collision.build_blocking(20, 8);
+    let cave = Vec3::new(21270.5, 8960.5, 474.8673 + 5.0);
+    assert_eq!(step_slope(&terrain, &collision, cave, Vec2::Y, STEP_UP), StepSlope { factor: 1.0, tan: 0.0 });
+
+    // a ledge is a fall: the character keeps its full speed
+    let ledge = Vec3::new(21000.0, 10542.0, 119.993);
+    assert_eq!(step_slope(&terrain, &collision, ledge, Vec2::Y, STEP_UP), StepSlope { factor: 1.0, tan: 0.0 });
+}
+
+/// A slow slide along a wall must not toggle the movement packets every frame: start at 0.05 m/s,
+/// keep going down to 0.02 m/s.
+#[test]
+fn the_active_threshold_has_hysteresis() {
+    assert!(!is_moving(0.04, false));
+    assert!(is_moving(0.04, true));
+    assert!(!is_moving(0.01, true));
+    assert!(is_moving(0.06, false));
+    assert!(is_moving(0.06, true));
+}
+
+/// Stale air carry is cleared or seeded at every owner hand-back: swim entry/exit, the glider, a ship
+/// deck and a skill move. Otherwise a jump out of water, a folded glider or a stepped-off deck would
+/// drift at an old velocity.
+#[test]
+fn stale_air_carry_is_cleared_or_seeded_at_the_hand_backs() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    // glider: the last glider frame's velocity is carried into the fall
+    let mut glide = Feel::new();
+    {
+        let mut mover = glide.app.world_mut().get_mut::<Mover>(glide.player).unwrap();
+        mover.grounded = false;
+        mover.velocity = Vec3::new(3.0, 4.0, 0.0);
+    }
+    glide.app.world_mut().resource_mut::<SendState>().glide_owns = true;
+    glide.tick(0.05);
+    assert_eq!(glide.app.world().resource::<SendState>().air_velocity, Vec2::new(3.0, 4.0));
+    glide.app.world_mut().resource_mut::<SendState>().glide_owns = false;
+    glide.tick(0.05);
+    assert!(close(glide.mover().velocity.x, 3.0, 0.1) && close(glide.mover().velocity.y, 4.0, 0.1), "{:?}", glide.mover().velocity);
+
+    // deck hand-over: the hull speed is the CarriedVelocity, not an old own one
+    let mut deck = Feel::new();
+    {
+        let mut state = deck.app.world_mut().resource_mut::<SendState>();
+        state.air_velocity = Vec2::new(5.0, 0.0);
+        state.hand_over_from_deck();
+    }
+    assert_eq!(deck.app.world().resource::<SendState>().air_velocity, Vec2::ZERO);
+
+    // skill move: the skill's last velocity is carried after it returns
+    let mut skill = Feel::new();
+    {
+        let mut mover = skill.app.world_mut().get_mut::<Mover>(skill.player).unwrap();
+        mover.velocity = Vec3::new(3.0, 4.0, 0.0);
+    }
+    skill.app.world_mut().entity_mut(skill.player).insert(crate::ingame::skill_motion::SkillMove::fixture());
+    skill.tick(0.01);
+    assert_eq!(skill.app.world().resource::<SendState>().air_velocity, Vec2::new(3.0, 4.0));
+
+    // swim entry clears the old land carry; leaving the water seeds the swimmer's own speed (zero here)
+    let mut water = Feel::at(15600.0, 15458.0);
+    water.app.world_mut().resource_mut::<SendState>().air_velocity = Vec2::new(5.4, 0.0);
+    water.tick(0.05);
+    assert!(water.mover().swim.is_some(), "the sea point starts swimming");
+    assert_eq!(water.app.world().resource::<SendState>().air_velocity, Vec2::ZERO);
+    {
+        let mut mover = water.app.world_mut().get_mut::<Mover>(water.player).unwrap();
+        mover.pos = Vec3::new(15480.0, 15282.0, 134.86328);
+    }
+    water.app.world_mut().resource_mut::<SendState>().air_velocity = Vec2::new(5.4, 0.0);
+    water.tick(0.05);
+    assert!(water.mover().swim.is_none(), "the dry point leaves the water");
+    assert_eq!(water.app.world().resource::<SendState>().air_velocity, Vec2::ZERO);
 }

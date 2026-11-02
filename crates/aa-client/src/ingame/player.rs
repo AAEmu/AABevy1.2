@@ -117,6 +117,10 @@ const STOP_GAP: f32 = 0.008;
 const FALL_VELOCITY_MIN: f32 = 20.0;
 /// How far ahead the on-foot step samples the terrain for its slope (m).
 const SLOPE_PROBE: f32 = 0.5;
+/// The active-movement speed thresholds (m/s): start when the step is faster than [`MOVE_START`], keep
+/// going down to [`MOVE_KEEP`], so a step that jitters at a wall does not start and stop every frame.
+const MOVE_START: f32 = 0.05;
+const MOVE_KEEP: f32 = 0.02;
 /// The forced maximum send period of the native movement sender while nothing changes
 /// (`DAT_3a59f850`, cvar descriptor 0x39ac4640, default 0xbb8 = 3000 ms). A hanging climber sends
 /// one idle movement at this period; the on-foot controller has no equivalent and uses
@@ -395,6 +399,9 @@ pub fn control_player(
     state.since_spawn += dt;
     // a glider flies the character: `glide::control_glide` has moved it and sent its packets this frame
     if state.glide_owns {
+        // the last glider frame's velocity is what a hand-back carries into the fall
+        state.air_velocity = mover.velocity.truncate();
+        state.drive_vel = Vec2::ZERO;
         *motion = Motion::default();
         *input_state = PlayerInput::default();
         mover.velocity = Vec3::ZERO;
@@ -501,6 +508,9 @@ pub fn control_player(
     if let Some(skill_move) = skill_moving.filter(|_| !dead) {
         // A declined parented Blink/impulse does not swallow genuine exit keys.
         if !seated || skill_move.controller_activity() {
+            // a skill move's last velocity is what the normal controller carries after it
+            state.air_velocity = mover.velocity.truncate();
+            state.drive_vel = Vec2::ZERO;
             *input_state = PlayerInput { moving: skill_move.controller_activity(), ..default() };
             state.autorun = AutoRun::default();
             return;
@@ -626,6 +636,7 @@ pub fn control_player(
     if driving.is_none() {
         state.drive_vel = Vec2::ZERO;
     }
+    let mut step_tan = 0.0;
     let step = if let Some((_, speed)) = driving {
         // the mount's buffs (a gallop) speed it up; its carried velocity follows the wanted one at the
         // actor model's `game_inertia` / `game_inertia_accel`, so a release coasts and a turn curves
@@ -645,8 +656,9 @@ pub fn control_player(
         let input_world = forward(mover.facing) * local_vel.y + right(mover.facing) * local_vel.x;
         if mover.grounded {
             // the slope's share (the capture's 3D speed falls with the slope, symmetric up and down)
-            let world =
-                input_world * step_slope_factor(&terrain, &collision, old, input_world, STEP_UP);
+            let slope = step_slope(&terrain, &collision, old, input_world, STEP_UP);
+            step_tan = slope.tan;
+            let world = input_world * slope.factor;
             // carried through the air on the next frames, and kept when a take-off or a ledge starts one
             state.air_velocity = world;
             world + carried_velocity
@@ -695,10 +707,12 @@ pub fn control_player(
     let rising = !mover.grounded && mover.vz > 0.0 && !swimming;
     let mut jumped = false;
     let mut takeoff = false;
+    let mut left_water = false;
     // swimming starts and stops with the depth of the water over the ground (a body that rises out of it does not start)
     let want_swim = swim::should_swim(swimming, pos.z, wet, actor.swim_depth()) && (swimming || !rising) && driving.is_none();
     if want_swim && !swimming {
         mover.grounded = false;
+        state.air_velocity = Vec2::ZERO;
         let w = wet.expect("swimming needs water");
         mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: 0.0, vertical: 0.0, deep: false });
         info!("swimming in {:?} water at ({:.1}, {:.1}, {:.2}), surface {:.2}, ground {:.2}", w.kind, pos.x, pos.y, pos.z, w.surface, ground);
@@ -706,6 +720,7 @@ pub fn control_player(
         mover.swim = None;
         mover.grounded = false;
         mover.vz = mover.vz.min(0.0);
+        left_water = true;
         info!("left the water at ({:.1}, {:.1}, {:.2}), ground {:.2}", pos.x, pos.y, pos.z, ground);
     }
 
@@ -718,6 +733,7 @@ pub fn control_player(
             mover.swim = None;
             mover.vz = actor.jump_speed();
             jumped = true;
+            left_water = true;
             state.swim_jump = true;
         } else {
             let wanted = swim::wanted_vz(vertical, pos.z, rest);
@@ -777,11 +793,15 @@ pub fn control_player(
     };
     let swimming = mover.swim.is_some();
     let airborne = !mover.grounded && !swimming;
-    // on the ground the vertical part is the terrain's: the capture's slope rows carry it (0.6 m/s down an
-    // 11 degree slope) and its jumps 0; a landing snaps to the ground, so it reports 0
-    let dz = if dt > 0.0 { (pos.z - old.z) / dt } else { 0.0 };
-    let ground_vz = if !swimming && !airborne && landed.is_none() && actual.length() > 0.05 {
-        dz
+    // leaving the water carries the swimmer's own horizontal speed into the jump/fall, not an old land one
+    if left_water {
+        state.air_velocity = actual;
+    }
+    // on the ground the vertical part is the terrain's: the 11 degree capture row is about 1.0 m/s down,
+    // and a stair or brush (whose slope probe is 0) reports none, so a 0.2-0.5 m step cannot report the
+    // 12-30 m/s a raw frame dz would (a landing snaps to the ground, so it reports 0)
+    let ground_vz = if !swimming && !airborne && landed.is_none() && actual.length() > MOVE_KEEP {
+        actual.length() * step_tan
     } else {
         0.0
     };
@@ -798,8 +818,10 @@ pub fn control_player(
     mover.pos = pos;
     *transform = placement(pos, mover.facing, 1.0);
     let coasting = driving.is_some() && local_dir == Vec2::ZERO && state.drive_vel.length() > 0.05;
-    // a mount that coasts to rest (`game_inertia`) is still moving without a key
-    let moving = (local_dir != Vec2::ZERO || coasting) && actual.length() > 0.05;
+    // a mount that coasts to rest (`game_inertia`) is still moving without a key; the threshold keeps a
+    // step that jitters below 0.05 m/s from starting and stopping every frame
+    let moving =
+        (local_dir != Vec2::ZERO || coasting) && is_moving(actual.length(), state.was_moving);
     // the jump's clips (`super::jump`): a take-off, walking, Dash and the keys' direction
     if !airborne {
         state.took_off = false;
@@ -961,8 +983,13 @@ pub fn control_player(
             flags = Some(move_flags::STOPPING);
             actor_bits = Some(actor_flags::STANDING_ON_SOLID);
         } else if stop || mount_release {
-            // the first stop packet keeps the old velocity; on foot the zero one follows [`STOP_GAP`] later
-            packet_velocity = state.last_velocity;
+            // the first stop packet keeps the old velocity; on foot the zero one follows [`STOP_GAP`] later;
+            // a mount that reached rest ends its coast with an explicit zero packet
+            packet_velocity = if mount_release || (stop && driving.is_none()) {
+                state.last_velocity
+            } else {
+                Vec3::ZERO
+            };
             flags = Some(move_flags::STOPPING);
             actor_bits = Some(actor_flags::STANDING_ON_SOLID);
             if stop && driving.is_none() {
@@ -1045,8 +1072,12 @@ pub fn control_player(
     state.swimming = swimming;
     state.was_active = active;
     state.was_input = local_dir != Vec2::ZERO;
+    state.was_moving = moving;
     if mover.grounded || swimming {
         state.swim_jump = false;
+    }
+    if swimming {
+        state.air_velocity = Vec2::ZERO;
     }
     state.last_velocity = if driving.is_some() && active {
         // the mount's packet velocity is its carried speed, not the position delta
@@ -1122,6 +1153,8 @@ pub struct SendState {
     stop_pending: Option<f32>,
     /// A direction was held in the last step (a mount's release is the first stop packet).
     was_input: bool,
+    /// The step was a moving one last frame (the hysteresis of [`MOVE_START`] / [`MOVE_KEEP`]).
+    was_moving: bool,
     /// The air time began with a jump out of the water (its packets keep the old jump flags).
     swim_jump: bool,
     /// The last hanging packet said "moving": the next idle one is the stop packet.
@@ -1139,6 +1172,7 @@ impl SendState {
         self.sent_first = false;
         self.stop_pending = None;
         self.last_velocity = Vec3::ZERO;
+        self.was_moving = false;
     }
 
     /// The seat changed: the new mount starts from rest (the carried velocity is not the last mount's).
@@ -1152,6 +1186,7 @@ impl SendState {
         self.last_velocity = Vec3::ZERO;
         self.stop_pending = None;
         self.swim_jump = false;
+        self.was_moving = false;
     }
 
     /// The ladder controller's send clock: [`SEND_INTERVAL`] since the last hanging packet.
@@ -1187,6 +1222,7 @@ impl SendState {
         self.sent_first = true;
         self.was_active = false;
         self.was_input = false;
+        self.was_moving = false;
         self.swimming = false;
         self.took_off = false;
         self.freefall = false;
@@ -1217,6 +1253,12 @@ impl SendState {
     pub(crate) fn hand_over_from_deck(&mut self) {
         self.deck_exit = true;
         self.since_sent = SEND_INTERVAL;
+        // the deck controller's own step is not carried: its hull speed is `CarriedVelocity`, and the
+        // keys' own speed is added by `control_player` on the next frame
+        self.air_velocity = Vec2::ZERO;
+        self.drive_vel = Vec2::ZERO;
+        self.last_velocity = Vec3::ZERO;
+        self.was_moving = false;
     }
 
     /// A jump edge from the real binding or a scripted key (`hold J`, `--walk ...:J`); the
@@ -1381,50 +1423,67 @@ pub fn slope_factor(rise: f32, run: f32) -> f32 {
     c * c
 }
 
-/// The horizontal speed factor of the terrain slope under an on-foot step (`1` off a slope, on a brush or
-/// walking off a ledge). `pos` is the feet position and `step` the horizontal step asked for.
-fn step_slope_factor(
+/// The terrain slope under an on-foot step: the horizontal speed factor and the tangent of the slope
+/// along the step (the vertical speed share). `1` / `0` off a slope, on a brush or walking off a ledge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StepSlope {
+    factor: f32,
+    tan: f32,
+}
+
+/// The CryPhysics living-entity ground projection (`aaemu-physics entities/living/step.rs:247-251`,
+/// `1736-1739`): the move request is projected onto the ground normal, which is the capture's
+/// `run * cos^2` horizontal speed and `run * cos * sin` vertical. `pos` is the feet position and `step`
+/// the horizontal step asked for.
+fn step_slope(
     terrain: &TerrainQuery,
     collision: &WorldCollision,
     pos: Vec3,
     step: Vec2,
     step_up: f32,
-) -> f32 {
+) -> StepSlope {
+    let flat = StepSlope { factor: 1.0, tan: 0.0 };
     if step == Vec2::ZERO {
-        return 1.0;
+        return flat;
     }
     let Some(here) = support(terrain, collision, pos.x, pos.y, pos.z, step_up) else {
-        return 1.0;
+        return flat;
     };
     // a bridge, stair or deck has its own footing; the capture's slopes are terrain
     if here.brush {
-        return 1.0;
+        return flat;
     }
     let dir = step.normalize();
     let Some(ahead) = terrain
         .ground_at(pos.x + dir.x * SLOPE_PROBE, pos.y + dir.y * SLOPE_PROBE)
         .map(|g| g.height)
     else {
-        return 1.0;
+        return flat;
     };
     // a ledge is a fall, not a slope: the character walks off it at its full speed
     if ahead < here.height - DROP {
-        return 1.0;
+        return flat;
     }
-    slope_factor(ahead - here.height, SLOPE_PROBE)
+    let rise = ahead - here.height;
+    StepSlope {
+        factor: slope_factor(rise, SLOPE_PROBE),
+        tan: (rise / SLOPE_PROBE).clamp(-MAX_CLIMB_TAN, MAX_CLIMB_TAN),
+    }
 }
 
 /// One frame of a ridden mount's carried world velocity (m/s, x east / y north): it follows `target` at
-/// the mount's `game_inertia_accel` while speeding up and `game_inertia` while slowing down. The
-/// 2026-11-02 capture's Leomorph ramps 0 -> 5.9 m/s by its first packet and reaches 8.85 by 0.5 s, and
-/// coasts 12.65 -> 8.3 (0.1 s) -> 0.7 (0.7 s) -> 0 (1.5 s), 3.2-3.3 m: exponential rates 11 and 4.
+/// the mount's `game_inertia_accel` whenever a move is requested and at `game_inertia` only with no input
+/// (`aaemu-physics entities/living/step.rs:171-179`: `len2(vel_requested) > 0.1` uses `inertia_accel`,
+/// else `inertia`). A rate of 0 means no inertia (the next velocity is the target), not a freeze.
+/// The 2026-11-02 capture's Leomorph ramps 0 -> 5.9 m/s by its first packet and reaches 8.85 by 0.5 s,
+/// and coasts 12.65 -> 8.3 (0.1 s) -> 0.7 (0.7 s) -> 0 (1.5 s), 3.2-3.3 m: exponential rates 11 and 4.
 pub fn mount_velocity(carried: Vec2, target: Vec2, speed: MountSpeed, dt: f32) -> Vec2 {
-    let rate = if target.length_squared() > carried.length_squared() {
-        speed.accel
+    let rate = if target != Vec2::ZERO { speed.accel } else { speed.inertia };
+    let next = if rate <= 0.0 {
+        target
     } else {
-        speed.inertia
+        carried + (target - carried) * (1.0 - (-rate * dt).exp())
     };
-    let next = carried + (target - carried) * (1.0 - (-rate * dt).exp());
     // the capture's last coast samples are 0.2 and 0.09 m/s: under ~0.2 m/s the slide is over
     if target == Vec2::ZERO && next.length_squared() < 0.04 {
         Vec2::ZERO
@@ -1433,6 +1492,12 @@ pub fn mount_velocity(carried: Vec2, target: Vec2, speed: MountSpeed, dt: f32) -
     }
 }
 
+
+/// Is a step of `speed` m/s an active movement? The threshold is [`MOVE_START`] when starting and
+/// [`MOVE_KEEP`] once moving, so a slow slide along a wall does not toggle the movement packets.
+pub fn is_moving(speed: f32, was_moving: bool) -> bool {
+    speed > if was_moving { MOVE_KEEP } else { MOVE_START }
+}
 
 /// One frame of a body in the air: gravity, then the frame's mean vertical speed moves it, so a jump peaks at v^2 / 2g (1.2's
 /// 1.3 m) at any frame rate. The vertical speed does not fall below `-max_fall` (water holds a falling body back).
