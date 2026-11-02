@@ -460,9 +460,15 @@ depth-only prepass and shadow pipelines (`MAY_DISCARD`); without it the hidden p
 shadow. `restore_emergence_clip` puts the shared materials back after `portal_time`, but only on a mesh that still
 holds its clipped clone (a stealth material change wins). Parts that are not `IllumMaterial` (none of the vehicle
 parts in the data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in
-for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's
-`FxSound` item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2
-list.
+for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The pending list
+survives visibility loss like the 1.2 list.
+
+`spawn_summon_portals` starts the group's sounds through the skill audio path (`sounds::Audio`, class `Skill`): the
+`FxSound` items and each `FxParticle` item's `fx_particles.sound_id` (the same field as a skill effect's particle
+sound), and the particle library's own emitter `Sound=""` events, deduplicated and played once at the portal anchor.
+Land group 1263 has the `FxSound` item 1760 `Sounds/x2eventsounds:portal:portal_tank`; sea group 619's particle item
+890 has `fx_particles.sound_id` 2413 `Sounds/x2eventsounds:portal:portal_ship_15`. Both groups' items offset 0, so
+they all hang at the anchor. The sounds were missing before this slice; a muted run (`--mute`) starts none.
 
 Sea variant (Eznan Cutter, slave 21): the data gives group 619 `배포탈_열림x10`, scale 10.0, time 7.0 s, whose single
 item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), played at the plane.

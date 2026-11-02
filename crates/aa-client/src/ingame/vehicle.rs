@@ -20,9 +20,10 @@
 //! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) emerges from its
 //! `slaves.portal_spawn_fx_id` portal: the unit starts two bounding extents behind its position, behind the portal
 //! plane, and moves out over `portal_time` while the portal hangs at the plane (`FUN_3909ea30` / `FUN_39097220`,
-//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). A ship (the Eznan Cutter)
-//! instead floats up out of the sea with the native buoyancy motion's bow-up righting, clipped at the sea surface;
-//! see [`SummonEmergence`]. A vehicle that merely streams into view later has no creation packet, so it plays none.
+//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). The group's `FxSound` items
+//! and particle sounds start at the portal through [`super::sounds::Audio`]. A ship (the Eznan Cutter) instead
+//! floats up out of the sea with the native buoyancy motion's bow-up righting, clipped at the sea surface; see
+//! [`SummonEmergence`]. A vehicle that merely streams into view later has no creation packet, so it plays none.
 //!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
@@ -272,6 +273,7 @@ pub fn spawn_summon_portals(
     book: Option<Res<super::combat::skills::SkillBook>>,
     units: Option<Res<Units>>,
     water: Option<Res<aa_world::WaterQuery>>,
+    audio: super::sounds::Audio,
     mut portals: ResMut<SummonPortals>,
     time: Res<Time>,
     roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform, Option<&VehicleExtent>)>,
@@ -356,31 +358,61 @@ pub fn spawn_summon_portals(
             ))
             .id();
         let unit_scale = transform.scale.y.max(0.0);
+        let mut sounds: Vec<String> = Vec::new();
         for item in book.fx_group(portal.fx_group).iter() {
-            // the group's FxSound item has no effect name; 1.2 plays it with the portal, this slice draws the particles
-            if item.effect.is_empty() {
-                continue;
+            let mut parent = anchor;
+            let at = plane + cry_to_bevy(item.offset);
+            let effect = if item.effect.is_empty() {
+                None
+            } else {
+                let effect = commands
+                    .spawn((
+                        aa_fx::Effect {
+                            scale: portal.scale * item.scale * unit_scale,
+                            prime: false,
+                            item: true,
+                            no_body: true,
+                            despawn_when_finished: true,
+                            ..aa_fx::Effect::new(item.effect.clone())
+                        },
+                        Transform {
+                            translation: cry_to_bevy(item.offset),
+                            ..default()
+                        },
+                        ChildOf(anchor),
+                        SummonPortalEffect {
+                            until: now + f64::from(portal.time),
+                            despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
+                            stopped: false,
+                        },
+                    ))
+                    .id();
+                parent = effect;
+                Some(effect)
+            };
+            // `FxSound` items and the `fx_particles.sound_id` of the group's particles start with the portal, at the
+            // anchor (1.2 hands the whole group to the effect system at once, `FUN_3909ea30` -> `FUN_393eb7f0`).
+            // The particle library's own emitter `Sound=""` events play the same way as a skill effect's.
+            let mut play = |path: &str| {
+                if sounds.iter().any(|seen| seen.eq_ignore_ascii_case(path)) {
+                    return;
+                }
+                sounds.push(path.to_string());
+                audio.start(
+                    &mut commands,
+                    &super::sounds::Play { path, class: super::sounds::Class::Skill, unit: root, parent, at },
+                );
+            };
+            if let Some(super::combat::Sfx::Event(path)) = item.sound.as_ref() {
+                play(path);
             }
-            commands.spawn((
-                aa_fx::Effect {
-                    scale: portal.scale * item.scale * unit_scale,
-                    prime: false,
-                    item: true,
-                    no_body: true,
-                    despawn_when_finished: true,
-                    ..aa_fx::Effect::new(item.effect.clone())
-                },
-                Transform {
-                    translation: cry_to_bevy(item.offset),
-                    ..default()
-                },
-                ChildOf(anchor),
-                SummonPortalEffect {
-                    until: now + f64::from(portal.time),
-                    despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
-                    stopped: false,
-                },
-            ));
+            if effect.is_some()
+                && let Some(sound_book) = audio.book()
+            {
+                for path in sound_book.particle_sounds(&item.effect).iter() {
+                    play(path);
+                }
+            }
         }
         // the prefab's own inactive `portal_exhaust` follows the moving unit (FUN_39097140 / FUN_39097220)
         spawn_portal_exhaust(&mut commands, root, &damage.variant, now + f64::from(portal.time));
@@ -2282,6 +2314,61 @@ mod tests {
             transform.rotation,
             emergence.end_rotation
         );
+    }
+
+    /// The fx group's sounds (`FxSound` items and each particle's `fx_particles.sound_id`) start once per summon,
+    /// through the same audio system as the skill effects, at the portal.
+    #[test]
+    fn a_summon_portal_plays_its_fx_sounds_once_at_the_portal() {
+        use super::super::combat::Sfx;
+        use super::super::sounds::SoundBook;
+        let Some((mut app, db, root)) = hauler() else { return };
+        let portal = db.slave_summon_portal(146).expect("the Red Farm Hauler's portal");
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let expected: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter_map(|item| match item.sound.as_ref() {
+                Some(Sfx::Event(path)) => Some(path.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            expected.iter().any(|path| path.eq_ignore_ascii_case("Sounds/x2eventsounds:portal:portal_tank")),
+            "{expected:?}"
+        );
+        app.insert_resource(SoundBook::open());
+        app.world_mut().write_message(created(1, false));
+        for _ in 0..3 {
+            app.update();
+        }
+        let count = |app: &mut App| {
+            app.world_mut()
+                .query::<&aa_audio::Sound>()
+                .iter(app.world())
+                .filter(|sound| expected.iter().any(|path| path.eq_ignore_ascii_case(&sound.event)))
+                .count()
+        };
+        assert_eq!(count(&mut app), expected.len(), "one sound per group item");
+        let anchor = app
+            .world_mut()
+            .query::<(Entity, &SummonPortalAnchor)>()
+            .iter(app.world())
+            .find(|(_, anchor)| anchor.root == root)
+            .map(|(entity, _)| entity)
+            .expect("the portal anchor");
+        let hearing: Vec<Entity> = app
+            .world_mut()
+            .query::<(&aa_audio::Sound, &ChildOf)>()
+            .iter(app.world())
+            .filter(|(sound, _)| expected.iter().any(|path| path.eq_ignore_ascii_case(&sound.event)))
+            .map(|(_, child)| child.parent())
+            .collect();
+        assert!(hearing.contains(&anchor), "the FxSound item hangs at the portal: {hearing:?}");
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(count(&mut app), expected.len(), "the portal sound starts once per summon");
     }
 
     /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
