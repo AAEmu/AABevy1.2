@@ -643,12 +643,16 @@ and explicit controls").
   **surface gap** of the collision shapes (`FUN_3989bf90` -> `FUN_398b1ab0` ->
   `FUN_398b1af0`): the minimum over the target's colliders of
   `|centre_player - centre_slave| - (r_player + r_slave)`, not clamped at 0, compared strictly
-  (`gap < limit`). The exact per-collider shapes are not recovered; the port uses one scaled
-  actor-model radius per unit (the same `GameData::model_size` as the server's `Unit.ModelSize`
-  and `api::distance_to`), an approximation (unverified). The 2026-10-28 capture bound at a
-  3.1022 m centre-to-centre 3D distance with no walking; the capture's Farm Wagon (slave
-  template 60, model 1008) has no actor-model radius (it is a `VehicleModel`), so the player
-  radius alone (0.4-0.55 m for the 1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
+  (`gap < limit`). The exact per-collider shapes are not recovered; for a vehicle or ship the
+  port uses the body's prefab AABB (the box the summon placement uses, `GameData::vehicle_box`
+  / `hud/slave.rs::slave_gap`) in the slave's yaw frame, like the server's ship mass box and
+  attach-point stand-in; other units keep one scaled actor-model radius (the same
+  `GameData::model_size` as the server's `Unit.ModelSize` and `api::distance_to`). This is the
+  approximation the 2026-11-01 retest needed: the Red Farm Hauler's cargo bed is in reach while
+  its origin is more than 3 m away. The 2026-10-28 capture bound at a 3.1022 m centre-to-centre
+  3D distance with no walking; the capture's Farm Wagon (slave template 60, model 1008) has no
+  actor-model radius (it is a `VehicleModel`), so the player radius alone (0.4-0.55 m for the
+  1.2 races) leaves a 2.55-2.70 m gap. Then `CSBindSlave` 0x031
   goes out (`FUN_393bf310` -> `FUN_39362f50` -> `FUN_393464a0`, `SlaveCommand::Bind`). Out of
   reach the native client auto-walks (`FUN_390a6af0`); this port has no walk-to-unit, so it
   refuses with 0x9a. The mounted 3.5 m variant is modelled from the player's received
@@ -756,21 +760,44 @@ and explicit controls").
   reports); the speed is treated as 0 after 500 ms without a new report (a port bound, **not a
   1.2 value**). Without a bound master `FUN_39362170` sends only from an attachment above point 1
   (no speed check, 1500 ms throttle) and is silent for a point-1 seat that is not the player's.
-* **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
-  (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
-  the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
-  buttons run forward, one button makes A / D strafe) sends the parent's 0x032 through
-  `FUN_39362170`, throttled to one request per 1500 ms (`_DAT_3a169948`). That native path has no
-  speed check, unlike the driver's `FUN_39345aa0`. Like `talk_input` it is skipped while the HUD
-  is suspended or loading, while a widget has the HUD focus, and while the UI owns the keyboard
-  (typing in a field); mouse buttons held over a HUD widget are ignored like they are on foot.
+* **Vehicle seat frames.** A vehicle seat is the body helper named by
+  `model_attach_point_strings` (point 2 is `$passenger0`, point 1 `$driver`). A **passenger**
+  helper's matrix is the attachment frame: its translation and **full** authored rotation (a
+  quaternion, not yaw only) compose with the vehicle's world rotation
+  (`ingame/mount.rs::rider_rotation`). Driver and other helper frames are not rider frames: the
+  real data authors `$driver` 180 degrees on model 129 (`ShipModel`) and 772 (`singboat`), and
+  `$cannonN`/ladder/box helpers carry prop rotations; applying them would turn or tilt the
+  driver/gunner. They are left on the mount rotation.
+  Real passenger frames: model 1553 Red Farm Hauler `$passenger0` 180 degrees about model Z;
+  models 314 (`maritram`), 653 (`carriage_trailed`) and 1459 (`ghostcarriage_trailed`) also 180;
+  the speedcar/car passenger helpers (1293/1323/1371/1406/1444/1460-1462) are a 23.1-degree
+  recline. Model 1008 Farm Wagon has only an identity `$driver` and no point-2 helper in 1.2. The seat clip
+  `fist_ac_trailer_sit_idle` has an identity Bip01 root, so it adds no turn of its own; the
+  passenger's turn comes from the `$passenger0` attachment frame.
+  Why the old identity mount rotation faced the rear: the rider was drawn in the mount frame and
+  the `$passenger0` attachment frame (the only 180-degree frame in the seat data) was not
+  applied; whether the native composition also includes a body/bind-root turn is not captured.
+  The owner's Bevy retest and the real-data test pin the corrected frames.
+* **Passenger leaving.** With the own attachment point above 1 on a slave, the explicit dismount
+  skill/button sends the parent's 0x032 through `FUN_39362170`, throttled to one request per
+  1500 ms (`_DAT_3a169948`). That branch has no speed check, unlike the driver's `FUN_39345aa0`.
+  Movement input does **not** leave the seat. This is now captured on the real 1.2 client
+  (2026-11-02 12:30, owner, Red Farm Hauler passenger via G): W between 12:30:00 and 12:30:06 sent NOTHING
+  (no CSMoveUnit, no CSDiscardSlave); the 12:30:06 CSDiscardSlave came from the R dismount
+  skill. The decompile path `FUN_39406540` (`InputManager::Update`) -> `FUN_39404d50`
+  (:843283-843297) -> `FUN_39362170` (:700266) does send 0x032 for parent type 2 / attach point
+  not 0/1, so for a passenger it must be blocked by one of its guards: the input-block flag
+  `*param_1 != 0` (calls `FUN_39402b30`, which resets the axis/controller state and calls the
+  model's +0x44), `FUN_39055fa0` / the `+0x480` flag (UI/script input capture), or the player's
+  model controller `local_60[0x74]` (a scripted/vehicle controller owns the body). Which guard
+  applies is unresolved. The client keeps the seat.
 * **Not ported here:** ships, and the despawn/destroy lifecycle (0x02f/0x030).
   Cart driving and the wheel visuals are in the next section. The player flags at +0x3a70..+0x3a73/+0x3a7b (native 0x13)
   and the parent unit type 0xe (native silent refusal) are also not ported: their meaning is
   unverified.
   The mode bar's `unbind` function slot now calls the same `FUN_39345aa0` path (driver 0x67 above
-  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point and the passenger walk-off remain
-  the other two ways a client action sends the unbind.
+  5 m/s, passenger `FUN_39362170` throttle); the Lua entry point is the other way a client action
+  sends the unbind.
 
 #### Pending live checks
 
@@ -858,8 +885,11 @@ The 1.2 slave interaction offers two seat skills on the target unit. `hud/slave.
   input with the smoothed hull). `mount.rs` tests cover two remote passengers at different helpers and
   a moved cart transform (capture-pending S11-C4).
 * **Leaving.** The local driver uses `DiscardSiegeWeapon`/the speed-guarded 0x032 (S5); a passenger
-  walks off on movement input (1500 ms throttle) or sends the same 0x032. On `SCUnitDetached` the local
-  seat clears and the mover starts from the seat helper, as before.
+  sends the same 0x032 from the explicit dismount skill/button (1500 ms throttle). Movement input
+  keeps the seat: the 2026-11-02 12:30 real 1.2 capture sent nothing on W (the R skill did the
+  unbind); the decompile path must be blocked for passengers by one of its guards (unresolved).
+  On `SCUnitDetached` the local seat clears and the mover
+  starts from the seat helper, as before.
 
 Capture-pending (S11):
 

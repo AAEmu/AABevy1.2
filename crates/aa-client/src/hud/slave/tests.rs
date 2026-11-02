@@ -846,6 +846,115 @@ fn the_real_model_flag_gates_the_unbind_speed_refusal() -> Result<(), Box<dyn st
     Ok(())
 }
 
+/// The reach to a vehicle is to its body, not its origin: 3.4 m from the origin but 2.4 m from
+/// the box's side passes the 3.0 m interaction check (the 2026-11-01 retest was refused with the
+/// origin-only sphere). The box is set directly so this runs without the pak.
+#[test]
+fn a_vehicle_slave_reach_uses_its_body_box_not_its_origin() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
+    let game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 0.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert!(
+        candidate(&state.borrow(), &units).is_some_and(|c| c.obj_id == 20),
+        "the F prompt uses the same body gap"
+    );
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+    assert!(matches!(
+        send(&state, &units).as_slice(),
+        [Command::Slave(SlaveCommand::Bind { tl_id: 8 })]
+    ));
+}
+
+/// The clamped box distance is in unscaled model units; a scaled slave's box is smaller in
+/// world space, so the gap must be multiplied back by the unit scale.
+#[test]
+fn a_scaled_vehicle_box_reach_is_converted_back_to_world_metres() {
+    let mut cart = slave(20, 8, Vec3::ZERO);
+    cart.scale = 0.5;
+    let (state, units) = setup(&[cart]);
+    let game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    // World gap to the scaled box side: 3.4 - 0.5 = 2.9 m (< 3.0). The unscaled model
+    // distance would be 5.8 m and wrongly refuse.
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 1.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+}
+
+/// The passenger list (13863) uses the same body reach and sends the plain interaction cast.
+#[test]
+fn a_vehicle_passenger_request_uses_the_body_box() {
+    let (state, units) = setup(&[slave(20, 8, Vec3::ZERO)]);
+    let game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 0.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[13863])),
+        Outcome::Sent
+    );
+    assert!(matches!(
+        state.borrow().requests.as_slice(),
+        [Request::UseSkill {
+            skill_id: 13863,
+            target_obj_id: 20
+        }]
+    ));
+}
+
+/// The real Red Farm Hauler (model 1553) box reaches its cargo bed: 3.4 m behind the origin is
+/// inside the hull's drawn box, so the 2026-11-01 right click is in reach.
+#[test]
+#[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+fn the_real_hauler_box_reaches_its_cargo_bed() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+    let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&path).exists() {
+        eprintln!("skipping: the game pak {pak} or database {path} is not there");
+        return Ok(());
+    }
+    let game = crate::hud::data::GameData::load(&path)?;
+    let (lo, hi) = game.vehicle_box(1553).expect("the hauler body box");
+    assert!(lo.y < -3.0, "the cargo bed extends behind the origin: {lo:?}..{hi:?}");
+    let mut hauler = slave(20, 8, Vec3::ZERO);
+    hauler.model_id = 1553;
+    hauler.kind = UnitKind::Slave {
+        id: 700,
+        tl_id: 8,
+        template_id: 146,
+        summoner_id: 100,
+    };
+    let (state, units) = setup(&[hauler]);
+    state.borrow_mut().pos = Vec3::new(0.0, -3.4, 1.1);
+    state.borrow_mut().player_radius = game.model_size(10, 1.0);
+    state.borrow().game.0.set(game).ok().expect("game data");
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+    Ok(())
+}
+
 #[test]
 fn only_a_mate_seat_switches_the_interaction_reach_to_three_point_five_metres() {
     let mut mate = crate::hud::expansion::fixture::spawn().unit;
@@ -1513,129 +1622,128 @@ fn passenger_walk_off_is_throttled_to_1500_ms() {
     assert!(view.walk_off_throttle(now + Duration::from_millis(1500)));
 }
 
-fn walk_off_app(state: &Shared, units: &Units, point: u8, focus: bool, suspended: bool) -> App {
-    let mut spawn = crate::hud::fixture_spawn();
-    spawn.unit.attached_to = Some(Attachment { obj_id: 20, point, reason: 0 });
-    let mut app = App::new();
-    app.insert_non_send(HudBridge(state.clone()))
-        .insert_resource(units.clone())
-        .insert_resource(aa_net::state::Player { spawn: Some(spawn) })
-        .insert_resource(crate::settings::Actions::default())
-        .insert_resource(ButtonInput::<MouseButton>::default())
-        .insert_resource(super::super::HudPointerOverUi(false))
-        .insert_resource(super::super::HudKeyboardFocus(focus))
-        .insert_resource(super::super::HudSuspended(suspended))
-        .insert_resource(crate::ingame::teleport::Teleport::default())
-        .add_systems(Update, walk_off);
-    app
-}
+/// Captured on the real 1.2 client (2026-11-02 12:30, see `docs/aa-client-units.md`): W held on a passenger seat
+/// goes through the real `player::control_player` and the HUD request pipeline and sends no
+/// `CSDiscardSlave`; the seat stays at point 2. The dismount skill is covered by
+/// `a_passenger_unbind_is_throttled_to_1500_ms_without_a_speed_check`.
+#[test]
+fn a_seated_passenger_with_w_held_sends_no_cs_discard_slave() {
+    use crate::ingame::player::{self, LocalPlayer, Mover, PlayerInput, SendState};
+    use crate::ingame::{DevOptions, LocalJump, LocalMount, Motion};
+    use crate::ingame::camera::OrbitCamera;
+    use crate::ingame::mount::LocalSeat;
+    use aa_net::state::Player;
 
-fn tap_walk(app: &mut App) {
+    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
+    crate::hud::mounted::receive(
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 2,
+            reason: 0,
+        },
+    );
+    let mut spawn = crate::hud::fixture_spawn();
+    spawn.unit.attached_to = Some(Attachment {
+        obj_id: 20,
+        point: 2,
+        reason: 0,
+    });
+    let terrain = aa_world::TerrainQuery::new("main_world");
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(HudBridge(state.clone()))
+        .insert_resource(units)
+        .insert_resource(Player { spawn: Some(spawn) })
+        .insert_resource(crate::settings::Actions::default())
+        .insert_resource(DevOptions::default())
+        .insert_resource(LocalMount(Some(LocalSeat {
+            mount: 20,
+            point: 2,
+            drives: false,
+            cart: true,
+            ship: false,
+            turret: false,
+            speed: Default::default(),
+            lift: 0.0,
+        })))
+        .insert_resource(SendState::default())
+        .insert_resource(PlayerInput::default())
+        .insert_resource(LocalJump::default())
+        .insert_resource(terrain.clone())
+        .insert_resource(aa_world::WorldCollision::new("main_world", terrain.clone()))
+        .insert_resource(aa_world::WaterQuery::with_terrain("main_world", terrain))
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<NextState<crate::Screen>>()
+        .init_resource::<aa_net::state::ActionBar>()
+        .init_resource::<aa_net::state::Inventory>()
+        .init_resource::<aa_net::state::Target>()
+        .init_resource::<aa_net::state::Skills>()
+        .init_resource::<aa_net::state::Buffs>()
+        .init_resource::<crate::hud::InFlight>()
+        .add_message::<NetCommand>()
+        .add_message::<crate::hud::alerts::UseFailed>()
+        .add_message::<crate::ingame::ground_target::SkillPressed>()
+        .add_systems(
+            Update,
+            (player::control_player, crate::hud::api::handle_requests),
+        );
+    app.world_mut().spawn(OrbitCamera::default());
+    let player = app
+        .world_mut()
+        .spawn((
+            LocalPlayer { obj_id: 100 },
+            Mover {
+                pos: Vec3::ZERO,
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+            Transform::default(),
+            Motion::default(),
+        ))
+        .id();
     app.world_mut()
         .resource_mut::<crate::settings::Actions>()
-        .tap_for_test("moveforward");
-}
-
-fn hold_mouse(app: &mut App, left: bool, right: bool) {
-    let mut mouse = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
-    if left {
-        mouse.press(MouseButton::Left);
-    }
-    if right {
-        mouse.press(MouseButton::Right);
-    }
-}
-
-#[test]
-fn both_mouse_buttons_walk_off_the_passenger_seat() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    hold_mouse(&mut app, true, true);
+        .hold_for_test("moveforward");
     app.update();
+    let sent: Vec<Command> = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|message| message.0)
+        .collect();
+    assert!(
+        sent.iter()
+            .all(|command| !matches!(
+                command,
+                Command::Slave(SlaveCommand::Unbind { .. })
+            )),
+        "movement sent an unbind: {sent:?}"
+    );
+    assert!(state.borrow().requests.is_empty());
     assert_eq!(
-        state.borrow().requests,
-        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })],
-        "holding both world mouse buttons runs forward in the player controller"
+        app.world()
+            .get::<Mover>(player)
+            .map(|mover| mover.pos)
+            .map(Some),
+        Some(Some(Vec3::ZERO)),
+        "a passenger is not moved by W"
     );
-}
-
-#[test]
-fn one_mouse_button_alone_is_not_movement() {
-    for (left, right) in [(true, false), (false, true)] {
-        let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-        let mut app = walk_off_app(&state, &units, 2, false, false);
-        hold_mouse(&mut app, left, right);
-        app.update();
-        assert!(
-            state.borrow().requests.is_empty(),
-            "left {left}, right {right}: one button only turns the camera"
-        );
-    }
-}
-
-#[test]
-fn both_mouse_buttons_over_the_hud_do_not_walk_off() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    app.world_mut()
-        .resource_mut::<super::super::HudPointerOverUi>()
-        .0 = true;
-    hold_mouse(&mut app, true, true);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "the player controller ignores world buttons held over a HUD widget"
-    );
-}
-
-#[test]
-fn walk_off_needs_a_passenger_seat_and_free_keyboard_focus() {
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 1, false, false);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "a driver seat does not walk off"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, true, false);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "HUD keyboard focus is not movement input"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, true);
-    tap_walk(&mut app);
-    app.update();
-    assert!(
-        state.borrow().requests.is_empty(),
-        "a suspended HUD cannot unbind"
-    );
-
-    let (state, units) = setup(&[slave(20, 8, Vec3::new(1.0, 0.0, 0.0))]);
-    let mut app = walk_off_app(&state, &units, 2, false, false);
-    tap_walk(&mut app);
-    app.update();
     assert_eq!(
-        state.borrow().requests,
-        vec![Request::Slave(SlaveCommand::Unbind { tl_id: 8 })]
-    );
-}
-
-#[test]
-fn every_walk_off_input_guard_blocks_the_unbind() {
-    assert!(!input_blocked(false, false, false, false));
-    assert!(input_blocked(true, false, false, false), "suspended HUD");
-    assert!(input_blocked(false, true, false, false), "teleport loading");
-    assert!(input_blocked(false, false, true, false), "HUD focus");
-    assert!(
-        input_blocked(false, false, false, true),
-        "typing in a field"
+        app.world()
+            .resource::<Player>()
+            .spawn
+            .as_ref()
+            .and_then(|spawn| spawn.unit.attached_to)
+            .map(|attachment| attachment.point),
+        Some(2),
+        "the passenger keeps the seat"
     );
 }
 

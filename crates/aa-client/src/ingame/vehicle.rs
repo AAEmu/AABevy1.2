@@ -774,7 +774,7 @@ fn part_helpers(part: &Part, model: &aa_cry::mesh::Model) -> HashMap<String, Aff
 
 /// The body helpers of `look` (reads the body models; used by the tests, [`prepare`] reuses the models it loads).
 #[cfg(test)]
-fn body_helpers(look: &VehicleLook) -> HashMap<String, Affine3A> {
+pub(super) fn body_helpers(look: &VehicleLook) -> HashMap<String, Affine3A> {
     let mut helpers = HashMap::new();
     for part in body_parts(look) {
         if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {

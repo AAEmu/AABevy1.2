@@ -40,11 +40,14 @@ doodad names (`localized_texts` of `doodad_almighties`).
   `ExecuteDynamicAction(i)` (a click), `X2Interaction:GetInteractionSkillIconPath(skill)` (the skill icon,
   `ui/icon/interaction/icon_interaction29.dds` for 14602; the script derives `_o` / `_c` / `_d`) and `IsValidIconPath` (pak lookup).
 * **Which doodad**: the one last right clicked while it is in reach, else the nearest, a doodad behind the player counting up to 3 m
-  further than one in front (an inn's chairs stand around the Crescent Throne tome). Reach: the skill's `max_range` (at least 2 m),
-  4 m without a skill. The 2026-10-30 1.2 capture: the herb's Gather (13990, `max_range` 4) is on the bar at 3.0 m and absent at
-  4.5 m and 8.0 m (F sent nothing), so there is no slack on top of the range (the first version added 1 m). The edge between 3.0
-  and 4.5 m and the reach of other doodad skills were not sampled; every doodad skill uses the same rule, unverified beyond Gather.
-  The range is measured to the doodad's origin; the 2 m minimum and the 4 m default are ours, not captured.
+  further than one in front (an inn's chairs stand around the Crescent Throne tome). Reach: the client setting
+  `max_interaction_doodad_distance` that `FUN_3902f010` reads (`DAT_39aefb98+0x2a0`), not the skill's `max_range`. The setting's
+  value is not in the pak; the 2026-10-30 1.2 capture bounds it: the herb's Gather (13990, `max_range` 4) is on the bar at 3.0 m
+  and absent at 4.5 m and 8.0 m (F sent nothing), so the port uses 4.0 m with no slack. It is the same distance for every doodad
+  skill: storage skill 15307 has `max_range` 20 but its "store a trade pack" button must clear at the same 4 m (2026-11-01 retest:
+  the icon stayed on screen 10 m from the box). The threshold is the **centre distance** to the doodad's origin (strictly
+  under 4 m), as the capture's 3 m/4.5 m boundary supports; the player's radius only feeds the ordering key. The doodad's
+  own collision shape is not recovered. The right-click walk uses the same 4 m interaction distance.
 * **Keys**: F (G, H, J for the 2nd to 4th button) uses the doodad when no loot is in reach (F loots first, `loot.rs`) and no NPC
   is nearer than the doodad (F talks, `dialog.rs` asks `View::claims_key`).
 * **Right click** on a doodad (view ray against a sphere at the doodad, 1.3 m * scale, within 40 m; an NPC in front of it wins):
@@ -282,7 +285,8 @@ silhouette pass; the game's native silhouette path is `Prefab::SetSilhouetteColo
 ## Walk-to, plate and phase messages
 
 A right click on a doodad out of reach starts `View::approach`: the character runs at it (camera turned, W held) until
-`stop_distance(reach)`, then the use is sent. A key of the player's, a missing doodad or [`STUCK_SECS`] without getting
+`stop_distance(DOODAD_REACH)`, then the use is sent; the walk uses the same 4 m interaction distance as the bar, not the
+skill's `max_range`. A key of the player's, a missing doodad or [`STUCK_SECS`] without getting
 0.3 m nearer ends the walk; the state machine (`advance`) is pure and unit tested. The plate is the original
 `DRAW_DOODAD_TOOLTIP`: name, `owner` while the doodad has one (`SCDoodadCreated`/`SCDoodadOriginator`), and
 `displayTime` = the growth seconds left

@@ -15,8 +15,10 @@
 //! dead (`CANT_DO_WHILE_YOU_DEAD` 0x14c), we are bound to another slave (0x66), we are bound to
 //! this one (silent), a bind is already pending (0x13), and the same gap strictly below
 //! `DAT_39ac7408` 16.0 -> 4.0 m (0x9a). 1.2 minimises over per-collider shapes that are not
-//! recovered; this client uses one sphere per unit (unverified), and a slave has no
-//! `ActorModel`, so its radius is 0 and only the player's radius reduces the centre distance.
+//! recovered; a slave (a `VehicleModel`) has no `ActorModel` radius, so this client measures the
+//! player to the drawn body's prefab box ([`slave_gap`]: the body only, without the wheels the
+//! summon placement's box adds, in the slave's yaw frame), not to its origin. That box is an approximation of the collision
+//! parts, like the server's ship mass box / attach-point stand-in.
 //! The auto-walk out of reach (`FUN_390a6af0`) is not modelled: it refuses 0x9a.
 //!
 //! A right click on the slave we are bound to or seated on sends only `CSChangeTarget` 0x02c
@@ -43,20 +45,24 @@
 //! `use_wheeled_vehicle_simulation` (`X2::VehicleUnitModel::Init`, `FUN_390f0510` 190001, copies
 //! the model descriptor's +0x72); for a `ShipModel` it holds the ship's 0x198-byte driver object
 //! pointer (`FUN_390bdf70` 156143-156149), so a ship driver is refused too (inferred: a ship
-//! dismount at speed is capture-pending). Without a bound master, a passenger (attach point
-//! above 1) walks off on movement input through `FUN_39362170`, throttled to one request per
-//! 1500 ms (`_DAT_3a169948`); that native path has no speed check.
+//! dismount at speed is capture-pending). The 2026-11-01 owner capture: the Red Farm Hauler
+//! (slave template 146, model 1553, `vehicle_models` 65: `use_wheeled_vehicle_simulation`
+//! false) sent 0x032 at ~6.7 m/s and the owner got off, with no 0x67.
 //!
-//! The 2026-11-01 owner capture: the Red Farm Hauler (slave template 146, model 1553,
-//! `vehicle_models` 65: `use_wheeled_vehicle_simulation` false) sent 0x032 at ~6.7 m/s with W
-//! held and the owner got off, with no 0x67.
+//! A passenger (attach point above 1) leaves through the same explicit dismount path
+//! (`FUN_39362170`), throttled to one request per 1500 ms (`_DAT_3a169948`); that branch has no
+//! speed check. The 2026-11-02 12:30 real 1.2 capture (owner, Red Farm Hauler passenger via G)
+//! pressed W and the client sent nothing (no CSMoveUnit, no CSDiscardSlave); the 12:30:06
+//! CSDiscardSlave came from the R dismount skill. So 1.2 keeps a passenger seated on W, and the
+//! decompile `FUN_39406540` -> `FUN_39404d50` -> `FUN_39362170` path must be blocked for
+//! passengers by one of its guards (unresolved which). This client keeps the seat.
 
 use std::time::Duration;
 
 use aa_net::interaction::{Interact, InteractEvent};
 use aa_net::model::{Unit, UnitKind};
 use aa_net::slave_control::SlaveCommand;
-use aa_net::state::{Player, Units};
+use aa_net::state::Units;
 use aa_net::{Event, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -78,10 +84,14 @@ pub(super) const BIND_REACH: f32 = 4.0;
 /// The native passes the squared value to `FUN_393601a0`, which compares the surface gap with
 /// `sqrt` of it (`FUN_39093860`).
 pub(super) const CANDIDATE_REACH: f32 = 2.5;
+/// A slave farther than this centre distance from the player cannot have a body box reaching
+/// the candidate gap: the longest 1.2 ship body is well under 32 m. Skip it before
+/// [`slave_gap`] loads the model from the pak (the F prompt producer runs every frame).
+const SLAVE_PREFILTER: f32 = 64.0;
 /// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s, checked only when the bound
 /// slave model's +0x2a0 slot is non-zero (a wheeled-simulation vehicle, or a ship).
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
-/// `_DAT_3a169948`: the passenger walk-off throttle.
+/// `_DAT_3a169948`: the passenger dismount throttle.
 pub(super) const WALK_OFF_THROTTLE: Duration = Duration::from_millis(1500);
 
 /// `ErrorMessageType` ids from the native message table (`FUN_3956b860`).
@@ -125,7 +135,9 @@ pub(super) fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32
 /// The key `FUN_393601a0` (units) and `FUN_3902f010` (doodads) store per candidate, ordered by
 /// `FUN_3902ed20`: the surface gap minus `1 + facing` (`_DAT_3999c488` is the 1.0), where
 /// `facing` is the player's forward dot the horizontal direction to the candidate. The gap is
-/// taken absolute like the native bits mask (`DAT_3999d500` 0x7fffffff); lower sorts first.
+/// taken absolute like the native bits mask (`DAT_3999d500` 0x7fffffff); lower sorts first. The
+/// F-bar producer additionally clamps a slave's signed gap at 0 before this key; the
+/// bind/right-click checks keep the signed value.
 pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
     let toward = (at - from).truncate().normalize_or_zero();
     gap.abs() - (1.0 + forward.dot(toward))
@@ -133,12 +145,41 @@ pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
 
 /// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
 /// model is a `VehicleModel`, not an `ActorModel`, so the catalog has no radius for it and this
-/// returns 0: the slave's collider is not approximated at all (unverified, but the 1.2
-/// `FUN_3989bf90` uses the slave's real collision shape, which is also not recovered).
+/// returns 0; [`slave_gap`] uses the model's box instead.
 fn radius(data: &HudData, unit: &Unit) -> f32 {
     data.game
         .get()
         .map_or(0.0, |game| game.model_size(unit.model_id, unit.scale))
+}
+
+/// The surface gap to a slave: the player's distance to the vehicle body's box in the slave's
+/// frame, minus the player's radius. The 1.2 client measures the player's collision shape to the
+/// target's collision parts (`FUN_3989bf90` -> `FUN_398b1ab0`); those shapes are not recovered,
+/// so the prefab body box [`crate::ingame::data::Db::vehicle_look`] draws and the summon
+/// placement uses stands in for them, like the server's ship mass box / attach-point measure.
+/// The box is authored at scale 1 in Cry model space (Z up); it is rotated by the slave's yaw and
+/// divided by the unit scale before the clamp. A model with no loaded box keeps the old centre
+/// distance minus the (zero for a vehicle) actor radius.
+pub(super) fn slave_gap(
+    data: &HudData,
+    unit: &Unit,
+    from: Vec3,
+    at: Vec3,
+    yaw: f32,
+) -> f32 {
+    let Some((lo, hi)) = data
+        .game
+        .get()
+        .and_then(|game| game.vehicle_box(unit.model_id))
+    else {
+        return surface_gap(from, data.player_radius, at, radius(data, unit));
+    };
+    let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
+    let local = Quat::from_rotation_z(-yaw) * (from - at) / scale;
+    let nearest = local.clamp(lo, hi);
+    // `local` is in unscaled model units: put the distance back into metres before subtracting
+    // the player's world-space radius.
+    local.distance(nearest) * scale - data.player_radius
 }
 
 /// Where the checks measure from. While attached to a slave the server moves only the slave,
@@ -286,8 +327,15 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
         if seated == Some(unit.obj_id) {
             continue;
         }
-        let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-        let gap = surface_gap(from, data.player_radius, at, radius(data, unit));
+        let (at, yaw) = world(unit.obj_id)
+            .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+        if from.distance(at) > CANDIDATE_REACH + SLAVE_PREFILTER {
+            continue;
+        }
+        // The bar orders a unit and a doodad on the same native key. A player standing inside
+        // the body box has a negative surface gap; clamping it at 0 keeps the key from beating
+        // every doodad the player faces. The bind/right-click checks below keep the raw gap.
+        let gap = slave_gap(data, unit, from, at, yaw).max(0.0);
         if gap >= CANDIDATE_REACH {
             continue;
         }
@@ -336,13 +384,9 @@ pub(crate) fn receive(
     if !matches!(unit.kind, UnitKind::Slave { .. }) {
         return Outcome::Silent;
     }
-    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-    let gap = surface_gap(
-        player_centre(data, world),
-        data.player_radius,
-        at,
-        radius(data, unit),
-    );
+    let (at, yaw) = world(unit.obj_id)
+        .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+    let gap = slave_gap(data, unit, player_centre(data, world), at, yaw);
     if gap >= interact_reach(data) {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
@@ -441,13 +485,9 @@ pub(super) fn bind(
     if data.mounted.bind_pending(Instant::now()) {
         return Outcome::Refused(MSG_ALREADY_REQUESTED);
     }
-    let at = world(unit.obj_id).map_or(Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), |(pos, _)| pos);
-    let gap = surface_gap(
-        player_centre(data, world),
-        data.player_radius,
-        at,
-        radius(data, unit),
-    );
+    let (at, yaw) = world(unit.obj_id)
+        .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
+    let gap = slave_gap(data, unit, player_centre(data, world), at, yaw);
     if gap >= BIND_REACH {
         return Outcome::Refused(MSG_TOO_FAR_AWAY);
     }
@@ -466,7 +506,9 @@ pub(super) fn bind(
 /// bound slave is the one speed-checked (refused above 5 m/s with 0x67 on a gated model), even
 /// when the player is seated on another one. Without it (a passenger, or a point-1 seat that is not the player's)
 /// the native `FUN_39362170` branch sends only from an attachment above point 1: no speed check,
-/// one request per 1500 ms (`_DAT_3a169948`).
+/// one request per 1500 ms (`_DAT_3a169948`). The 2026-11-02 12:30 1.2 capture showed a
+/// passenger's W sends nothing; the decompile input path is blocked for passengers by one of its
+/// guards (unresolved), so this client does not wire movement to it.
 pub(super) fn discard(data: &mut HudData) -> Outcome {
     discard_at(data, Instant::now())
 }
@@ -554,85 +596,6 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )
-}
-
-/// Movement input on a passenger seat walks off (`FUN_39404d50` -> `FUN_39362170`).
-/// The input guards `talk_input` uses: typing in a field or a loading screen is not movement.
-fn input_blocked(
-    suspended: bool,
-    teleport_loading: bool,
-    focus: bool,
-    keyboard_captured: bool,
-) -> bool {
-    suspended || teleport_loading || focus || keyboard_captured
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn walk_off(
-    actions: Res<crate::settings::Actions>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    focus: Res<super::HudKeyboardFocus>,
-    rt: Option<NonSend<UiRuntime>>,
-    teleport: Option<Res<crate::ingame::teleport::Teleport>>,
-    suspended: Res<super::HudSuspended>,
-    over_ui: Option<Res<super::HudPointerOverUi>>,
-    player: Res<Player>,
-    units: Res<Units>,
-    bridge: NonSend<HudBridge>,
-) {
-    if input_blocked(
-        suspended.0,
-        teleport.is_some_and(|t| t.loading()),
-        focus.0,
-        rt.as_ref().is_some_and(|rt| rt.keyboard_captured()),
-    ) {
-        return;
-    }
-    let Some(spawn) = player.spawn.as_ref() else {
-        return;
-    };
-    let Some(attachment) = spawn.unit.attached_to else {
-        return;
-    };
-    if attachment.point <= 1 {
-        return;
-    }
-    let Some(unit) = units.get(attachment.obj_id) else {
-        return;
-    };
-    let UnitKind::Slave { tl_id, .. } = unit.kind else {
-        return;
-    };
-    // The player controller's mapping (x2game+0x412590): both world mouse buttons run
-    // forward and either button makes A / D strafe, so any input that moves the player
-    // on foot also leaves the passenger seat (`FUN_39362170`). NumLock autorun is a
-    // toggle rather than a held direction and keeps its tap.
-    let over_ui = over_ui.is_some_and(|o| o.0);
-    let held = crate::ingame::player::MoveKeys {
-        forward: actions.pressed("moveforward", 0),
-        back: actions.pressed("moveback", 0),
-        left: actions.pressed("moveleft", 0),
-        right: actions.pressed("moveright", 0),
-        turn_left: actions.pressed("turnleft", 0),
-        turn_right: actions.pressed("turnright", 0),
-    };
-    let (forward, strafe, turn) = crate::ingame::player::resolve_keys(
-        held,
-        mouse.pressed(MouseButton::Left) && !over_ui,
-        mouse.pressed(MouseButton::Right) && !over_ui,
-        0,
-    );
-    let moving =
-        forward != 0.0 || strafe != 0.0 || turn != 0.0 || actions.just_pressed("autorun", 0);
-    if !moving {
-        return;
-    }
-    let mut data = bridge.0.borrow_mut();
-    if !data.mounted.walk_off_throttle(web_time::Instant::now()) {
-        return;
-    }
-    data.requests
-        .push(Request::Slave(SlaveCommand::Unbind { tl_id }));
 }
 
 #[cfg(test)]

@@ -9,7 +9,10 @@
 //! their own packets (`CSNaviTeleport`, `CSNaviOpenPortal`).
 //!
 //! Original 1.2 capture (2026-10-30, `tools/evidence/doodad_affordance/capture-results.txt`): the bar offers a phase's
-//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857) and the reach is the skill's `max_range` ([`reach`]).
+//! `func_skill_id` (the Narcissus' Gather 13990, a chair's 15857). The candidate distance is the client setting
+//! `max_interaction_doodad_distance` that `FUN_3902f010` passes to its range predicate ([`DOODAD_REACH`]), not the
+//! skill's `max_range`: the capture bounds it at 3.0 m in and 4.5 m out for Gather (whose `max_range` is also 4),
+//! and storage skill 15307 (`max_range` 20) must still clear at the same distance.
 //! The lamp 2319's fake-use skill 13166 (offered by the original too) comes from the func's own detail row (`gather.rs`),
 //! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). Not listed here yet:
 //! the Mailbox's 11400 "Open Mailbox" (no `func_skill_id` and no detail row; the mail window opens with Ctrl-E, `mail.rs`).
@@ -63,10 +66,14 @@ mod gather;
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
-/// Reach of a doodad use without a skill range, metres (not captured). A skill's own `max_range` is used as is
-/// ([`skill_reach`]): the 2026-10-30 original-client capture showed no bar entry for Gather (13990, `max_range` 4) at
-/// 4.5 m, so there is no extra slack.
-const BASE_REACH: f32 = 4.0;
+/// `max_interaction_doodad_distance`: `FUN_3902f010` reads this client setting (at
+/// `DAT_39aefb98+0x2a0`, not a static in the pak) for the doodad candidates, independent of the
+/// skill's `max_range`. The exact setting is not in the pak; the 2026-10-30 original-client
+/// capture bounds it: Gather 13990 (`max_range` 4) is offered at 3.0 m and absent at 4.5 m. The
+/// bar therefore uses this 4.0 m **centre distance**, not `max_range`: storage skill 15307 has
+/// `max_range` 20 but its button still clears at the doodad distance. The surface gap below is
+/// only the ordering key, so a non-zero player radius does not push the prompt past 4 m.
+pub(super) const DOODAD_REACH: f32 = 4.0;
 /// How far a right click or the pointer picks doodads, metres.
 const PICK_DISTANCE: f32 = 40.0;
 /// A press that moves more than this many pixels before it is released was a camera drag.
@@ -412,20 +419,19 @@ impl View {
     }
 }
 
-/// The reach of a doodad whose phase has `uses`, metres: [`skill_reach`] of the first skill's `max_range`.
-fn reach(data: &HudData, uses: &Uses) -> f32 {
-    let range = data.game.get().and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s))).map_or(0.0, |s| s.max_range as f32);
-    skill_reach(range)
-}
-
-/// A skill's `max_range` (at least 2 m, the minimum is ours), else [`BASE_REACH`]. The range is to the doodad's origin
-/// with no slack. The 2026-10-30 1.2 capture: Gather 13990 (`max_range` 4) has a bar entry at 3 m and none at 4.5 m or
-/// 8 m (`tools/evidence/gather/capture-results.txt`, `tools/evidence/doodad_affordance/capture-results.txt`).
-fn skill_reach(max_range: f32) -> f32 {
-    if max_range > 0.0 {
-        max_range.max(2.0)
+/// The right-click walk's reach: the 4 m interaction distance, shortened by the first skill's
+/// `max_range` when that is smaller. The bar's threshold is still the interaction setting; this
+/// only makes a right click walk closer before using a short-range skill.
+fn walk_reach(data: &HudData, uses: &Uses) -> f32 {
+    let range = data
+        .game
+        .get()
+        .and_then(|g| uses.skills.first().and_then(|s| g.skills.get(s)))
+        .map_or(0.0, |s| s.max_range as f32);
+    if range > 0.0 {
+        range.min(DOODAD_REACH)
     } else {
-        BASE_REACH
+        DOODAD_REACH
     }
 }
 
@@ -473,7 +479,7 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
             continue;
         };
         let dist = from.distance(pos);
-        if dist > reach(data, uses) {
+        if dist >= DOODAD_REACH {
             continue;
         }
         let gap = super::slave::surface_gap(from, data.player_radius, pos, 0.0);
@@ -1229,7 +1235,7 @@ pub(super) fn walk_to(
         .get()
         .zip(doodads.by_id.get(&a.obj_id))
         .and_then(|(g, o)| g.doodad.uses(o.func_group_id))
-        .map_or(BASE_REACH, |u| reach(d, u));
+        .map_or(DOODAD_REACH, |uses| walk_reach(d, uses));
     let dist = target.map_or(f32::INFINITY, |t| d.pos.distance(t));
     let step = advance(
         target.is_none(),
@@ -1311,7 +1317,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
     let dist = d.pos.distance(pos);
-    let reach = reach(d, &uses);
+    let reach = walk_reach(d, &uses);
     d.doodad.preferred = Some(obj_id);
     // a doodad use is a new target action: a mount walk to the pet must not keep steering
     super::pets::cancel_mount_walk(d);
@@ -1319,7 +1325,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
     }
-    if dist > reach {
+    if dist >= reach {
         info!("doodad: {name} ({obj_id}) is {dist:.1} m away (reach {reach:.1} m): walking there");
         start_walk(d, obj_id, dist, now);
         return false;
@@ -1654,19 +1660,6 @@ mod tests {
     }
 
     #[test]
-    fn a_skill_reach_is_its_max_range() {
-        // 2026-10-30 1.2 capture: Gather 13990 (`skills.max_range` 4) has the bar at 3 m and not at 4.5 m.
-        assert_eq!(skill_reach(4.0), 4.0);
-        assert!(skill_reach(4.0) > 3.0 && skill_reach(4.0) < 4.5);
-        assert_eq!(
-            skill_reach(0.0),
-            BASE_REACH,
-            "no skill range keeps the base reach"
-        );
-        assert_eq!(skill_reach(1.0), 2.0, "the shortest skill reach is 2 m");
-    }
-
-    #[test]
     fn a_doodad_skill_over_the_players_labor_is_refused_locally() {
         // 2026-10-30 1.2 capture: Gather 13990 (1 LP) at -2946 LP printed "Insufficient Labor Points."
         // and sent no CSStartSkill; the fake-use lamp 13166 costs no labor.
@@ -1733,6 +1726,40 @@ mod tests {
         assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![13990]));
         assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
         assert_eq!(bar_skills(&mut data, &doodads, 8.0), None);
+    }
+
+    /// The bar's candidate distance is the doodad interaction setting, not the skill's range:
+    /// storage skill 15307 has `max_range` 20, but its button must clear at 4.5 m and 10 m from
+    /// the box (2026-11-01 owner retest: a "store a trade pack" icon stayed on screen 10 m away).
+    #[test]
+    fn a_doodad_bar_uses_the_interaction_distance_not_the_skill_range() {
+        let mut game = GameData::default();
+        game.doodad.add(8264, 15307, "DoodadFuncConsumeChanger");
+        game.skills.insert(
+            15307,
+            SkillInfo {
+                max_range: 20,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        let mut doodads = Doodads::default();
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(10990.0, 10123.0, 102.5));
+        assert!(doodads.apply(&aa_net::Event::DoodadsSpawned(vec![storage])));
+        assert_eq!(bar_skills(&mut data, &doodads, 3.0), Some(vec![15307]));
+        assert_eq!(
+            bar_skills(&mut data, &doodads, 4.5),
+            None,
+            "the bar clears at the interaction distance, not the 20 m skill range"
+        );
+        assert_eq!(bar_skills(&mut data, &doodads, 10.0), None);
+        // The capture's edge is a centre distance: a 0.55 m player radius must not stretch the
+        // 4 m prompt to 4.5 m.
+        data.player_radius = 0.55;
+        assert_eq!(bar_skills(&mut data, &doodads, 3.9), Some(vec![15307]));
+        assert_eq!(bar_skills(&mut data, &doodads, 4.0), None);
+        assert_eq!(bar_skills(&mut data, &doodads, 4.5), None);
     }
 
     #[test]
@@ -2167,10 +2194,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(portal_range, 4);
-        assert!(
-            skill_reach(portal_range as f32) < 5.5,
-            "out of reach at the 5.5 m the capture stood"
-        );
+        // The capture stood 5.5 m away, past the 4 m interaction distance, so the portal's fake
+        // use offered nothing.
         let mailbox_skill = conn
             .query_row(
                 "SELECT func_skill_id FROM doodad_funcs WHERE doodad_func_group_id = 107",
@@ -2266,10 +2291,19 @@ mod tests {
     fn approach_app(doodads: Vec<aa_net::model::Doodad>) -> (App, Shared) {
         let mut tables = Tables::default();
         tables.add(1, 14602, "DoodadFuncUse");
-        let game = GameData {
-            doodad: tables,
-            ..Default::default()
-        };
+        approach_app_with_game(
+            GameData {
+                doodad: tables,
+                ..Default::default()
+            },
+            doodads,
+        )
+    }
+
+    fn approach_app_with_game(
+        game: GameData,
+        doodads: Vec<aa_net::model::Doodad>,
+    ) -> (App, Shared) {
         let data = HudData::default();
         let _ = data.game.0.set(game);
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
@@ -2332,6 +2366,69 @@ mod tests {
             "no second action"
         );
         assert_eq!(shared.borrow().doodad.chosen.len(), 1);
+    }
+
+    /// A right click walks closer for a skill whose max_range is below the 4 m interaction
+    /// distance, and uses the same centre-distance/strict comparison as the bar.
+    #[test]
+    fn a_right_click_walks_to_a_skill_shorter_than_four_metres() {
+        let mut tables = Tables::default();
+        tables.add(1, 14602, "DoodadFuncUse");
+        let mut game = GameData {
+            doodad: tables,
+            ..Default::default()
+        };
+        game.skills.insert(
+            14602,
+            SkillInfo {
+                max_range: 2,
+                ..default()
+            },
+        );
+        let (mut app, shared) =
+            approach_app_with_game(game, vec![test_doodad(7, 0.0, 3.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().doodad.approach.is_some(),
+            "3 m is outside the 2 m skill range: walk first"
+        );
+        assert!(w_held(&app));
+
+        let (mut app, shared) =
+            approach_app_with_game(
+                {
+                    let mut tables = Tables::default();
+                    tables.add(1, 14602, "DoodadFuncUse");
+                    let mut game = GameData {
+                        doodad: tables,
+                        ..Default::default()
+                    };
+                    game.skills.insert(
+                        14602,
+                        SkillInfo {
+                            max_range: 2,
+                            ..default()
+                        },
+                    );
+                    game
+                },
+                vec![test_doodad(7, 0.0, 1.9)],
+            );
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(
+            shared.borrow().doodad.approach.is_none(),
+            "1.9 m is inside the 2 m skill range"
+        );
     }
 
     #[test]
@@ -2588,6 +2685,144 @@ mod tests {
             focus.obj_id, 2,
             "without a click the native key picks the front one"
         );
+    }
+
+    /// A player standing inside a vehicle's body box has a negative surface gap. The slave's
+    /// bar key is clamped at 0 so a nearer storage box the player faces still wins the F prompt.
+    #[test]
+    fn a_player_inside_a_hauler_box_still_gets_its_facing_storage_prompt() {
+        let mut game = GameData::default();
+        game.doodad.add(1, 13990, "DoodadFuncUse");
+        game.skills.insert(
+            13990,
+            SkillInfo {
+                max_range: 4,
+                ..default()
+            },
+        );
+        game.set_vehicle_box(
+            1553,
+            Some((Vec3::new(-1.0, -4.5, 0.0), Vec3::new(1.0, 1.5, 2.0))),
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        // In the cargo bed, 3 m behind the origin, facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(10.0, 7.0, 1.0);
+        data.yaw = std::f32::consts::PI;
+        data.player_radius = 0.55;
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(
+            3446,
+            world_doodad(3446, 850, 1, Vec3::new(10.0, 4.9, 1.0)),
+        );
+        let mut units = Units::default();
+        let mut hauler = crate::hud::expansion::fixture::spawn().unit;
+        hauler.obj_id = 20;
+        hauler.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 146,
+            summoner_id: 100,
+        };
+        hauler.model_id = 1553;
+        hauler.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
+        units.by_id.insert(20, hauler);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        assert_eq!(focus.obj_id, 3446);
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
+        assert_eq!(candidate.obj_id, 20);
+        assert!(
+            focus.key < candidate.key,
+            "storage key {} must beat the inside-box slave key {}",
+            focus.key,
+            candidate.key
+        );
+        let (wanted, _) = arbitrate(
+            Some((
+                Shown {
+                    source: Source::Doodad {
+                        obj_id: 3446,
+                        phase: 1,
+                        generation: 0,
+                    },
+                    skills: focus.skills,
+                },
+                focus.key,
+                focus.dist,
+            )),
+            Some((
+                Shown {
+                    source: Source::Npc {
+                        obj_id: 20,
+                        template: 146,
+                    },
+                    skills: candidate.skills,
+                },
+                candidate.key,
+                candidate.dist,
+            )),
+        );
+        assert!(matches!(
+            wanted.map(|w| w.source),
+            Some(Source::Doodad { obj_id: 3446, .. })
+        ));
+    }
+
+    /// The same with the real Red Farm Hauler body box (model 1553) and its storage box: the
+    /// owner's "Store Trade Pack" prompt must win over the Grab Machine while facing it.
+    #[test]
+    #[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+    fn the_real_hauler_box_does_not_hide_its_facing_storage_prompt()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.into());
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&path).exists() {
+            eprintln!("skipping: the game pak {pak} or database {path} is not there");
+            return Ok(());
+        }
+        let mut game = GameData::load(&path)?;
+        let (lo, hi) = game.vehicle_box(1553).expect("the hauler body box");
+        assert!(lo.y < -3.0, "the cargo bed extends behind: {lo:?}..{hi:?}");
+        game.doodad.add(8264, 15307, "DoodadFuncConsumeChanger");
+        game.skills.insert(
+            15307,
+            SkillInfo {
+                max_range: 20,
+                ..default()
+            },
+        );
+        let mut data = HudData::default();
+        assert!(data.game.0.set(game).is_ok());
+        // In the cargo bed (3 m behind the origin), facing the rear storage box 2.1 m ahead.
+        data.pos = Vec3::new(100.0, 197.0, 6.0);
+        data.yaw = std::f32::consts::PI;
+        data.player_radius = 0.55;
+        let mut doodads = Doodads::default();
+        let storage = world_doodad(3446, 850, 8264, Vec3::new(100.0, 194.9, 6.0));
+        doodads.by_id.insert(3446, storage);
+        let mut units = Units::default();
+        let mut hauler = crate::hud::expansion::fixture::spawn().unit;
+        hauler.obj_id = 20;
+        hauler.kind = aa_net::model::UnitKind::Slave {
+            id: 700,
+            tl_id: 8,
+            template_id: 146,
+            summoner_id: 100,
+        };
+        hauler.model_id = 1553;
+        hauler.pos = aa_net::Pos::new(100.0, 200.0, 5.0);
+        units.by_id.insert(20, hauler);
+
+        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
+        assert!(
+            focus.key < candidate.key,
+            "storage key {} must beat the real-box slave key {}",
+            focus.key,
+            candidate.key
+        );
+        Ok(())
     }
 
     /// `player+0x3b94`: sitting on a bonded seat doodad shows no doodad bar either.
