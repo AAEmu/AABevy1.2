@@ -354,8 +354,7 @@ a rigged prefab part gets a [`VehicleIdle`] with the idle bound from its `.cal`,
 it (looping) whenever the body's `Animator` has no clip, the Bevy analogue of the 1.2 init/refresh.
 `creature::spawn_with_idle(..., play_idle = false)` keeps the generic creature idle from starting a vehicle body first.
 The exclusion is inherent: the driver only runs on prefab vehicle/ship bodies, and a body in damage state 5 or 6 keeps
-the loop stopped. The Bevy client has no dying state yet (PR #69 adds vehicle damage), so it gates on `Dead`
-(state 6) only. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
+the loop stopped. Twenty-two `vehicle_models` have a rigged part whose `.cal` has this idle (`1008 tractor`,
 `1277 tower_cannon`, `1293 hwang_ferrari`, `1323/1371/1406 speedcar1-3`, `1442 food_truck`, `1444 speedcar_decal`,
 `1460/1461/1462 speedcar_*_ucc`, `1464 tractor_b`, `1465 sigetank`, `1526 siegetank_prologue`, `1553 tractor_c`,
 `2 trebuchet`, `5 siege_tower`, `8000009 small_tractor`, `892/898/899 siegetank_a-c`, `990 siege_catapult_a`); three
@@ -389,8 +388,8 @@ resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_
 are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
 for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
 parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
-state 5/6 and freezes the `engine` handle; the Bevy client has no dying state yet (PR #69), so it gates on `Dead`
-(state 6) and removes both sounds there - a deviation to revisit with #69. A resurrection puts the engine back and
+state 5/6 and freezes the `engine` handle; the Bevy client gates on the damage state 5 (dying) or `Dead`
+(state 6) and removes both sounds there. A resurrection puts the engine back and
 `vehicle::resume_vehicle_idle` starts the idle again.
 
 `VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
@@ -460,7 +459,13 @@ poller never returns 5: dying is entered by the death path below.
   objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
   inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2 active `_spawn` + 2 active named
   particles (`caravel_cruise_pool`, `airship_smoke`); only the exact speed-driven names are filtered, the
-  other active authored emitters stay.
+  other active authored emitters stay. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
+  `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
+  Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
+  (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A
+  burst (no `Continuous` emitter, like the explosion) is never primed: priming would advance its whole
+  life past the first frame. Vehicle prefab effects retire when finished, and the dead `_dead_effect`
+  plays only on a worsening transition into 6, not for a slave that arrives already dead.
 * **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
   (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying
@@ -656,14 +661,28 @@ and explicit controls").
   check on that bound slave's object id (`this+0x18`): both use the BOUND slave, not the seat, so
   a player seated on another slave still discards the bound one. The driver branch is keyed on
   `this+0x14`, the slave SCSlaveBound named as the local player's master, not on the seat point.
-  With it the unbind is refused while the bound slave's speed squared is above
-  `_DAT_3999f85c` 25.0 (5 m/s) with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67. Without it `FUN_39362170`
-  sends only from an attachment above point 1 (no speed check, 1500 ms throttle) and is silent for
-  a point-1 seat that is not the player's. The speed is the latest replicated
-  `SCOneUnitMovement` velocity (`Movement.velocity`: 1/1024 m/s, 30/32767 m/s for a type-2 vehicle
-  body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
-  `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
-  value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
+  With it the unbind is refused with `SLAVE_SHUT_OFF_TO_UNBIND` 0x67 only when **both** hold: the
+  bound slave model's +0x2a0 slot is non-zero, and the model's entity velocity squared is above
+  `_DAT_3999f85c` 25.0 (5 m/s). `FUN_39345aa0` (677646) puts the check inside
+  `if (model[+0x2a0] != 0)`. For a `VehicleModel`, `X2::VehicleUnitModel::Init`
+  (`FUN_390f0510`, 190001) copies the slot from the model descriptor's +0x72, which the client's
+  `vehicle_models` loader (`FUN_39736bd0`, 1581965) fills from column 0x20
+  (`use_wheeled_vehicle_simulation`; +0x74 is `velocity`, +0x78/+0x7c `wheel`/`wheel2`). Carts
+  are false (model 1008 Farm Wagon, model 1553 Red Farm Hauler) and the speed cars are true
+  (vehicle models 45-48, 50, 52, 54-56). A `ShipModel` keeps its 0x198-byte ship object pointer
+  in the same slot (`FUN_390bdf70`, 156143-156149, the ship base vtable 0x399a56d0 slot 0x50;
+  the ship dtor deletes it), so a ship driver is refused too - **inferred** from the pointer
+  byte test, **capture-pending** (a ship dismount above 5 m/s has not been recorded). The
+  2026-11-01 owner capture sent 0x032 at ~6.7 m/s on the hauler (slave template 146) with W held
+  and got off, no 0x67; the client reads the gate from `AA_DB` and a model the data does not name
+  is not gated (the server still decides the unbind). The speed is the latest replicated
+  `SCOneUnitMovement` velocity through `Movement::velocity_mps`: 30/32767 m/s for a type-2 land
+  vehicle and a type-3 ship body, 50/32767 for a type-5 transfer, 1/1024 for a unit movement. (A
+  type-3 body read at 1/1024 would make a real 4.8 m/s ship read 5.12 and refuse it.) The
+  controller speed covers the cart this client drives (`cart::CartDrive`, which no `UnitMoved`
+  reports); the speed is treated as 0 after 500 ms without a new report (a port bound, **not a
+  1.2 value**). Without a bound master `FUN_39362170` sends only from an attachment above point 1
+  (no speed check, 1500 ms throttle) and is silent for a point-1 seat that is not the player's.
 * **Passenger walk-off.** With the own attachment point above 1 on a slave, movement input
   (`moveforward`, `moveback`, `moveleft`, `moveright`, `turnleft`, `turnright`, `autorun`, and
   the world mouse buttons through the same `resolve_keys` mapping `control_player` uses: both
@@ -711,9 +730,17 @@ and explicit controls").
   (`CANT_DO_WHILE_YOU_DEAD`) shows the same text.
 * The player flags +0x3a70..+0x3a73/+0x3a7b -> 0x13 and the parent unit type 0xe silent refusal,
   both not ported.
-* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s, and the
-  native speed source and staleness (the port ages the last velocity after 500 ms, not 1.2);
+* Leaves and stale state: 0x032 followed by `SCUnitDetached` 0x077, 0x67 above 5 m/s on a
+  gated model (wheeled-simulation vehicle or ship), and the staleness bound (the port ages the
+  last velocity after 500 ms, not 1.2);
   `SCSlaveDespawn`/`SCEscapeSlave`/`SCSlaveRemoved`/visibility loss clearing the bound slave.
+* A live leave on a wheeled-simulation car at 5-15 m/s: the data gate and the capture cover the
+  cart; the car's own 0x67 has not been recorded.
+* A ship driver's leave above 5 m/s: `FUN_390bdf70` leaves a non-zero pointer byte in the ship
+  model's +0x2a0, so the refusal is **inferred**, not captured. It allocates the 0x198-byte
+  object only when `param_2 != 0` and `*(DAT_3a5bb1d8 + 0x94) != 0` (DEC 156143), so a ship that
+  is not crewed or a disabled cvar keeps 0 on this slot. The pointer's low byte could in
+  principle be 0 too (the native tests only that byte); the port gates every `ShipModel`.
 * The 1500 ms agent throttle, the driver/passenger seat difference, a non-owner passenger, and
   whether any mounted-HUD button or key (not just `DiscardSiegeWeapon` and movement) leaves.
 * A slave with a zero timeline (the port stays silent; not a 1.2 check), and whether movement
