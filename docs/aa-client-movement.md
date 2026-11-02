@@ -86,11 +86,14 @@ as the player instead of waiting for cells around a different saved spawn.
 * Surface hold (`x2game.dll.c:230972-230995`, `231050-231074`): `local_c = (1 - clamp((|desired_z| - 0.3) * 2.5, 0, 1)) *
   (1 - clamp(|relWaterLevel|, 0, 1))` (`DAT_3999ccd0` / `DAT_399a323c` read from `x2game_unpacked.dll` `.rdata`). While it is positive
   the vertical speed is blended toward the water-level offset, so a gentle course at the surface stays there and cannot lift the body
-  above the resting height; a steep dive (`|vz| >= 0.7 m/s`) or more than 1 m of depth is not held.
+  above the resting height; a steep dive (`|vz| >= 0.7 m/s`) or more than 1 m of depth is not held. The blend factor ramps like 1.2's
+  `param_1[0x29]` (`+= dt * local_c`, clamped to 1, reset when `local_c` reaches 0), so the hold fades in over about a second.
 * Speeds: 3.0 m/s along the swim direction (the `.lmg` MoveDir), x 0.8 backwards (`swim_back_speed_mul`), up x 0.7, down x 0.5 (`swim_up/down_speed_mul`),
   a diver floats up at 2.0 m/s (`swim_buoy_speed`); Space within 0.2 m of the surface jumps out (`swim_jump_permission_range`).
 * Sea cells at the map edge can have no terrain. A swimmer there has no floor (`support_at` is `None`), so the `floor_at` fallback that keeps a
-  standing body at its saved height must not apply: otherwise every dive step was clamped back to the height the swimmer was at.
+  standing body at its saved height must not apply: otherwise every dive step was clamped back to the height the swimmer was at. Over a
+  terrain hole in a loaded cell (no support, but `is_hole_at`) the floor stays at the body's current height minus the 5 cm swim clearance, so
+  the clamp holds it in place instead of lifting it out of the water every frame.
 * A body that falls in is stopped by the water (35 m/s^2); gravity is x 0.3 in water and a splash is no landing (no fall packet).
 * Clips: `fist_ba_idle_swim`, `fist_mo_swim_<dir>` (8 ways), `_deep` when diving (more than 0.5 m under the floating height), `fist_mo_swim_up / down`
   while only Space / X is pressed. `drive_swim` runs after `anim::drive_locomotion` (the player's `Motion` is empty in the water, so locomotion

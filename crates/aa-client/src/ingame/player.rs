@@ -338,12 +338,17 @@ pub(super) fn floor_at(
     })
 }
 
+/// The clearance (m) a swimmer keeps above a supported floor. Over a hole in a loaded cell the floor has no support: keeping
+/// the current height as the floor is right, but it must sit this far below the body, or the 5 cm lift in the swim step would
+/// raise the body every frame and walk it out of the water.
+const SWIM_FLOOR_CLEARANCE: f32 = 0.05;
+
 /// The floor under a swimmer: the support when there is one; over a hole in a loaded cell the height they are at (the
 /// terrain has no surface there and the collision under the water may still be missing, so dropping the floor would sink
 /// them through the seabed and pop them back up); and no floor at all where the cell has no terrain (the open sea at the
 /// map edge), so a dive there is not clamped.
 fn swim_floor(support: Option<f32>, hole: Option<bool>, current: f32) -> f32 {
-    support.unwrap_or(if hole == Some(true) { current } else { f32::NEG_INFINITY })
+    support.unwrap_or(if hole == Some(true) { current - SWIM_FLOOR_CLEARANCE } else { f32::NEG_INFINITY })
 }
 
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
@@ -669,7 +674,7 @@ pub fn control_player(
     if want_swim && !swimming {
         mover.grounded = false;
         let w = wet.expect("swimming needs water");
-        mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: 0.0, vertical: 0.0, deep: false });
+        mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: 0.0, vertical: 0.0, deep: false, hold: 0.0 });
         info!("swimming in {:?} water at ({:.1}, {:.1}, {:.2}), surface {:.2}, ground {:.2}", w.kind, pos.x, pos.y, pos.z, w.surface, ground);
     } else if !want_swim && swimming {
         mover.swim = None;
@@ -690,10 +695,11 @@ pub fn control_player(
         } else {
             // forward with the camera pitched is a dive or a rise; holding it with the camera level keeps the depth
             let course = (local_dir != Vec2::ZERO).then_some(swim_aim.z);
-            let wanted = swim::wanted_vz(vertical, course, pos.z, rest, dt);
+            let mut hold = mover.swim.map_or(0.0, |s| s.hold);
+            let wanted = swim::wanted_vz(vertical, course, pos.z, rest, dt, &mut hold);
             mover.vz = swim::approach(mover.vz, wanted, swim::WATER_DRAG, dt);
-            pos.z = (pos.z + mover.vz * dt).max(ground + 0.05);
-            if pos.z <= ground + 0.05 {
+            pos.z = (pos.z + mover.vz * dt).max(ground + SWIM_FLOOR_CLEARANCE);
+            if pos.z <= ground + SWIM_FLOOR_CLEARANCE {
                 mover.vz = mover.vz.max(0.0);
             }
             // the aimed course never lifts a swimming body above the floating height; a body that just fell in is not
@@ -702,7 +708,7 @@ pub fn control_player(
                 pos.z = rest;
                 mover.vz = mover.vz.min(0.0);
             }
-            mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: local_vel.length(), vertical, deep: rest - pos.z > swim::DEEP });
+            mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: local_vel.length(), vertical, deep: rest - pos.z > swim::DEEP, hold });
         }
     }
     if mover.swim.is_none() {
@@ -1485,6 +1491,16 @@ mod dive_tests {
             let terrain = TerrainQuery::new("main_world");
             let collision = WorldCollision::new("main_world", terrain.clone());
             let water = WaterQuery::with_terrain("main_world", terrain.clone());
+            Some(SwimApp::with(terrain, collision, water, pos))
+        }
+
+        /// A synthetic world (flat ground, a sea or a hole) that needs no pak.
+        fn fixture(terrain: TerrainQuery, water: WaterQuery, pos: Vec3) -> SwimApp {
+            let collision = WorldCollision::new(terrain.world(), terrain.clone());
+            SwimApp::with(terrain, collision, water, pos)
+        }
+
+        fn with(terrain: TerrainQuery, collision: WorldCollision, water: WaterQuery, pos: Vec3) -> SwimApp {
             let mut app = App::new();
             app.init_resource::<Time>()
                 .init_resource::<crate::settings::Actions>()
@@ -1521,12 +1537,12 @@ mod dive_tests {
                     ActorParams::default(),
                 ))
                 .id();
-            Some(SwimApp {
+            SwimApp {
                 app,
                 player,
                 camera,
                 sent: Vec::new(),
-            })
+            }
         }
 
         fn tick(&mut self, dt: f32) {
@@ -1580,11 +1596,60 @@ mod dive_tests {
 
     const SEA: Vec3 = Vec3::new(15_678.0, 15_382.0, 100.0);
 
+    /// An all-hole cell at `height`: raw terrain heights exist, but there is no physical ground and no collision.
+    fn hole_cell(height: f32) -> aa_world::heightmap::CellHeights {
+        let n = aa_world::heightmap::GRID * aa_world::heightmap::GRID;
+        aa_world::heightmap::CellHeights {
+            heights: vec![height; n],
+            surface: vec![31; n],
+            hole_sectors: [true; 256],
+            ocean_level: 0.0,
+            min_z: height,
+            max_z: height,
+            sectors: 256,
+        }
+    }
+
     #[test]
     fn a_swimmer_keeps_the_floor_over_a_hole_and_only_loses_it_without_terrain() {
         assert_eq!(swim_floor(Some(91.0), Some(false), 98.7), 91.0);
-        assert_eq!(swim_floor(None, Some(true), 98.7), 98.7, "a hole keeps the previous floor");
+        assert_eq!(swim_floor(None, Some(true), 98.7), 98.7 - SWIM_FLOOR_CLEARANCE, "a hole keeps the previous floor");
         assert_eq!(swim_floor(None, None, 98.7), f32::NEG_INFINITY, "the open sea has no floor");
+    }
+
+    #[test]
+    fn a_swimmer_over_a_hole_is_not_lifted_out_of_the_water_frame_by_frame() {
+        // A synthetic all-hole seabed at 90 m under a 100 m sea: no support, so the floor is the body's own height. With the
+        // floor returned raw, the 5 cm swim clearance lifted it every frame (3 m/s) out of the water; the movement step must
+        // keep it at the floating height instead.
+        let terrain = TerrainQuery::fixture_cell("test", hole_cell(90.0));
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 100.0, 98.7));
+        for _ in 0..180 {
+            f.tick(1.0 / 60.0);
+        }
+        let m = f.mover();
+        assert!(m.swim.is_some(), "the swimmer walked out of the water over a hole: {:?}", m.pos);
+        assert!((m.pos.z - 98.7).abs() < 0.05, "the hole lifted the swimmer: {}", m.pos.z);
+    }
+
+    #[test]
+    fn a_swimmer_floats_and_dives_over_a_synthetic_sea_without_the_pak() {
+        let terrain = TerrainQuery::fixture_flat("test", 90.0);
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 100.0, 98.5));
+        for _ in 0..60 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(f.mover().swim.is_some(), "did not start swimming: {:?}", f.mover().pos);
+        f.hold("down");
+        for _ in 0..120 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(f.mover().pos.z < 96.0, "X did not dive: {}", f.mover().pos.z);
+        let last = f.moves().last().expect("a movement packet");
+        assert_eq!(last.stance, stance::SWIM);
+        assert!(last.pos.z < 96.0, "the packet stayed at the surface: {:?}", last.pos);
     }
 
     #[test]

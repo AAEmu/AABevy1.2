@@ -699,6 +699,7 @@ fn swimming_allows_the_grab() {
             speed: 0.0,
             vertical: 0.0,
             deep: false,
+            hold: 0.0,
         });
     }
     tap(&mut app, "do_interaction_1");

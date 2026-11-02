@@ -118,6 +118,8 @@ struct Inner {
     terrain: TerrainQuery,
     capacity: usize,
     cache: Mutex<Cache>,
+    /// A test query without the pak: no `object.dat` volumes are read.
+    no_data: bool,
 }
 
 #[derive(Default)]
@@ -154,6 +156,24 @@ impl WaterQuery {
                 terrain,
                 capacity: Self::DEFAULT_CACHE_CELLS,
                 cache: Mutex::default(),
+                no_data: false,
+            }),
+        }
+    }
+
+    /// A synthetic sea at `level` over `terrain` and no water volumes (no pak), for tests that must run without the game
+    /// files. The sea applies wherever `terrain` has no ground or ground below `level`, as on the real map.
+    pub fn fixture_sea(world: &str, level: f32, terrain: TerrainQuery) -> WaterQuery {
+        WaterQuery {
+            inner: Arc::new(Inner {
+                world: world.to_string(),
+                ocean_level: Some(level),
+                cells_x: i32::MAX,
+                cells_y: i32::MAX,
+                terrain,
+                capacity: Self::DEFAULT_CACHE_CELLS,
+                cache: Mutex::default(),
+                no_data: true,
             }),
         }
     }
@@ -164,6 +184,9 @@ impl WaterQuery {
 
     /// The water volumes of cell `(cx, cy)`, loaded on first use.
     fn cell(&self, cx: i32, cy: i32) -> Arc<Vec<Volume>> {
+        if self.inner.no_data {
+            return Arc::new(Vec::new());
+        }
         let slot = {
             let mut cache = self.inner.cache.lock().unwrap_or_else(PoisonError::into_inner);
             cache.tick += 1;
@@ -288,6 +311,18 @@ mod tests {
         assert_eq!(q.water_at(Vec3::new(f32::NAN, 10.0, 100.0)), None);
         // a world without a sea
         assert_eq!(WaterQuery::new("login2").water_at(Vec3::new(100.0, 100.0, 0.0)), None);
+    }
+
+    #[test]
+    fn a_fixture_sea_answers_without_the_pak() {
+        let terrain = TerrainQuery::fixture_flat("test", 90.0);
+        let sea = WaterQuery::fixture_sea("test", 100.0, terrain);
+        assert_eq!(sea.water_at(Vec3::new(100.0, 100.0, 98.5)), Some((100.0, WaterKind::Sea)));
+        assert_eq!(sea.water_at(Vec3::new(100.0, 100.0, 89.0)), Some((100.0, WaterKind::Sea)));
+        assert_eq!(sea.water_at(Vec3::new(-5.0, 10.0, 95.0)), None);
+        // above the seabed there is sea only while the terrain is below it
+        let high = WaterQuery::fixture_sea("test", 100.0, TerrainQuery::fixture_flat("test", 101.0));
+        assert_eq!(high.water_at(Vec3::new(100.0, 100.0, 100.5)), None);
     }
 
     #[test]
