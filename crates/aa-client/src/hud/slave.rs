@@ -72,6 +72,10 @@ pub(super) const BIND_REACH: f32 = 4.0;
 /// The native passes the squared value to `FUN_393601a0`, which compares the surface gap with
 /// `sqrt` of it (`FUN_39093860`).
 pub(super) const CANDIDATE_REACH: f32 = 2.5;
+/// A slave farther than this centre distance from the player cannot have a body box reaching
+/// the candidate gap: the longest 1.2 ship body is well under 32 m. Skip it before
+/// [`slave_gap`] loads the model from the pak (the F prompt producer runs every frame).
+const SLAVE_PREFILTER: f32 = 64.0;
 /// `_DAT_3999f85c` (25.0): the driver's unbind speed limit, 5 m/s. The speed source is unverified.
 pub(super) const UNBIND_SPEED_SQUARED: f32 = 25.0;
 /// `_DAT_3a169948`: the passenger dismount throttle.
@@ -117,11 +121,12 @@ pub(super) fn surface_gap(from: Vec3, from_radius: f32, to: Vec3, to_radius: f32
 
 /// The key `FUN_393601a0` (units) and `FUN_3902f010` (doodads) store per candidate, ordered by
 /// `FUN_3902ed20`: the surface gap minus `1 + facing` (`_DAT_3999c488` is the 1.0), where
-/// `facing` is the player's forward dot the horizontal direction to the candidate. The gap is
-/// taken absolute like the native bits mask (`DAT_3999d500` 0x7fffffff); lower sorts first.
+/// `facing` is the player's forward dot the horizontal direction to the candidate. Lower sorts
+/// first. A candidate the player stands inside keeps a negative gap; the F-bar producer clamps
+/// a slave's gap at 0 before this key, while the bind/right-click checks keep the signed value.
 pub(super) fn native_key(from: Vec3, forward: Vec2, at: Vec3, gap: f32) -> f32 {
     let toward = (at - from).truncate().normalize_or_zero();
-    gap.abs() - (1.0 + forward.dot(toward))
+    gap - (1.0 + forward.dot(toward))
 }
 
 /// The target's scaled actor-model radius, the same source as `api::distance_to`. A slave's
@@ -158,7 +163,9 @@ pub(super) fn slave_gap(
     let scale = if unit.scale > 0.0 { unit.scale } else { 1.0 };
     let local = Quat::from_rotation_z(-yaw) * (from - at) / scale;
     let nearest = local.clamp(lo, hi);
-    local.distance(nearest) - data.player_radius
+    // `local` is in unscaled model units: put the distance back into metres before subtracting
+    // the player's world-space radius.
+    local.distance(nearest) * scale - data.player_radius
 }
 
 /// Where the checks measure from. While attached to a slave the server moves only the slave,
@@ -308,7 +315,13 @@ pub(super) fn candidate(data: &HudData, units: &Units) -> Option<Candidate> {
         }
         let (at, yaw) = world(unit.obj_id)
             .unwrap_or((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.yaw()));
-        let gap = slave_gap(data, unit, from, at, yaw);
+        if from.distance(at) > CANDIDATE_REACH + SLAVE_PREFILTER {
+            continue;
+        }
+        // The bar orders a unit and a doodad on the same native key. A player standing inside
+        // the body box has a negative surface gap; clamping it at 0 keeps the key from beating
+        // every doodad the player faces. The bind/right-click checks below keep the raw gap.
+        let gap = slave_gap(data, unit, from, at, yaw).max(0.0);
         if gap >= CANDIDATE_REACH {
             continue;
         }

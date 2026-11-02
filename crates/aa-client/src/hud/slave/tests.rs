@@ -738,6 +738,29 @@ fn a_vehicle_slave_reach_uses_its_body_box_not_its_origin() {
     ));
 }
 
+/// The clamped box distance is in unscaled model units; a scaled slave's box is smaller in
+/// world space, so the gap must be multiplied back by the unit scale.
+#[test]
+fn a_scaled_vehicle_box_reach_is_converted_back_to_world_metres() {
+    let mut cart = slave(20, 8, Vec3::ZERO);
+    cart.scale = 0.5;
+    let (state, units) = setup(&[cart]);
+    let game = game_with_radii(&[]);
+    game.set_vehicle_box(
+        1008,
+        Some((Vec3::new(-1.0, -0.5, 0.0), Vec3::new(1.0, 0.5, 2.0))),
+    );
+    state.borrow().game.0.set(game).ok().expect("game data");
+    // World gap to the scaled box side: 3.4 - 0.5 = 2.9 m (< 3.0). The unscaled model
+    // distance would be 5.8 m and wrongly refuse.
+    state.borrow_mut().pos = Vec3::new(3.4, 0.0, 1.0);
+    state.borrow_mut().player_radius = 0.0;
+    assert_eq!(
+        receive(&state, &units, &skill_list(20, &[12076])),
+        Outcome::Sent
+    );
+}
+
 /// The passenger list (13863) uses the same body reach and sends the plain interaction cast.
 #[test]
 fn a_vehicle_passenger_request_uses_the_body_box() {

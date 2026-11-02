@@ -718,28 +718,26 @@ fn helper_seat(now: &Transform, helpers: &super::vehicle::SeatHelpers, name: &st
         .map(|helper| now.transform_point(cry_to_bevy(helper.translation.into())))
 }
 
-/// The authored yaw of a vehicle body helper. `transfers_trailer_c.chr` (the Red Farm Hauler's
-/// body, model 1553) turns `$passenger0` 180 degrees about model Z: the seat helper itself faces
-/// the vehicle's rear, so a passenger attached at the helper is turned around to face forward
-/// (2026-11-01 owner retest). Only `passenger` helpers carry that authored turn; the `$driver`
-/// helper is identity and the native driver keeps the mount's own quaternion.
+/// The full authored rotation of a vehicle body helper, in the mount root's frame. The helper
+/// matrix is the attachment frame, not a seat-yaw hint: `transfers_trailer_c.chr` (the Red Farm
+/// Hauler's body, model 1553) authors `$passenger0` as a 180-degree turn about model Z, while
+/// its `$driver` and the Farm Wagon's `$driver` are identity. The seat clip
+/// (`fist_ac_trailer_sit_idle`) has an identity Bip01 root, so it adds no turn of its own.
 fn helper_rotation(helpers: &super::vehicle::SeatHelpers, name: &str) -> Option<Quat> {
     let (_, rotation, _) = helpers.0.get(name)?.to_scale_rotation_translation();
     Some(cry_rot_to_bevy(rotation))
 }
 
-fn passenger_helper(name: &str) -> bool {
-    name.to_ascii_lowercase().starts_with("passenger")
-}
-
-/// The world rotation of a rider: the mount's world rotation, times a passenger helper's authored
-/// turn. A creature seat (`Seat::Bone`) and the driver's seat keep the mount rotation.
+/// The world rotation of a rider: the mount's world rotation composed with the full rotation of
+/// a vehicle body helper. Every `Seat::Helper` takes its authored frame (driver included, so a
+/// body that turns any seat is handled consistently); a creature seat (`Seat::Bone`) keeps the
+/// mount's rotation.
 fn rider_rotation(seat: &Seat, helpers: Option<&super::vehicle::SeatHelpers>, mount: Quat) -> Quat {
     match seat {
-        Seat::Helper(name) if passenger_helper(name) => helpers
+        Seat::Helper(name) => helpers
             .and_then(|helpers| helper_rotation(helpers, name))
             .map_or(mount, |authored| mount * authored),
-        _ => mount,
+        Seat::Bone(_) => mount,
     }
 }
 
@@ -2036,6 +2034,77 @@ mod tests {
         );
     }
 
+    /// The driver helper takes its authored frame too: a body that turns `$driver` must not be
+    /// assumed to have an identity seat. The full quaternion is applied, not just a yaw.
+    #[test]
+    fn every_vehicle_helper_seat_takes_its_full_authored_rotation() {
+        use crate::ingame::units::{RemoteUnit, Views};
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::transform::TransformPlugin))
+            .insert_resource(Units::default())
+            .add_systems(Update, pose_local_rider);
+        let cart_pos = Vec3::new(100.0, 200.0, 5.0);
+        let cart_yaw = 0.4;
+        let authored = Quat::from_euler(EulerRot::XYZ, 0.3, 0.4, 0.5);
+        let mut helpers = crate::ingame::vehicle::SeatHelpers::default();
+        helpers.0.insert(
+            "driver".into(),
+            bevy::math::Affine3A::from_rotation_translation(
+                authored,
+                Vec3::new(0.1, -0.5, 1.3),
+            ),
+        );
+        let cart = app
+            .world_mut()
+            .spawn((
+                RemoteUnit::fixture(7, cart_pos),
+                placement(cart_pos, cart_yaw, 1.0),
+                helpers,
+            ))
+            .id();
+        let mut views = Views::default();
+        views.track_unit_entity(7, cart);
+        app.insert_resource(views);
+        app.insert_resource(LocalMount(Some(LocalSeat {
+            mount: 7,
+            point: 1,
+            drives: true,
+            cart: true,
+            ship: false,
+            turret: false,
+            speed: MountSpeed::default(),
+            lift: 0.0,
+        })));
+        let (mut rider, animator) = stepped_rider(riding());
+        rider.seat = Seat::Helper("driver".into());
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 5 },
+                Mover {
+                    pos: cart_pos,
+                    facing: cart_yaw,
+                    vz: 0.0,
+                    grounded: true,
+                    velocity: Vec3::ZERO,
+                    swim: None,
+                    wading: 0.0,
+                },
+                Transform::default(),
+                rider,
+                animator,
+            ))
+            .id();
+        app.update();
+        let rotation = app.world().get::<Transform>(player).unwrap().rotation;
+        let expected = Quat::from_rotation_y(cart_yaw) * cry_rot_to_bevy(authored);
+        assert!(
+            rotation.dot(expected).abs() > 1.0 - 1e-6,
+            "driver yaw {rotation:?} should take the helper's full rotation {expected:?}"
+        );
+    }
+
     /// The same with the hauler's real `transfers_trailer_c.chr` helper: model 1553's
     /// `$passenger0` is authored 180 degrees about model Z, so a passenger seated there is turned
     /// around to face the vehicle's forward (2026-11-01 owner retest).
@@ -2101,6 +2170,66 @@ mod tests {
         assert!(
             rotation.dot(expected).abs() > 1.0 - 1e-6,
             "the real hauler passenger yaw {rotation:?} should be the vehicle yaw plus 180 degrees {expected:?}"
+        );
+    }
+
+    /// The real body frames: the Red Farm Hauler (1553) has an identity `$driver` and a
+    /// 180-degree `$passenger0`; the Farm Wagon (1008) has only an identity `$driver` (no point-2
+    /// helper in 1.2). The rider rotation is the mount's world rotation composed with that frame.
+    #[test]
+    #[ignore = "requires the game pak and game database (AA_PAK, AA_DB)"]
+    fn the_real_vehicle_seat_frames_are_the_authored_helpers() {
+        use std::f32::consts::PI;
+
+        let Some(db) = Db::open() else { return };
+        let haul = db.vehicle_look(1553).expect("the Red Farm Hauler's look");
+        let haul_helpers = crate::ingame::vehicle::body_helpers(&haul);
+        let (_, driver, _) = haul_helpers["driver"].to_scale_rotation_translation();
+        let (_, passenger, _) = haul_helpers["passenger0"].to_scale_rotation_translation();
+        assert!(
+            driver.angle_between(Quat::IDENTITY) < 1e-3,
+            "the hauler driver helper is identity: {driver:?}"
+        );
+        assert!(
+            passenger.angle_between(Quat::from_rotation_z(PI)) < 1e-3,
+            "the hauler passenger helper is 180 degrees about model Z: {passenger:?}"
+        );
+        let mount = Quat::from_rotation_y(0.4);
+        let seat = crate::ingame::vehicle::SeatHelpers(haul_helpers);
+        assert!(
+            rider_rotation(
+                &Seat::Helper("driver".into()),
+                Some(&seat),
+                mount
+            )
+            .dot(mount)
+            .abs()
+                > 1.0 - 1e-6,
+            "the driver keeps the vehicle's forward"
+        );
+        let expected = mount * Quat::from_rotation_y(PI);
+        assert!(
+            rider_rotation(
+                &Seat::Helper("passenger0".into()),
+                Some(&seat),
+                mount
+            )
+            .dot(expected)
+            .abs()
+                > 1.0 - 1e-6,
+            "the hauler passenger takes the helper's 180-degree frame"
+        );
+
+        let wagon = db.vehicle_look(1008).expect("the Farm Wagon's look");
+        let wagon_helpers = crate::ingame::vehicle::body_helpers(&wagon);
+        let (_, wagon_driver, _) = wagon_helpers["driver"].to_scale_rotation_translation();
+        assert!(
+            wagon_driver.angle_between(Quat::IDENTITY) < 1e-3,
+            "the Farm Wagon driver helper is identity: {wagon_driver:?}"
+        );
+        assert!(
+            !wagon_helpers.contains_key("passenger0"),
+            "the Farm Wagon has no point-2 helper in 1.2"
         );
     }
 

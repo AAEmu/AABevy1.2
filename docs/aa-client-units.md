@@ -657,13 +657,17 @@ and explicit controls").
   body), or the controller speed for the cart this client drives (`cart::CartDrive`, which no
   `UnitMoved` reports), treated as 0 after 500 ms without a new report (a port bound, **not a 1.2
   value**); the native getter `vtable+0xa4` is an engine speed, so this source is **unverified**.
-* **Passenger seat facing.** A vehicle seat is placed at the body's `$passenger0` (point 2) or
-  `$passengerN` helper. `transfers_trailer_c.chr` (the Red Farm Hauler's body, model 1553) authors
-  `$passenger0` as a 180-degree turn about model Z: the helper faces the vehicle's rear. The
-  rider therefore takes the helper's authored rotation on top of the vehicle's world rotation
-  (`ingame/mount.rs::rider_rotation`); the `$driver` helper is identity and keeps the mount's own
-  quaternion. Without the helper turn the seated character faced the cargo bed (2026-11-01 owner
-  retest), because the seat clip itself has an identity root (`fist_ac_trailer_sit_idle`).
+* **Vehicle seat frames.** A vehicle seat is the body helper named by
+  `model_attach_point_strings` (point 2 is `$passenger0`, point 1 `$driver`). The helper matrix is
+  the attachment frame: its translation and **full** authored rotation (a quaternion, not yaw
+  only) compose with the vehicle's world rotation (`ingame/mount.rs::rider_rotation`). This is
+  applied to every `Seat::Helper`, driver included, so a body that turns any seat is handled the
+  same way. Real frames: the Red Farm Hauler (model 1553, `transfers_trailer_c.chr`) has an
+  identity `$driver` and a 180-degree-about-model-Z `$passenger0`; the Farm Wagon (model 1008)
+  has only an identity `$driver` (no point-2 helper in 1.2). The seat clip
+  `fist_ac_trailer_sit_idle` has an identity Bip01 root, so it adds no turn of its own; the
+  passenger's turn comes from the `$passenger0` attachment frame. The 2026-11-01 1.2 retest has
+  the passenger facing the vehicle's forward, and the real-data test pins both frames.
 * **Passenger leaving.** With the own attachment point above 1 on a slave, the explicit dismount
   skill/button sends the parent's 0x032 through `FUN_39362170`, throttled to one request per
   1500 ms (`_DAT_3a169948`). That branch has no speed check, unlike the driver's `FUN_39345aa0`.

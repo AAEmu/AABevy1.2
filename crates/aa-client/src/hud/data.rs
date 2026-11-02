@@ -991,18 +991,24 @@ impl GameData {
     /// uses), like the server's ship mass box / attach-point stand-in. Loaded on first use and
     /// cached, including a missing pak or model.
     pub(super) fn vehicle_box(&self, model_id: u32) -> Option<(Vec3, Vec3)> {
-        let mut cache = self
+        if let Some(bounds) = self
             .vehicle_boxes
             .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if let Some(bounds) = cache.get(&model_id) {
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&model_id)
+        {
             return *bounds;
         }
+        // Load the prefab outside the lock: this runs on the main thread and a model can take
+        // a while. A second thread may load the same model; the last insert is equivalent.
         let bounds = self
             .vehicle_looks
             .get(&model_id)
             .and_then(crate::ingame::vehicle::bounds);
-        cache.insert(model_id, bounds);
+        self.vehicle_boxes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(model_id, bounds);
         bounds
     }
 
