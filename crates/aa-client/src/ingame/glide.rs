@@ -45,7 +45,8 @@
 //!   flags 0 / actor 0, then the remove. The old "fold stop" was that water entry, not a fold.
 //! * S14-C4: settled: `FUN_39404d50` line 843762 calls `FUN_39399690` on the jump edge only when the actor jump-state byte
 //!   (`+0x161`) is set and the `glider_start_with_double_jump` cvar (`+0x2ac`) is nonzero; there is no height/freefall gate.
-//! * S14-C5: settled: the opened model hangs on `item_glider` (identity attachment, `FUN_394e4e80`); the stowed model stays
+//! * S14-C5: settled: the opened model hangs on `item_glider` in the bone's CryEngine frame (identity attachment,
+//!   `FUN_394e4e80`; spawning it with a second `CRY_TO_BEVY` stands the wing on edge); the stowed model stays
 //!   on `item_back_c` (`glider_b_back` / `asset2_id`, drawn by `weapons.rs`).
 //! * S14-C6: the move speeds against the live unit attributes 7/8/9 (the buff row is used here; see above).
 //! * S14-C7: a ceiling stops the rise (x2game has no upward ray; cryphysics owns the capsule, so this is a conservative
@@ -1742,12 +1743,11 @@ pub fn show_glider(
             .and_then(|template| db.as_deref()?.glider(template))
             .map(|glider| glider.model);
         let Some(path) = model else { return };
-        let Some(root) = super::creature::spawn(
+        let Some(root) = super::creature::spawn_cry_space(
             &mut commands,
             &mut cry,
             &library,
             &path,
-            None,
             Transform::IDENTITY,
         ) else {
             debug!("glide: cannot draw the glider {path}");
@@ -1787,7 +1787,8 @@ pub fn show_glider(
 }
 
 /// The opened glider's bone: `FUN_394e4e80` sets `item_glider` while the buff flies and `item_back_c` when stowed
-/// (`docs/research/equipment-attach.md`); the attachment transform is identity on the bone.
+/// (`docs/research/equipment-attach.md`); the attachment transform is identity on the bone, whose frame is already
+/// CryEngine space (the model is spawned with `creature::spawn_cry_space`).
 fn glider_bone(animator: &Animator) -> Option<Entity> {
     let index = animator
         .rig
@@ -1796,6 +1797,49 @@ fn glider_bone(animator: &Animator) -> Option<Entity> {
         .iter()
         .position(|bone| bone.name == "item_glider")?;
     animator.bones.get(index).copied()
+}
+
+/// The world normal of the opened glider's wing plane, from the model's own vertices: its local X is the
+/// span and local Z the canopy up. Both wing tips and the canopy top are skinned with the joints the glider
+/// is drawn with. `None` before [`show_glider`] has spawned the model, or when the pak is missing (a test
+/// or example helper).
+pub(crate) fn glider_wing_normal(world: &mut World) -> Option<Vec3> {
+    let (path, rig, bones) = {
+        let mut query = world.query_filtered::<(Entity, &Animator), With<GliderModel>>();
+        let (entity, animator) = query.iter(world).next()?;
+        let name = world.get::<Name>(entity)?.as_str().to_string();
+        (name, animator.rig.clone(), animator.bones.clone())
+    };
+    let geometry = aa_cry::Model::load(&path).ok()?;
+    let mesh = geometry.meshes.iter().find(|mesh| mesh.skin.is_some() && !mesh.positions.is_empty())?;
+    let skin = mesh.skin.as_ref()?;
+    let extreme = |axis: fn(&Vec3) -> f32, most: bool| -> Option<usize> {
+        mesh.positions
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                let (a, b) = (axis(a), axis(b));
+                if most { a.total_cmp(&b) } else { b.total_cmp(&a) }
+            })
+            .map(|(index, _)| index)
+    };
+    let (left, right, top) = (extreme(|p| p.x, false)?, extreme(|p| p.x, true)?, extreme(|p| p.z, true)?);
+    let skinned = |vertex: usize| -> Option<Vec3> {
+        let mut out = Vec3::ZERO;
+        for k in 0..4 {
+            let weight = skin.weights[vertex][k];
+            if weight == 0.0 {
+                continue;
+            }
+            let joint = skin.joints[vertex][k] as usize;
+            let inverse = bevy::math::Affine3A::from_mat4(rig.skeleton.bones.get(joint)?.inverse_bind());
+            let global = world.get::<GlobalTransform>(*bones.get(joint)?)?;
+            out += weight * (global.affine() * inverse).transform_point3(mesh.positions[vertex]);
+        }
+        Some(out)
+    };
+    let (left, right, top) = (skinned(left)?, skinned(right)?, skinned(top)?);
+    Some((right - left).cross(top - left).normalize_or_zero())
 }
 
 /// The `.cal` of a glider model (`.chr`, or the `.cdf` that names one).
@@ -1938,12 +1982,11 @@ pub fn draw_remote_gliders(
             let bone = glider_bone(&animator);
             if let Some(path) = model {
                 let Some(bone) = bone else { continue };
-                if let Some(root) = super::creature::spawn(
+                if let Some(root) = super::creature::spawn_cry_space(
                     &mut commands,
                     &mut cry,
                     &library,
                     &path,
-                    None,
                     Transform::IDENTITY,
                 ) {
                     commands
@@ -2910,6 +2953,118 @@ mod tests {
         assert!(
             (world - start).length() >= 4.99,
             "the player did not follow the hull's 5 m: {world:?} from {start:?}"
+        );
+    }
+
+    /// The opened glider hangs under the character's `item_glider` bone with the identity attachment
+    /// `FUN_394e4e80` sets. That bone sits under the character's CryEngine model root, so the glider
+    /// model must be spawned in Cry space: a second [`aa_cry::CRY_TO_BEVY`] turns the wing on edge
+    /// (the owner's 2026-11-01 report). The wing span is the model's local X, its up the local Z;
+    /// skin three vertices (both tips and the canopy top) with the real animated joints and check
+    /// that the wing plane is level while the character is in its gliding idle clip.
+    #[test]
+    fn the_glider_wing_stays_level_on_the_item_glider_bone() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        use aa_anim::pose::shared_rig;
+        use aa_net::model::{Equipment, Item};
+        use aa_net::state::Inventory;
+        use bevy::transform::TransformPlugin;
+
+        let Some(db) = Db::open() else { return };
+        let model = "objects/characters/nuian/male/nude/nu_m_base.chr";
+        let glider = db.glider(14677).expect("glider item 14677");
+        assert!(glider.model.ends_with("glider_bx.chr"), "{}", glider.model);
+        let Some(rig) = shared_rig(model).ok() else { return };
+        let clips = ClipLibrary::default();
+        let cal = format!("{}.cal", model.trim_end_matches(".chr"));
+        let Some(set) = super::super::anim::shared_clip_set(model, &cal, &clips) else {
+            return;
+        };
+
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<ClipLibrary>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>()
+            .init_resource::<aa_cry::scene::CryCache>()
+            .add_plugins((TransformPlugin, aa_anim::AnimPlugin))
+            .add_systems(Update, (drive_glide, show_glider).chain());
+        let mut equipment = Equipment::default();
+        equipment.slots[slot::BACKPACK] = Some(Item {
+            id: 14677,
+            template_id: 14677,
+            count: 1,
+            ..default()
+        });
+        let mut inventory = Inventory::default();
+        inventory.equipment = equipment;
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        flight.elapsed = 3.0;
+        let mut gliding = Gliding::default();
+        gliding.active = Some(Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Idle,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        });
+        app.insert_resource(gliding)
+            .insert_resource(inventory)
+            .insert_resource(db);
+        let world = app.world_mut();
+        let root = world
+            .spawn((LocalPlayer { obj_id: 7 }, Transform::IDENTITY, Visibility::default()))
+            .id();
+        let model_root = world
+            .spawn((
+                Transform::from_rotation(aa_cry::CRY_TO_BEVY),
+                Visibility::default(),
+                ChildOf(root),
+            ))
+            .id();
+        let mut bones = Vec::with_capacity(rig.len());
+        for (i, bone) in rig.skeleton.bones.iter().enumerate() {
+            let parent = bone.parent.map(|p| bones[p]).unwrap_or(model_root);
+            let e = world
+                .spawn((
+                    Name::new(bone.name.clone()),
+                    Transform {
+                        translation: rig.bind.pos[i],
+                        rotation: rig.bind.rot[i],
+                        scale: Vec3::ONE,
+                    },
+                    Visibility::default(),
+                    ChildOf(parent),
+                ))
+                .id();
+            bones.push(e);
+        }
+        world.entity_mut(root).insert((
+            Animator::new(rig.clone(), bones),
+            Locomotion::new((*set).clone()),
+            Motion::default(),
+        ));
+        for _ in 0..20 {
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_secs_f32(0.05));
+            app.update();
+        }
+
+        let normal = glider_wing_normal(app.world_mut()).expect("the glider model was spawned");
+        let degrees = normal.dot(Vec3::Y).abs().acos().to_degrees();
+        println!("glider wing normal {normal:?}, {degrees:.1} deg from level");
+        assert!(
+            degrees < 10.0,
+            "the glider wing stands up: its plane is {degrees:.1} deg from horizontal"
         );
     }
 

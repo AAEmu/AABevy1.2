@@ -543,6 +543,13 @@ impl EmitterState {
         self.target = None;
     }
 
+    /// Stops new particles while the live ones keep drawing and ageing out (the 1.2 effect end event 5).
+    pub fn stop_emitting(&mut self) {
+        self.off = true;
+        self.done = true;
+        self.target = None;
+    }
+
     /// No particles and nothing more to emit.
     pub fn finished(&self) -> bool {
         self.done && self.particles.is_empty()
@@ -1698,6 +1705,14 @@ impl EffectSim {
         self.emitters.iter().all(|e| e.finished())
     }
 
+    /// Stops every emitter from spawning new particles; the live ones keep drawing and ageing out (the 1.2 effect
+    /// end event 5).
+    pub fn stop_emitting(&mut self) {
+        for e in &mut self.emitters {
+            e.stop_emitting();
+        }
+    }
+
     /// Forgets every particle (the effect went out of range).
     pub fn reset(&mut self) {
         for e in &mut self.emitters {
@@ -2104,6 +2119,78 @@ mod tests {
             s.step(&c);
         }
         assert_eq!(s.alive(), 2, "the second one after 2 s");
+    }
+
+    #[test]
+    fn a_stopped_looping_effect_does_not_restart_and_a_rebuilt_sim_stays_stopped() {
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params Continuous="true"/><Childs><Particles Name="e"><Params Continuous="true" Count="1" ParticleLifeTime="0.4" Texture="textures/x.dds" Speed="0"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let effect = lib.get("a").unwrap();
+        assert!(effect.loops());
+        let mut run = crate::FxRun { def: Some(Arc::clone(effect)), ..Default::default() };
+        run.stop_emitting();
+        assert!(run.is_stopped());
+        assert!(!run.restarts(&crate::Effect::new("T.a")), "a stopped looping effect does not restart");
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut rebuilt = tree_sim(xml);
+        crate::stop_sim(&run, &mut rebuilt);
+        rebuilt.step(&c);
+        assert!(rebuilt.finished(), "a rebuilt sim is stopped from its first step");
+        assert_eq!(rebuilt.alive(), 0);
+    }
+
+    #[test]
+    fn a_stopped_real_portal_sim_stays_stopped_when_rebuilt() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let lib = Library::load("abillity_skill_table_m").unwrap();
+        let effect = lib.get("system_skill.portal_tank_main").unwrap();
+        let build = || {
+            let emitters = effect
+                .emitters
+                .iter()
+                .enumerate()
+                .map(|(i, e)| EmitterState::new(e.def.clone(), e.parent, 0, 1.0, 7 + i as u64, bevy::prelude::Entity::PLACEHOLDER))
+                .collect();
+            EffectSim::new(emitters, 0.8, 1.0, 1.0)
+        };
+        let budget = AtomicI32::new(10_000);
+        let c = ctx(&budget);
+        let mut sim = build();
+        sim.step(&c);
+        assert!(sim.alive() > 0, "the real portal emits");
+        let mut run = crate::FxRun { def: Some(Arc::clone(effect)), ..Default::default() };
+        assert!(run.max_particle_life().is_some_and(|life| life > 0.0));
+        run.stop_emitting();
+        sim.stop_emitting();
+        for _ in 0..400 {
+            sim.step(&c);
+        }
+        assert!(sim.finished(), "the live portal particles fade out");
+        let mut rebuilt = build();
+        crate::stop_sim(&run, &mut rebuilt);
+        rebuilt.step(&c);
+        assert!(rebuilt.finished(), "a rebuilt portal starts stopped");
+    }
+
+    #[test]
+    fn stop_emitting_keeps_the_live_particles_until_they_fade() {
+        let budget = AtomicI32::new(10_000);
+        let mut s = sim(r#"Continuous="true" Count="1" ParticleLifeTime="0.5" Texture="textures/x.dds" Speed="0""#);
+        let c = ctx(&budget);
+        s.step(&c);
+        assert!(!s.finished());
+        s.stop_emitting();
+        for _ in 0..20 {
+            s.step(&c);
+        }
+        assert!(!s.finished(), "the live particle is still fading");
+        for _ in 0..20 {
+            s.step(&c);
+        }
+        assert!(s.finished(), "the last particle has aged out");
     }
 
     #[test]
@@ -2601,6 +2688,23 @@ mod tests {
         s.prime(&c);
         let n = s.alive();
         assert!((30..=48).contains(&n), "alive {n}");
+    }
+
+    #[test]
+    fn an_unprimed_one_shot_has_particles_in_its_first_frames() {
+        let budget = AtomicI32::new(10_000);
+        let xml = r#"<ParticleLibrary Name="T"><Particles Name="a"><Params/><Childs><Particles Name="e"><Params ParticleLifeTime="6" Count="10" Texture="textures/x.dds"/></Particles></Childs></Particles></ParticleLibrary>"#;
+        let lib = Library::parse(xml).unwrap();
+        let def = lib.get("a").unwrap();
+        assert!(def.one_shot());
+        let effect = crate::Effect::new("T.a");
+        assert!(!effect.primes(def), "the burst is not primed");
+        let mut s = tree_sim(xml);
+        let c = ctx(&budget);
+        // the production start decision: a burst starts at t=0, not advanced by `EffectSim::prime`
+        crate::start_simulation(&effect, def, &mut s, &c);
+        s.step(&c);
+        assert!(s.alive() > 0, "the burst's first frame is visible");
     }
 
     #[test]

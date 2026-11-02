@@ -190,7 +190,8 @@ fn helper() -> LadderHelper {
         bottom: Vec3::ZERO,
         top: Vec3::new(0.0, 5.0, 0.0),
         axis: Vec3::Y,
-        forward: Vec3::NEG_Z,
+        // the ladder faces the player at +X in the default fixture
+        forward: Vec3::X,
     }
 }
 
@@ -222,6 +223,7 @@ fn app_with(kind: u8, parent: u32) -> App {
         .insert_resource(Units::default())
         .insert_resource(Views::default())
         .insert_resource(LadderClaim::default())
+        .insert_resource(LadderGrab::default())
         .insert_resource(SendState::default())
         .insert_resource(PlayerInput::default())
         .insert_resource(aa_anim::ClipLibrary::default())
@@ -350,6 +352,107 @@ fn f_grabs_the_climb_doodad_and_sends_the_native_hang_block() {
         Some(77),
         "F is claimed"
     );
+}
+
+#[test]
+fn a_plain_jump_off_sends_7_and_carries_away_from_the_ladder() {
+    let mut app = app(0);
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    clear_taps(&mut app);
+    let before = {
+        let mut q = app.world_mut().query::<&Mover>();
+        q.single(app.world()).unwrap().pos
+    };
+    tap(&mut app, "jump");
+    app.update();
+    assert!(ladder_of(&mut app).is_none(), "the jump leaves the ladder");
+    let commands = sent(&mut app);
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 7 })),
+        "CSUnhang 7 (back-hop): {commands:?}"
+    );
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 6 })),
+        "not the mode-6 forward leap: {commands:?}"
+    );
+    let entity = player_entity(&mut app);
+    let carried = *app
+        .world()
+        .get::<super::player::CarriedVelocity>(entity)
+        .expect("the jump carry");
+    // The ladder is at x=0 and the body hangs on +X facing -X, so away is +X.
+    assert!(
+        carried.0.x > 1.9 && carried.0.y.abs() < 1e-6,
+        "the carry points away from the ladder: {:?}",
+        carried.0
+    );
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    assert!((mover.vz - 4.0).abs() < 1e-5, "4.0 m/s up: {}", mover.vz);
+    assert!(
+        mover.pos.x > before.x + 0.25,
+        "the -0.3 m nudge along forward moves away from the ladder: {:?} -> {:?}",
+        before,
+        mover.pos
+    );
+}
+
+/// One lateral jump: the action held at Space, the expected wire reason, and the local X sign.
+fn assert_side_jump(action: &str, reason: i32, sign: f32) {
+    let mut app = app(0);
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    clear_taps(&mut app);
+    hold(&mut app, action);
+    tap(&mut app, "jump");
+    app.update();
+    assert!(ladder_of(&mut app).is_none(), "{action}: the jump left");
+    let commands = sent(&mut app);
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: r } if *r == reason)),
+        "{action}: CSUnhang {reason}: {commands:?}"
+    );
+    let entity = player_entity(&mut app);
+    let carried = *app
+        .world()
+        .get::<super::player::CarriedVelocity>(entity)
+        .expect("the jump carry");
+    // Facing -X, the local X axis is +Y: the side velocity is 2.0 m/s along it.
+    assert!(
+        (carried.0.y - sign * 2.0).abs() < 1e-5 && carried.0.x.abs() < 1e-6,
+        "{action}: side velocity {:?}",
+        carried.0
+    );
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    assert!((mover.vz - 4.0).abs() < 1e-5, "{action}: 4.0 m/s up");
+    assert!(
+        (mover.pos.y - sign * 0.3).abs() < 1e-5,
+        "{action}: the 0.3 m side nudge: {:?}",
+        mover.pos
+    );
+}
+
+#[test]
+fn a_and_d_with_space_send_4_and_5() {
+    // The owner's 2026-11-01 14:20 session on a ship ladder: A held + Space sent CSUnhang 4,
+    // D held + Space sent CSUnhang 5.
+    assert_side_jump("turnleft", 4, -1.0);
+    assert_side_jump("turnright", 5, 1.0);
+}
+
+#[test]
+fn strafe_with_space_sends_the_same_side_hop() {
+    // Q/E strafe are the same lateral intent as A/D, which the capture used.
+    assert_side_jump("moveleft", 4, -1.0);
+    assert_side_jump("moveright", 5, 1.0);
 }
 
 #[test]
@@ -555,7 +658,8 @@ fn a_rotated_hull_sends_the_hull_relative_facing() {
     tap(&mut app, "do_interaction_1");
     app.update();
     let ladder = ladder_of(&mut app).expect("grabbed");
-    // the ladder is east of the hull's centre, the body faces east (pi/2 in the world)
+    // The helper forward is local +X; the hull yaw +90 turns it to +Y (north), so the body
+    // stands north of the rung and faces south (pi in the world, pi/2 in the hull frame).
     assert!((ladder.fraction - 0.01).abs() < 1e-3, "{ladder:?}");
     let first_commands = sent(&mut app);
     let first = moves(&first_commands)
@@ -565,13 +669,185 @@ fn a_rotated_hull_sends_the_hull_relative_facing() {
     let movement = first.to_movement(0);
     // the primary point is hull-local, so its direction byte is the facing in the hull frame
     assert!(
-        movement.yaw().abs() < 0.02,
-        "relative yaw {} (world facing would be {hull_yaw})",
+        (movement.yaw() - std::f32::consts::FRAC_PI_2).abs() < 0.06,
+        "relative yaw {} (world facing is pi)",
         movement.yaw()
     );
     let support = movement.support.expect("both blocks");
     let (_, direction) = support.world.expect("world backup");
-    assert_eq!(direction[2], radians_to_direction(hull_yaw), "world facing");
+    assert!(
+        (i32::from(direction[2]) - i32::from(radians_to_direction(std::f32::consts::PI))).abs()
+            <= 1,
+        "world facing {} (pi is {})",
+        direction[2],
+        radians_to_direction(std::f32::consts::PI)
+    );
+}
+
+#[test]
+fn a_ship_ladder_hangs_on_its_front_side_and_jumps_outboard() {
+    // A translated, rotated hull: the ladder's world frame is the hull transform x its local
+    // helper. The owner grabbed a ship ladder from the deck (inside the hull); the body must
+    // stand on the helper's front side, not between the rungs and the deck.
+    let mut app = app(0x1234);
+    let hull_pos = Vec3::new(10.0, 2.0, 0.0);
+    let hull_yaw = std::f32::consts::FRAC_PI_2;
+    app.insert_resource({
+        let mut hull = DeckHullPoses::default();
+        hull.0.insert(
+            0x1234,
+            (hull_pos, Quat::from_rotation_z(hull_yaw), hull_yaw),
+        );
+        hull
+    });
+    let hull_entity = app
+        .world_mut()
+        .spawn((
+            Transform {
+                translation: aa_world::cry_to_bevy(hull_pos),
+                rotation: Quat::from_rotation_y(hull_yaw),
+                scale: Vec3::ONE,
+            },
+            GlobalTransform::default(),
+        ))
+        .id();
+    {
+        let doodad = app
+            .world_mut()
+            .query_filtered::<Entity, With<RemoteDoodad>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().entity_mut(doodad).insert((
+            ChildOf(hull_entity),
+            Transform::default(),
+            GlobalTransform::default(),
+        ));
+    }
+    // The helper forward is local +X; the hull yaw +90 makes it +Y (game): the front is north.
+    // Stand south of the ladder, on the deck side.
+    {
+        let mut q = app.world_mut().query::<&mut Mover>();
+        q.single_mut(app.world_mut()).unwrap().pos = hull_pos + Vec3::new(0.0, -0.5, 0.0);
+    }
+    tap(&mut app, "do_interaction_1");
+    app.update();
+    ladder_of(&mut app).expect("the ship ladder is grabbed");
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    // 0.35 m in front of the rung, not 0.35 m behind it (inside the hull).
+    let expected = hull_pos + Vec3::new(0.0, STANDOFF, 0.05);
+    assert!(
+        mover.pos.distance(expected) < 0.1,
+        "hang point {:?}, expected {expected:?}",
+        mover.pos
+    );
+    assert!(
+        (mover.facing.abs() - std::f32::consts::PI).abs() < 1e-4,
+        "facing the ladder (south): {}",
+        mover.facing
+    );
+    // Jumping off is the mode-7 back-hop, away from the ladder and the hull (north).
+    sent(&mut app);
+    clear_taps(&mut app);
+    tap(&mut app, "jump");
+    app.update();
+    assert!(
+        sent(&mut app)
+            .iter()
+            .any(|c| matches!(c, Command::Unhang { reason: 7 })),
+        "CSUnhang 7"
+    );
+    let entity = player_entity(&mut app);
+    let carried = *app
+        .world()
+        .get::<super::player::CarriedVelocity>(entity)
+        .expect("the jump carry");
+    assert!(
+        carried.0.y > 1.9 && carried.0.x.abs() < 1e-5,
+        "the jump carries away from the hull: {:?}",
+        carried.0
+    );
+    let mut q = app.world_mut().query::<&Mover>();
+    let mover = q.single(app.world()).unwrap();
+    assert!(
+        mover.pos.y > hull_pos.y + 0.5,
+        "the nudge also moves outboard: {:?}",
+        mover.pos
+    );
+}
+
+#[test]
+fn the_relative_kinds_take_the_side_from_the_players_facing() {
+    // Native FUN_3916c520: kinds 1/4/5/8/9 keep the identity hang rotation (the helper front);
+    // 2/3/6/7/10 build it from the player's quaternion. The player stands on the helper's back
+    // (-X): facing away (west, +pi/2) makes position and facing disagree, so a regression to
+    // the position rule would put the relative kinds at -X.
+    let grab = |kind: u8, facing: f32| {
+        let mut app = app_with(kind, 0);
+        {
+            let mut q = app.world_mut().query::<&mut Mover>();
+            let mut mover = q.single_mut(app.world_mut()).unwrap();
+            mover.pos = Vec3::new(-0.5, 0.0, 0.0);
+            mover.facing = facing;
+        }
+        tap(&mut app, "do_interaction_1");
+        app.update();
+        ladder_of(&mut app).expect("the ladder is grabbed");
+        let mut q = app.world_mut().query::<&Mover>();
+        q.single(app.world()).unwrap().pos
+    };
+    for kind in [1u8, 4, 5, 8, 9] {
+        let pos = grab(kind, std::f32::consts::FRAC_PI_2);
+        assert!(pos.x > 0.25, "kind {kind} is on the helper front: {pos:?}");
+    }
+    for kind in [2u8, 3, 6, 7, 10] {
+        let pos = grab(kind, std::f32::consts::FRAC_PI_2);
+        assert!(
+            pos.x > 0.25,
+            "kind {kind} follows the facing away, not the standing side: {pos:?}"
+        );
+    }
+    // facing the ladder from the back keeps the relative kinds behind it
+    for kind in [2u8, 3, 6, 7, 10] {
+        let pos = grab(kind, -std::f32::consts::FRAC_PI_2);
+        assert!(pos.x < -0.25, "kind {kind} faces the ladder: {pos:?}");
+    }
+}
+
+#[test]
+fn a_right_click_grab_request_grabs_the_named_doodad() {
+    {
+        let mut app = app(0);
+        app.insert_resource(LadderGrab(Some(77)));
+        app.update();
+        assert!(
+            ladder_of(&mut app).is_some(),
+            "the requested ladder is grabbed"
+        );
+        assert!(
+            sent(&mut app)
+                .iter()
+                .any(|c| matches!(c, Command::Hang { target_obj_id: 77 })),
+            "CSHang for the requested doodad"
+        );
+        assert_eq!(
+            app.world().resource::<LadderGrab>().0,
+            None,
+            "the request is consumed"
+        );
+    }
+
+    // A request for a doodad that is not there does not fall back to the nearest ladder.
+    let mut unknown = app(0);
+    unknown.insert_resource(LadderGrab(Some(999)));
+    unknown.update();
+    assert!(ladder_of(&mut unknown).is_none());
+    assert!(
+        !sent(&mut unknown)
+            .iter()
+            .any(|c| matches!(c, Command::Hang { .. }))
+    );
+    assert_eq!(unknown.world().resource::<LadderGrab>().0, None);
 }
 
 #[test]
@@ -804,6 +1080,7 @@ fn no_player_entity_clears_the_ladder_claim() {
         .insert_resource(Doodads::default())
         .insert_resource(Units::default())
         .insert_resource(LadderClaim(Some(77)))
+        .insert_resource(LadderGrab::default())
         .insert_resource(SendState::default())
         .insert_resource(PlayerInput::default())
         .add_message::<NetCommand>()
