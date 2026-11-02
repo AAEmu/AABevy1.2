@@ -922,8 +922,12 @@ fn simulate(
                     SlotState::Ready => {}
                 }
             }
-            if ready && let Some(def) = run.def.as_deref() {
-                start_simulation(effect, def, &mut sim, &ctx);
+            if ready {
+                match run.def.as_deref() {
+                    Some(def) => start_simulation(effect, def, &mut sim, &ctx),
+                    // never leave a simulation waiting for a definition it cannot get
+                    None => sim.primed = true,
+                }
             }
             run.sim = Some(sim);
             return;
