@@ -415,6 +415,12 @@ impl View {
     pub(super) fn claims_key(&self) -> bool {
         self.claims_key
     }
+
+    /// The bar's F claim, for the dialog tests (`claims_key` is set by the doodad frame system).
+    #[cfg(test)]
+    pub(super) fn claim_key_for_test(&mut self) {
+        self.claims_key = true;
+    }
 }
 
 /// The reach of a doodad whose phase has `uses`, metres: [`skill_reach`] of the first skill's `max_range`.
@@ -447,9 +453,11 @@ fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32
     if o.parent_obj_id == 0
         && let Some(bounds) = data.doodad.bounds.get(&obj_id).copied()
     {
-        let (lo, hi) = crate::ingame::units::doodad_bounds_world(o, bounds, scale);
+        let (transform, lo, hi) = crate::ingame::units::doodad_bounds_local(o, bounds, scale);
         let player = aa_world::cry_to_bevy(data.pos);
-        let nearest = player.clamp(lo, hi);
+        // the doodad's own (oriented) frame: an axis-aligned world box is too lenient on a rotated model
+        let local = transform.to_matrix().inverse().transform_point3(player);
+        let nearest = transform.transform_point(local.clamp(lo, hi));
         return Some(player.distance(nearest) - data.player_radius);
     }
     let radius = data
@@ -913,10 +921,13 @@ fn track(
     // The interaction gap measures to the drawn model's bounds; cache them for the doodads the pointer,
     // the bar or the walk is about (the clicked one may be far and not in `focus`).
     for id in [clicked, arrived, d.doodad.hover, d.doodad.preferred, d.doodad.focus.as_ref().map(|f| f.obj_id)].into_iter().flatten() {
-        if let Some(bounds) = views.doodad_bounds(id) {
-            d.doodad.bounds.insert(id, bounds);
+        // a changed model or a reused obj_id must not keep the old model's bounds
+        match views.doodad_bounds(id) {
+            Some(bounds) => { d.doodad.bounds.insert(id, bounds); }
+            None => { d.doodad.bounds.remove(&id); }
         }
     }
+    d.doodad.bounds.retain(|id, _| doodads.by_id.contains_key(id));
     d.doodad.pointer_pick = clicked;
     d.doodad.arrived = arrived;
     // the glow: the doodad the bar is about and the one under the pointer
@@ -2149,9 +2160,11 @@ mod tests {
         // sim_radius is 0 for most templates (Owl Mailbox, warehouses, workbenches); a large model
         // whose body keeps the player 4 m from its centre is still inside the 2.1 m interaction gap
         // when the gap is measured to its drawn model bounds (the collider approximation).
-        let mut data = HudData::default();
-        data.pos = Vec3::new(0.0, -4.0, 0.0);
-        data.player_radius = 0.5;
+        let mut data = HudData {
+            pos: Vec3::new(0.0, -4.0, 0.0),
+            player_radius: 0.5,
+            ..HudData::default()
+        };
         data.doodad
             .bounds
             .insert(7, (Vec3::new(-3.0, -2.0, 0.0), Vec3::new(3.0, 2.0, 3.0)));
@@ -2165,6 +2178,33 @@ mod tests {
             "the 3 x 2 m body leaves 1.5 m from its side (centre distance would be 4 m): {gap}"
         );
         assert!(gap < INTERACTION_DISTANCE);
+    }
+
+    #[test]
+    fn a_rotated_doodad_is_measured_in_its_own_frame_not_a_world_box() {
+        // A 8 x 2 m body turned 45 degrees. The point (4.8, 4.8) is inside the axis-aligned box around
+        // the model (that box would report a gap of 1.78 m) but 2.79 m from the real, rotated body, so
+        // the right click must walk, not use.
+        let mut data = HudData {
+            pos: Vec3::new(4.8, 4.8, 1.5),
+            ..HudData::default()
+        };
+        data.doodad
+            .bounds
+            .insert(7, (Vec3::new(-4.0, -1.0, 0.0), Vec3::new(4.0, 1.0, 3.0)));
+        let mut doodad = world_doodad(7, 850, 1, Vec3::ZERO);
+        doodad.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4).to_array();
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(7, doodad);
+        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(
+            (gap - 2.789).abs() < 0.01,
+            "the rotated corner leaves its real 2.79 m gap: {gap}"
+        );
+        assert!(
+            gap >= INTERACTION_DISTANCE,
+            "the axis-aligned box's 1.78 m would have used it from out of reach"
+        );
     }
 
     #[test]

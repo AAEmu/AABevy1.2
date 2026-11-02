@@ -740,10 +740,14 @@ fn nearest_npc(
             let UnitKind::Npc { template_id, .. } = u.kind else { return None };
             let at = world(u).unwrap_or(Vec3::new(u.pos.x, u.pos.y, u.pos.z));
             let gap = npc_gap(d, me, at, u);
-            if gap >= range.min(interact_reach(u)) || super::plates::relation_of(game, own_faction, u) == "hostile" {
+            // A scripted `talk` searches its whole range; the interact key (F) only reaches what the
+            // right click could talk to.
+            let limit = if wanted { range } else { range.min(interact_reach(u)) };
+            if gap >= limit || super::plates::relation_of(game, own_faction, u) == "hostile" {
                 return None;
             }
-            if wanted && game.is_none_or(|g| g.quests.mark(template_id, facts).is_none()) {
+            // with no game data there is no mark to prefer: keep the NPC rather than filtering all out
+            if wanted && game.is_some_and(|g| g.quests.mark(template_id, facts).is_none()) {
                 return None;
             }
             Some((gap, (u.obj_id, template_id)))
@@ -857,8 +861,8 @@ pub fn talk_input(
     let ladder_owns_key = ladder_claim
         .as_deref()
         .is_some_and(|claim| claim.0.is_some());
-    let interact_key = !scripted_talk
-        && pressed("do_interaction_1", 0, 'f')
+    let interact_pressed = !scripted_talk && pressed("do_interaction_1", 0, 'f');
+    let interact_key = interact_pressed
         && d.loot.nearest.is_none()
         && (scripted_key == Some('f') || (!d.doodad.claims_key() && !ladder_owns_key));
     if let Some(obj_id) = super::slave::action_target(&units, picked) {
@@ -901,8 +905,9 @@ pub fn talk_input(
             }
         }
     });
-    if interact_key || scripted_talk {
-        // F / a scripted talk is a new action: it ends a running walk
+    if interact_pressed || scripted_talk {
+        // F / a scripted talk is a new action: it ends a running walk, also when a doodad or loot
+        // takes the key and no NPC talk follows.
         cancel_walk(&mut d);
     }
     let keyboard_npc = if scripted_talk {
@@ -958,11 +963,10 @@ pub(super) fn cancel_walk(data: &mut HudData) -> bool {
     data.dialog.approach.take().is_some()
 }
 
-/// The player is on a seat or driving: a forward key would drive the vehicle, so the talk walk must not run.
+/// The player is on a slave seat or driving: a forward key would drive the vehicle, so the talk walk must not
+/// run. Riding a mate is not a seat (`player_attachment` also reports the mate): the player still walks.
 fn seated_or_driving(data: &HudData) -> bool {
-    data.mounted.player_attachment().is_some()
-        || data.mounted.local_cart.is_some()
-        || data.doodad.seated
+    data.mounted.slave_seat().is_some() || data.mounted.local_cart.is_some()
 }
 
 /// What one frame of the walk to a right-clicked NPC decides.
@@ -1852,14 +1856,92 @@ mod tests {
     }
 
     #[test]
-    fn a_seated_player_does_not_hold_w_for_the_npc_walk() {
+    fn a_driving_player_does_not_hold_w_for_the_npc_walk() {
         let (mut app, shared) = npc_walk_app(10.0);
         if !with_ui(&mut app) { return; }
         npc_events(&mut app);
-        shared.borrow_mut().doodad.seated = true;
+        shared.borrow_mut().mounted.local_cart = Some((31, 0.0));
         right_click(&mut app, 20);
         assert!(shared.borrow().dialog.approach.is_none());
         assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn riding_a_mate_still_walks_to_a_far_npc() {
+        // `player_attachment` also reports a mate; only a slave seat or a cart is "seated" and blocks
+        // the walk (the forward key would drive it).
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        let spawn = app.world().resource::<Player>().spawn.clone().unwrap();
+        crate::hud::mounted::receive(&shared, &Event::PlayerSpawn(Box::new(spawn.clone())));
+        let mut mate = crate::hud::fixture_spawn().unit;
+        mate.obj_id = 31;
+        mate.name = "Snowlion".into();
+        mate.kind = UnitKind::Mate {
+            tl_id: 1,
+            template_id: 1,
+            owner_id: spawn.character().id,
+        };
+        crate::hud::mounted::receive(&shared, &Event::UnitSpawned(Box::new(mate)));
+        crate::hud::mounted::receive(
+            &shared,
+            &Event::UnitAttached {
+                obj_id: spawn.obj_id,
+                mount: 31,
+                point: 2,
+                reason: 0,
+            },
+        );
+        assert!(shared.borrow().mounted.riding_mate());
+        npc_events(&mut app);
+        right_click(&mut app, 20);
+        assert!(
+            shared.borrow().dialog.approach.is_some(),
+            "a mounted player still walks to a far NPC"
+        );
+        assert!(w_held(&app));
+    }
+
+    #[test]
+    fn f_under_a_doodad_claim_cancels_the_npc_walk() {
+        let (mut app, shared) = npc_walk_app(10.0);
+        if !with_ui(&mut app) { return; }
+        npc_events(&mut app);
+        right_click(&mut app, 20);
+        assert!(shared.borrow().dialog.approach.is_some());
+        shared.borrow_mut().doodad.claim_key_for_test();
+        app.world_mut()
+            .resource_mut::<crate::settings::Actions>()
+            .tap_for_test("do_interaction_1");
+        app.update();
+        assert!(
+            shared.borrow().dialog.approach.is_none(),
+            "F used by the doodad also ends the NPC walk"
+        );
+        assert!(!w_held(&app));
+    }
+
+    #[test]
+    fn a_scripted_talk_searches_past_the_interact_reach() {
+        let (app, shared) = npc_walk_app(10.0);
+        let d = shared.borrow();
+        let units = app.world().resource::<Units>();
+        let facts = PlayerFacts::default();
+        let find = |wanted| {
+            nearest_npc(
+                &d,
+                Vec3::ZERO,
+                units,
+                100,
+                0,
+                &facts,
+                60.0,
+                wanted,
+                &|u: &Unit| Some(Vec3::new(u.pos.x, u.pos.y, u.pos.z)),
+            )
+        };
+        assert_eq!(find(true), Some((20, 42)), "the scripted talk finds an NPC at 10 m");
+        assert_eq!(find(false), None, "the interact key stays inside the interaction reach");
     }
 
     #[test]

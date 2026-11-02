@@ -467,6 +467,14 @@ impl Views {
             self.source_generation += 1;
             self.doodads.insert(doodad.obj_id,View { announced_at:now, source_generation:self.source_generation, doodad_source:Some(doodad.clone()), ..default() });
         } else if let Some(view) = self.doodads.get_mut(&doodad.obj_id) {
+            // a phase/model change drops the old model's bounds before the new model is built
+            if view
+                .doodad_source
+                .as_ref()
+                .is_some_and(|old| old.func_group_id != doodad.func_group_id)
+            {
+                view.bounds = None;
+            }
             view.announced_at = now;
             view.doodad_source = Some(doodad.clone());
         }
@@ -808,29 +816,20 @@ fn doodad_root_transform(doodad: &aa_net::model::Doodad, scale: f32) -> Transfor
     }
 }
 
-/// The world-space box of a doodad's model bounds (prefab-local Cry metres) placed by its packet transform,
-/// for the right-click interaction gap. Parented doodads are not composed here (their parent transform is
-/// not in the HUD); callers fall back to the centre/sim-radius for those.
-pub(crate) fn doodad_bounds_world(
+/// The world transform of a doodad's model (prefab-local Cry metres) and the same model bounds in that
+/// transform's local Bevy frame, as an oriented box for the right-click interaction gap: a rotated doodad
+/// is measured against its real box, not an axis-aligned box around it. Parented doodads are not composed
+/// here (their parent transform is not in the HUD); callers fall back to the centre/sim-radius for those.
+pub(crate) fn doodad_bounds_local(
     doodad: &aa_net::model::Doodad,
     bounds: (Vec3, Vec3),
     scale: f32,
-) -> (Vec3, Vec3) {
+) -> (Transform, Vec3, Vec3) {
     let transform = doodad_root_transform(doodad, if scale > 0.0 { scale } else { 1.0 });
     let (lo, hi) = bounds;
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for i in 0..8 {
-        let corner = Vec3::new(
-            if i & 1 == 0 { lo.x } else { hi.x },
-            if i & 2 == 0 { lo.y } else { hi.y },
-            if i & 4 == 0 { lo.z } else { hi.z },
-        );
-        let point = transform.transform_point(cry_to_bevy(corner));
-        min = min.min(point);
-        max = max.max(point);
-    }
-    (min, max)
+    let a = cry_to_bevy(lo);
+    let b = cry_to_bevy(hi);
+    (transform, a.min(b), a.max(b))
 }
 
 /// Where a doodad stands in the world (game coordinates): the packet position for an ordinary doodad, or the parent
