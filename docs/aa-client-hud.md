@@ -536,7 +536,7 @@ also exercises the live updates.
 
 ### Quest notices and the clock
 
-A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(qtype, err)`; the native
+A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(err, qtype)`; the native
 `FUN_3937a130` first clears the quest's timer through `FUN_39379ea0`, so the directing window also gets
 `QUEST_LEFT_TIME_UPDATED(qtype, 0)`. `route_quest_notices` (`dialog.rs`) ends the directing window when
 the failed quest is the one the window shows (`quest_context_directing.alb` F37) and lets the original

@@ -1273,7 +1273,7 @@ pub(super) fn talk_pointer(
 /// (`SCQuestContextFailed`), a needed unit gone (`SCQuestUnitReqFailed`) and quest mail
 /// (`SCQuestMailSent`, `SCQuestRewardedByMail`).
 ///
-/// `FUN_391dbcd0` raises `QUEST_ERROR_INFO(qtype, err)` and `FUN_3937a130` first clears the quest's
+/// `FUN_391dbcd0` raises `QUEST_ERROR_INFO(err, qtype)` and `FUN_3937a130` first clears the quest's
 /// timer (`FUN_39379ea0` publishes `QUEST_LEFT_TIME_UPDATED(qtype, 0)`); the directing script ends
 /// its window when the event's quest is the one it shows (`quest_context_directing.alb` F37).
 /// `FUN_391dbdd0` raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when the failed unit is the current
@@ -1307,7 +1307,7 @@ pub fn route_quest_notices(
                 if had_timer {
                     rt.fire_event("QUEST_LEFT_TIME_UPDATED", (failed.quest_id, 0i32));
                 }
-                rt.fire_event("QUEST_ERROR_INFO", (failed.quest_id, u32::from(failed.err)));
+                rt.fire_event("QUEST_ERROR_INFO", (u32::from(failed.err), failed.quest_id));
             }
             Event::QuestUnitReqFailed(failed) => {
                 if target.obj_id != Some(failed.unit_obj_id) {
@@ -2331,7 +2331,7 @@ mod tests {
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1066, err: 6 })));
         app.update();
         assert!(shared.borrow().dialog.directing);
-        // The directed quest itself: the window ends and QUEST_ERROR_INFO carries (qtype, err).
+        // The directed quest itself: the window ends and QUEST_ERROR_INFO carries (err, qtype).
         app.world_mut()
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1065, err: 6 })));
         app.update();
@@ -2341,11 +2341,11 @@ mod tests {
         rt.lua
             .load(
                 r#"
-                assert(#OBSERVED==3 and OBSERVED[1].event=='QUEST_ERROR_INFO' and OBSERVED[1].args[1]==1066)
+                assert(#OBSERVED==3 and OBSERVED[1].event=='QUEST_ERROR_INFO' and OBSERVED[1].args[1]==6 and OBSERVED[1].args[2]==1066)
                 assert(OBSERVED[2].event=='QUEST_LEFT_TIME_UPDATED')
                 assert(OBSERVED[2].args[1]==1065 and OBSERVED[2].args[2]==0)
                 assert(OBSERVED[3].event=='QUEST_ERROR_INFO')
-                assert(OBSERVED[3].args[1]==1065 and OBSERVED[3].args[2]==6)
+                assert(OBSERVED[3].args[1]==6 and OBSERVED[3].args[2]==1065)
             "#,
             )
             .exec()
