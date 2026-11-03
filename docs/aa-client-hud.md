@@ -614,7 +614,8 @@ HUD state is released so the original handlers can query it and close their wind
   bit is ignored when `quest_contexts.repeatable` is set).
 * `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
   assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
-  the not-done Progress components (the native increments before comparing). A supply item is
+  the not-done Progress components (the native increments before comparing); the counted act types
+  are inferred from `FUN_397d3370`'s switch (`FUN_397d5b90`'s native set is not recovered). A supply item is
   assigned by `FUN_394a2930`'s first test: the item's use skill's `skill_products` (the native
   skill list at `+0x1f8`) name one of the objective's act item ids; objective 1 takes the ones
   unrelated to any other objective. Its second test (effect list `+0x1e8`, effect `+0x1c` type 0x18

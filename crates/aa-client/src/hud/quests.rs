@@ -480,7 +480,7 @@ impl QuestTables {
             let col = |wanted: &[&str]| wanted.iter().find_map(|w| names.iter().position(|n| n == w));
             let (id_col, target, count, value, grade, alias, use_alias, action_bar) = (
                 col(&["id"]),
-                col(&["npc_id", "item_id", "doodad_id", "quest_monster_group_id", "npc_group_id", "quest_id", "quest_context_id", "sphere_id", "skill_id", "buff_id", "craft_id", "appellation_id", "item_group_id", "zone_id"]),
+                col(&["npc_id", "item_id", "doodad_id", "quest_monster_group_id", "npc_group_id", "quest_id", "quest_context_id", "complete_component", "sphere_id", "skill_id", "buff_id", "craft_id", "appellation_id", "item_group_id", "zone_id"]),
                 col(&["count"]),
                 col(&["exp", "amount", "lp", "point", "level"]),
                 col(&["grade_id"]),
@@ -960,9 +960,43 @@ impl QuestTables {
         out
     }
 
-    /// The first act in `FUN_397d5b90`'s counted set (here [`counts_as_objective`]).
+    /// The act types `FUN_397d3370` handles: the native `FUN_397d5b90` set (`DAT_3a5e11f4`) is not
+    /// recovered, so these inferred types stand in.
+    fn native_counted(ty: &str) -> bool {
+        matches!(
+            ty,
+            "ObjMonsterHunt"
+                | "ObjMonsterGroupHunt"
+                | "ObjInteraction"
+                | "ObjZoneMonsterHunt"
+                | "ObjItemGather"
+                | "ObjItemUse"
+                | "ObjZoneQuestComplete"
+                | "ObjEffectFire"
+                | "ObjItemGroupGather"
+                | "ObjItemGroupUse"
+                | "ObjExpressFire"
+                | "ObjCraft"
+                | "ObjZoneKill"
+                | "ObjTalk"
+                | "ObjSphere"
+                | "ObjZoneNpcTalk"
+                | "ObjTalkNpcGroup"
+                | "ObjDoodadPhaseCheck"
+                | "ObjCompleteQuest"
+                | "ObjSendMail"
+                | "ObjMateLevel"
+                | "ObjLevel"
+                | "ObjAbilityLevel"
+                | "ObjCinema"
+                | "ObjDistance"
+                | "ObjCondition"
+        )
+    }
+
+    /// The first act in `FUN_397d5b90`'s counted set (inferred from `FUN_397d3370`).
     fn counted_act<'a>(&self, c: &'a ComponentDef) -> Option<&'a ActDef> {
-        c.acts.iter().find(|a| counts_as_objective(&a.ty))
+        c.acts.iter().find(|a| Self::native_counted(&a.ty))
     }
 
     /// The component's slot among the template's kind-4 components (`FUN_397d4360`); only the first
@@ -989,15 +1023,15 @@ impl QuestTables {
     /// `FUN_397d3370`: whether the first counted act's requirement is met by `counter`. Types with
     /// a detail count compare it; the rest are met by any progress.
     fn act_met(a: &ActDef, counter: i32) -> bool {
+        if !Self::native_counted(&a.ty) {
+            return false;
+        }
         match a.ty.as_str() {
             "ObjMonsterHunt" | "ObjMonsterGroupHunt" | "ObjInteraction" | "ObjZoneMonsterHunt"
             | "ObjItemGather" | "ObjItemUse" | "ObjZoneQuestComplete" | "ObjEffectFire"
             | "ObjItemGroupGather" | "ObjItemGroupUse" | "ObjExpressFire" | "ObjCraft"
             | "ObjZoneKill" => counter >= a.count,
-            "ObjTalk" | "ObjSphere" | "ObjZoneNpcTalk" | "ObjTalkNpcGroup" | "ObjDoodadPhaseCheck"
-            | "ObjCompleteQuest" | "ObjSendMail" | "ObjMateLevel" | "ObjLevel" | "ObjAbilityLevel"
-            | "ObjCinema" | "ObjDistance" | "ObjCondition" => counter > 0,
-            _ => false,
+            _ => counter > 0,
         }
     }
 
@@ -1029,7 +1063,8 @@ impl QuestTables {
     }
 
     /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): `FUN_397d5b90` returns the first act whose
-    /// type is in its counted set (here [`counts_as_objective`]), and that act is `ObjAggro` (0x39).
+    /// type is in its counted set, and that act is `ObjAggro` (0x39). The native set
+    /// `DAT_3a5e11f4` is not recovered; the server's objective types stand in here.
     pub fn is_aggro(&self, quest: u32) -> bool {
         self.parts_of(quest, kind::PROGRESS)
             .any(|c| c.acts.iter().find(|a| counts_as_objective(&a.ty)).is_some_and(|a| a.ty == "ObjAggro"))
@@ -1444,6 +1479,44 @@ mod tests {
         // Item 2 has no use skill, but the gather act still feeds FUN_394a2930's relation, so the
         // supply item that produces it is assigned to objective 2.
         assert_eq!(t.items_by_objective(&game, 30, None, 2), vec![1]);
+    }
+
+    #[test]
+    fn check_complete_component_loads_its_target() {
+        let Some(t) = tables() else { return };
+        let found = t.parts.values().filter(|c| c.kind == kind::PROGRESS).find_map(|c| {
+            let act = c.acts.iter().find(|a| a.ty == "CheckCompleteComponent" && a.target != 0)?;
+            let target = t.parts.get(&act.target)?;
+            if target.kind != kind::PROGRESS {
+                return None;
+            }
+            let first = t.counted_act(target)?;
+            let slot = t.slot_of_component(c.quest, act.target)?;
+            (first.count > 0).then_some((c, act.target, slot, first.count))
+        });
+        let (component, target, slot, count) = found.expect("a real Progress CheckCompleteComponent with a Progress target");
+        assert_ne!(target, 0, "quest_act_check_complete_components.complete_component");
+        assert!(!t.dependency_met(component, [0; 5]), "the referenced component is not done");
+        let mut objectives = [0; 5];
+        objectives[slot] = count;
+        assert!(t.dependency_met(component, objectives), "the referenced component is met");
+    }
+
+    #[test]
+    fn counted_acts_include_the_fun_397d3370_types() {
+        let mut game = GameData::default();
+        game.items.insert(3, super::super::data::ItemInfo { use_skill: 5, ..Default::default() });
+        game.skills.insert(5, super::super::data::SkillInfo::default());
+        let act = |ty: &str, target, count| ActDef { ty: ty.into(), target, count, ..ActDef::default() };
+        let mut t = QuestTables::default();
+        t.defs.insert(31, QuestDef { components: vec![60, 61], ..QuestDef::default() });
+        // ObjSendMail is one of the types FUN_397d3370 handles but the server's objective list lacks.
+        t.parts.insert(60, ComponentDef { id: 60, quest: 31, kind: kind::PROGRESS, acts: vec![act("ObjSendMail", 1, 1)], ..ComponentDef::default() });
+        t.parts.insert(61, ComponentDef { id: 61, quest: 31, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 3, 1)], ..ComponentDef::default() });
+        assert!(t.counted_act(t.parts.get(&60).unwrap()).is_some());
+        // The first component keeps index 1, so the use item is on objective 2.
+        assert_eq!(t.items_by_objective(&game, 31, None, 2), vec![3]);
+        assert!(t.items_by_objective(&game, 31, None, 1).is_empty());
     }
 
     #[test]
