@@ -1623,6 +1623,10 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         });
     }
     entries.extend(uses.navi.iter().map(|n| Entry { id: NAVI_ID + *n as i64, name: n.label().into() }));
+    // A phase whose only use was refused offers nothing: never open an empty interaction list.
+    if entries.is_empty() {
+        return false;
+    }
     // A craft action is listed out to the bar's distance and its use walks on its own (`FUN_393b3ec0`
     // checks 2.1 m); other uses still walk before the list, as before.
     if gap >= INTERACTION_DISTANCE && (!craft || gap >= DOODAD_REACH) {
@@ -3652,6 +3656,25 @@ mod tests {
         data.pos = Vec3::new(0.0, 1.0, 0.0);
         assert!(use_bench(&mut data, &doodads, &units, 300, 2.0).is_some());
         assert_eq!(crate::hud::crafting::active_bench(&data), Some((300, 568)));
+    }
+
+    /// A phase whose only craft func is refused offers nothing: no empty interaction list.
+    #[test]
+    fn a_refused_craft_only_phase_does_not_open_an_empty_menu() {
+        let mut data = HudData {
+            character_id: 47,
+            pos: Vec3::ZERO,
+            player_radius: 0.0,
+            ..HudData::default()
+        };
+        assert!(data.game.0.set(craft_tables(1088, craft_perm::OWNER)).is_ok());
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        let mut dev = crate::ingame::DevOptions::default();
+        assert!(!right_click(&mut data, &doodads, &Units::default(), 300, 0.0, &mut dev, PermEnv::default()));
+        assert!(data.doodad.menu.is_none(), "no empty interaction list");
+        assert!(data.doodad.chosen.is_empty());
+        assert!(data.doodad.approach.is_none(), "nothing to walk for");
     }
 
     /// Native `FUN_393b7b10` runs `FUN_393b7aa0` first, so a second bench fires `INTERACTION_END`
