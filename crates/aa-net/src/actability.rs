@@ -257,10 +257,10 @@ impl Actabilities {
                     let entry = self.get_mut(*action as u32);
                     // SCAddActionPoint carries no grade step: native recomputes it from the total.
                     entry.point = add_point(entry.point, *value, entry.step, &limits);
-                    if !limits.is_empty() {
-                        if let Some(point) = entry.point {
-                            entry.step = grade_for(&limits, point);
-                        }
+                    if !limits.is_empty()
+                        && let Some(point) = entry.point
+                    {
+                        entry.step = grade_for(&limits, point);
                     }
                     return true;
                 }

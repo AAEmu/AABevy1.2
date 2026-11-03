@@ -392,8 +392,7 @@ fn add_action_point_adds_like_labor_without_a_wire_step() {
 
 #[test]
 fn point_gains_clamp_to_the_current_grade_and_recompute_the_grade() {
-    let mut state = Actabilities::default();
-    state.up_limits = vec![10000, 20000, 30000];
+    let mut state = Actabilities { up_limits: vec![10000, 20000, 30000], ..Default::default() };
     snapshot(&mut state, true, &[(5, 9999, 0)]);
     state.apply(&Event::LaborChanged { amount: -1, action: 5, point: 5000, step: 0 });
     assert_eq!(state.get(5).unwrap().point, Some(10000));
