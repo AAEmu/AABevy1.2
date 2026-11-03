@@ -971,22 +971,23 @@ fn aim_input(
         return;
     }
     match aim.spot {
-        Some((spot, _)) if fishing_refusal(water.as_deref(), terrain.as_deref(), &aim.skill, spot).is_some() => {
-            let result = fishing_refusal(water.as_deref(), terrain.as_deref(), &aim.skill, spot).unwrap_or(crate::hud::usable::code::INVALID_LOCATION);
-            info!("ground: skill {} needs fishable water at ({:.1}, {:.1}, {:.1}): error {result}, not cast, still aiming", aim.press.skill, spot.x, spot.y, spot.z);
-            failed.write(crate::hud::UseFailed {
-                skill: aim.press.skill,
-                result,
-                value: 0,
-                server: false,
-            });
+        Some((spot, ok)) => {
+            if let Some(result) = fishing_refusal(water.as_deref(), terrain.as_deref(), &aim.skill, spot) {
+                info!("ground: skill {} needs fishable water at ({:.1}, {:.1}, {:.1}): error {result}, not cast, still aiming", aim.press.skill, spot.x, spot.y, spot.z);
+                failed.write(crate::hud::UseFailed {
+                    skill: aim.press.skill,
+                    result,
+                    value: 0,
+                    server: false,
+                });
+            } else if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) {
+                let press = aim.press;
+                cast_at(&press, spot, &mut mover, &mut net, &mut flight);
+                aiming.0 = None;
+            } else {
+                info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill);
+            }
         }
-        Some((spot, ok)) if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) => {
-            let press = aim.press;
-            cast_at(&press, spot, &mut mover, &mut net, &mut flight);
-            aiming.0 = None;
-        }
-        Some((spot, _)) => info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill),
         None => info!("ground: no ground under the cursor: not cast"),
     }
 }
