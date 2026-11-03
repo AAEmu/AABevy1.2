@@ -5,7 +5,7 @@
 //! (`CSStartQuestContext`), hands one in (`CSCompleteQuestContext`), drops one
 //! (`CSDropQuestContext`) or says what a talk objective asks for (`CSQuestTalkMade`), and the server's
 //! answers that are not quest state (`SCNpcInteractionSkillList`, `SCDoodadQuestAccept`,
-//! `SCQuestRewardedByMail`, `SCNpcChatMessage`). The quest state itself (started, updated, completed)
+//! `SCDoodadCompleteQuest`, `SCQuestRewardedByMail`, `SCNpcChatMessage`). The quest state itself (started, updated, completed)
 //! is [`crate::quest`].
 //!
 //! Layouts follow the server's `systems/npcs/npc/packets.rs` and `systems/quests/packets.rs` (the
@@ -36,6 +36,11 @@ pub enum Interact {
     /// chosen reward of a quest with selective rewards (1 based, 0 for none). Answered by
     /// `QuestCompleted`, the rewards (`ExpChanged`, `ItemsChanged`) and maybe the next quest.
     QuestComplete { quest_id: u32, npc_obj_id: u32, doodad_obj_id: u32, selected: i32 },
+    /// `CSTryQuestCompleteAsLetItDone`: complete the in-progress let-it-done quest `quest_id` early,
+    /// optionally at the NPC `obj_id` (0 from the quest journal). `selected` is the chosen reward of
+    /// a quest with selective rewards. The server reads `id`, `bc obj_id`, `selected`
+    /// (`systems/quests/packets.rs:443`).
+    TryQuestCompleteAsLetItDone { quest_id: u32, obj_id: u32, selected: i32 },
     /// `CSDropQuestContext`: give quest `quest_id` up. Answered by `QuestUpdated` with status dropped.
     QuestDrop { quest_id: u32 },
     /// `CSQuestTalkMade`: the talk objective `act_id` (`quest_acts.id`) of component `component_id` of
@@ -65,6 +70,7 @@ impl Interact {
             Self::Start { .. } => cs::CSStartInteractionPacket,
             Self::QuestStart { .. } => cs::CSStartQuestContextPacket,
             Self::QuestComplete { .. } => cs::CSCompleteQuestContextPacket,
+            Self::TryQuestCompleteAsLetItDone { .. } => cs::CSTryQuestCompleteAsLetItDonePacket,
             Self::QuestDrop { .. } => cs::CSDropQuestContextPacket,
             Self::QuestTalk { .. } => cs::CSQuestTalkMadePacket,
             Self::NaviTeleport { .. } => cs::CSNaviTeleportPacket,
@@ -91,6 +97,9 @@ impl Interact {
             }
             Self::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected } => {
                 w.u32(quest_id).bc(npc_obj_id).bc(doodad_obj_id).i32(selected);
+            }
+            Self::TryQuestCompleteAsLetItDone { quest_id, obj_id, selected } => {
+                w.u32(quest_id).bc(obj_id).i32(selected);
             }
             Self::QuestDrop { quest_id } => {
                 w.u32(quest_id);
@@ -156,6 +165,10 @@ pub enum InteractEvent {
     NpcStatusChanged { npc_obj_id: u32, status_wire_byte: u8 },
     /// `SCDoodadQuestAccept`: the doodad `doodad_obj_id` (a notice board ...) offers quest `quest_id`.
     DoodadQuestAccept { doodad_obj_id: u32, quest_id: u32 },
+    /// `SCDoodadCompleteQuest`: quest `quest_id` can be handed in at the doodad `doodad_obj_id`
+    /// (`OnDoodadCompleteQuest`, x2game `FUN_391dc050`, reads the same `bc` + `u32` pair as the
+    /// accept packet).
+    DoodadCompleteQuest { doodad_obj_id: u32, quest_id: u32 },
     /// `SCQuestRewardedByMail`: the rewards of quest `quest` were sent by mail (the bag was full);
     /// `success` 0 means the mail could not be sent (`QUEST_ERROR_INFO` error 0xb).
     RewardedByMail { success: bool, quest: u32 },
@@ -167,7 +180,7 @@ pub enum InteractEvent {
 impl InteractEvent {
     /// Whether `opcode` is one of the packets this module reads.
     pub fn handles(opcode: u16) -> bool {
-        matches!(opcode, sc::SCWorldInteractionSkillListPacket | sc::SCWorldInteractionCanceledPacket | sc::SCNpcInteractionSkillListPacket | sc::SCNpcInteractionStatusChangedPacket | sc::SCDoodadQuestAcceptPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
+        matches!(opcode, sc::SCWorldInteractionSkillListPacket | sc::SCWorldInteractionCanceledPacket | sc::SCNpcInteractionSkillListPacket | sc::SCNpcInteractionStatusChangedPacket | sc::SCDoodadQuestAcceptPacket | sc::SCDoodadCompleteQuestPacket | sc::SCQuestRewardedByMailPacket | sc::SCNpcChatMessagePacket)
     }
 
     pub fn name(&self) -> &'static str {
@@ -177,6 +190,7 @@ impl InteractEvent {
             Self::SkillList { .. } => "SCNpcInteractionSkillList",
             Self::NpcStatusChanged { .. } => "SCNpcInteractionStatusChanged",
             Self::DoodadQuestAccept { .. } => "SCDoodadQuestAccept",
+            Self::DoodadCompleteQuest { .. } => "SCDoodadCompleteQuest",
             Self::RewardedByMail { .. } => "SCQuestRewardedByMail",
             Self::NpcChat { .. } => "SCNpcChatMessage",
         }
@@ -198,6 +212,7 @@ impl InteractEvent {
                 Self::SkillList { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, skills, interactable: r.bool()?, modifier_keys: r.i32()? }
             }
             sc::SCDoodadQuestAcceptPacket => Self::DoodadQuestAccept { doodad_obj_id: r.bc()?, quest_id: r.u32()? },
+            sc::SCDoodadCompleteQuestPacket => Self::DoodadCompleteQuest { doodad_obj_id: r.bc()?, quest_id: r.u32()? },
             sc::SCQuestRewardedByMailPacket => {
                 // FUN_397b5ec0 reads "success" (u8) and one quest id; the server's single-quest
                 // packet (a count byte of 1 and the id) has the same bytes.
@@ -244,6 +259,11 @@ mod tests {
         // CSCompleteQuestContext: u32 quest, bc npc, bc doodad, i32 selected
         let b = body(&Interact::QuestComplete { quest_id: 330, npc_obj_id: 5, doodad_obj_id: 0, selected: 0 });
         assert_eq!(b, [0x4A, 0x01, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        // CSTryQuestCompleteAsLetItDone: u32 quest, bc obj, i32 selected (the server's
+        // `CSTryQuestCompleteAsLetItDonePacket::read`)
+        let b = body(&Interact::TryQuestCompleteAsLetItDone { quest_id: 330, obj_id: 5, selected: 2 });
+        assert_eq!(b, [0x4A, 0x01, 0, 0, 5, 0, 0, 2, 0, 0, 0]);
+        assert_eq!(Interact::TryQuestCompleteAsLetItDone { quest_id: 0, obj_id: 0, selected: 0 }.opcode(), 0x0dd);
         assert_eq!(body(&Interact::QuestDrop { quest_id: 330 }), [0x4A, 0x01, 0, 0]);
         // CSQuestTalkMade: bc npc, u32 quest, u32 component, u32 act
         let b = body(&Interact::QuestTalk { npc_obj_id: 7, quest_id: 1, component_id: 2, act_id: 3 });
@@ -306,7 +326,14 @@ mod tests {
         for cut in 0..bytes.len() {
             assert!(InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes[..cut])).is_err());
         }
-        assert!(InteractEvent::handles(0x07b) && !InteractEvent::handles(0x147));
+        let e = InteractEvent::read(sc::SCDoodadCompleteQuestPacket, &mut Reader::new(&[1, 2, 0, 250, 0, 0, 0])).unwrap();
+        assert_eq!(e, InteractEvent::DoodadCompleteQuest { doodad_obj_id: 0x201, quest_id: 250 });
+        assert!(InteractEvent::handles(0x07b) && InteractEvent::handles(0x14d) && !InteractEvent::handles(0x147));
+        with_world_tail(
+            sc::SCDoodadCompleteQuestPacket,
+            &[1, 2, 0, 250, 0, 0, 0],
+            InteractEvent::DoodadCompleteQuest { doodad_obj_id: 0x201, quest_id: 250 },
+        );
     }
     fn hex(raw: &str) -> Vec<u8> {
         raw.split_whitespace().flat_map(|word| (0..word.len()).step_by(2).map(move |i| u8::from_str_radix(&word[i..i+2],16).unwrap())).collect()

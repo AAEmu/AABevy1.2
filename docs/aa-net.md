@@ -640,6 +640,7 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 | `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's or slave's interaction skills) |
 | `QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id }` | `CSStartQuestContext` 0x0d5: `u32 bc bc u32` | `SCQuestContextStarted` (+ `Updated`), nothing when refused |
 | `QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }` | `CSCompleteQuestContext` 0x0d6: `u32 bc bc i32` | `SCQuestContextCompleted`, `SCExpChanged`, items / money |
+| `TryQuestCompleteAsLetItDone { quest_id, obj_id, selected }` | `CSTryQuestCompleteAsLetItDone` 0x0dd: `u32 bc i32` (the server's `packets.rs:443`; `obj_id` 0 from the journal) | the same rewards as a hand-in, or `SCQuestContextFailed` |
 | `QuestDrop { quest_id }` | `CSDropQuestContext` 0x0d7: `u32` | `SCQuestContextUpdated` with status 4 (dropped) |
 | `QuestTalk { npc_obj_id, quest_id, component_id, act_id }` | `CSQuestTalkMade` 0x0da: `bc u32 u32 u32` | `SCQuestContextUpdated` |
 
@@ -648,6 +649,8 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 | `SkillList { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, skills, interactable, modifier_keys }` | `SCNpcInteractionSkillList` 0x07b (the request's values echoed, `i32` count + `u32` skills, `bool`, `i32`) |
 | `DoodadQuestAccept { doodad_obj_id, quest_id }` | `SCDoodadQuestAccept` 0x111 (a doodad's quest function offers a quest: the client opens the dialog) |
 | `RewardedByMail { success, quest }` | `SCQuestRewardedByMail` 0x14e (`u8` success + `u32` quest id; `FUN_397b5ec0`) |
+
+| `DoodadCompleteQuest { doodad_obj_id, quest_id }` | `SCDoodadCompleteQuest` 0x14d (`bc` doodad, `u32` quest, the same pair as the accept packet; x2game `FUN_391dc050`): the doodad can take the quest in |
 | `NpcChat { chat_type, faction_id, npc_obj_id, npc_name, character_obj_id, kind, text_id, message }` | `SCNpcChatMessage` 0x0cf (`kind` 1: a text id, else a string) |
 
 The quest notices are their own `Event` variants (`aa_net::quest`), not interactions:

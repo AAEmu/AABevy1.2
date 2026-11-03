@@ -98,7 +98,7 @@ offers a skill or navi use therefore walks before its list is offered, while a c
 phase is listed from the 4 m centre distance. The pending action stores the phase and view
 generation it was picked from; on arrival the port re-checks the phase, the generation and
 a craft permission and drops the use if any changed, and a different bar or list pick
-cancels it. Picking a list entry closes the list (`menu_shown`), so a later bench open does
+cancels it. A fresh pointer click also cancels it when it arrives on the same frame as the old walk. Picking a list entry closes the list (`menu_shown`), so a later bench open does
 not close it a second time. `FUN_394d6dc0`
 rechecks the same distance before `CSExecuteCraft` (`batch::command`) and shows error 0x9a
 (`TOO_FAR_AWAY`) when the request is out of range. The active-interaction monitor `393b7e40`
@@ -124,6 +124,18 @@ values are refused. The owner is the house owner for a housing doodad. A house z
 client cannot resolve yet is inferred as allowed and the server's `bench_denial` stays
 authoritative. The send carries the live bench object id
 (`CSExecuteCraft` 0x0f8: recipe, doodad, count).
+
+## Quest hand-in
+
+A doodad's quest function can also take a quest in: the server sends `SCDoodadCompleteQuest` 0x14d (`bc`
+doodad, `u32` quest; x2game `FUN_391dc050` -> `FUN_393773a0`). `hud/dialog.rs` raises the original's
+`COMPLETE_QUEST_CONTEXT_DOODAD(quest, flag, doodadId)`, where the flag is `FUN_397d42d0` of the Ready
+component (act type 0x14 `QuestActConReportNpc` or 0x15 `QuestActConReportDoodad`). With the flag the
+directing window opens and its confirm button sends from the doodad id kept in `d.dialog`; without it the
+quest context script calls `TryCompleteQuestContext(2, quest, doodadId, "", selected)` immediately. The
+`CSCompleteQuestContext` request then carries that doodad object id (or 0x0dd for an in-progress
+let-it-done quest). The lane server does not send 0x14d yet, so the path is tested against the real World
+scripts from the decoded packet, not live.
 
 ## Natural gathering
 

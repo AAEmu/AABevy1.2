@@ -563,6 +563,47 @@ packet); an expired clock stays gone until the server's next Started / Updated (
 only creator). A refusal latches the quest instance so the next tick does not bring the clock back;
 the next Started / Updated of that instance releases the latch and starts the clock anew.
 
+### Let-it-done and over-done
+
+`X2Quest:IsLetItDoneQuest*` / `IsOverDoneQuest*` are computed by `quests.rs` from the quest's step and
+counters, not read from the raw `quest_contexts.let_it_done` column; `quest.lua` returns the row values.
+The original (`FUN_397d6320` for let-it-done, `FUN_397d71b0` for over-done, called by
+`FUN_39376930` / `FUN_39376990`) asks:
+
+* let-it-done: the quest is not main (`detail_id != 2`), is flagged `let_it_done`, is not repeatable, is
+  in progress, is not finished yet, and its objectives add up to at least half of what the step asks
+  (`DAT_3999c47c` 0.5; score quests use `score` instead). The native passes the player's level
+  (`player+0x4b4`, set by `FUN_390b4930`) as a third argument; the recovered `FUN_397d6320` body does not
+  read it;
+* over-done: a non-main let-it-done quest, every objective complete (`FUN_397d7070`) and each
+  `min(done, 2 * count)` at least `ceil(1.5 * count)` (`DAT_3999c478` 1.5; score quests 1.5 times their
+  score). It does not test the quest status, so a quest the server already marked ready still counts.
+
+The objectives use the native set: one slot per Progress component from that component's first act, and
+only `FUN_397d3440` / `FUN_397d7070`'s act types 0, 1, 2, 4, 5, 0x31 and 0x32 (`QuestActObjZoneKill` sums
+`count_pk + count_npc`); score quests use 0, 1, 2, 4, 5 and 0x2b. A 0 count is not promoted to 1.
+
+Handing one in from the quest journal (`who` 0 in `X2Quest:TryCompleteQuestContext`) now sends
+`CSTryQuestCompleteAsLetItDone` 0x0dd (`u32` quest, `bc` NPC, `i32` selected); the native picks it in
+`FUN_3937b860` when the quest is not ready but `FUN_397d6320` holds. A ready quest keeps
+`CSCompleteQuestContext` 0x0d6. The native also raises `QUEST_CHAT_LET_IT_DONE` when a report doodad is in
+view (`FUN_3937b860` -> event 245, the doodad id as a string); no 1.2 script registers that event (checked
+the `x2ui` quest scripts), so the client does not raise it.
+
+A doodad that hands a quest in (`SCDoodadCompleteQuest` 0x14d, handled by x2game `FUN_391dc050` ->
+`FUN_393773a0`) raises `COMPLETE_QUEST_CONTEXT_DOODAD(quest, flag, doodadId)`. The flag is
+`FUN_397d42d0` of the quest's Ready component (an act type 0x14 `QuestActConReportNpc` or 0x15
+`QuestActConReportDoodad`): true opens the directing dialog (`quest_context_directing.alb` proto 33) and
+its confirm button sends from `d.dialog`; false goes through `quest_context.alb` proto 19 to
+`TryCompleteQuestContext(2, quest, doodadId, "", selected)`. `hud/dialog.rs` sets `d.dialog.doodad` and
+clears the NPC before raising the event, and skips a second event while directing.
+
+`FUN_3937b860` also refuses locally and raises `QUEST_ERROR_INFO(error, quest)` through the scripts
+(`FUN_3937a130`): error 2 when the ready quest's NPC/doodad is not in reach (`FUN_393761f0`), error 10 when
+a Reward step has `QuestActSupplySelectiveItem` and no reward is selected, and error 12 when the quest is
+in progress and not let-it-done. Nothing is sent for those. Local refusal events fire after the
+HUD state is released so the original handlers can query it and close their window.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
