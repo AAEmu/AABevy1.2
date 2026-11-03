@@ -1268,8 +1268,12 @@ pub mod move_flags {
 pub mod actor_flags {
     /// Feet on terrain or a static collider.
     pub const STANDING_ON_SOLID: u8 = 0x04;
+    /// The first packet of a jump (the capture's 0x08 standing, 0x0c moving).
+    pub const JUMP_START: u8 = 0x08;
     /// In the air after a jump.
     pub const JUMPING: u8 = 0x10;
+    /// The landing packet of a jump (the capture's 0x14: `JUMPING | STANDING_ON_SOLID`).
+    pub const LANDING: u8 = JUMPING | STANDING_ON_SOLID;
     /// Standing on a ship, vehicle or doodad; a block naming the object follows (not modelled).
     pub const STANDING_ON_OBJECT: u8 = 0x20;
     /// Hanging from an object; climb data follows (not modelled).

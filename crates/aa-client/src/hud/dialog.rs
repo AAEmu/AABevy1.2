@@ -2027,7 +2027,11 @@ mod tests {
         let (mut app, shared) = npc_walk_app(10.0);
         if !with_ui(&mut app) { return; }
         npc_events(&mut app);
-        shared.borrow_mut().mounted.local_cart = Some((31, 0.0));
+        shared.borrow_mut().mounted.local_cart = Some(crate::hud::mounted::LocalCart {
+            obj_id: 31,
+            speed: 0.0,
+            turn_rate: 0.0,
+        });
         right_click(&mut app, 20);
         assert!(shared.borrow().dialog.approach.is_none());
         assert!(!w_held(&app));
