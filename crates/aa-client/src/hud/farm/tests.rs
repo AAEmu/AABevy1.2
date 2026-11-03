@@ -1,20 +1,14 @@
 use super::*;
+use aa_net::Pos;
+use aa_net::farm::CommonFarmEntry;
+
+use crate::hud::api::HudBridge;
 use crate::hud::data::housing::{CommonFarm, FarmGroup, FarmGroupDoodad, Tables};
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use aa_ui::UiRuntime;
-
-use crate::hud::api::Shared;
 
 fn game() -> GameData {
     let mut game = GameData::default();
     let mut housing = Tables::default();
-    for (id, name, count, description) in [
-        (1, "Farm", 10, "crops"),
-        (2, "Nursery", 5, "trees"),
-    ] {
+    for (id, name, count, description) in [(1, "Farm", 10, "crops"), (2, "Nursery", 5, "trees")] {
         housing.farm_groups.insert(
             id,
             FarmGroup {
@@ -74,6 +68,24 @@ fn setup(game: GameData) -> (UiRuntime, Shared) {
     (rt, bridge)
 }
 
+fn entry() -> CommonFarmEntry {
+    CommonFarmEntry {
+        farm_type: 1,
+        template_id: 380,
+        time_left: 5000,
+        func_group_id: 77,
+        pos: Pos::new(100.0, 200.0, 30.0),
+        plant_time: super::unix_ms() / 1000,
+    }
+}
+
+fn list(entries: Vec<CommonFarmEntry>) -> CommonFarmList {
+    CommonFarmList {
+        max_count: entries.len() as i32,
+        entries,
+    }
+}
+
 #[test]
 fn static_getters_match_the_native_shapes() {
     let (rt, _) = setup(game());
@@ -96,4 +108,112 @@ fn static_getters_match_the_native_shapes() {
         )
         .exec()
         .unwrap();
+}
+
+#[test]
+fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
+    let (rt, bridge) = setup(game());
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(rt)
+        .insert_non_send(HudBridge(bridge))
+        .add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, sync);
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load(
+            r#"
+            UPDATED = 0
+            local probe = UIParent:CreateWidget('emptywidget', 'farmUpdatedProbe', 'UIParent')
+            probe:RegisterEvent('COMMON_FARM_UPDATED')
+            probe:SetHandler('OnEvent', function() UPDATED = UPDATED + 1 end)
+        "#,
+        )
+        .exec()
+        .unwrap();
+    app.world_mut()
+        .write_message(NetEvent(Event::Farm(FarmEvent::List(list(vec![entry()])))));
+    app.update();
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 1);
+    rt.lua
+        .load(
+            r#"
+            assert(X2:GetRuntimeCommonFarmDoodadCount(1) == 1)
+            assert(X2:GetRuntimeCommonFarmDoodadCount(2) == 0)
+            assert(X2:GetRuntimeCommonFarmDoodadsInfo(2) == nil)
+            local crops = X2:GetRuntimeCommonFarmDoodadsInfo(1)
+            assert(#crops == 1)
+            local crop = crops[1]
+            assert(crop.farmType == 1 and crop.itemType == 13725)
+            assert(crop.name == '' and crop.doodadName == '')
+            assert(crop.vPosX == 100 and crop.vPosY == 200)
+            assert(crop.leftGrowthTime > 4000 and crop.leftGrowthTime <= 5000)
+            assert(crop.leftProtectTime > 86000000)
+            assert(crop.growUp == true)
+            assert(type(crop.leftProtectTime) == 'number')
+        "#,
+        )
+        .exec()
+        .unwrap();
+}
+
+#[test]
+fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
+    let (rt, bridge) = setup(game());
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(rt)
+        .insert_non_send(HudBridge(bridge.clone()))
+        .add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, sync);
+    let drain = |app: &mut App| {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|v| v.0)
+            .collect::<Vec<_>>()
+    };
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load("X2:RequestRuntimeCommonFarmDoodadInfo()")
+        .exec()
+        .unwrap();
+    app.update();
+    assert!(matches!(
+        drain(&mut app).as_slice(),
+        [Command::RequestCommonFarmList]
+    ));
+    // A second request inside 2 s only refreshes the window.
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load("X2:RequestRuntimeCommonFarmDoodadInfo()")
+        .exec()
+        .unwrap();
+    app.update();
+    assert!(drain(&mut app).is_empty());
+    // An instant zone refuses the request (0x242) and still refreshes.
+    bridge.borrow_mut().snapshot.instance_id = 9;
+    let state = app
+        .world()
+        .non_send::<UiRuntime>()
+        .lua
+        .app_data_ref::<State>()
+        .unwrap()
+        .clone();
+    state.0.borrow_mut().last_request = None;
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load("X2:RequestRuntimeCommonFarmDoodadInfo()")
+        .exec()
+        .unwrap();
+    app.update();
+    assert!(drain(&mut app).is_empty());
 }
