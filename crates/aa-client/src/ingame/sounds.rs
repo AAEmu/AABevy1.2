@@ -207,7 +207,8 @@ impl SoundBook {
         weapon.sound(conn.as_ref()?, blows, impact, mainhand, target.into())
     }
 
-    /// The sound events of the clips of a model's `$SoundEventDatabase`; `None` while it is being read.
+    /// The sound events of the clips of a model's `$SoundEventDatabase`, their times phases of the clip; `None` while it is being
+    /// read. [`SoundBook::clip_events`] gives seconds.
     pub fn clip_sounds(&self, database: &str, clip_name: &str) -> Option<Arc<[AnimSound]>> {
         let slot = {
             let mut inner = self.inner();
@@ -230,15 +231,17 @@ impl SoundBook {
         Some(table.get(&file_name(clip_name)).cloned().unwrap_or_else(|| Arc::from(Vec::new())))
     }
 
-    /// The sound events of a clip as the unit plays it: its own, else (a direction of a locomotion group, `fist_mo_normal_run_fl`) the
-    /// ones of the group's `.lmg`, whose times are phases of the cycle (`duration` is the length of the clip).
+    /// The sound events of a clip as the unit plays it, in seconds into a clip `duration` long: its own, else (a direction of a
+    /// locomotion group, `fist_mo_normal_run_fl`) the ones of the group's `.lmg`. Both hold phases of the clip (0..=1, see
+    /// `combat::clips`), which the original client plays at `time * duration`.
     pub fn clip_events(&self, database: &str, file: &str, duration: f32) -> Option<Arc<[AnimSound]>> {
         let own = self.clip_sounds(database, file)?;
-        if !own.is_empty() {
-            return Some(own);
-        }
-        let Some(group) = locomotion_group(file) else { return Some(own) };
-        let phases = self.clip_sounds(database, &group)?;
+        let phases = if own.is_empty() {
+            let Some(group) = locomotion_group(file) else { return Some(own) };
+            self.clip_sounds(database, &group)?
+        } else {
+            own
+        };
         Some(phases.iter().map(|e| AnimSound { time: e.time * duration, ..e.clone() }).collect())
     }
 

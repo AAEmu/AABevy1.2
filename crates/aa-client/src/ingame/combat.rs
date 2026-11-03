@@ -914,10 +914,10 @@ impl Stage<'_, '_> {
         skills::upper_candidates(&upper).find_map(|n| self.clip(unit, &n).map(|(clip, _)| clip))
     }
 
-    /// The anim events of clip `name` of the unit's model.
+    /// The anim events of clip `name` of the unit's model, in seconds into the clip (the databases hold phases of it).
     fn events(&self, unit: Entity, name: &str) -> clips::ClipEvents {
-        let Some(cal) = self.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return clips::ClipEvents::default() };
-        clips::ClipEvents::of(&cal, name)
+        let Some((clip, cal)) = self.clip(unit, name) else { return clips::ClipEvents::default() };
+        clips::ClipEvents::of(&cal, name, clip.clip.duration)
     }
 
     /// Plays a clip on a unit as an action. `hold` is how long a looping clip may last. Returns the clip's length, `None` when the
@@ -1017,7 +1017,7 @@ impl Stage<'_, '_> {
     fn layer_sounds(&self, unit: Entity, clip: &aa_anim::BoundClip) -> Option<Arc<[AnimSound]>> {
         let (_, loco, ..) = self.actors.get(unit).ok()?;
         let database = loco?.clips.cal.sound_events.as_deref()?;
-        let events = self.audio.book()?.clip_sounds(database, &clip_file(clip)?)?;
+        let events = self.audio.book()?.clip_events(database, &clip_file(clip)?, clip.clip.duration)?;
         (!events.is_empty()).then_some(events)
     }
 
@@ -1296,8 +1296,8 @@ fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name:
 
 /// The effects the clip starts itself (`effect` anim events: the flowers of `/flowers`, the tears of `/sad`), at their times.
 fn clip_effects(st: &Stage, combat: &mut Combat, unit: Entity, name: &str, now: f64) {
-    let Some(cal) = st.actors.get(unit).ok().and_then(|(_, loco, ..)| loco.map(|l| l.clips.cal.clone())) else { return };
-    for effect in clips::clip_effects(&cal, name).iter() {
+    let Some((clip, cal)) = st.clip(unit, name) else { return };
+    for effect in clips::clip_effects(&cal, name, clip.clip.duration).iter() {
         combat.after(now + f64::from(effect.time), Later::ClipFx { unit, effect: effect.clone() });
     }
 }
