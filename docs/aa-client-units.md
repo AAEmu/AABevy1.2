@@ -470,15 +470,44 @@ depth-only prepass and shadow pipelines (`MAY_DISCARD`); without it the hidden p
 shadow. `restore_emergence_clip` puts the shared materials back after `portal_time`, but only on a mesh that still
 holds its clipped clone (a stealth material change wins). Parts that are not `IllumMaterial` (none of the vehicle
 parts in the data) would not be clipped. The model enable call (vfunc 0x1a4) has no direct equivalent. `h` stands in
-for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The group's
-`FxSound` item is not played yet (the particle portal is); the pending list survives visibility loss like the 1.2
-list.
+for the native `[bounds+0x28]` with the largest horizontal half extent of the combined model bounds. The pending list
+survives visibility loss like the 1.2 list.
+
+`spawn_summon_portals` starts the group's sounds through the skill audio path (`sounds::Audio`, class `Skill`): the
+`FxSound` items and each `FxParticle` item's `fx_particles.sound_id` (the same field as a skill effect's particle
+sound), and the particle library's own emitter `Sound=""` events, deduplicated and played once at the portal anchor.
+Land group 1263 has the `FxSound` item 1760 `Sounds/x2eventsounds:portal:portal_tank`; sea group 619's particle item
+890 has `fx_particles.sound_id` 2413 `Sounds/x2eventsounds:portal:portal_ship_15`. Both groups' items offset 0, so
+they all hang at the anchor. The sounds were missing before this slice; a muted run (`--mute`) starts none.
 
 Sea variant (Eznan Cutter, slave 21): the data gives group 619 `배포탈_열림x10`, scale 10.0, time 7.0 s, whose single
-item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), and the client plays it at
-the plane. The capture's 45-60° tilted rise/righting with spray is **a client gap**: the emergence client adds no
-tilt or righting and leaves the unit rotation to `units::move_units`, so it cannot produce the captured pitch on its
-own; the parts still below the sea are not modelled either.
+item is `X2_EFFECT_O.Interaction.shipportal_open_main_x15` (a water column, no tank ring), played at the plane.
+
+The portal emergence code has **no ship branch**: `FUN_3909ea30`/`FUN_39097220` (x2game.dll.c:136679 / 132165) always
+slide the unit along its forward projected to the horizontal, through a vertical clip plane, for `portal_time`. The
+captured Eznan Cutter rises vertically and rights itself; the **inferred** attribution is its CryPhysics buoyancy
+body. `FUN_390df580` (x2game.dll.c:179095) builds that body: it scans the prefab's objects for names starting with
+`buoy` (`XlComparePrefixI`, x2game.dll.c:179531) and, when there are none, builds the float body from the ship
+descriptor's keel tube (`tube_length` / `tube_radius` / `tube_offset_z` / `keel_offset_z`), mass box
+(`mass_center_*` / `mass_box_size_*`) and floats it with `water_damping` / `water_density` / `water_resistance`
+(fallback at x2game.dll.c:179577 ff.; `galleon.xml/galleon.step_10galleon_normal` has no `buoy` object). It is
+reached through the model vtable (`FUN_390e2220` / `FUN_390e3530` / `FUN_390eb720`), **not** directly from
+`ShipUnitModel::Init`/`Update` (`FUN_390e8b30`, x2game.dll.c:185704 / `FUN_390ebc50`, x2game.dll.c:187637, which
+do not reference it); the captured rise/righting is therefore taken as the model physics, not the portal animation,
+but that link is **capture-inferred**, not proven by the decompile.
+
+The Bevy emergence reproduces the result for a `ShipModel` when a water surface is known at its position
+(`WaterQuery`): it keeps the native horizontal start (`end - axis * 2 * extent`), linear slide and native anchor
+x/z (`end - axis * extent`, `FUN_3909ea30` state +0x74), but starts the root with the hull top at the sea
+(`ship_models.mass_center_z + mass_box_size_z / 2`, via `Db::ship_hull_height`), pitched bow up, and eases the rise
+and the righting to upright over `portal_time`; the clip plane is the horizontal sea surface (normal +Y, the native
+anchor x/z lifted to the water) instead of the native vertical portal plane, so the submerged part is not drawn.
+The horizontal-only ship clip is **capture-inferred**: the native code has only the vertical plane. The pitch is 50°
+(the capture's 45-60° mast/yard line); the start depth, the pitch angle and the easing curve are **capture-inferred**
+(2026-11-02 Eznan Cutter capture, `<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`), not decompiled
+constants. The captured timing (first mast inside the burst, sails +0.9 s, upright with a bow wake ~3.5 s into the
+7 s) is the reference; our rise is the same shape but is not frame-exact. Without a water query the ship takes the
+land path exactly as before (start/plane/clip unchanged).
 
 ### Damage states (S15)
 
@@ -1596,5 +1625,8 @@ TODO(#58 child units): when the `child-units` branch lands, `turret::local_aim` 
 `units::current_transform` instead of the drawn `GlobalTransform`, so a cannon aboard a moving
 ship aims from its parent's transform (S12-C3). Until then it uses the replicated transform.
 
-The vehicle death example pauses its simulation while render pipelines compile, so cold shader
-compilation cannot consume the short animation before `--shot` captures it.
+`examples/slave_summon -- --ship` draws the Eznan Cutter rising and righting through a horizontal
+sea clip beside a streamed-in control. Use `--shot-after 4` to capture the middle of its 7 s emergence.
+
+The vehicle death and summon examples pause their simulation while render pipelines compile,
+so cold shader compilation cannot consume the short animation before `--shot` captures it.
