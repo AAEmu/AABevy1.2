@@ -542,8 +542,9 @@ A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(err, q
 the failed quest is the one the window itself shows (`quest_context_directing.alb` F37): `playLines`
 reports its questType through `HUD.quest_show`, so a late refusal for an older quest cannot close a
 newer window. The original scripts print `locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148)
-raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when it is the current target (`FUN_39376590`), which
-closes the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
+reports its `SkillResult` through the skill-result message first and then raises
+`QUEST_QUICK_CLOSE_EVENT(qtype)`, only when it is the current target (`FUN_39376590`), which closes
+the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
 raises `DOODAD_PHASE_MSG(text)` (`FUN_3937a650`, `FUN_3937a520`) with the `QUEST_MAIL_SENT` /
 `QUEST_REWARDED_BY_MAIL` `ERROR_MSG` text and the `quest_mails` name / the quest title as its `$1`;
 a failed reward mail (`success` 0) raises `QUEST_ERROR_INFO(0xb, qtype)` instead. A name the client
