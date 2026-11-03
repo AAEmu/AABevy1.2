@@ -158,6 +158,7 @@ async fn exercise(c: &mut Client, s: &mut WorldState, db: &Connection) -> Result
     c.send(Command::Shop(ShopCommand::Buy {
         npc_obj_id: npc_id,
         doodad_obj_id: 0,
+        func_id: 0,
         buy: vec![],
         buy_back: vec![0],
         use_aa_point: false,
@@ -207,6 +208,7 @@ async fn exercise(c: &mut Client, s: &mut WorldState, db: &Connection) -> Result
     c.send(Command::Shop(ShopCommand::Buy {
         npc_obj_id: npc_id,
         doodad_obj_id: 0,
+        func_id: 0,
         buy: vec![BuyEntry { item_id: product, grade, count: 1, currency: 0 }],
         buy_back: vec![],
         use_aa_point: false,

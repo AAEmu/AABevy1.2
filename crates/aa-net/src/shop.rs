@@ -38,6 +38,9 @@ pub enum ShopCommand {
     Buy {
         npc_obj_id: u32,
         doodad_obj_id: u32,
+        /// The doodad func for a `DoodadFuncPurchase` confirmation (`FUN_397ac3f0` +0x14); 0 for
+        /// a merchant/store cart. The server reads the field and ignores it.
+        func_id: u32,
         buy: Vec<BuyEntry>,
         buy_back: Vec<i32>,
         use_aa_point: bool,
@@ -121,9 +124,9 @@ impl ShopCommand {
     /// Call [`Self::validate`] before encoding caller-provided carts. The session does this.
     pub fn write(&self, w: &mut Writer) {
         match self {
-            Self::Buy { npc_obj_id, doodad_obj_id, buy, buy_back, use_aa_point } => {
+            Self::Buy { npc_obj_id, doodad_obj_id, func_id, buy, buy_back, use_aa_point } => {
                 assert!(buy.len() <= 255 && buy_back.len() <= 255, "shop cart exceeds wire count");
-                w.bc(*npc_obj_id).bc(*doodad_obj_id).u32(0).u8(buy.len() as u8).u8(buy_back.len() as u8);
+                w.bc(*npc_obj_id).bc(*doodad_obj_id).u32(*func_id).u8(buy.len() as u8).u8(buy_back.len() as u8);
                 for i in buy {
                     w.u32(i.item_id).u8(i.grade).i32(i.count).u8(i.currency);
                 }
@@ -249,6 +252,7 @@ mod tests {
         let buy = ShopCommand::Buy {
             npc_obj_id: 0x010203,
             doodad_obj_id: 0,
+            func_id: 0x0102_0304,
             buy: vec![BuyEntry { item_id: 8001, grade: 2, count: 3, currency: 1 }],
             buy_back: vec![4],
             use_aa_point: false,
@@ -257,7 +261,7 @@ mod tests {
         assert_eq!(packet.opcode(), 0x0ae);
         assert_eq!(
             packet.encode_body(),
-            [3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0x41, 0x1f, 0, 0, 2, 3, 0, 0, 0, 1, 4, 0, 0, 0, 0]
+            [3, 2, 1, 0, 0, 0, 4, 3, 2, 1, 1, 1, 0x41, 0x1f, 0, 0, 2, 3, 0, 0, 0, 1, 4, 0, 0, 0, 0]
         );
         let packet = ClientMsg::Shop(ShopCommand::Sell {
             npc_obj_id: 0x010203,
@@ -285,6 +289,7 @@ mod tests {
         let buy = |count, buy_back| ShopCommand::Buy {
             npc_obj_id: 1,
             doodad_obj_id: 0,
+            func_id: 0,
             buy: vec![BuyEntry { item_id: 8001, grade: 0, count, currency: 0 }],
             buy_back,
             use_aa_point: false,

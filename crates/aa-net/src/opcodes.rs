@@ -174,6 +174,7 @@ opcodes! {
         CSJuryEndTestimonyPacket = 0x073,
         CSCancelTrialPacket = 0x074,
         CSJuryVerdictPacket = 0x075,
+        CSReportCrimePacket = 0x076,
         CSRequestJuryWaitingNumberPacket = 0x079,
         CSInviteToTeamPacket = 0x07a,
         CSInviteAreaToTeamPacket = 0x07b,
