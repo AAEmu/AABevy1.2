@@ -220,6 +220,15 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             // `cannot_request_commonfarm_info_in_instant_zone` (0x242) and raises
             // `COMMON_FARM_UPDATED`; a request within 2 s only refreshes the window.
             if b.borrow().snapshot.instance_id != 0 {
+                s.0.borrow_mut().list = None;
+                let key = "cannot_request_commonfarm_info_in_instant_zone";
+                let text = super::alerts::localized_lua(lua, "ERROR_MSG", key)
+                    .unwrap_or_else(|| key.to_string());
+                aa_ui::lua::queue_ui_event(
+                    lua,
+                    "SYSMSG",
+                    vec![Value::String(lua.create_string(&text)?)],
+                );
                 aa_ui::lua::queue_ui_event(lua, "COMMON_FARM_UPDATED", Vec::new());
                 return Ok(());
             }
@@ -230,6 +239,8 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 aa_ui::lua::queue_ui_event(lua, "COMMON_FARM_UPDATED", Vec::new());
                 return Ok(());
             }
+            // A sent request clears the list before sending (`FUN_39034b10`).
+            v.list = None;
             v.last_request = Some(now);
             v.commands.push(Command::RequestCommonFarmList);
             Ok(())

@@ -357,18 +357,30 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .app_data_ref::<State>()
         .unwrap()
         .clone();
+    state.0.borrow_mut().list = Some(Received {
+        entries: Vec::new(),
+        at: Instant::now(),
+    });
     app.world()
         .non_send::<UiRuntime>()
         .lua
         .load("X2:RequestRuntimeCommonFarmDoodadInfo()")
         .exec()
         .unwrap();
+    assert!(
+        state.0.borrow().list.is_none(),
+        "a sent request clears the list"
+    );
     app.update();
     assert!(matches!(
         drain(&mut app).as_slice(),
         [Command::RequestCommonFarmList]
     ));
     // A second request inside 2 s only refreshes the window and keeps the list.
+    state.0.borrow_mut().list = Some(Received {
+        entries: Vec::new(),
+        at: Instant::now(),
+    });
     app.world()
         .non_send::<UiRuntime>()
         .lua
@@ -377,11 +389,16 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .unwrap();
     app.update();
     assert!(drain(&mut app).is_empty());
+    assert!(state.0.borrow().list.is_some());
     let rt = app.world().non_send::<UiRuntime>();
     aa_ui::lua::tick(&rt.lua, 16.0);
     assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 1);
     // An instant zone refuses (0x242), clears the list and still refreshes.
     bridge.borrow_mut().snapshot.instance_id = 9;
+    state.0.borrow_mut().list = Some(Received {
+        entries: Vec::new(),
+        at: Instant::now(),
+    });
     state.0.borrow_mut().last_request = None;
     app.world()
         .non_send::<UiRuntime>()
@@ -391,9 +408,11 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .unwrap();
     app.update();
     assert!(drain(&mut app).is_empty());
+    assert!(state.0.borrow().list.is_none());
     let rt = app.world().non_send::<UiRuntime>();
     aa_ui::lua::tick(&rt.lua, 16.0);
     assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 2);
+    assert_eq!(rt.lua.load("return MESSAGES").eval::<i64>().unwrap(), 1);
 }
 
 fn load_commonfarm(rt: &UiRuntime) -> bool {
