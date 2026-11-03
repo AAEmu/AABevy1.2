@@ -388,6 +388,9 @@ pub(super) struct View {
     claims_key: bool,
     /// The interaction list: the doodad and its rows.
     menu: Option<(u32, Vec<Entry>)>,
+    /// The list was shown to the player (`INTERACTION_START`), not only carried as a single
+    /// action: another interaction (`FUN_393b7b10`) must close it first.
+    menu_shown: bool,
     /// The ids picked from the list.
     chosen: Vec<i64>,
     /// The doodad under the pointer (its name tooltip is up).
@@ -874,9 +877,12 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     interaction.set(
         "CancelInteraction",
         lua.create_function(move |_, args: mlua::MultiValue| {
-            if state.borrow_mut().doodad.menu.take().is_some() {
+            let mut data = state.borrow_mut();
+            if data.doodad.menu.take().is_some() {
+                data.doodad.menu_shown = false;
                 return Ok(());
             }
+            drop(data);
             match &prior {
                 Some(f) => f.call::<()>(args),
                 None => Ok(()),
@@ -1502,6 +1508,9 @@ fn pointer_use(
             .or(arrived)
             .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev, env))
     };
+    if menu {
+        data.doodad.menu_shown = true;
+    }
     drop(data);
     if menu && let Some(rt) = rt {
         rt.fire_event("INTERACTION_START", ());
@@ -1856,6 +1865,9 @@ pub(super) fn execute(
         out.write(NetCommand(Command::Coffer(CofferCommand::Interact { obj_id, open: false })));
         inventory.coffer.close();
     }
+    // Native `FUN_393b7b10` runs `FUN_393b7aa0` first when any interaction is active, not only
+    // another bench: the shown interaction list and the coffer window are interactions too.
+    let other_interaction = d.doodad.menu_shown || inventory.coffer.is_open();
     let execute = match d.dynamic_actions.shown().map(|s| s.source) {
         Some(super::dynamic_actions::Source::Doodad { .. })
         | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
@@ -1998,6 +2010,12 @@ pub(super) fn execute(
     // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
     // cast ran and the phase changed to 4514; the server only added `SCErrorMsg` BAG_FULL after it
     // (`tools/evidence/gather/capture-results.txt`).
+    if !opens.is_empty() {
+        if other_interaction && inventory.coffer.is_open() {
+            d.doodad.coffer_close = true;
+        }
+        d.doodad.menu_shown = false;
+    }
     let game = d.game.get();
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
@@ -2036,7 +2054,7 @@ pub(super) fn execute(
         // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
         // count) treats either argument nil/zero as the general recipe book.
         for (object, count, replaced) in opens {
-            if replaced {
+            if replaced || other_interaction {
                 rt.fire_event("INTERACTION_END", ());
             }
             rt.fire_event("CRAFTING_START", (object, count));
@@ -4437,6 +4455,82 @@ mod tests {
             .load("assert(EVENTS=='CRAFTING_START;INTERACTION_END;CRAFTING_START;','second open: '..EVENTS)")
             .exec()
             .unwrap();
+    }
+
+    /// Native `FUN_393b7b10` closes any active interaction (`FUN_393b7aa0` -> event 0xd2) before
+    /// installing kind 3; a shown doodad interaction list or an open coffer is one, not only
+    /// another bench.
+    #[test]
+    fn opening_a_bench_closes_a_shown_interaction_list_or_coffer_first() {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+        if !std::path::Path::new(&pak).is_file() {
+            eprintln!("skip: no game_pak at {pak}");
+            return;
+        }
+        let rt = UiRuntime::new("en_us", 800.0, 600.0).unwrap();
+        rt.lua
+            .load(
+                "EVENTS='';local w=UIParent:CreateWidget('emptywidget','interactionProbe','UIParent');                 w:RegisterEvent('INTERACTION_END');w:RegisterEvent('CRAFTING_START');                 w:SetHandler('OnEvent',function(_,event) EVENTS=EVENTS..event..';' end)",
+            )
+            .exec()
+            .unwrap();
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            assert!(d.game.0.set(craft_tables(1088, craft_perm::ANY)).is_ok());
+        }
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        let mut app = craft_app(rt, bridge.clone(), doodads, Units::default());
+        let mut inventory = Inventory::default();
+        inventory.coffer.obj_id = 900;
+        app.insert_resource(inventory);
+        {
+            let mut d = bridge.borrow_mut();
+            d.doodad.menu_shown = true;
+            d.doodad.menu = Some((300, Vec::new()));
+            d.doodad.chosen.push(i64::from(CRAFT_ACTION));
+        }
+        app.update();
+        assert_eq!(
+            crate::hud::crafting::active_bench(&bridge.borrow()),
+            Some((300, 568))
+        );
+        assert!(
+            !bridge.borrow().doodad.menu_shown,
+            "the list is closed by the bench"
+        );
+        assert!(
+            bridge.borrow().doodad.coffer_close,
+            "the coffer is closed too"
+        );
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(EVENTS=='INTERACTION_END;CRAFTING_START;','first open: '..EVENTS)")
+            .exec()
+            .unwrap();
+
+        app.update();
+        let sent = app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [Command::Coffer(CofferCommand::Interact {
+                    obj_id: 900,
+                    open: false,
+                })]
+            ),
+            "{sent:?}"
+        );
+        assert!(!app.world().resource::<Inventory>().coffer.is_open());
     }
 
     fn craft_app(rt: UiRuntime, bridge: Shared, doodads: Doodads, units: Units) -> App {

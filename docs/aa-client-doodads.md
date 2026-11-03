@@ -78,8 +78,10 @@ The port adds that action to the phase's `Uses` (`craft: Vec<perm_id>`, one entr
 func), offers it on F, the right-click list and the dynamic bar (a sentinel id, since no
 skill exists), and `doodad::execute` opens the bench through `crafting::open_bench`, firing
 `CRAFTING_START` with the two numeric arguments the script's `SetDoodad` reads. No packet
-goes out on open. Opening a second bench while one is active runs native `FUN_393b7b10`'s
-`FUN_393b7aa0` first, so the HUD fires `INTERACTION_END` before the new `CRAFTING_START`.
+goes out on open. Opening a bench runs native `FUN_393b7b10`'s `FUN_393b7aa0` first whenever any
+interaction is active (another bench, a shown doodad interaction list or the coffer
+window), so the HUD fires `INTERACTION_END` before `CRAFTING_START`; an open coffer is
+also closed through `CSCofferInteraction` on the next frame.
 
 The bar and right-click list use the normal doodad candidate distance (4 m): native
 `393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
