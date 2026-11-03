@@ -105,7 +105,14 @@ fn activation_preserves_stale_refresh_and_real_identical_snapshot_notifications(
             rt.lua.load("assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
         }
         match stale {
-            1 => { bridge.borrow_mut().crafting.actabilities.apply(&Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 }); }
+            1 => {
+                bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+                bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+                    last: true,
+                    entries: vec![ActabilityValue { id: 1, point: 9000, step: 0 }],
+                }));
+                bridge.borrow_mut().crafting.actabilities.apply(&Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 });
+            }
             2 => bridge.borrow_mut().tips.attrs.modifiers.push((0, false, 25)),
             3 => bridge.borrow_mut().character_id = 48,
             4..=6 => {
@@ -160,14 +167,19 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     crate::hud::api::install(&mut rt, &bridge)?;
-    rt.lua.load("pointReceipts=0;UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)assert(id==1 and delta==17 and total==10017);pointReceipts=pointReceipts+1 end);assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+    rt.lua.load("pointReceipts=0;UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)assert(id==1 and delta==17 and total==9017);pointReceipts=pointReceipts+1 end);assert(#X2Ability:GetAllMyActabilityInfos()>0)").exec()?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 9000, step: 0 }],
+    }));
     let delta = Event::LaborChanged { amount: 0, action: 1, point: 17, step: 0 };
     // sync_hud has copied the authoritative resource before the first update.
     bridge.borrow_mut().crafting.actabilities.apply(&delta);
     let mut app = activation_app(rt, bridge.clone());
     app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(delta));
     app.update();
-    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10017));
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(9017));
     assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("pointReceipts")?, 1);
 
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
@@ -182,6 +194,106 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
     app.update();
     assert_eq!(bridge.borrow().crafting.actabilities.get(2).unwrap().point, Some(10000));
     assert_eq!(app.world().get_non_send::<aa_ui::UiRuntime>().unwrap().lua.globals().get::<u32>("downgradeReceipts")?, 1);
+    Ok(())
+}
+
+#[test]
+fn over_limit_gain_uses_the_actual_clamped_difference_and_recomputes_the_grade() -> Result<(), Box<dyn std::error::Error>> {
+    if !aa_cry::pak_available() {
+        return Ok(());
+    }
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 9999, step: 0 }],
+    }));
+    rt.lua
+        .load(
+            r#"
+        points={}
+        UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)
+            assert(id==1 and name=='Group1')
+            table.insert(points,{delta,total})
+        end)
+    "#,
+        )
+        .exec()?;
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 5000 });
+    rt.lua.load("assert(#points==1 and points[1][1]==1 and points[1][2]==10000)").exec()?;
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10000));
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().step, 0);
+    // A negative point total recomputes the grade down (FUN_397a8640), not the wire step.
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 15000, step: 1 }],
+    }));
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: -6000 });
+    rt.lua.load("assert(#points==2 and points[2][1]==-6000 and points[2][2]==9000);assert(X2Ability:GetMyActabilityInfo(1).grade==0)").exec()?;
+    Ok(())
+}
+
+#[test]
+fn new_actability_entry_prints_the_inserted_total_not_zero() -> Result<(), Box<dyn std::error::Error>> {
+    if !aa_cry::pak_available() {
+        return Ok(());
+    }
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.entries.retain(|a| a.id != 19);
+    rt.lua
+        .load(
+            r#"
+        points={}
+        UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)
+            assert(id==19 and name=='Group19' and delta==5000 and total==5000)
+            table.insert(points,delta)
+        end)
+    "#,
+        )
+        .exec()?;
+    // Native inserts a missing entry with the grade-0-capped gain and returns it; the chat
+    // total must be the inserted point, not zero.
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 19, value: 5000 });
+    rt.lua.load("assert(#points==1)").exec()?;
+    assert_eq!(bridge.borrow().crafting.actabilities.get(19), Some(&aa_net::Actability { id: 19, point: Some(5000), step: 0 }));
+    Ok(())
+}
+
+#[test]
+fn action_point_gain_fires_the_four_native_arguments() -> Result<(), Box<dyn std::error::Error>> {
+    if !aa_cry::pak_available() {
+        return Ok(());
+    }
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 9983, step: 0 }],
+    }));
+    rt.lua
+        .load(
+            r#"
+        points={}
+        UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)
+            assert(id==1 and name=='Group1' and total==10000)
+            table.insert(points,delta)
+        end)
+    "#,
+        )
+        .exec()?;
+    // `SCAddActionPoint(action, value)` has no grade step and no nonzero gate (`391861f0`).
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 17 });
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 0 });
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 0, value: 5 });
+    rt.lua.load("assert(#points==2 and points[1]==17 and points[2]==0)").exec()?;
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10000));
     Ok(())
 }
 
@@ -333,6 +445,11 @@ fn point_changes_have_four_native_arguments_and_incomplete_snapshots_do_not_refr
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     crate::hud::api::install(&mut rt, &bridge)?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 0, step: 0 }],
+    }));
     rt.lua
         .load(
             r#"
@@ -358,7 +475,7 @@ fn point_changes_have_four_native_arguments_and_incomplete_snapshots_do_not_refr
         );
     }
     rt.lua
-        .load("assert(#points==2 and points[1][1]==150 and points[1][2]==10150 and points[2][1]==-50 and points[2][2]==10100)")
+        .load("assert(#points==2 and points[1][1]==150 and points[1][2]==150 and points[2][1]==-50 and points[2][2]==100)")
         .exec()?;
     dispatch(
         &rt,
@@ -557,5 +674,210 @@ fn original_proficiency_upgrade_cancel_confirm_and_received_downgrade() -> Resul
     if path.exists() {
         std::fs::remove_file(path)?;
     }
+    Ok(())
+}
+
+/// The original chat scripts' `All` tab lines (`chat/chat_msg_event.alb` dispatches to `X2Chat`).
+fn chat_lines(rt: &aa_ui::UiRuntime) -> Vec<String> {
+    let ui = aa_ui::lua::ui(&rt.lua);
+    let window = ui
+        .tree
+        .of_class("chatwindow")
+        .into_iter()
+        .find(|&id| ui.tree.widget(id).and_then(|w| w.chat.as_ref()).is_some_and(|c| c.window_id == 0))
+        .expect("original chat window 0");
+    let chat = ui.tree.widget(window).and_then(|w| w.chat.as_ref()).expect("chat state");
+    let message = chat.tabs.iter().find(|tab| tab.id == 0).map(|tab| tab.message).expect("All tab");
+    ui.tree
+        .widget(message)
+        .and_then(|w| w.message.as_ref())
+        .map(|m| m.lines.iter().map(|(line, _)| line.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// The World stage with the real chat scripts, texts and actability catalog, or `None` without
+/// the game files (the test then skips like the other real-data fixtures).
+fn proficiency_chat_runtime() -> Result<Option<(aa_ui::UiRuntime, Shared, std::path::PathBuf)>, Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&db).exists() {
+        eprintln!("proficiency chat: needs game_pak (AA_PAK) and compact.sqlite3 (AA_DB); skipped");
+        return Ok(None);
+    }
+    let (rt, bridge, path) = crate::hud::breath::fixture::runtime(1280., 720.)?;
+    Ok(Some((rt, bridge, path)))
+}
+
+#[test]
+fn login_snapshot_prints_no_gain_line_and_a_labor_delta_prints_the_native_line() -> Result<(), Box<dyn std::error::Error>> {
+    let Some((rt, bridge, path)) = proficiency_chat_runtime()? else { return Ok(()) };
+    bridge.borrow_mut().crafting.actabilities.expanded_expert = Some(0);
+    let limits = bridge.borrow().game.get().map(|g| g.crafting.raw_limits.clone()).unwrap_or_default();
+    bridge.borrow_mut().crafting.actabilities.up_limits = limits;
+    let snapshot = Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 9983, step: 0 }],
+    });
+    let before = chat_lines(&rt).len();
+    dispatch(&rt, &bridge, &snapshot);
+    assert_eq!(chat_lines(&rt).len(), before, "a received proficiency list must not print a gain line");
+    // Native `OnLaborPowerChanged` ignores a zero point delta (`0x391d3d60`).
+    dispatch(&rt, &bridge, &Event::LaborChanged { amount: 1, action: 1, point: 0, step: 0 });
+    assert_eq!(chat_lines(&rt).len(), before, "a zero delta prints nothing");
+    dispatch(&rt, &bridge, &Event::LaborChanged { amount: -1, action: 1, point: 17, step: 0 });
+    let lines = chat_lines(&rt);
+    assert_eq!(lines.len(), before + 1, "one gain line");
+    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy proficiency rose +|,17;. Current proficiency: |,10000;");
+    // The bar/page getter reads the same updated state.
+    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(1).point==10000)").exec()?;
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_grade_change_prints_the_native_grade_notice() -> Result<(), Box<dyn std::error::Error>> {
+    let Some((rt, bridge, path)) = proficiency_chat_runtime()? else { return Ok(()) };
+    let snapshot = Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 10000, step: 0 }],
+    });
+    dispatch(&rt, &bridge, &snapshot);
+    let before = chat_lines(&rt).len();
+    dispatch(&rt, &bridge, &Event::Actability(ActabilityEvent::TierChanged { is_upgrade: true, id: 1, step: 1 }));
+    let lines = chat_lines(&rt);
+    assert_eq!(lines.len(), before + 1, "one grade-up line");
+    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy's proficiency increased to Rank Novice.");
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn modifier_data() -> HudData {
+    let mut game = GameData::default();
+    game.crafting.groups.insert(
+        1,
+        super::super::data::Group {
+            name: "Group1".into(),
+            visible: true,
+            skill_page_visible: true,
+            unit_attr: 99,
+            ..default()
+        },
+    );
+    game.tips.set_buff_mods(
+        700,
+        vec![crate::hud::tipcalc::Mod { attr: 99, percent: false, value: 25, per_level: 0 }],
+    );
+    game.tips.set_buff_mods(
+        701,
+        vec![crate::hud::tipcalc::Mod { attr: 3, percent: false, value: 5, per_level: 0 }],
+    );
+    // Native `FUN_393888b0`: a template whose raw duration and tick differ can refresh on a tick.
+    game.tips.set_buff_times(700, 5000, 1000);
+    game.tips.set_buff_times(701, 1000, 1000);
+    let mut data = HudData { character_id: 47, ..default() };
+    data.game.0.set(game).ok().unwrap();
+    data.snapshot.unit_id = "100".into();
+    data
+}
+
+fn buff(index: u32, buff_id: u32) -> aa_net::buff::Buff {
+    aa_net::buff::Buff { index, buff_id, duration_ms: 10_000, stacks: 1, ..Default::default() }
+}
+
+fn modifier_app(rt: aa_ui::UiRuntime, bridge: Shared) -> App {
+    let mut app = App::new();
+    app.add_message::<NetEvent>()
+        .insert_non_send(rt)
+        .insert_non_send(crate::hud::api::HudBridge(bridge))
+        .init_resource::<aa_net::state::Buffs>()
+        .add_systems(Update, modifier_update);
+    app
+}
+
+#[test]
+fn actability_modifier_update_follows_the_native_buff_hooks() -> Result<(), Box<dyn std::error::Error>> {
+    if !aa_cry::pak_available() {
+        return Ok(());
+    }
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(modifier_data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua
+        .load("modifierUpdates=0;UIParent:SetEventHandler('ACTABILITY_MODIFIER_UPDATE',function(...)assert(select('#',...)==0);modifierUpdates=modifierUpdates+1 end)")
+        .exec()?;
+    let mut app = modifier_app(rt, bridge.clone());
+    let updates = |app: &App| {
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .globals()
+            .get::<u32>("modifierUpdates")
+            .unwrap()
+    };
+    app.update();
+    assert_eq!(updates(&app), 0, "the first run only seeds the tracker");
+    // Equipment is not a buff: the native 0x54 is a buff-manager event.
+    bridge.borrow_mut().tips.attrs.modifiers.push((99, false, 25));
+    app.update();
+    assert_eq!(updates(&app), 0, "equipment does not raise the buff event");
+    // A buff whose template has no actability-attribute modifier does nothing.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 100, buff: buff(7, 701) }));
+    app.update();
+    assert_eq!(updates(&app), 0, "an unrelated buff does not refresh proficiency");
+    // Another unit's actability buff is outside the player/mate gate.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 999, buff: buff(8, 700) }));
+    app.update();
+    assert_eq!(updates(&app), 0, "another unit's buff does not refresh the player's pages");
+    // Add on the player.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 100, buff: buff(9, 700) }));
+    app.update();
+    assert_eq!(updates(&app), 1, "a player actability buff raises the event");
+    // A same-value refresh still raises it (native OnBuffUpdated has no value gate).
+    app.world_mut().write_message(NetEvent(Event::BuffUpdated { obj_id: 100, index: 9, stacks: 1, charged: 1 }));
+    app.update();
+    assert_eq!(updates(&app), 2, "a same-value refresh raises the event");
+    // Remove raises it.
+    app.world_mut().write_message(NetEvent(Event::BuffRemoved { obj_id: 100, index: 9 }));
+    app.update();
+    assert_eq!(updates(&app), 3, "removing an actability buff raises the event");
+    // The player's own mate is gated like the player.
+    let mut mates = aa_net::state::Mates::default();
+    mates.own = Some(aa_net::mate::OwnedMate { spawn: Default::default(), obj_id: Some(77), dynamic: None });
+    app.insert_resource(mates);
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 77, buff: buff(10, 700) }));
+    app.update();
+    assert_eq!(updates(&app), 4, "an own-mate actability buff raises the event");
+    // Native `FUN_393888b0` tick: an actability buff crossing a tick boundary refreshes.
+    let mut buffs = aa_net::state::Buffs::default();
+    buffs.by_unit.insert(
+        100,
+        vec![aa_net::state::BuffEntry {
+            buff: aa_net::buff::Buff { index: 11, buff_id: 700, tick_ms: 1000, elapsed_ms: 0, stacks: 1, ..Default::default() },
+            received: std::time::Instant::now(),
+        }],
+    );
+    app.insert_resource(buffs);
+    app.update();
+    assert_eq!(updates(&app), 4, "the first observed tick is the baseline");
+    app.world_mut().resource_mut::<aa_net::state::Buffs>().by_unit.get_mut(&100).unwrap()[0].received =
+        std::time::Instant::now() - std::time::Duration::from_secs(2);
+    app.update();
+    assert_eq!(updates(&app), 5, "a tick boundary raises the event");
+    // Native skips the final tick (`tick_index >= duration / tick`).
+    {
+        let mut buffs = app.world_mut().resource_mut::<aa_net::state::Buffs>();
+        let entry = &mut buffs.by_unit.get_mut(&100).unwrap()[0];
+        entry.buff.duration_ms = 2000;
+        entry.received = std::time::Instant::now() - std::time::Duration::from_secs(3);
+    }
+    app.update();
+    assert_eq!(updates(&app), 5, "the final tick is skipped");
     Ok(())
 }

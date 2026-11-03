@@ -689,6 +689,9 @@ pub enum Event {
     /// Labor points added (`amount` > 0: "Gained N Labor Point(s)") or spent (`amount` < 0) for
     /// `action` (an actability id, 0 for none), which gained `point` actability points.
     LaborChanged { amount: i32, action: i32, point: i32, step: u8 },
+    /// `SCAddActionPoint`: actability `action` gains `value` points (native `391861f0` has no
+    /// nonzero gate and does not carry a grade step).
+    ActionPoint { action: i32, value: i32 },
     /// Honor and vocation (living) points, sent when the character is selected.
     GamePoints { honor: i32, vocation: i32, other: [i32; 8] },
     /// `kind` 0 honor, 1 vocation: `amount` was added.
@@ -2301,6 +2304,7 @@ impl Session {
             M::LaborPowerChanged { amount, action, point, step } => {
                 self.emit(Event::LaborChanged { amount, action, point, step });
             }
+            M::AddActionPoint { action, value } => self.emit(Event::ActionPoint { action, value }),
             M::GamePoints { honor, vocation, other } => self.emit(Event::GamePoints { honor, vocation, other }),
             M::GamePointChanged { kind, amount } => self.emit(Event::GamePointChanged { kind, amount }),
             M::BmPoint(bm_point) => self.emit(Event::LoyaltyChanged { bm_point }),

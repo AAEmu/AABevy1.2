@@ -1689,9 +1689,13 @@ the expansion count. Character selection, world leave and disconnect reset stale
 
 **`LaborChanged.point` is a delta**, not the new total. Active
 `economy/inventory.rs::change_labor` sends `a.point - previous` after the server caps the
-gain, with `action=actabilityId` and the current `step`. The resource adds it to a known
-snapshot base. A missing base stays unknown, rather than pretending a gain is a total.
-Normal labor regeneration (`action=0`) creates no proficiency row.
+gain. The native `FUN_397a9880` caps each gain at the grade-0 limit and clamps the resulting
+total to the current grade's limit, then recomputes the grade. Languages 21..30 use the
+grade-0 limit; id 19 uses the last limit. A new entry starts with the capped gain at grade 0.
+The static `up_limits` survive character selection and world leave. A downgrade's unknown
+base stays unknown until catalog reconciliation. Labor regeneration (`action=0`) and a
+zero point delta preserve all proficiency entries and grades. `SCAddActionPoint` (0x047,
+i32 action and i32 value) uses the same gain rules even for a zero delta.
 
 Expert changes wait for matching authoritative ACKs; sending never changes tier, points,
 currency, inventory or expansion count. Upgrade preserves known points. Downgrade changes

@@ -570,6 +570,8 @@ pub enum ServerMsg {
     AbilitySwapped { obj_id: u32, old_ability: u8, ability: u8 },
     /// Labor points added (`amount` > 0) or spent for `action` (an actability id, 0 for none).
     LaborPowerChanged { amount: i32, action: i32, point: i32, step: u8 },
+    /// `SCAddActionPoint(action, value)`: actability `action` gains `value` points.
+    AddActionPoint { action: i32, value: i32 },
     /// Honor and vocation (living) points, sent when the character is selected.
     GamePoints { honor: i32, vocation: i32, other: [i32; 8] },
     /// `kind` 0 honor, 1 vocation: `amount` was added.
@@ -783,6 +785,7 @@ impl ServerMsg {
             Self::LevelChanged { .. } => "SCLevelChanged",
             Self::AbilitySwapped { .. } => "SCAbilitySwapped",
             Self::LaborPowerChanged { .. } => "SCCharacterLaborPowerChanged",
+            Self::AddActionPoint { .. } => "SCAddActionPoint",
             Self::GamePoints { .. } => "SCCharacterGamePoints",
             Self::GamePointChanged { .. } => "SCGamePointChanged",
             Self::BmPoint(_) => "SCBmPoint",
@@ -1242,6 +1245,7 @@ impl ServerMsg {
                 point: r.i32()?,
                 step: r.u8()?,
             },
+            sc::SCAddActionPointPacket => Self::AddActionPoint { action: r.i32()?, value: r.i32()? },
             sc::SCCharacterGamePointsPacket => {
                 let honor = r.i32()?;
                 let vocation = r.i32()?;
@@ -1706,6 +1710,17 @@ mod tests {
         assert_eq!(
             decode(sc::SCCharacterLaborPowerChangedPacket, &w.finish()),
             ServerMsg::LaborPowerChanged { amount: -30, action: 5, point: 2, step: 1 }
+        );
+        // SCAddActionPoint(action, value): i32, i32 (server packets/g2c_misc.rs:35)
+        assert_eq!(
+            decode(sc::SCAddActionPointPacket, &[9, 0, 0, 0, 17, 0, 0, 0]),
+            ServerMsg::AddActionPoint { action: 9, value: 17 }
+        );
+        let mut w = Writer::new();
+        w.i32(1).i32(-2);
+        assert_eq!(
+            decode(sc::SCAddActionPointPacket, &w.finish()),
+            ServerMsg::AddActionPoint { action: 1, value: -2 }
         );
         // SCCharacterGamePoints: honor, vocation, eight more i32.
         let mut w = Writer::new();

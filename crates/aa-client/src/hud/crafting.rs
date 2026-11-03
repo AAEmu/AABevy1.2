@@ -89,6 +89,12 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
             data.crafting.actabilities.clone_from(received);
         }
     }
+    // Native `FUN_397a9880` needs the static grade limits to clamp a gained total.
+    if let Some(game) = data.game.get() {
+        if data.crafting.actabilities.up_limits != game.crafting.raw_limits {
+            data.crafting.actabilities.up_limits.clone_from(&game.crafting.raw_limits);
+        }
+    }
     data.crafting.item_secure = world
         .get_resource::<aa_net::GameConfig>()
         .and_then(|c| c.received.as_ref())

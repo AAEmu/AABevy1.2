@@ -2,6 +2,7 @@
 use super::*;
 use aa_net::{ActabilityCommand as Command, ActabilityEvent, Event, NetCommand, NetEvent};
 use mlua::Value;
+use std::collections::HashMap;
 
 #[allow(dead_code)]
 pub(super) mod fixture;
@@ -11,6 +12,11 @@ pub(super) struct View {
     pub(super) active: bool,
     requests: Vec<(u32, Command)>,
     constructed: Option<Construction>,
+    /// Buff templates on the gated units, keyed by `(obj_id, buff index)`, for the native
+    /// `ACTABILITY_MODIFIER_UPDATE` add/update/remove hooks.
+    modifier_buffs: HashMap<(u32, u32), u32>,
+    modifier_ticks: HashMap<(u32, u32), u64>,
+    modifier_seeded: bool,
 }
 
 /// Constructor inputs for one HUD build. Getter observations also detect transient
@@ -322,15 +328,16 @@ fn can_send(data: &HudData, command: Command) -> bool {
 }
 
 fn dispatch(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
-    if !bridge.borrow_mut().crafting.actabilities.apply(event) {
+    let (changed, applied) = bridge.borrow_mut().crafting.actabilities.apply_with_gain(event);
+    if !changed {
         return;
     }
-    notify_receipt(rt, bridge, event);
+    notify_receipt(rt, bridge, event, applied);
 }
 
 /// First activation has already copied the received state in sync_hud. Deliver
 /// its real receipts without applying point deltas to that state a second time.
-fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
+fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event, applied: Option<i32>) {
     let notify = {
         let mut data = bridge.borrow_mut();
         let limits = if matches!(event, Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, .. })) {
@@ -360,6 +367,12 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
     if matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. })) {
         rt.fire_event("ACTABILITY_REFRESH_ALL", ());
     }
+    // Native `OnLaborPowerChanged` (0x391d3d60) calls `FUN_3930be90(action, point)` only when the
+    // point delta is nonzero; that adds the capped points and raises `ACTABILITY_EXPERT_CHANGED`
+    // (0xc3) with (id, localized group name, actual delta, base + attribute modifiers).
+    // `chat_msg_event.alb` turns it into `actability_value_changed`:
+    // "$1 proficiency rose +$2. Current proficiency: $3". SCActability itself only refreshes
+    // (`ACTABILITY_REFRESH_ALL`), so the login list never prints a gain.
     if let Event::LaborChanged { action, point, .. } = event {
         let args = (|| {
             if *action <= 0 || *point == 0 {
@@ -368,11 +381,37 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
             let data = bridge.borrow();
             let id = *action as u32;
             let group = data.game.get()?.crafting.groups.get(&id).filter(|g| g.skill_page_visible)?;
-            let base = data.crafting.actabilities.get(id)?.point?;
+            // Native has an int total even after a downgrade; the lane's ACK omits it, so an
+            // unresolved base still fires the callback (the chat line uses the applied delta).
+            let base = data.crafting.actabilities.get(id).and_then(|a| a.point).unwrap_or(0);
+            let delta = applied.unwrap_or(*point);
             Some((
                 f64::from(id as f32),
                 group.name.clone(),
-                f64::from(*point as f32),
+                f64::from(delta as f32),
+                f64::from(base.wrapping_add(super::modify_point(&data, id)) as f32),
+            ))
+        })();
+        if let Some(args) = args {
+            rt.fire_event("ACTABILITY_EXPERT_CHANGED", args);
+        }
+    }
+    // Native `SCAddActionPoint` (0x047) handler `391861f0` calls `FUN_3930be90` directly, with
+    // no nonzero gate: the same 0xc3 line follows a quest/reward action point.
+    if let Event::ActionPoint { action, value } = event {
+        let args = (|| {
+            if *action <= 0 {
+                return None;
+            }
+            let data = bridge.borrow();
+            let id = *action as u32;
+            let group = data.game.get()?.crafting.groups.get(&id).filter(|g| g.skill_page_visible)?;
+            let base = data.crafting.actabilities.get(id).and_then(|a| a.point).unwrap_or(0);
+            let delta = applied.unwrap_or(*value);
+            Some((
+                f64::from(id as f32),
+                group.name.clone(),
+                f64::from(delta as f32),
                 f64::from(base.wrapping_add(super::modify_point(&data, id)) as f32),
             ))
         })();
@@ -411,7 +450,7 @@ fn update(
     if first {
         let mut received_all = false;
         for NetEvent(event) in events.read() {
-            notify_receipt(&rt, &bridge.0, event);
+            notify_receipt(&rt, &bridge.0, event, None);
             received_all |= matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. }));
         }
         // Fresh constructors already queried this exact state. A synthetic repeat
@@ -443,7 +482,140 @@ fn update(
     }
 }
 
+/// Native buff-manager hook (`FUN_39388400` gate, add `FUN_3938a3c0`, update `FUN_393886c0`,
+/// tick `FUN_393888b0`, remove `FUN_39389d60`): raise `ACTABILITY_MODIFIER_UPDATE` (0x54) when a
+/// buff on the player, their own mate or own slave has a modifier on the fixed actability
+/// attribute set (`FUN_398a8fe0`: 99..=118, 138, 158..=163). Equipment is not a buff and does not
+/// raise this event (the native `UNIT_EQUIPMENT_CHANGED` path refreshes the page separately).
+fn modifier_update(
+    mut events: MessageReader<NetEvent>,
+    rt: Option<NonSend<aa_ui::UiRuntime>>,
+    bridge: NonSend<super::super::api::HudBridge>,
+    player: Option<Res<aa_net::state::Player>>,
+    mates: Option<Res<aa_net::state::Mates>>,
+    slaves: Option<Res<aa_net::state::Slaves>>,
+    buffs: Option<Res<aa_net::state::Buffs>>,
+) {
+    let Some(rt) = rt else {
+        events.clear();
+        return;
+    };
+    let player_id = player
+        .as_ref()
+        .and_then(|p| p.spawn.as_ref())
+        .map(|s| s.obj_id)
+        .or_else(|| bridge.0.borrow().snapshot.unit_id.parse::<u32>().ok());
+    let mate_id = mates.as_ref().and_then(|m| m.own.as_ref()).and_then(|o| o.obj_id);
+    let slave_id = slaves.as_ref().and_then(|s| s.own.as_ref()).map(|s| s.obj_id);
+    let gated = |id: u32| id != 0 && (Some(id) == player_id || Some(id) == mate_id || Some(id) == slave_id);
+    let game = bridge.0.borrow().game.clone();
+    let has_modifier = |buff_id: u32| game.get().is_some_and(|g| g.tips.buff_has_actability_modifier(buff_id));
+    let mut refresh = false;
+    let mut data = bridge.0.borrow_mut();
+    if !data.crafting.expert.modifier_seeded {
+        data.crafting.expert.modifier_seeded = true;
+        if let Some(buffs) = buffs.as_ref() {
+            for id in [player_id, mate_id, slave_id].into_iter().flatten() {
+                for entry in buffs.of(id) {
+                    data.crafting.expert.modifier_buffs.insert((id, entry.buff.index), entry.buff.buff_id);
+                }
+            }
+        }
+    }
+    for NetEvent(event) in events.read() {
+        match event {
+            Event::PlayerSpawn(spawn) => {
+                if gated(spawn.obj_id) {
+                    for buff in &spawn.unit.buffs {
+                        data.crafting.expert.modifier_buffs.insert((spawn.obj_id, buff.index), buff.buff_id);
+                    }
+                }
+            }
+            Event::UnitSpawned(unit) | Event::OwnUnitSnapshot(unit) => {
+                if gated(unit.obj_id) {
+                    for buff in &unit.buffs {
+                        data.crafting.expert.modifier_buffs.insert((unit.obj_id, buff.index), buff.buff_id);
+                    }
+                }
+            }
+            Event::BuffCreated { obj_id, buff } => {
+                if gated(*obj_id) {
+                    data.crafting.expert.modifier_buffs.insert((*obj_id, buff.index), buff.buff_id);
+                    refresh |= has_modifier(buff.buff_id);
+                }
+            }
+            Event::BuffUpdated { obj_id, index, .. } => {
+                if gated(*obj_id) {
+                    if let Some(&buff_id) = data.crafting.expert.modifier_buffs.get(&(*obj_id, *index)) {
+                        refresh |= has_modifier(buff_id);
+                    }
+                }
+            }
+            Event::BuffRemoved { obj_id, index } => {
+                if gated(*obj_id) {
+                    // Native `39389d60` / `0x3938a12b` checks the removed buff's own template
+                    // (`FUN_39388400` on it), not the remaining list. `BuffRemoved` carries only
+                    // the index, so an untracked template (a buff from before the HUD) cannot be
+                    // resolved here and does not refresh.
+                    if let Some(buff_id) = data.crafting.expert.modifier_buffs.remove(&(*obj_id, *index)) {
+                        refresh |= has_modifier(buff_id);
+                    }
+                }
+            }
+            Event::UnitsRemoved(ids) => {
+                for id in ids {
+                    data.crafting.expert.modifier_buffs.retain(|&(unit, _), _| unit != *id);
+                }
+            }
+            Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } | Event::CharacterSelected(_) => {
+                data.crafting.expert.modifier_buffs.clear();
+                data.crafting.expert.modifier_ticks.clear();
+                data.crafting.expert.modifier_seeded = false;
+            }
+            _ => {}
+        }
+    }
+    // Native `FUN_393888b0`: a tick refresh needs the template's raw `duration != tick` gate,
+    // then skips the final tick (`tick_index >= duration / tick`). aa-net keeps the receipt time;
+    // the first observation is the baseline, later tick indices are changes.
+    if let Some(buffs) = buffs.as_ref() {
+        for id in [player_id, mate_id, slave_id].into_iter().flatten() {
+            for entry in buffs.of(id) {
+                let tick_ms = u64::from(entry.buff.tick_ms);
+                if tick_ms == 0
+                    || !has_modifier(entry.buff.buff_id)
+                    || !game.get().is_some_and(|g| g.tips.buff_ticks(entry.buff.buff_id))
+                {
+                    continue;
+                }
+                let total = entry.buff.duration_ms.max(0) as u64 / tick_ms;
+                let elapsed = u64::from(entry.buff.elapsed_ms) + entry.received.elapsed().as_millis() as u64;
+                let tick = elapsed / tick_ms;
+                if total != 0 && tick >= total {
+                    continue;
+                }
+                let key = (id, entry.buff.index);
+                if data.crafting.expert.modifier_ticks.insert(key, tick).is_some_and(|previous| previous != tick) {
+                    refresh = true;
+                }
+            }
+        }
+    }
+    drop(data);
+    if refresh {
+        rt.fire_event("ACTABILITY_MODIFIER_UPDATE", ());
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
+    app.add_systems(
+        Update,
+        modifier_update
+            .after(super::super::sync_hud)
+            .before(update)
+            .before(aa_ui::UiFrame)
+            .run_if(super::super::hud_up),
+    );
     app.add_systems(
         Update,
         update

@@ -269,6 +269,7 @@ opcodes! {
         SCCharacterResurrectedPacket = 0x042,
         SCCharacterLaborPowerChangedPacket = 0x045,
         SCBmPointPacket = 0x046,
+        SCAddActionPointPacket = 0x047,
         SCICSCashPointPacket = 0x1d6,
         SCCooldownsPacket = 0x04a,
         SCCharacterInvenInitPacket = 0x04b,
