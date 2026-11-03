@@ -154,6 +154,12 @@ end
 X2Quest.GetQuestReportNpcTypeByQuestType = field("reportNpc", nil)
 X2Quest.GetQuestReportNpcNameByQuestType = field("reportNpcName", nil)
 X2Quest.GetQuestLinkText = function(self, qtype) local q = byType(qtype); return q and string.format("|q%d;", tonumber(qtype)) or "" end
+-- Restart a main quest (`FUN_3949b780` / `FUN_3937b200`): the native refuses quietly a zero quest
+-- and lets the request path check the rest.
+X2Quest.QuestContextRestart = function(self, qtype)
+  local t = tonumber(qtype) or 0
+  if t ~= 0 then HUD.quest_restart(t) end
+end
 -- Give the quest up (the quest log's button; the list's index).
 X2Quest.QuestContextDrop = function(self, idx)
   local q = byIndex(idx)

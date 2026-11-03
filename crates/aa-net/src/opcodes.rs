@@ -216,6 +216,7 @@ opcodes! {
         CSDropQuestContextPacket = 0x0d7,
         CSQuestTalkMadePacket = 0x0da,
         CSTryQuestCompleteAsLetItDonePacket = 0x0dd,
+        CSRestartMainQuestPacket = 0x0fd,
         CSExecuteCraft = 0x0f8,
         CSChangeAppellationPacket = 0x0f9,
         CSApplyToInstantGamePacket = 0x0e1,
