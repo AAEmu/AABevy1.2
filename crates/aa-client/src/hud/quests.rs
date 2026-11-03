@@ -244,6 +244,9 @@ pub struct QuestTables {
     /// Quest level -> (exp, copper) given on top of the acts.
     pub supplies: HashMap<u8, (i64, i64)>,
     pub categories: HashMap<u32, String>,
+    /// `quest_mails.id` -> name, the `$1` of the client's `QUEST_MAIL_SENT` text (`FUN_3937a650`
+    /// formats the `quest_mails` row's name).
+    pub quest_mail_names: HashMap<u32, String>,
     /// `quest_cameras` by id, and `model_quest_cameras`: model id -> row id (the talk's close-up).
     pub cameras: HashMap<u32, crate::ingame::quest_framing::Row>,
     pub model_cameras: HashMap<u32, u32>,
@@ -361,7 +364,7 @@ impl QuestTables {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, tbl_column_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties') AND tbl_column_name = 'name') OR \
+                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties','quest_mails') AND tbl_column_name = 'name') OR \
                  (tbl_name = 'quest_component_texts' AND tbl_column_name = 'text') OR \
                  (tbl_name = 'quest_chat_bubbles' AND tbl_column_name IN ('speech','change_speaker_name')))",
             )?;
@@ -373,11 +376,19 @@ impl QuestTables {
             }
         }
         let en = |table: &str, id: u32| text.get(&(table.to_string(), id)).cloned();
-        for (table, map) in [("quest_categories", &mut t.categories), ("quest_act_obj_aliases", &mut t.aliases), ("quest_monster_groups", &mut t.monster_groups), ("doodad_almighties", &mut t.doodads)] {
+        for (table, map) in [("quest_categories", &mut t.categories), ("quest_act_obj_aliases", &mut t.aliases), ("quest_monster_groups", &mut t.monster_groups), ("doodad_almighties", &mut t.doodads), ("quest_mails", &mut t.quest_mail_names)] {
             for ((tb, id), s) in &text {
                 if tb == table {
                     map.insert(*id, s.clone());
                 }
+            }
+        }
+        if let Ok(mut q) = conn.prepare("SELECT id, name FROM quest_mails") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id = any_int(r, 0)? as u32;
+                let fallback: Option<String> = r.get(1)?;
+                t.quest_mail_names.entry(id).or_insert_with(|| fallback.unwrap_or_default());
             }
         }
         {

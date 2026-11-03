@@ -647,7 +647,7 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 |---|---|
 | `SkillList { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, skills, interactable, modifier_keys }` | `SCNpcInteractionSkillList` 0x07b (the request's values echoed, `i32` count + `u32` skills, `bool`, `i32`) |
 | `DoodadQuestAccept { doodad_obj_id, quest_id }` | `SCDoodadQuestAccept` 0x111 (a doodad's quest function offers a quest: the client opens the dialog) |
-| `RewardedByMail { quests }` | `SCQuestRewardedByMail` 0x14e (`u8` count + `u32` ids) |
+| `RewardedByMail { success, quest }` | `SCQuestRewardedByMail` 0x14e (`u8` success + `u32` quest id; `FUN_397b5ec0`) |
 | `NpcChat { chat_type, faction_id, npc_obj_id, npc_name, character_obj_id, kind, text_id, message }` | `SCNpcChatMessage` 0x0cf (`kind` 1: a text id, else a string) |
 
 The quest notices are their own `Event` variants (`aa_net::quest`), not interactions:
@@ -661,9 +661,10 @@ The quest notices are their own `Event` variants (`aa_net::quest`), not interact
 `SCQuestContextFailed` matches the server's writer (`systems/quests/packets.rs`). The other two have no
 server writer (only the opcode constants); their tests use the client reader's bytes. The 1.2 reader for
 `SCQuestRewardedByMail` 0x14e (`FUN_397b5ec0`) reads a success byte and one quest id
-(`OnQuestRewardMailSent` `FUN_391dc150` -> `FUN_3937a520`), while the server writes a `u8` count and that
-many `u32` ids; the two are byte-identical for the single-quest packet the server sends
-(`quests/engine.rs:1023`), so `RewardedByMail { quests }` keeps the server's list layout.
+(`OnQuestRewardMailSent` `FUN_391dc150` -> `FUN_3937a520`), so `RewardedByMail { success, quest }`
+follows the client. The server writes a `u8` count and that many `u32` ids; for the single-quest packet
+it sends (`quests/engine.rs:1023`) the bytes are the same, and a `success` 0 makes the client raise
+`QUEST_ERROR_INFO` error 0xb for that quest.
 
 `SCQuestContextStarted` and `SCQuestContextUpdated` are read by `quest::read_context`. After the quest,
 they carry the component the quest is at as a trailing `u32` (`Updated` then has four more values). The

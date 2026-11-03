@@ -1278,8 +1278,24 @@ pub(super) fn talk_pointer(
 /// its window when the event's quest is the one it shows (`quest_context_directing.alb` F37).
 /// `FUN_391dbdd0` raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when the failed unit is the current
 /// target (`FUN_39376590`); the directing script closes the same window (F36). The mail packets
-/// show the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` system texts (`FUN_3937a650`,
-/// `FUN_3937a520`).
+/// show the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` texts through `DOODAD_PHASE_MSG`
+/// (`FUN_3937a650`, `FUN_3937a520`), with the `quest_mails` name / the quest title as `$1`; a
+/// failed reward mail (`success` 0) is `FUN_3937a130(qtype, 0xb)` instead.
+/// `FUN_3937a130`'s refusal path: end the window showing `quest_id`, clear its clock, latch the
+/// instance so the tick does not restore it, and say whether a clock was cleared.
+fn refuse_quest(rt: &UiRuntime, bridge: &Shared, quest_id: u32) -> bool {
+    let mut d = bridge.borrow_mut();
+    if d.dialog.directing && d.dialog.quest == Some(quest_id) {
+        apply_directing(rt, &mut d.dialog, false);
+        d.dialog.quest = None;
+    }
+    let instance = d.dialog.quests.iter().find(|q| q.template_id == quest_id).map(|q| q.id);
+    if let Some(id) = instance {
+        d.dialog.cleared_left.insert((quest_id, id));
+    }
+    d.dialog.left_times.remove(&quest_id).is_some()
+}
+
 pub fn route_quest_notices(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -1291,18 +1307,7 @@ pub fn route_quest_notices(
     for NetEvent(e) in events.read() {
         match e {
             Event::QuestContextFailed(failed) => {
-                let had_timer = {
-                    let mut d = bridge.0.borrow_mut();
-                    if d.dialog.directing && d.dialog.quest == Some(failed.quest_id) {
-                        apply_directing(&rt, &mut d.dialog, false);
-                        d.dialog.quest = None;
-                    }
-                    let instance = d.dialog.quests.iter().find(|q| q.template_id == failed.quest_id).map(|q| q.id);
-                    if let Some(id) = instance {
-                        d.dialog.cleared_left.insert((failed.quest_id, id));
-                    }
-                    d.dialog.left_times.remove(&failed.quest_id).is_some()
-                };
+                let had_timer = refuse_quest(&rt, &bridge.0, failed.quest_id);
                 info!("hud: quest {} failed ({})", failed.quest_id, failed.err);
                 // FUN_3937a130 clears the quest's timer before raising the error.
                 if had_timer {
@@ -1332,14 +1337,36 @@ pub fn route_quest_notices(
                 rt.fire_event("QUEST_QUICK_CLOSE_EVENT", failed.quest_id);
             }
             Event::QuestMailSent(sent) => {
-                let text = super::alerts::localized(&rt, "ERROR_MSG", "QUEST_MAIL_SENT").unwrap_or_else(|| "QUEST_MAIL_SENT".to_string());
+                // FUN_3937a650: the quest_mails row's name (FUN_398562a0 -> +4) is the $1 of
+                // QUEST_MAIL_SENT; a missing row shows nothing.
+                let name = bridge.0.borrow().game.get().and_then(|game| game.quests.quest_mail_names.get(&sent.id)).cloned();
+                let Some(name) = name else { continue };
+                let Some(text) = super::alerts::localized_args(&rt, "ERROR_MSG", "QUEST_MAIL_SENT", std::slice::from_ref(&name)) else { continue };
                 info!("hud: quest mail {} sent: {text}", sent.id);
-                rt.fire_event("SYSMSG", text);
+                rt.fire_event("DOODAD_PHASE_MSG", text);
             }
-            Event::Interaction(InteractEvent::RewardedByMail { quests }) if !quests.is_empty() => {
-                let text = super::alerts::localized(&rt, "ERROR_MSG", "QUEST_REWARDED_BY_MAIL").unwrap_or_else(|| "QUEST_REWARDED_BY_MAIL".to_string());
-                info!("hud: quests {quests:?} rewarded by mail: {text}");
-                rt.fire_event("SYSMSG", text);
+            Event::Interaction(InteractEvent::RewardedByMail { success, quest }) => {
+                if !success {
+                    // FUN_3937a520(0, qtype) -> FUN_3937a130(qtype, 0xb).
+                    let had_timer = refuse_quest(&rt, &bridge.0, *quest);
+                    info!("hud: quest {quest} reward mail failed");
+                    if had_timer {
+                        rt.fire_event("QUEST_LEFT_TIME_UPDATED", (*quest, 0i32));
+                    }
+                    rt.fire_event("QUEST_ERROR_INFO", (0xb_u32, *quest));
+                    continue;
+                }
+                // FUN_3937a520: the quest's title (+0x20) is the $1 of QUEST_REWARDED_BY_MAIL; a
+                // quest missing from the table shows nothing.
+                let title = {
+                    let d = bridge.0.borrow();
+                    let Some(game) = d.game.get() else { continue };
+                    let Some(def) = game.quests.def(*quest) else { continue };
+                    texts(&d, game).expand(&def.name)
+                };
+                let Some(text) = super::alerts::localized_args(&rt, "ERROR_MSG", "QUEST_REWARDED_BY_MAIL", std::slice::from_ref(&title)) else { continue };
+                info!("hud: quest {quest} rewarded by mail: {text}");
+                rt.fire_event("DOODAD_PHASE_MSG", text);
             }
             _ => {}
         }
@@ -2305,22 +2332,27 @@ mod tests {
 
     fn quest_notice_app() -> Option<(App, Shared)> {
         if !aa_world::pak_available() { return None; }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let game = GameData::load(&path).ok()?;
         let rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).ok()?;
         rt.lua
             .load(
                 r#"
                 OBSERVED={}
+                X2Locale.LocalizeUiText=function(self,group,key,arg) return key..':'..tostring(arg) end
                 local w=UIParent:CreateWidget('emptywidget','questNotice','UIParent')
                 w:SetHandler('OnEvent',function(self,event,...) table.insert(OBSERVED,{event=event,args={...}}) end)
-                w:RegisterEvent('QUEST_ERROR_INFO');w:RegisterEvent('QUEST_QUICK_CLOSE_EVENT');w:RegisterEvent('QUEST_LEFT_TIME_UPDATED')
+                w:RegisterEvent('QUEST_ERROR_INFO');w:RegisterEvent('QUEST_QUICK_CLOSE_EVENT');w:RegisterEvent('QUEST_LEFT_TIME_UPDATED');w:RegisterEvent('DOODAD_PHASE_MSG')
             "#,
             )
             .exec()
             .ok()?;
-        let shared: Shared = Rc::new(RefCell::new(HudData {
+        let data = HudData {
             dialog: DialogView { directing: true, quest: Some(1065), npc: Some((1, 1)), ..Default::default() },
             ..HudData::default()
-        }));
+        };
+        let _ = data.game.0.set(game);
+        let shared: Shared = Rc::new(RefCell::new(data));
         let mut app = App::new();
         app.add_message::<NetEvent>()
             .add_message::<super::super::alerts::UseFailed>()
@@ -2398,6 +2430,54 @@ mod tests {
             .load("assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
             .exec()
             .unwrap();
+    }
+
+    #[test]
+    fn quest_mail_sent_shows_the_quest_mail_name_as_the_argument() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let name = shared.borrow().game.get().and_then(|game| game.quests.quest_mail_names.get(&1)).cloned();
+        let Some(name) = name else { return };
+        app.world_mut().write_message(NetEvent(Event::QuestMailSent(aa_net::quest::QuestMailSent { id: 1 })));
+        app.update();
+        let expected = format!("QUEST_MAIL_SENT:{name}");
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua.globals().set("EXPECTED", expected).unwrap();
+        rt.lua
+            .load("assert(#OBSERVED==1 and OBSERVED[1].event=='DOODAD_PHASE_MSG' and OBSERVED[1].args[1]==EXPECTED)")
+            .exec()
+            .unwrap();
+        // FUN_3937a650 shows nothing when the quest_mails lookup fails.
+        app.world_mut().write_message(NetEvent(Event::QuestMailSent(aa_net::quest::QuestMailSent { id: 999_999 })));
+        app.update();
+        app.world().non_send::<UiRuntime>().lua.load("assert(#OBSERVED==1)").exec().unwrap();
+    }
+
+    #[test]
+    fn reward_mail_shows_the_quest_title_and_a_failed_send_raises_error_11() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let title = shared.borrow().game.get().and_then(|game| game.quests.def(330)).map(|def| def.name.clone());
+        let Some(title) = title else { return };
+        app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::RewardedByMail { success: true, quest: 330 })));
+        app.update();
+        let expected = format!("QUEST_REWARDED_BY_MAIL:{title}");
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua.globals().set("EXPECTED", expected).unwrap();
+        rt.lua
+            .load("assert(#OBSERVED==1 and OBSERVED[1].event=='DOODAD_PHASE_MSG' and OBSERVED[1].args[1]==EXPECTED)")
+            .exec()
+            .unwrap();
+        // FUN_3937a520(0, qtype) -> FUN_3937a130(qtype, 0xb), raised as (err, qtype).
+        app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::RewardedByMail { success: false, quest: 330 })));
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(#OBSERVED==2 and OBSERVED[2].event=='QUEST_ERROR_INFO' and OBSERVED[2].args[1]==11 and OBSERVED[2].args[2]==330)")
+            .exec()
+            .unwrap();
+        // A quest missing from the table shows nothing, even for a successful send.
+        app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::RewardedByMail { success: true, quest: 999_999 })));
+        app.update();
+        app.world().non_send::<UiRuntime>().lua.load("assert(#OBSERVED==2)").exec().unwrap();
     }
 
     fn timed(left_ms: i32, accept_time: i64) -> Quest {

@@ -543,8 +543,10 @@ the failed quest is the one the window shows (`quest_context_directing.alb` F37)
 scripts print `locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148)
 raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when it is the current target (`FUN_39376590`), which
 closes the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
-shows the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` `ERROR_MSG` texts (`FUN_3937a650`,
-`FUN_3937a520`).
+raises `DOODAD_PHASE_MSG(text)` (`FUN_3937a650`, `FUN_3937a520`) with the `QUEST_MAIL_SENT` /
+`QUEST_REWARDED_BY_MAIL` `ERROR_MSG` text and the `quest_mails` name / the quest title as its `$1`;
+a failed reward mail (`success` 0) raises `QUEST_ERROR_INFO(0xb, qtype)` instead. A name the client
+cannot look up shows nothing.
 
 Timed quests count down from the server's `time_left_ms` and `accept_time`: `FUN_39379e30` returns
 `end - (now - start) * 1000`. `HUD.quest_left_time(qtype)` feeds `X2Quest.GetQuestContextLeftTime`

@@ -103,12 +103,12 @@ impl QuestUnitReqFailed {
     }
 }
 
-/// `SCQuestMailSent` (`0x150`): the quest mail `id` was sent.
+/// `SCQuestMailSent` (`0x150`): the quest mail `id` (`quest_mails.id`) was sent.
 ///
 /// The 1.2 reader `FUN_397b5f00` (packet vtable `399b3abc`) reads the single `u32` field `"type"`.
-/// `OnQuestMailSent` (`FUN_391dc1d0`) resolves it through `FUN_398562a0` and shows the
-/// `QUEST_MAIL_SENT` system text (`FUN_3937a650`). The server has only the opcode constant (no
-/// writer).
+/// `OnQuestMailSent` (`FUN_391dc1d0`) resolves it through `FUN_398562a0` (the `quest_mails` table)
+/// and shows `QUEST_MAIL_SENT` with the row's name (`FUN_3937a650`). The server has only the opcode
+/// constant (no writer).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct QuestMailSent {
     pub id: u32,
