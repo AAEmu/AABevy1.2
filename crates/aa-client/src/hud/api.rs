@@ -854,6 +854,13 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::battlefield::refresh(world, &mut data, &spawn);
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
+    if let Some(game) = data.game.get() {
+        if let Some(mut received) = world.get_resource_mut::<aa_net::Actabilities>() {
+            if received.up_limits != game.crafting.raw_limits {
+                received.up_limits.clone_from(&game.crafting.raw_limits);
+            }
+        }
+    }
     super::crafting::refresh(world, &mut data);
     super::pets::refresh(world, &mut data);
     data.mounted.local_cart = world

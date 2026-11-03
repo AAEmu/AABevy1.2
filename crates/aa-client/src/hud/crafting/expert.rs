@@ -338,15 +338,30 @@ fn can_send(data: &HudData, command: Command) -> bool {
 }
 
 fn dispatch(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
+    // Native `FUN_397a9880` returns the ACTUAL difference after clamping; capture the base so
+    // the 0xc3 delta is not the raw wire value.
+    let before = match event {
+        Event::LaborChanged { action, .. } | Event::ActionPoint { action, .. } => {
+            bridge.borrow().crafting.actabilities.get(*action as u32).and_then(|a| a.point)
+        }
+        _ => None,
+    };
     if !bridge.borrow_mut().crafting.actabilities.apply(event) {
         return;
     }
-    notify_receipt(rt, bridge, event);
+    let applied = match event {
+        Event::LaborChanged { action, .. } | Event::ActionPoint { action, .. } => {
+            let after = bridge.borrow().crafting.actabilities.get(*action as u32).and_then(|a| a.point);
+            before.zip(after).map(|(before, after)| after.wrapping_sub(before))
+        }
+        _ => None,
+    };
+    notify_receipt(rt, bridge, event, applied);
 }
 
 /// First activation has already copied the received state in sync_hud. Deliver
 /// its real receipts without applying point deltas to that state a second time.
-fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
+fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event, applied: Option<i32>) {
     let notify = {
         let mut data = bridge.borrow_mut();
         let limits = if matches!(event, Event::Actability(ActabilityEvent::TierChanged { is_upgrade: false, .. })) {
@@ -390,11 +405,14 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
             let data = bridge.borrow();
             let id = *action as u32;
             let group = data.game.get()?.crafting.groups.get(&id).filter(|g| g.skill_page_visible)?;
-            let base = data.crafting.actabilities.get(id)?.point?;
+            // Native has an int total even after a downgrade; the lane's ACK omits it, so an
+            // unresolved base still fires the callback (the chat line uses the applied delta).
+            let base = data.crafting.actabilities.get(id).and_then(|a| a.point).unwrap_or(0);
+            let delta = applied.unwrap_or(*point);
             Some((
                 f64::from(id as f32),
                 group.name.clone(),
-                f64::from(*point as f32),
+                f64::from(delta as f32),
                 f64::from(base.wrapping_add(super::modify_point(&data, id)) as f32),
             ))
         })();
@@ -412,11 +430,12 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
             let data = bridge.borrow();
             let id = *action as u32;
             let group = data.game.get()?.crafting.groups.get(&id).filter(|g| g.skill_page_visible)?;
-            let base = data.crafting.actabilities.get(id)?.point?;
+            let base = data.crafting.actabilities.get(id).and_then(|a| a.point).unwrap_or(0);
+            let delta = applied.unwrap_or(*value);
             Some((
                 f64::from(id as f32),
                 group.name.clone(),
-                f64::from(*value as f32),
+                f64::from(delta as f32),
                 f64::from(base.wrapping_add(super::modify_point(&data, id)) as f32),
             ))
         })();
@@ -455,7 +474,7 @@ fn update(
     if first {
         let mut received_all = false;
         for NetEvent(event) in events.read() {
-            notify_receipt(&rt, &bridge.0, event);
+            notify_receipt(&rt, &bridge.0, event, None);
             received_all |= matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. }));
         }
         // Fresh constructors already queried this exact state. A synthetic repeat

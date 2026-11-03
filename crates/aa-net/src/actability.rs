@@ -136,6 +136,19 @@ pub struct Actability {
     pub point: Option<i32>,
     pub step: u8,
 }
+/// Native `FUN_397a9880`: add `delta` to a known total, clamped to `[0, current grade limit]`.
+/// An unknown total stays unknown (the native map always has an int, but the lane's downgrade ACK
+/// omits it until the catalog reconciliation fills it).
+fn add_point(point: Option<i32>, delta: i32, step: u8, up_limits: &[i32]) -> Option<i32> {
+    point.map(|old| {
+        if up_limits.is_empty() {
+            return old.wrapping_add(delta);
+        }
+        let limit = up_limits.get(usize::from(step)).copied().unwrap_or(10000);
+        old.wrapping_add(delta).clamp(0, limit)
+    })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActabilityFailure {
     pub command: ActabilityCommand,
@@ -149,9 +162,22 @@ pub struct Actabilities {
     pub expanded_expert: Option<u8>,
     pub pending: Vec<ActabilityCommand>,
     pub last_error: Option<ActabilityFailure>,
+    /// ALL `expert_limits` up_limits ordered by up_limit ASC, indexed from step zero. The client
+    /// installs this from its static catalog; native `FUN_397a9880` clamps a gained total to the
+    /// current grade's limit and `FUN_397a8640` recomputes the grade from the total.
+    pub up_limits: Vec<i32>,
     snapshot_open: bool,
     unresolved_downgrades: HashMap<u32, u8>,
 }
+/// Native `FUN_397a8640`: the first grade whose up_limit is at or above `point` (0 when none).
+fn grade_for(up_limits: &[i32], point: i32) -> u8 {
+    up_limits
+        .iter()
+        .position(|&limit| point <= limit)
+        .and_then(|step| u8::try_from(step).ok())
+        .unwrap_or(0)
+}
+
 impl Actabilities {
     /// Reconcile an already-applied lane downgrade ACK with the matching static catalog.
     /// `up_limits` must contain ALL expert_limits rows ordered by up_limit ASC, indexed
@@ -212,17 +238,30 @@ impl Actabilities {
                     ..
                 } if *action > 0 => {
                     self.unresolved_downgrades.remove(&(*action as u32));
+                    let limits = self.up_limits.clone();
                     let entry = self.get_mut(*action as u32);
                     // The wire contains a capped delta, never an absolute point total.
-                    entry.point = entry.point.map(|old| old.wrapping_add(*point));
-                    entry.step = *step;
+                    entry.point = add_point(entry.point, *point, entry.step, &limits);
+                    // Native recomputes the grade from the total (`FUN_397a8640`), so the wire
+                    // step is only the fallback when no catalog is installed.
+                    entry.step = if limits.is_empty() {
+                        *step
+                    } else {
+                        entry.point.map_or(*step, |point| grade_for(&limits, point))
+                    };
                     return true;
                 }
                 Event::ActionPoint { action, value } if *action > 0 => {
                     self.unresolved_downgrades.remove(&(*action as u32));
+                    let limits = self.up_limits.clone();
                     let entry = self.get_mut(*action as u32);
                     // SCAddActionPoint carries no grade step: native recomputes it from the total.
-                    entry.point = entry.point.map(|old| old.wrapping_add(*value));
+                    entry.point = add_point(entry.point, *value, entry.step, &limits);
+                    if !limits.is_empty() {
+                        if let Some(point) = entry.point {
+                            entry.step = grade_for(&limits, point);
+                        }
+                    }
                     return true;
                 }
                 _ => return false,

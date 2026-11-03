@@ -89,7 +89,7 @@ pub(in crate::hud) struct Tables {
     pub(super) experts: BTreeMap<u32, Expert>,
     /// SHOW rows only, assigned consecutive grades in native up_limit order.
     pub(super) grades: Vec<u32>,
-    pub(super) raw_limits: Vec<i32>,
+    pub(crate) raw_limits: Vec<i32>,
     /// Received expanded_expert is the current count, these keys are the next target count.
     pub(super) expansions: BTreeMap<u32, Expansion>,
     pub(super) recipes: BTreeMap<u32, Recipe>,

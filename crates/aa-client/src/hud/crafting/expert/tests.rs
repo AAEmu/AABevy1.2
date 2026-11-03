@@ -170,6 +170,41 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
 }
 
 #[test]
+fn over_limit_gain_uses_the_actual_clamped_difference_and_recomputes_the_grade() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    bridge.borrow_mut().crafting.actabilities.up_limits = vec![10000, 20000, 40000, 90000];
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 9999, step: 0 }],
+    }));
+    rt.lua
+        .load(
+            r#"
+        points={}
+        UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)
+            assert(id==1 and name=='Group1')
+            table.insert(points,{delta,total})
+        end)
+    "#,
+        )
+        .exec()?;
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 5000 });
+    rt.lua.load("assert(#points==1 and points[1][1]==1 and points[1][2]==10000)").exec()?;
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10000));
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().step, 0);
+    // A negative point total recomputes the grade down (FUN_397a8640), not the wire step.
+    bridge.borrow_mut().crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 15000, step: 1 }],
+    }));
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: -6000 });
+    rt.lua.load("assert(#points==2 and points[2][1]==-6000 and points[2][2]==9000);assert(X2Ability:GetMyActabilityInfo(1).grade==0)").exec()?;
+    Ok(())
+}
+
+#[test]
 fn action_point_gain_fires_the_four_native_arguments() -> Result<(), Box<dyn std::error::Error>> {
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
@@ -582,9 +617,11 @@ fn proficiency_chat_runtime() -> Result<Option<(aa_ui::UiRuntime, Shared, std::p
 fn login_snapshot_prints_no_gain_line_and_a_labor_delta_prints_the_native_line() -> Result<(), Box<dyn std::error::Error>> {
     let Some((rt, bridge, path)) = proficiency_chat_runtime()? else { return Ok(()) };
     bridge.borrow_mut().crafting.actabilities.expanded_expert = Some(0);
+    let limits = bridge.borrow().game.get().map(|g| g.crafting.raw_limits.clone()).unwrap_or_default();
+    bridge.borrow_mut().crafting.actabilities.up_limits = limits;
     let snapshot = Event::Actability(ActabilityEvent::Snapshot {
         last: true,
-        entries: vec![ActabilityValue { id: 1, point: 10000, step: 0 }],
+        entries: vec![ActabilityValue { id: 1, point: 9983, step: 0 }],
     });
     let before = chat_lines(&rt).len();
     dispatch(&rt, &bridge, &snapshot);
@@ -595,9 +632,9 @@ fn login_snapshot_prints_no_gain_line_and_a_labor_delta_prints_the_native_line()
     dispatch(&rt, &bridge, &Event::LaborChanged { amount: -1, action: 1, point: 17, step: 0 });
     let lines = chat_lines(&rt);
     assert_eq!(lines.len(), before + 1, "one gain line");
-    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy proficiency rose +|,17;. Current proficiency: |,10017;");
+    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy proficiency rose +|,17;. Current proficiency: |,10000;");
     // The bar/page getter reads the same updated state.
-    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(1).point==10017)").exec()?;
+    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(1).point==10000)").exec()?;
     drop(rt);
     if path.exists() {
         std::fs::remove_file(path)?;

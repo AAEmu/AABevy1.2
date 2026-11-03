@@ -389,3 +389,22 @@ fn add_action_point_adds_like_labor_without_a_wire_step() {
     assert_eq!(state.get(5).unwrap().point, Some(10017));
     assert!(!state.apply(&Event::ActionPoint { action: 0, value: 5 }));
 }
+
+#[test]
+fn point_gains_clamp_to_the_current_grade_and_recompute_the_grade() {
+    let mut state = Actabilities::default();
+    state.up_limits = vec![10000, 20000, 30000];
+    snapshot(&mut state, true, &[(5, 9999, 0)]);
+    state.apply(&Event::LaborChanged { amount: -1, action: 5, point: 5000, step: 0 });
+    assert_eq!(state.get(5).unwrap().point, Some(10000));
+    assert_eq!(state.get(5).unwrap().step, 0);
+    // A delta below the grade threshold lowers the grade by FUN_397a8640.
+    snapshot(&mut state, true, &[(5, 15000, 1)]);
+    state.apply(&Event::ActionPoint { action: 5, value: -6000 });
+    assert_eq!(state.get(5).unwrap().point, Some(9000));
+    assert_eq!(state.get(5).unwrap().step, 0);
+    // Clamp at zero.
+    snapshot(&mut state, true, &[(5, 100, 0)]);
+    state.apply(&Event::ActionPoint { action: 5, value: -5000 });
+    assert_eq!(state.get(5).unwrap().point, Some(0));
+}
