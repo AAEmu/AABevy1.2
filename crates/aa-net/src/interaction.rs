@@ -201,7 +201,7 @@ impl InteractEvent {
             sc::SCQuestRewardedByMailPacket => {
                 // FUN_397b5ec0 reads "success" (u8) and one quest id; the server's single-quest
                 // packet (a count byte of 1 and the id) has the same bytes.
-                Self::RewardedByMail { success: r.bool()?, quest: r.u32()? }
+                Self::RewardedByMail { success: r.u8()? != 0, quest: r.u32()? }
             }
             _ => {
                 let chat_type = r.i16()?;
@@ -299,6 +299,10 @@ mod tests {
         let bytes = [0, 2, 0, 0, 0];
         let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes)).unwrap();
         assert_eq!(e, InteractEvent::RewardedByMail { success: false, quest: 2 });
+        // FUN_3937a520 tests the byte against 0: any other value is success.
+        let bytes = [2, 1, 0, 0, 0];
+        let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes)).unwrap();
+        assert_eq!(e, InteractEvent::RewardedByMail { success: true, quest: 1 });
         for cut in 0..bytes.len() {
             assert!(InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes[..cut])).is_err());
         }
