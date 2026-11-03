@@ -2,13 +2,13 @@ use super::*;
 
 use bevy::prelude::*;
 
-use aa_net::model::Item;
-use aa_net::state::{Doodads, Inventory, Units};
+use aa_net::model::{slot, Item};
+use aa_net::state::{Doodads, Inventory, Player, Units};
 use aa_net::{Command, Event, NetCommand};
 
-use crate::hud::api::{HudBridge, Shared};
-use crate::hud::data::GameData;
-use crate::hud::doodad::{execute, world_doodad, Focus, Tables, Views};
+use crate::hud::api::{HudBridge, HudData, Shared};
+use crate::hud::data::{GameData, SkillInfo};
+use crate::hud::doodad::{execute, find_focus, world_doodad, Focus, PermEnv, Tables, Views};
 use crate::hud::dynamic_actions::{Shown, Source};
 
 const MAILBOX_GROUP: u32 = 107;
@@ -51,6 +51,7 @@ fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Invent
         assert!(d.game.0.set(game).is_ok());
         d.snapshot.labor = 100;
         d.pos = Vec3::new(10.0, 10.0, 100.0);
+        d.character_id = 42;
         d.doodad.focus = Some(Focus {
             obj_id: 2075,
             skills: vec![action],
@@ -85,11 +86,16 @@ fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Invent
         .insert_resource(Units::default())
         .insert_resource(inventory)
         .insert_resource(views)
+        .insert_resource(Player {
+            spawn: Some(crate::hud::fixture_spawn()),
+        })
+        .init_resource::<aa_net::shop::Shop>()
+        .add_message::<aa_net::NetEvent>()
         .add_message::<NetCommand>()
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
         .init_resource::<crate::ingame::DevOptions>()
-        .add_systems(Update, execute);
+        .add_systems(Update, (execute, crate::hud::store::update));
     app
 }
 
@@ -137,20 +143,36 @@ fn the_real_tables_map_the_local_funcs() {
         "mailbox func has no func_skill_id; native maps the type to 11400"
     );
     assert_eq!(
-        t.local(MAILBOX_GROUP, MAILBOX_ACTION),
-        Some(LocalAction::Mailbox)
+        t.local(MAILBOX_GROUP, MAILBOX_ACTION)
+            .map(|l| (l.action, l.perm)),
+        Some((LocalAction::Mailbox, 0))
     );
     assert_eq!(
         t.uses(FARM_GROUP).map(|u| u.skills.clone()),
         Some(vec![16_968]),
         "farm info board"
     );
-    assert_eq!(t.local(FARM_GROUP, 16_968), Some(LocalAction::FarmInfo(1)));
-    assert_eq!(t.local(STORE_GROUP, 12_087), Some(LocalAction::Store(274)));
-    assert_eq!(t.local(BANK_GROUP, 13_238), Some(LocalAction::Bank));
     assert_eq!(
-        t.insert_counter(COUNTER_GROUP, COUNTER_SKILL),
-        Some((COUNTER_ITEM, 1))
+        t.local(FARM_GROUP, 16_968).map(|l| (l.action, l.perm)),
+        Some((LocalAction::FarmInfo(1), 0))
+    );
+    assert_eq!(
+        t.local(STORE_GROUP, 12_087).map(|l| (l.action, l.perm)),
+        Some((LocalAction::Store(274), 0))
+    );
+    assert_eq!(
+        t.local(15_916, 12_087).map(|l| (l.action, l.perm)),
+        Some((LocalAction::Store(164), 6)),
+        "Farmer's Workbench store is perm 6"
+    );
+    assert_eq!(
+        t.local(BANK_GROUP, 13_238).map(|l| (l.action, l.perm)),
+        Some((LocalAction::Bank, 0))
+    );
+    assert_eq!(
+        t.insert_counter(COUNTER_GROUP, COUNTER_SKILL)
+            .map(|c| (c.item, c.count, c.perm)),
+        Some((COUNTER_ITEM, 1, 0))
     );
 }
 
@@ -271,6 +293,9 @@ fn the_bank_doodad_opens_the_original_bank_window() {
 /// (0x1b) and sends nothing; with it the skill is sent unchanged.
 #[test]
 fn the_insert_counter_checks_the_item_before_sending() {
+    if !aa_cry::pak_available() {
+        return;
+    }
     let Some(game_data) = game() else { return };
     let mut without = app(
         game_data,
@@ -308,4 +333,435 @@ fn the_insert_counter_checks_the_item_before_sending() {
             ..
         }]
     ));
+}
+
+/// The fixture tables the pak-free permission/dispatch tests read: a perm-6 `DoodadFuncStoreUi`
+/// (pack 274) and a perm-0 `DoodadFuncInsertCounter` (item 27301, count 1).
+fn fixture_tables() -> Tables {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
+         CREATE TABLE doodad_func_groups (id INTEGER, phase_msg TEXT, is_msg_to_zone INTEGER);
+         CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight INTEGER, use_target_silhouette INTEGER, use_target_decal INTEGER, target_decal_size REAL, sim_radius REAL);
+         CREATE TABLE localized_texts (tbl_name TEXT, tbl_column_name TEXT, idx INTEGER, en_us TEXT);
+         CREATE TABLE doodad_func_store_uis (id INTEGER, merchant_pack_id INTEGER);
+         CREATE TABLE doodad_func_open_farm_infos (id INTEGER, farm_id INTEGER);
+         CREATE TABLE doodad_func_insert_counters (id INTEGER, item_id INTEGER, item_count INTEGER);
+         CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
+         CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
+         CREATE TABLE skills (id INTEGER);
+         INSERT INTO doodad_funcs VALUES (1, 1, 12087, 'DoodadFuncStoreUi', 1, 6);
+         INSERT INTO doodad_funcs VALUES (2, 2, 23780, 'DoodadFuncInsertCounter', 2, 0);
+         INSERT INTO doodad_func_groups VALUES (1, '', 0), (2, '', 0);
+         INSERT INTO doodad_almighties VALUES (100, 1, 0, 0, 0, 0), (101, 1, 0, 0, 0, 0);
+         INSERT INTO localized_texts VALUES ('doodad_almighties', 'name', 100, 'Store Doodad');
+         INSERT INTO doodad_func_store_uis VALUES (1, 274);
+         INSERT INTO doodad_func_insert_counters VALUES (2, 27301, 1);",
+    )
+    .unwrap();
+    Tables::load(&conn).unwrap()
+}
+
+/// `find_focus` lists a local action only when its func permission passes (`FUN_393bd290` /
+/// `FUN_393b3300`). Runs without the pak: the tables are an in-memory fixture.
+#[test]
+fn a_local_action_is_listed_only_with_its_permission() {
+    let mut game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    game.skills.insert(
+        12_087,
+        SkillInfo {
+            max_range: 4,
+            ..Default::default()
+        },
+    );
+    let mut data = HudData::default();
+    assert!(data.game.0.set(game).is_ok());
+    data.pos = Vec3::new(10.0, 10.0, 100.0);
+    data.character_id = 42;
+    let mut doodads = Doodads::default();
+    let mut store = world_doodad(1, 100, 1, Vec3::new(10.0, 10.0, 100.0));
+    store.owner_id = 42;
+    doodads.by_id.insert(1, store);
+    let focus = find_focus(&data, &doodads, &Units::default(), PermEnv::default())
+        .expect("the owned store is in reach");
+    assert_eq!(focus.skills, vec![12_087]);
+
+    doodads.by_id.get_mut(&1).unwrap().owner_id = 0;
+    assert_eq!(
+        find_focus(&data, &doodads, &Units::default(), PermEnv::default()),
+        None,
+        "perm 6 refuses a doodad owned by somebody else"
+    );
+}
+
+/// A use of a local action rechecks `FUN_393b3300` before it opens: error 2 `NO_PERM`, no packet.
+/// Runs without the pak.
+#[test]
+fn a_local_action_use_checks_its_permission() {
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut app = dispatch_app(game, 1, 100, 12087, 0, Inventory::default(), None);
+    app.update();
+    let errors: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect();
+    assert_eq!(errors, [NO_PERM]);
+    assert!(sent(&mut app).is_empty());
+
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut app = dispatch_app(game, 1, 100, 12087, 42, Inventory::default(), None);
+    app.update();
+    assert!(app
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .next()
+        .is_none());
+    assert!(sent(&mut app).is_empty());
+}
+
+/// `FUN_393bc260` case 0x54: no local player -> handled, no send; with a player, the item must be
+/// in the bag or in the 28 equipment slots (`FUN_393b8f00`). Runs without the pak.
+#[test]
+fn the_insert_counter_needs_the_item_in_the_bag_or_equipment() {
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut no_player = dispatch_app(game, 2, 101, COUNTER_SKILL, 0, Inventory::default(), None);
+    no_player.update();
+    assert!(!no_player
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .any(|error| error.0 == NOT_ENOUGH_ITEM));
+    assert!(sent(&mut no_player).is_empty(), "no player sent the skill");
+
+    let player = Player {
+        spawn: Some(crate::hud::fixture_spawn()),
+    };
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut without = dispatch_app(
+        game,
+        2,
+        101,
+        COUNTER_SKILL,
+        0,
+        Inventory::default(),
+        Some(player.clone()),
+    );
+    without.update();
+    let errors: Vec<_> = without
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect();
+    assert_eq!(errors, [NOT_ENOUGH_ITEM]);
+    assert!(sent(&mut without).is_empty());
+
+    let mut equipped = Inventory::default();
+    equipped.equipment.slots[slot::BACKPACK] = Some(Item {
+        template_id: COUNTER_ITEM,
+        count: 1,
+        ..Default::default()
+    });
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut with = dispatch_app(game, 2, 101, COUNTER_SKILL, 0, equipped, Some(player));
+    with.update();
+    assert!(matches!(
+        sent(&mut with).as_slice(),
+        [Command::UseDoodadSkill {
+            skill_id: COUNTER_SKILL,
+            ..
+        }]
+    ));
+}
+
+/// A store/bank window closes with `NPC_INTERACTION_END` (0x6c) then `INTERACTION_END` (0xd2)
+/// (`FUN_393b7aa0`), on walk-away and when the doodad is gone.
+#[test]
+fn the_store_and_bank_close_with_the_native_end_events() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    for (group, template, action, activated) in [
+        (STORE_GROUP, STORE_TEMPLATE, 12_087, "IsActivatedStore()"),
+        (BANK_GROUP, BANK_TEMPLATE, 13_238, "IsActivatedBank()"),
+    ] {
+        let Some(game_data) = game() else { return };
+        let mut app = app(game_data, group, template, action, Inventory::default());
+        lua(
+            &app,
+            "STORE_ENDS=0; INTER_ENDS=0;              local a=UIParent:CreateWidget('emptywidget','storeEndProbe','UIParent');              a:RegisterEvent('NPC_INTERACTION_END');              a:SetHandler('OnEvent',function() STORE_ENDS=STORE_ENDS+1 end);              local b=UIParent:CreateWidget('emptywidget','interEndProbe','UIParent');              b:RegisterEvent('INTERACTION_END');              b:SetHandler('OnEvent',function() INTER_ENDS=INTER_ENDS+1 end)",
+        )
+        .unwrap();
+        app.update();
+        assert_eq!(
+            lua(&app, &format!("return {activated}"))
+                .unwrap()
+                .as_boolean(),
+            Some(true),
+            "the window did not open"
+        );
+        app.world()
+            .get_non_send::<HudBridge>()
+            .unwrap()
+            .0
+            .borrow_mut()
+            .pos = Vec3::new(1000.0, 1000.0, 100.0);
+        app.update();
+        assert_eq!(
+            lua(&app, &format!("return {activated}"))
+                .unwrap()
+                .as_boolean(),
+            Some(false),
+            "walking away did not close the window"
+        );
+        assert_eq!(
+            lua(&app, "return STORE_ENDS").unwrap().as_integer(),
+            Some(1),
+            "NPC_INTERACTION_END after the walk-away"
+        );
+        assert_eq!(
+            lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+            Some(1),
+            "INTERACTION_END after the walk-away"
+        );
+
+        // reopen, then despawn the doodad
+        {
+            let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+            let mut d = bridge.0.borrow_mut();
+            d.pos = Vec3::new(10.0, 10.0, 100.0);
+            d.dynamic_actions.request(1);
+        }
+        app.update();
+        assert_eq!(
+            lua(&app, &format!("return {activated}"))
+                .unwrap()
+                .as_boolean(),
+            Some(true),
+            "the window did not reopen"
+        );
+        app.world_mut()
+            .resource_mut::<Doodads>()
+            .by_id
+            .remove(&2075);
+        app.update();
+        assert_eq!(
+            lua(&app, "return STORE_ENDS").unwrap().as_integer(),
+            Some(2),
+            "NPC_INTERACTION_END after the despawn"
+        );
+        assert_eq!(
+            lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+            Some(2),
+            "INTERACTION_END after the despawn"
+        );
+    }
+}
+
+/// Opening a local window ends the interaction that is active (`FUN_393b7b10` ->
+/// `FUN_393b7aa0`): the open store window gets `NPC_INTERACTION_END` then `INTERACTION_END`
+/// before the mailbox window opens.
+#[test]
+fn a_local_window_ends_the_previous_store() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game_data) = game() else { return };
+    let mut app = app(
+        game_data,
+        STORE_GROUP,
+        STORE_TEMPLATE,
+        12_087,
+        Inventory::default(),
+    );
+    lua(
+        &app,
+        "STORE_ENDS=0; INTER_ENDS=0;          local a=UIParent:CreateWidget('emptywidget','storeEndProbe3','UIParent');          a:RegisterEvent('NPC_INTERACTION_END');          a:SetHandler('OnEvent',function() STORE_ENDS=STORE_ENDS+1 end);          local b=UIParent:CreateWidget('emptywidget','interEndProbe3','UIParent');          b:RegisterEvent('INTERACTION_END');          b:SetHandler('OnEvent',function() INTER_ENDS=INTER_ENDS+1 end)",
+    )
+    .unwrap();
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true)
+    );
+
+    // The same doodad becomes a mailbox; opening it must end the store first.
+    app.world_mut().resource_mut::<Doodads>().by_id.insert(
+        2075,
+        world_doodad(
+            2075,
+            MAILBOX_TEMPLATE,
+            MAILBOX_GROUP,
+            Vec3::new(10.0, 10.0, 100.0),
+        ),
+    );
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.doodad.focus = Some(Focus {
+            obj_id: 2075,
+            skills: vec![MAILBOX_ACTION],
+            craft_icon: None,
+            key: -3.0,
+            dist: 3.0,
+        });
+        let generation = d.dynamic_actions.shown().and_then(|s| match s.source {
+            Source::Doodad { generation, .. } => Some(generation),
+            _ => None,
+        });
+        d.dynamic_actions.replace(Some(Shown {
+            source: Source::Doodad {
+                obj_id: 2075,
+                phase: MAILBOX_GROUP,
+                generation: generation.unwrap_or_default(),
+            },
+            skills: vec![MAILBOX_ACTION],
+        }));
+        d.dynamic_actions.request(1);
+    }
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(false),
+        "the store window stayed open"
+    );
+    assert_eq!(
+        lua(&app, "return IsActivatedMailBox()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the mailbox window did not open"
+    );
+    assert_eq!(
+        lua(&app, "return STORE_ENDS").unwrap().as_integer(),
+        Some(1),
+        "NPC_INTERACTION_END before the new window"
+    );
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1),
+        "INTERACTION_END before the new window"
+    );
+}
+
+/// A store opened at a fallback gap (no drawn bounds, 3 m) must not close on the next frame.
+#[test]
+fn a_fallback_gap_store_stays_open() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game_data) = game() else { return };
+    let mut app = app(
+        game_data,
+        STORE_GROUP,
+        STORE_TEMPLATE,
+        12_087,
+        Inventory::default(),
+    );
+    lua(
+        &app,
+        "STORE_ENDS=0; local a=UIParent:CreateWidget('emptywidget','storeEndProbe2','UIParent');          a:RegisterEvent('NPC_INTERACTION_END');          a:SetHandler('OnEvent',function() STORE_ENDS=STORE_ENDS+1 end)",
+    )
+    .unwrap();
+    app.world_mut()
+        .resource_mut::<Doodads>()
+        .by_id
+        .get_mut(&2075)
+        .unwrap()
+        .pos = aa_net::Pos::new(10.0, 13.0, 100.0);
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true),
+        "the fallback-gap store did not open"
+    );
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true),
+        "the fallback-gap store closed on the next frame"
+    );
+    assert_eq!(
+        lua(&app, "return STORE_ENDS").unwrap().as_integer(),
+        Some(0)
+    );
+}
+
+/// An `execute` app without a UI runtime: the pak-free dispatch/permission tests.
+fn dispatch_app(
+    game: GameData,
+    group: u32,
+    template: u32,
+    action: u32,
+    owner: u32,
+    inventory: Inventory,
+    player: Option<Player>,
+) -> App {
+    let mut views = Views::default();
+    views.fixture_doodad(2075, Entity::PLACEHOLDER);
+    let generation = views.doodad_generation(2075).unwrap();
+    let bridge = Shared::default();
+    {
+        let mut d = bridge.borrow_mut();
+        assert!(d.game.0.set(game).is_ok());
+        d.snapshot.labor = 100;
+        d.pos = Vec3::new(10.0, 10.0, 100.0);
+        d.character_id = 42;
+        d.doodad.focus = Some(Focus {
+            obj_id: 2075,
+            skills: vec![action],
+            craft_icon: None,
+            key: -3.0,
+            dist: 3.0,
+        });
+        d.dynamic_actions.replace(Some(Shown {
+            source: Source::Doodad {
+                obj_id: 2075,
+                phase: group,
+                generation,
+            },
+            skills: vec![action],
+        }));
+        d.dynamic_actions.request(1);
+    }
+    let mut doodads = Doodads::default();
+    let mut doodad = world_doodad(2075, template, group, Vec3::new(10.0, 10.0, 100.0));
+    doodad.owner_id = owner;
+    doodads.by_id.insert(2075, doodad);
+    let mut app = App::new();
+    app.insert_non_send(HudBridge(bridge))
+        .insert_resource(doodads)
+        .insert_resource(Units::default())
+        .insert_resource(inventory)
+        .insert_resource(views)
+        .add_message::<NetCommand>()
+        .add_message::<crate::hud::UseFailed>()
+        .add_message::<crate::hud::ShowError>()
+        .init_resource::<crate::ingame::DevOptions>()
+        .add_systems(Update, execute);
+    if let Some(player) = player {
+        app.insert_resource(player);
+    }
+    app
 }

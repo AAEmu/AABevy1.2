@@ -40,7 +40,7 @@ pub struct Tables {
 impl Tables {
     pub fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut out = Self::default();
-        let mut q = conn.prepare("SELECT m.npc_id,g.item_id,g.grade_id,p.kind_id,m.merchant_pack_id FROM merchants m JOIN merchant_packs p ON p.id=m.merchant_pack_id JOIN merchant_goods g ON g.merchant_pack_id=m.merchant_pack_id ORDER BY m.id,g.id")?;
+        let mut q = conn.prepare("SELECT m.npc_id,g.item_id,g.grade_id,p.kind_id FROM merchants m JOIN merchant_packs p ON p.id=m.merchant_pack_id JOIN merchant_goods g ON g.merchant_pack_id=m.merchant_pack_id ORDER BY m.id,g.id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let npc = any_int(r, 0)? as u32;
@@ -53,14 +53,13 @@ impl Tables {
                 5 => 4,
                 _ => 0,
             };
-            let good = Good {
-                item,
-                grade: any_int(r, 2)?.clamp(0, 11) as u8,
-                currency,
-            };
             let goods = out.merchants.entry(npc).or_default();
             if !goods.iter().any(|g| g.item == item) {
-                goods.push(good.clone());
+                goods.push(Good {
+                    item,
+                    grade: any_int(r, 2)?.clamp(0, 11) as u8,
+                    currency,
+                });
             }
         }
         // A doodad's merchant pack need not belong to any NPC (the bait barrel's pack 274 has no
@@ -474,10 +473,32 @@ fn build_command(
     })
 }
 
+/// Closes the store/bank window that is open, with its native end events: `FUN_393b7aa0` raises
+/// `NPC_INTERACTION_END` (0x6c) for interaction states 0xe/0xf/0x11. `true` when one was open.
+pub(super) fn end_interaction(rt: &UiRuntime, bridge: &Shared) -> bool {
+    let mut data = bridge.borrow_mut();
+    if data.store.npc.is_none() {
+        return false;
+    }
+    if let Some(scope) = data.store.scope {
+        super::dialog::close_npc(&mut data, scope);
+    }
+    data.store.close();
+    drop(data);
+    rt.fire_event("NPC_INTERACTION_END", ());
+    true
+}
+
 /// A `DoodadFuncStoreUi` / `DoodadFuncBankUi`: native `FUN_393b8cc0` / `FUN_393b8c20` open the
-/// window locally with `NPC_INTERACTION_START("store" | "bank")` and send no packet. A store's
-/// catalog is the func's `merchant_pack_id`, not an NPC's; a bank has no catalog.
+/// window locally with `NPC_INTERACTION_START("store" | "bank")` (one argument,
+/// `FUN_39424240(0x6b, &one_arg)`) and send no packet. A store's catalog is the func's
+/// `merchant_pack_id`, not an NPC's; a bank has no catalog.
+///
+/// Native `FUN_393b7b10` closes the active interaction (an open NPC store included) first.
 pub(super) fn open_doodad(rt: &UiRuntime, bridge: &Shared, obj_id: u32, pack: u32, bank: bool) -> bool {
+    if end_interaction(rt, bridge) {
+        rt.fire_event("INTERACTION_END", ());
+    }
     {
         let mut data = bridge.borrow_mut();
         data.store.open((obj_id, pack), bank);
@@ -485,11 +506,7 @@ pub(super) fn open_doodad(rt: &UiRuntime, bridge: &Shared, obj_id: u32, pack: u3
     }
     rt.fire_event(
         "NPC_INTERACTION_START",
-        (
-            if bank { "bank" } else { "store" },
-            "",
-            obj_id.to_string(),
-        ),
+        if bank { "bank" } else { "store" },
     );
     true
 }
@@ -524,7 +541,7 @@ pub(super) fn start_selected(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn update(
+pub(super) fn update(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     player: Res<Player>,
@@ -558,12 +575,14 @@ fn update(
         .and_then(|f| f.call::<bool>(()))
         .unwrap_or(false);
     // A doodad store follows the doodad: native `FUN_393b7e40` ends the interaction at the same
-    // 2.1 m surface gap as any doodad use. An NPC store keeps the talk target and its dialog.
+    // measured 2.1 m surface gap as any doodad use. A fallback gap (no drawn bounds) cannot prove
+    // the player left, so it does not close (the same rule `needs_walk` uses). An NPC store keeps
+    // the talk target and its dialog.
     let close = if doodad {
         !visible
-            || !doodads
-                .as_deref()
-                .is_some_and(|doodads| super::doodad::in_interaction_reach(&bridge.0.borrow(), doodads, &units, npc.0))
+            || doodads.as_deref().is_none_or(|doodads| {
+                super::doodad::left_interaction(&bridge.0.borrow(), doodads, &units, npc.0)
+            })
     } else {
         !visible
             || !units
@@ -579,11 +598,18 @@ fn update(
                 .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
     };
     if close {
+        let was_doodad = doodad;
         let mut data = bridge.0.borrow_mut();
         if let Some(scope) = data.store.scope {
             super::dialog::close_npc(&mut data, scope);
         }
         data.store.close();
+        drop(data);
+        // `FUN_393b7aa0`: the store/bank states raise NPC_INTERACTION_END before INTERACTION_END.
+        if was_doodad {
+            rt.fire_event("NPC_INTERACTION_END", ());
+            rt.fire_event("INTERACTION_END", ());
+        }
         return;
     }
     let requests = std::mem::take(&mut bridge.0.borrow_mut().store.requests);

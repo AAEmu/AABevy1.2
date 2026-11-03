@@ -14,11 +14,15 @@
 //!   `NPC_INTERACTION_START("bank")`.
 //! * `DoodadFuncNaviOpenMailbox` (0x2c): `FUN_393bd290` (779073) lists it as skill 11400 through
 //!   the func-type map of `FUN_397aa970` (1699182), and using it reaches `FUN_393b1040` (767979),
-//!   which sets state 4 and raises `TOGGLE_MAIL(doodadObjId, true)`; there is no packet.
+//!   which sets state 4 and raises `TOGGLE_MAIL(doodadObjId, true)`. The handler is reached through
+//!   the pointer table `0x399d2c58` (direct caller not recovered), calls `FUN_393ccdd0` (not ported)
+//!   and mailbox group 107 has `next_phase` 10279, so whether it sends a packet is unverified.
 //!
-//! `DoodadFuncInsertCounter` (0x54) is the pre-check of its case: with fewer than
-//! `doodad_func_insert_counters.item_count` of `item_id` in the bag it shows `NOT_ENOUGH_ITEM`
-//! (0x1b, `FUN_39428370`) and does not send the skill; otherwise the skill is sent as usual.
+//! `DoodadFuncInsertCounter` (0x54) is the pre-check of its case: when both the bag count
+//! (`FUN_397ccda0`) and the 28 equipment slots (`FUN_393b8f00`) hold fewer than
+//! `doodad_func_insert_counters.item_count` of `item_id` it shows `NOT_ENOUGH_ITEM` (0x1b,
+//! `FUN_39428370`) and does not send the skill; otherwise the skill is sent as usual. With no
+//! local player it returns 1 (handled, no send).
 //!
 //! The other client-side cases of `FUN_393bc260` stay in the main module's use path or need a
 //! dependency that is not here yet (coffer permission protocol, the book/emblem windows); the
@@ -31,13 +35,20 @@ use aa_ui::UiRuntime;
 use rusqlite::Connection;
 
 use crate::hud::api::Shared;
-use crate::hud::data::GameData;
 
 /// The action id the native maps `DoodadFuncNaviOpenMailbox` to (`FUN_397aa970`). Its skill row is
 /// 11400 "Open Mailbox"; the func itself has no `func_skill_id`.
 pub(super) const MAILBOX_ACTION: u32 = 11400;
 
-/// A func whose window the client opens itself. Keyed by `(doodad_func_group_id, action id)`.
+/// A func whose window the client opens itself, with its `doodad_funcs.perm_id`
+/// (`FUN_393b3300`; the native checks it when listing and again before the switch).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::hud) struct LocalUse {
+    pub action: LocalAction,
+    pub perm: u8,
+}
+
+/// The window a local func opens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::hud) enum LocalAction {
     /// `TOGGLE_MAIL(doodadObjId, true)` (`FUN_393b1040`).
@@ -50,13 +61,21 @@ pub(in crate::hud) enum LocalAction {
     Bank,
 }
 
+/// `DoodadFuncInsertCounter` requirement and its permission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::hud) struct CounterUse {
+    pub item: u32,
+    pub count: u32,
+    pub perm: u8,
+}
+
 /// The detail rows the local funcs read: `doodad_func_open_farm_infos.farm_id`,
 /// `doodad_func_store_uis.merchant_pack_id` and the insert-counter requirement.
 #[derive(Default)]
 pub(super) struct LocalFuncs {
     farms: HashMap<u32, u32>,
     stores: HashMap<u32, u32>,
-    /// func id -> (item template, count the bag must hold).
+    /// func id -> (item template, number the bag or equipment must hold).
     insert_counters: HashMap<u32, (u32, u32)>,
 }
 
@@ -128,63 +147,74 @@ fn read_map(conn: &Connection, sql: &str) -> HashMap<u32, u32> {
     rows.flatten().filter(|(_, value)| *value != 0).collect()
 }
 
-/// Runs a local func. `true` means the caller must not send the skill.
+/// Runs a local func. Native `FUN_393bc260` always handles these: the skill is never sent, even
+/// when the window cannot open here (no UI runtime, no position, an empty pack). `FUN_393b7b10`
+/// first ends the interaction that is active (`FUN_393b7aa0`), which `end_interaction` mirrors.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     rt: Option<&UiRuntime>,
     bridge: &Shared,
-    game: &GameData,
     doodads: &Doodads,
     units: &Units,
+    inventory: &Inventory,
     obj_id: u32,
     local: LocalAction,
-) -> bool {
+) {
     let Some(rt) = rt else {
-        return false;
+        return;
     };
+    super::end_interaction(Some(rt), bridge, inventory);
     match local {
-        LocalAction::Mailbox => {
-            super::super::mail::open_at(rt, obj_id);
-            true
-        }
+        LocalAction::Mailbox => super::super::mail::open_at(rt, obj_id),
         LocalAction::FarmInfo(farm) => {
-            let pos = doodads
+            // Without a world position the native window still opens; this port cannot place it,
+            // so it stays closed rather than sending the skill.
+            if let Some(pos) = doodads
                 .by_id
                 .get(&obj_id)
-                .and_then(|o| crate::ingame::units::doodad_world(o, units));
-            match pos {
-                Some(pos) => {
-                    super::super::farm::show_doodad(rt, farm as i32, pos);
-                    true
-                }
-                None => false,
+                .and_then(|o| crate::ingame::units::doodad_world(o, units))
+            {
+                super::super::farm::show_doodad(rt, farm as i32, pos);
             }
         }
+        // An empty or unknown merchant pack still opens the native store window (it has no
+        // goods); the server owns the purchase check.
         LocalAction::Store(pack) => {
-            if game.stores.packs.get(&pack).is_none() {
-                return false;
-            }
-            super::super::store::open_doodad(rt, bridge, obj_id, pack, false)
+            super::super::store::open_doodad(rt, bridge, obj_id, pack, false);
         }
-        LocalAction::Bank => super::super::store::open_doodad(rt, bridge, obj_id, 0, true),
+        LocalAction::Bank => {
+            super::super::store::open_doodad(rt, bridge, obj_id, 0, true);
+        }
     }
 }
 
-/// `DoodadFuncInsertCounter`: the native `FUN_393bc260` case 0x54 refuses before sending when the
-/// bag holds fewer than the detail row's `item_count` of `item_id`.
+/// `DoodadFuncInsertCounter` (`FUN_393bc260` case 0x54): the bag count (`FUN_397ccda0`) and the
+/// 28 equipment slots (`FUN_393b8f00`) are compared separately; only when both are below
+/// `item_count` does the native refuse. Equipment items count through their template id.
 pub(super) fn missing_counter_item(inventory: &Inventory, item: u32, count: u32) -> bool {
-    let held: u32 = inventory
+    let bag: u32 = inventory
         .bag
         .iter()
         .flatten()
         .filter(|i| i.template_id == item)
         .map(|i| i.count.max(0) as u32)
         .sum();
-    held < count
+    let equipped: u32 = inventory
+        .equipment
+        .slots
+        .iter()
+        .flatten()
+        .filter(|i| i.template_id == item)
+        .map(|i| i.count.max(0) as u32)
+        .sum();
+    bag < count && equipped < count
 }
 
 /// The `ErrorMessageType` of the refusal (`error_names.txt`: 27 `NOT_ENOUGH_ITEM`).
 pub(super) const NOT_ENOUGH_ITEM: i16 = 27;
+
+/// `FUN_393bc260` shows `NO_PERM` (error 2) when `FUN_393b3300` refuses the func.
+pub(super) const NO_PERM: i16 = 2;
 
 #[cfg(test)]
 mod tests;

@@ -343,11 +343,12 @@ pub(super) fn update(
                 Request::Close => ended_interaction |= super::bench::close(&mut data),
             }
         }
-        // Native `393b7e40` monitors the active interaction with the same 2.1 m predicate and
-        // closes through `393b7aa0` (INTERACTION_END) when the doodad is gone or out of range.
+        // Native `393b7e40` monitors the active interaction with the same predicate as every
+        // doodad close (`doodad::left_interaction`) and closes through `393b7aa0`
+        // (INTERACTION_END) when the doodad is gone or out of range.
         if data.crafting.current.active.is_some_and(|b| {
             !doodads.by_id.get(&b.object).is_some_and(|d| d.template_id == b.template)
-                || !super::super::doodad::in_interaction_reach(&data, &doodads, &units, b.object)
+                || super::super::doodad::left_interaction(&data, &doodads, &units, b.object)
         }) {
             ended_interaction |= super::bench::close(&mut data);
         }
