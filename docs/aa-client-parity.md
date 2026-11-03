@@ -4,7 +4,9 @@
 
 The 1.2 decompile settles the combat state; the K2 capture (2026-11-01-combat-k2k3) only supplies the client's outbound packets.
 The battle flag is the `X2Unit + 0x3bba` byte: `OnCombatEngaged` sets it (`FUN_391d69a0` -> `FUN_390b36f0`), a real blow sets
-it on both sides (`FUN_39391670`: a caster, a hit, both units alive), and `OnCombatCleared` clears it at once (`FUN_391d6a60` ->
+it on both sides (`FUN_39391670`: a caster, a hit, both units alive), and a blow on the local player's own mate also sets it on
+the local owner (the target's `+0x410 == 5`, `+0x420` the local character id, the owner alive), and `OnCombatCleared` clears it
+at once (`FUN_391d6a60` ->
 vtable `+0x48` -> `FUN_39355ec0` -> `FUN_390b3710`); a clear on a unit that is not flagged changes nothing. The capture's
 1 -> 0 at t=59,322 is our server's `SCCombatCleared` 0.772 s after the recorder lost the target (0.613 s after the no-target
 press), not a client timer. Separate from the flag is the derived combat idle (`combat.rs` `CombatIdle`, `X2Unit + 0x5fc4`):
