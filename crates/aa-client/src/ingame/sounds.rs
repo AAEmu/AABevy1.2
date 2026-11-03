@@ -129,7 +129,7 @@ struct Counter {
 }
 
 impl SoundBook {
-    fn open() -> SoundBook {
+    pub(crate) fn open() -> SoundBook {
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI).ok();
         let footsteps: Arc<OnceLock<Footsteps>> = Arc::default();

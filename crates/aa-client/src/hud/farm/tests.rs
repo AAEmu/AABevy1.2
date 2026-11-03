@@ -113,12 +113,15 @@ fn zone_world(zone: u16) -> aa_world::stream::WorldInfo {
     aa_world::stream::WorldInfo(Arc::new(world))
 }
 
-fn setup(game: GameData) -> (UiRuntime, Shared) {
+fn setup(game: GameData) -> Option<(UiRuntime, Shared)> {
+    if !aa_cry::pak_available() {
+        return None;
+    }
     let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
     let bridge = Rc::new(RefCell::new(super::super::api::HudData::default()));
     assert!(bridge.borrow().game.0.set(game).is_ok());
     super::super::api::install(&mut rt, &bridge).unwrap();
-    (rt, bridge)
+    Some((rt, bridge))
 }
 
 fn entry(farm_type: u32, func_group_id: u32, time_left: u32, plant_time: i64) -> CommonFarmEntry {
@@ -141,7 +144,7 @@ fn list(entries: Vec<CommonFarmEntry>) -> CommonFarmList {
 
 #[test]
 fn static_getters_match_the_native_shapes() {
-    let (rt, _) = setup(game());
+    let Some((rt, _)) = setup(game()) else { return };
     rt.lua
         .load(
             r#"
@@ -221,7 +224,7 @@ fn runtime_entries_use_seconds_the_common_farm_and_the_crop_zone() {
 
 #[test]
 fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
-    let (rt, bridge) = setup(game());
+    let Some((rt, bridge)) = setup(game()) else { return };
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_non_send(rt)
@@ -280,7 +283,7 @@ fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
 
 #[test]
 fn show_raises_open_common_farm_info_and_walking_away_ends_it() {
-    let (rt, bridge) = setup(game());
+    let Some((rt, bridge)) = setup(game()) else { return };
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_non_send(rt)
@@ -305,7 +308,7 @@ fn show_raises_open_common_farm_info_and_walking_away_ends_it() {
         )
         .exec()
         .unwrap();
-    bridge.borrow_mut().pos = aa_world::cry_to_bevy(Vec3::new(100.0, 200.0, 30.0));
+    bridge.borrow_mut().pos = Vec3::new(100.0, 200.0, 30.0);
     app.world_mut()
         .write_message(NetEvent(Event::Farm(FarmEvent::Show(
             aa_net::ShowCommonFarm {
@@ -321,7 +324,7 @@ fn show_raises_open_common_farm_info_and_walking_away_ends_it() {
     aa_ui::lua::tick(&rt.lua, 16.0);
     assert_eq!(rt.lua.load("return FARM_OPENED").eval::<i64>().unwrap(), 10);
     assert_eq!(rt.lua.load("return FARM_ENDED").eval::<i64>().unwrap(), 0);
-    bridge.borrow_mut().pos = aa_world::cry_to_bevy(Vec3::new(200.0, 200.0, 30.0));
+    bridge.borrow_mut().pos = Vec3::new(200.0, 200.0, 30.0);
     app.update();
     let rt = app.world().non_send::<UiRuntime>();
     aa_ui::lua::tick(&rt.lua, 16.0);
@@ -336,7 +339,7 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
     else {
         return;
     };
-    let (rt, bridge) = setup(game());
+    let Some((rt, bridge)) = setup(game()) else { return };
     rt.load_ui_texts(std::path::Path::new(&db)).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -485,7 +488,7 @@ fn the_original_commonfarm_scripts_open_the_info_and_my_farm_windows() {
         .iter()
         .find(|f| f.id == f.farm_group_id)
         .map_or(1, |f| f.id);
-    let (rt, _) = setup(game);
+    let Some((rt, _)) = setup(game) else { return };
     if !load_commonfarm(&rt) {
         return;
     }
@@ -543,7 +546,7 @@ fn the_original_my_farm_list_shows_growing_and_grown_crops() {
         .zone(129)
         .map(|(_, zone, _)| zone.text.clone())
         .unwrap_or_else(|| "unknown".into());
-    let (rt, bridge) = setup(game);
+    let Some((rt, bridge)) = setup(game) else { return };
     if !load_commonfarm(&rt) {
         return;
     }

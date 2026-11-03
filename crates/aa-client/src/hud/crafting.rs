@@ -16,6 +16,16 @@ use bevy::prelude::*;
 pub(super) use data::Tables;
 use mlua::{Lua, Table};
 
+/// A catalog with only workbench recipe maps, for tests that do not need the pak or database.
+#[cfg(test)]
+pub(super) fn fixture_tables(benches: impl IntoIterator<Item = (u32, Vec<u32>)>) -> Tables {
+    let mut tables = Tables::default();
+    for (template, recipes) in benches {
+        tables.benches.insert(template, recipes.into_iter().collect());
+    }
+    tables
+}
+
 #[derive(Default)]
 pub(super) struct View {
     owner: u32,
@@ -27,6 +37,39 @@ pub(super) struct View {
     casts: batch::CastSlots,
     requests: Vec<batch::Request>,
     expert: expert::View,
+}
+
+/// Opens the bench at `object` (template `template`), the local entry of native `FUN_394dc360`.
+/// Returns the unique recipe count for `CRAFTING_START` and whether another bench was active
+/// (`FUN_393b7b10` runs `FUN_393b7aa0` first then), or `None` when the object is invalid or the
+/// catalog is not loaded.
+pub(super) fn open_bench(data: &mut HudData, object: u32, template: u32) -> Option<(usize, bool)> {
+    let replaced = data.crafting.current.active.is_some();
+    bench::open(data, object, template).map(|count| (count, replaced))
+}
+
+/// The live workbench identity `(object, template)`, or `None` after a close.
+#[cfg(test)]
+pub(super) fn active_bench(data: &HudData) -> Option<(u32, u32)> {
+    data.crafting.current.active.map(|b| (b.object, b.template))
+}
+
+/// The CURRENT recipe count (native `DAT_3a5ad86c`).
+#[cfg(test)]
+pub(super) fn current_recipe_count(data: &HudData) -> usize {
+    data.crafting.current.recipes.len()
+}
+
+/// The profession icon (`actability_groups.icon_path`) of the first recipe a bench template offers:
+/// the icon the shared action bar shows for the workbench action. This is a presentation choice
+/// (the original action's own icon id is the unresolved protected action key); the window itself
+/// uses the same actability group icon.
+pub(super) fn bench_icon(data: &HudData, template: u32) -> Option<String> {
+    let tables = &data.game.get()?.crafting;
+    let recipe = tables.benches.get(&template)?.iter().next()?;
+    let group = tables.recipes.get(recipe)?.actability_group;
+    let icon = tables.groups.get(&group)?.icon.clone();
+    (!icon.is_empty()).then_some(icon)
 }
 
 pub(super) fn refresh(world: &World, data: &mut HudData) {
@@ -44,6 +87,12 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
     if let Some(received) = world.get_resource::<aa_net::Actabilities>() {
         if !data.crafting.expert.active && data.crafting.actabilities != *received {
             data.crafting.actabilities.clone_from(received);
+        }
+    }
+    // Native `FUN_397a9880` needs the static grade limits to clamp a gained total.
+    if let Some(game) = data.game.get() {
+        if data.crafting.actabilities.up_limits != game.crafting.raw_limits {
+            data.crafting.actabilities.up_limits.clone_from(&game.crafting.raw_limits);
         }
     }
     data.crafting.item_secure = world

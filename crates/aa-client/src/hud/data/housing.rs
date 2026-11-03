@@ -619,6 +619,14 @@ mod tests {
             CREATE TABLE farm_groups (id INT, name TEXT, count INT, description TEXT);
             CREATE TABLE farm_group_doodads (id INT, farm_group_id INT, doodad_id INT, item_id INT);
             CREATE TABLE common_farms (id INT, name TEXT, guard_time INT, farm_group_id INT, comments TEXT);
+            CREATE TABLE doodad_func_groups (id INT, name TEXT);
+            CREATE TABLE doodad_phase_funcs (id INT, doodad_func_group_id INT, actual_func_id INT, actual_func_type TEXT);
+            CREATE TABLE doodad_func_growths (id INT, delay INT, next_phase INT);
+            CREATE TABLE doodad_almighties (id INT, name TEXT, climate_id INT);
+            INSERT INTO doodad_func_groups VALUES (77, 'Growing'), (78, 'Grown');
+            INSERT INTO doodad_phase_funcs VALUES (1, 77, 1, 'DoodadFuncGrowth');
+            INSERT INTO doodad_func_growths VALUES (1, 5000, 78);
+            INSERT INTO doodad_almighties VALUES (380, 'Parsley', 1), (381, 'Crop', 3), (413, 'Tree', 2);
             INSERT INTO taxations VALUES (3, 150000, 'small', 't');
             INSERT INTO localized_texts VALUES ('housings', 100, 'name', 'Rose Villa');
             INSERT INTO localized_texts VALUES ('deco_actability_groups', 1, 'name', 'Specialty furniture');
@@ -690,6 +698,10 @@ mod tests {
         assert_eq!(t.housing_areas[&100].housing_group_id, 5);
         assert!(t.housing_groups[&5].can_extend && !t.housing_groups[&5].houseless);
         assert_eq!(t.farm_group_ids, vec![1, 2], "X2.GetFarmGroups order");
+        assert_eq!(t.farm_growth_step(77), Some(FarmGrowthStep { delay_ms: 5000, next_phase: 78 }));
+        assert_eq!(t.farm_phase_name(78), Some("Grown"));
+        assert_eq!(t.farm_doodad_name(380), Some("Parsley"));
+        assert_eq!(t.farm_climate(381), 3);
         assert_eq!(t.farm_group_max_count(1), 10);
         assert_eq!(t.allowed_farm_doodads(1).collect::<Vec<_>>(), vec![380, 381]);
         assert_eq!(t.farm_doodad_item(1, 381), 13726);

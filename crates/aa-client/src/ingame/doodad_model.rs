@@ -149,6 +149,7 @@ fn prepare_inner(loader: &CryLoader, reference: &str, with_bounds: bool) -> Opti
             pos: Vec3::ZERO,
             rot: Quat::IDENTITY,
             scale: Vec3::ONE,
+            animation: None,
         }]
     };
     let mut pieces = Vec::new();
@@ -257,6 +258,7 @@ mod tests {
             pos: Vec3::new(7.0, 8.0, 9.0),
             rot: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
             scale: Vec3::new(2.0, 3.0, 4.0),
+            animation: None,
         };
         let node = |name: &str, parent, local| Node {
             name: name.into(),
@@ -330,6 +332,7 @@ mod tests {
                 pos: Vec3::ZERO,
                 rot: Quat::IDENTITY,
                 scale: Vec3::ONE,
+                animation: None,
             };
             let ladder =
                 ladder_of(&part, &model).unwrap_or_else(|| panic!("{path}: no $ladder segment"));
@@ -363,6 +366,7 @@ mod tests {
             pos: Vec3::ZERO,
             rot: Quat::IDENTITY,
             scale: Vec3::ONE,
+            animation: None,
         }
     }
 
@@ -469,6 +473,7 @@ mod tests {
             pos: Vec3::new(10.0, 0.0, 0.0),
             rot: Quat::IDENTITY,
             scale: Vec3::splat(2.0),
+            animation: None,
         };
         let (lo, hi) = part_bounds(&part, &model).expect("hull bounds");
         assert!((lo - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-5, "{lo}");

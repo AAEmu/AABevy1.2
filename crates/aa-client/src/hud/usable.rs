@@ -549,18 +549,28 @@ impl Env<'_> {
         // (`target_relation_id` 4): only a target `FUN_39838880` marks attackable (0x100) passes; the
         // attackable bit is the non-friendly relation (`FUN_39837800`'s `+0x40` and the force-attack/
         // bloodlust flags are not recovered). `FUN_39898e60` picks the refusal from `FUN_39838880`'s reason
-        // byte (`FUN_39837d60`): 0x2f `PROTECTED_FACTION` only for reason 1, a character (the value is
-        // `target+0x3adc`, unconfirmed); reasons 5/6 are 0x30 `PROTECTED_LEVEL` (that operand is not
-        // ported); everything else is 0x22 `INVALID_TARGET`.
-        if (r.auto_attack || r.target_relation == 4) && !t.attackable {
-            return Some(if t.unit_type == "character" {
-                Fail {
-                    result: code::PROTECTED_FACTION,
-                    value: t.faction_id.max(0) as u32,
-                }
-            } else {
-                fail(code::INVALID_TARGET)
-            });
+        // byte: on the neutral/friendly branch reasons 3/4 (same owning character, same party) come before
+        // reasons 5/6 and are 0x22 `INVALID_TARGET`; reasons 5/6 are 0x30 `PROTECTED_LEVEL` (the operand is
+        // the level threshold 10 of `FUN_39837a90`; the result detail is 0, and `skill_protected_level` takes
+        // no argument); reason 1 is 0x2f `PROTECTED_FACTION` (the value is `target+0x3adc`, unconfirmed);
+        // everything else is 0x22 `INVALID_TARGET`.
+        if r.auto_attack || r.target_relation == 4 {
+            if t.invalid_attack {
+                return Some(fail(code::INVALID_TARGET));
+            }
+            if t.protected_level {
+                return Some(fail(code::PROTECTED_LEVEL));
+            }
+            if !t.attackable {
+                return Some(if t.unit_type == "character" {
+                    Fail {
+                        result: code::PROTECTED_FACTION,
+                        value: t.faction_id.max(0) as u32,
+                    }
+                } else {
+                    fail(code::INVALID_TARGET)
+                });
+            }
         }
         match r.target_type {
             1 if hostile => return Some(fail(code::INVALID_TARGET)),
@@ -912,11 +922,32 @@ mod tests {
         assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(4, 0.0), None);
     }
 
+    /// `FUN_39838880` reasons 5/6 -> 0x30 `PROTECTED_LEVEL`: the level threshold of `FUN_39837a90` is 10 and
+    /// `FUN_39898e60` writes no detail (`skill_protected_level` takes no argument).
+    #[test]
+    fn the_low_level_protection_is_protected_level() {
+        let hostile_relation = SkillRules { target_relation: 4, ..melee() };
+        let auto = SkillRules { auto_attack: true, ..melee() };
+        let g = game(Rules::default().with_skill(2, hostile_relation).with_skill(3, auto));
+        let me = me();
+        let mut protected = target(100, "hostile");
+        protected.protected_level = true;
+        protected.attackable = false;
+        let expected = Some(Fail { result: code::PROTECTED_LEVEL, value: 0 });
+        assert_eq!(env(&g, &me, Some(&protected), 3.0).why_not(2, 0.0), expected, "a hostile-relation skill");
+        assert_eq!(env(&g, &me, Some(&protected), 3.0).why_not(3, 0.0), expected, "an auto attack");
+        // `FUN_39838880` reasons 3/4 (same owner or party on the neutral/friendly branch) come first
+        protected.invalid_attack = true;
+        assert_eq!(env(&g, &me, Some(&protected), 3.0).why_not(2, 0.0), Some(fail(code::INVALID_TARGET)), "reasons 3/4 stay before 5/6");
+    }
+
     #[derive(Resource)]
     struct Press {
         skill: u32,
         relation: &'static str,
         attackable: bool,
+        protected_level: bool,
+        invalid_attack: bool,
         target_type: u8,
         unit_type: &'static str,
     }
@@ -964,6 +995,8 @@ mod tests {
             max_hp: 100,
             relation: press.relation,
             attackable: press.attackable,
+            protected_level: press.protected_level,
+            invalid_attack: press.invalid_attack,
             faction_id: 101,
             unit_type: press.unit_type,
             ..TargetSnap::default()
@@ -992,7 +1025,7 @@ mod tests {
         );
     }
 
-    fn press_app(skill: u32, relation: &'static str, attackable: bool, target_type: u8, unit_type: &'static str) -> bevy::prelude::App {
+    fn press_app(skill: u32, relation: &'static str, attackable: bool, protected_level: bool, invalid_attack: bool, target_type: u8, unit_type: &'static str) -> bevy::prelude::App {
         let mut app = bevy::prelude::App::new();
         app.add_message::<crate::ingame::ground_target::SkillPressed>()
             .add_message::<super::super::alerts::UseFailed>()
@@ -1000,6 +1033,8 @@ mod tests {
                 skill,
                 relation,
                 attackable,
+                protected_level,
+                invalid_attack,
                 target_type,
                 unit_type,
             })
@@ -1025,7 +1060,7 @@ mod tests {
     fn an_auto_attack_or_hostile_skill_on_a_friendly_npc_is_refused_before_sending() {
         // A friendly NPC is refused with 0x22 `INVALID_TARGET` (FUN_39837d60 reason 1 is a character only).
         for skill in [2, 18132] {
-            let mut app = press_app(skill, "friendly", false, 4, "npc");
+            let mut app = press_app(skill, "friendly", false, false, false, 4, "npc");
             app.update();
             let (pressed, failed) = drain_press(&mut app);
             assert!(pressed.is_empty(), "skill {skill} must not be sent");
@@ -1035,7 +1070,7 @@ mod tests {
             );
         }
         // A friendly character: PROTECTED_FACTION (0x2f) with the faction value (`FUN_39898e60`).
-        let mut app = press_app(2, "friendly", false, 4, "character");
+        let mut app = press_app(2, "friendly", false, false, false, 4, "character");
         app.update();
         let (pressed, failed) = drain_press(&mut app);
         assert!(pressed.is_empty());
@@ -1046,7 +1081,7 @@ mod tests {
 
         // A neutral NPC (Amutar 3443, the lv1 rat 10661 ...) is attackable, and so is a hostile mob.
         for (relation, unit_type) in [("neutral", "npc"), ("hostile", "npc")] {
-            let mut app = press_app(2, relation, true, 4, unit_type);
+            let mut app = press_app(2, relation, true, false, false, 4, unit_type);
             app.update();
             let (pressed, failed) = drain_press(&mut app);
             assert!(
@@ -1057,11 +1092,43 @@ mod tests {
         }
 
         // A heal (friendly target type) on a friendly unit still passes the attack gate.
-        let mut app = press_app(4, "friendly", false, 1, "character");
+        let mut app = press_app(4, "friendly", false, false, false, 1, "character");
         app.update();
         let (pressed, failed) = drain_press(&mut app);
         assert!(matches!(pressed.as_slice(), [p] if p.skill == 4), "{pressed:?}");
         assert!(failed.is_empty(), "{failed:?}");
+    }
+
+    /// A hostile target under `FUN_39838880`'s level protection is refused with 0x30 `PROTECTED_LEVEL`
+    /// and no detail before anything is sent, for the auto attack and a hostile-relation skill.
+    #[test]
+    fn a_low_level_protection_refusal_is_protected_level_before_sending() {
+        for skill in [2, 18132] {
+            let mut app = press_app(skill, "hostile", false, true, false, 4, "character");
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(pressed.is_empty(), "skill {skill} must not be sent");
+            assert!(
+                matches!(failed.as_slice(), [f] if f.skill == skill && f.result == code::PROTECTED_LEVEL && f.value == 0),
+                "skill {skill}: {failed:?}"
+            );
+        }
+    }
+
+    /// A neutral target under reasons 3/4 (same owner or party) is refused with 0x22 `INVALID_TARGET`
+    /// even when the level protection also applies: the order of `FUN_39838880`.
+    #[test]
+    fn a_neutral_party_target_is_invalid_before_the_level_protection() {
+        for skill in [2, 18132] {
+            let mut app = press_app(skill, "neutral", false, true, true, 4, "character");
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(pressed.is_empty(), "skill {skill} must not be sent");
+            assert!(
+                matches!(failed.as_slice(), [f] if f.skill == skill && f.result == code::INVALID_TARGET),
+                "skill {skill}: {failed:?}"
+            );
+        }
     }
 
     #[test]

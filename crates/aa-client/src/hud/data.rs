@@ -248,6 +248,9 @@ pub struct GameData {
     pub(super) vehicle_boxes: Mutex<HashMap<u32, Option<(Vec3, Vec3)>>>,
     /// `zones.zone_key` -> (zone group id, protecting faction id).
     pub zones: HashMap<u32, (u32, u32)>,
+    /// `conflict_zones.zone_group_id` -> (`closed`, `peace_protected_faction_id`): the static
+    /// conflict-zone row (`FUN_397f2080`). A group without a row is a home zone.
+    pub conflict_zones: HashMap<u32, (bool, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
     pub zone_groups: HashMap<u32, ZoneGroup>,
     /// `zones.zone_key` -> `zones.zone_climate_id` (`FUN_39032470`).
@@ -784,6 +787,14 @@ impl GameData {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 data.zones.insert(r.get(0)?, (r.get(1)?, r.get::<_, Option<u32>>(2)?.unwrap_or(0)));
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT zone_group_id, closed, peace_protected_faction_id FROM conflict_zones")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let Some(group) = r.get::<_, Option<u32>>(0)? else { continue };
+                data.conflict_zones.insert(group, (any_flag(r, 1)?, any_int(r, 2)?.max(0) as u32));
             }
         }
         {

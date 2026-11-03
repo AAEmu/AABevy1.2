@@ -168,18 +168,18 @@ mod tests {
         .unwrap();
         let detail = DetailSkills::load(&conn).unwrap();
         let mut tables = Tables::default();
-        tables.add_resolved(1, 13975, "DoodadFuncUse", 1, &detail);
+        tables.add_resolved(1, 13975, "DoodadFuncUse", 1, 0, &detail);
         assert_eq!(
             uses(&tables, 1),
             Some(vec![13975]),
             "explicit func_skill_id"
         );
-        tables.add_resolved(2, 0, "DoodadFuncUse", 1, &detail);
+        tables.add_resolved(2, 0, "DoodadFuncUse", 1, 0, &detail);
         assert_eq!(uses(&tables, 2), Some(vec![13970]), "detail row fallback");
-        tables.add_resolved(3, 0, "DoodadFuncBinding", 1, &detail);
+        tables.add_resolved(3, 0, "DoodadFuncBinding", 1, 0, &detail);
         assert_eq!(uses(&tables, 3), None, "nothing to dispatch");
-        tables.add_resolved(4, 11106, "DoodadFuncOreMine", 0, &detail);
-        tables.add_resolved(4, 0, "DoodadFuncOreMine", 0, &detail);
+        tables.add_resolved(4, 11106, "DoodadFuncOreMine", 0, 0, &detail);
+        tables.add_resolved(4, 0, "DoodadFuncOreMine", 0, 0, &detail);
         assert_eq!(
             uses(&tables, 4),
             Some(vec![11106]),
@@ -211,7 +211,7 @@ mod tests {
             "unknown fake-use skill"
         );
         let mut tables = Tables::default();
-        tables.add_resolved(1, 0, "DoodadFuncFakeUse", 4, &detail);
+        tables.add_resolved(1, 0, "DoodadFuncFakeUse", 4, 0, &detail);
         assert_eq!(uses(&tables, 1), None, "no 'skill N' entry on the bar");
     }
 
@@ -304,7 +304,7 @@ mod tests {
             old.add(group, skill, kind);
             // `add_resolved` also maps the legacy gather kinds, which this count leaves out.
             if matches!(kind, "DoodadFuncUse" | "DoodadFuncFakeUse") {
-                detail.add_resolved(group, skill, kind, func_id, &detail_skills);
+                detail.add_resolved(group, skill, kind, func_id, 0, &detail_skills);
             } else {
                 detail.add(group, skill, kind);
             }

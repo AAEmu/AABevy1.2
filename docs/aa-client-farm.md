@@ -89,3 +89,6 @@ farm id, phase name, crop zone), a list event raising `COMMON_FARM_UPDATED`, `Sh
 sent-request clearing, 2 s debounce, instant-zone refusal clearing and raising the update), and the
 original `commonfarm` scripts opening `farm_info`, toggling `myFarminfo` through the main menu
 action and rendering a growing crop's time next to a grown crop's label.
+
+The leave-distance check keeps both the received stand position and `HudData::pos` in game
+coordinates. The farm receipt and refresh clocks use `web_time::Instant` for the browser build.

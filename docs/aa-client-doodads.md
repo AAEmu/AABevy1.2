@@ -62,6 +62,81 @@ doodad names (`localized_texts` of `doodad_almighties`).
   Book's Default Site moves its recall marker to the new point; `SCDoodadPhaseChanged` moves the tome to its timer phase (no skill
   use: the bar goes to the next doodad or hides) and back after a few seconds.
 
+## Workbenches (craft benches)
+
+A `DoodadFuncCraftStart` or `DoodadFuncCraftPack` phase has no `func_skill_id` (1.2: 18 + 7
+CraftStart rows with NULL/0 and all 304 CraftPack rows NULL). It is still a use: native
+`393bd290` adds the craft action to the shared action list, and selecting it calls
+`393b7ba0` -> `394dc360`, which installs interaction kind 3 and fires event 0x78
+`CRAFTING_START(objectID, uniqueRecipeCount)` for `crafting_renewal.alb`. The open is local:
+`394dc360` sends no packet. `394dc210` builds CURRENT from every static template function
+group, taking `DoodadFuncCraftStart` (kind 0x0c) recipe lists and `DoodadFuncCraftPack`
+(kind 0x3a) pack membership, deduplicated and grouped by the recipe's `ac_id`. That is the
+same union `crafting/data.rs` loads into `benches` by `doodad_almighties.id`.
+
+The port adds that action to the phase's `Uses` (`craft: Vec<perm_id>`, one entry per craft
+func), offers it on F, the right-click list and the dynamic bar (a sentinel id, since no
+skill exists), and `doodad::execute` opens the bench through `crafting::open_bench`, firing
+`CRAFTING_START` with the two numeric arguments the script's `SetDoodad` reads. No packet
+goes out on open. Opening a bench runs native `FUN_393b7b10`'s `FUN_393b7aa0` first whenever any
+interaction is active (another bench, a shown doodad interaction list or the coffer
+window), so the HUD fires `INTERACTION_END` before `CRAFTING_START`; an open coffer is
+also closed through `CSCofferInteraction` on the next frame.
+
+The bar and right-click list use the normal doodad candidate distance (4 m): native
+`393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
+`FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap) for every
+action, skills included; out of range it walks to the doodad (`FUN_390a6af0` pending
+action) and runs the action on arrival. That walk needs a gap measured against the drawn
+model's bounds (the native predicate uses the real colliders): when only the `sim_radius`
+fallback is available (the model is not built yet, a parented doodad on a wagon or ship,
+or a template whose `sim_radius` is 0), the port does not walk — the use is sent or the
+bench opened at once and the server checks the reach. A walk that stops with no progress
+(the character has not got nearer for 3 s) runs the pending use when the gap was that
+fallback and otherwise answers `FUN_39428370(0x9a)` `TOO_FAR_AWAY`. A phase that also
+offers a skill or navi use therefore walks before its list is offered, while a craft-only
+phase is listed from the 4 m centre distance. The pending action stores the phase and view
+generation it was picked from; on arrival the port re-checks the phase, the generation and
+a craft permission and drops the use if any changed, and a different bar or list pick
+cancels it. A fresh pointer click also cancels it when it arrives on the same frame as the old walk. Picking a list entry closes the list (`menu_shown`), so a later bench open does
+not close it a second time. `FUN_394d6dc0`
+rechecks the same distance before `CSExecuteCraft` (`batch::command`) and shows error 0x9a
+(`TOO_FAR_AWAY`) when the request is out of range. The active-interaction monitor `393b7e40`
+closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
+(`batch::update`, which keeps CURRENT maps until the next bench, as `393b7aa0` does).
+`X2Craft:EndCraftingInteraction` (wrapper `39460890`) queues the same close.
+
+Permission is `FUN_393b3300`, checked per craft func (`doodad_funcs.perm_id`):
+0 any; 1 owner; 2 owner or friend; 3 expedition (the player must be in one; a doodad with
+faction 0 is open to it, else `SCDoodadOriginator.new_faction`, native doodad+0x350, must be
+the player's expedition id); 4 owner or the same five-person party group; 5 owner or any
+party/raid member; 6 the owner, or the doodad's house is the player's account (native
+`FUN_393b32c0`: `owner == me`, or the house's `+0xa8` is my account; an alt of the login
+character list is *not* enough);
+7 the zone group's received Dominion owner expedition belongs to the player's nation
+(native `FUN_393b3300` case 7 -> `FUN_39053360(zoneGroup, DAT_39d44b94, 0)`: the owner
+resolved through the received expedition records and the static `system_factions`
+`mother_id` chain, as `FUN_392f8180` does, must be the player's CharacterState faction); an unknown zone, Dominion row, owner or faction
+record is refused (native has no record to compare); 8 the account has a house in the
+doodad's zone group (native `FUN_3932aaf0` walks the own house list `DAT_3a167ec4`, kept
+here from `SCMyHouse`/`SCLoginCharInfoHouse` so it survives the house leaving view); unknown
+values are refused. The owner is the house owner for a housing doodad. A house zone the
+client cannot resolve yet is inferred as allowed and the server's `bench_denial` stays
+authoritative. The send carries the live bench object id
+(`CSExecuteCraft` 0x0f8: recipe, doodad, count).
+
+## Quest hand-in
+
+A doodad's quest function can also take a quest in: the server sends `SCDoodadCompleteQuest` 0x14d (`bc`
+doodad, `u32` quest; x2game `FUN_391dc050` -> `FUN_393773a0`). `hud/dialog.rs` raises the original's
+`COMPLETE_QUEST_CONTEXT_DOODAD(quest, flag, doodadId)`, where the flag is `FUN_397d42d0` of the Ready
+component (act type 0x14 `QuestActConReportNpc` or 0x15 `QuestActConReportDoodad`). With the flag the
+directing window opens and its confirm button sends from the doodad id kept in `d.dialog`; without it the
+quest context script calls `TryCompleteQuestContext(2, quest, doodadId, "", selected)` immediately. The
+`CSCompleteQuestContext` request then carries that doodad object id (or 0x0dd for an in-progress
+let-it-done quest). The lane server does not send 0x14d yet, so the path is tested against the real World
+scripts from the decoded packet, not live.
+
 ## Natural gathering
 
 The use bar offers a func that has a skill. The skill is `doodad_funcs.func_skill_id`; when that is empty it is the

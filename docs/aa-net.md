@@ -92,7 +92,7 @@ CAEnterWorld(id)    ─► ACWorldQueue* ─► ACWorldCookie (cookie, game serv
 | client → login | `CARequestAuthTrion`, `CAListWorld`, `CAEnterWorld`, `CACancelEnterWorld`, `CARequestReconnect` |
 | login → client | `ACJoinResponse`, `ACAuthResponse`, `ACWorldList`, `ACWorldQueue`, `ACWorldCookie`, `ACEnterWorldDenied`, `ACLoginDenied`, `ACAccountWarned` |
 | client → game | `CSInteractNPC`, `CSInteractNPCEnd`, `CSStartInteraction`, `CSStartQuestContext`, `CSCompleteQuestContext`, `CSDropQuestContext`, `CSQuestTalkMade` (see "Quests and NPC dialogs"), `CSLootOpenBag`, `CSLootItem`, `CSLootCloseBag`, `CSLootDice`, `X2EnterWorld`, `FinishState`, `Ping`, `CSListCharacter`, `CSCreateCharacter`, `CSDeleteCharacter`, `CSCancelCharacterDelete`, `CSSelectCharacter`, `CSSpawnCharacter`, `CSNotifyInGame`, `CSNotifyInGameCompleted`, `CSMoveUnit`, `CSSendChatMessage`, `CSExpressEmotion`, `CSChangeTarget`, `CSUpdateActionSlot`, `CSSwapItems`, `CSSplitBagItem`, `CSDestroyItem` (see "Moving items"), `CSStartSkill` (skills and items), `CSStopCasting`, `CSResurrectCharacter`, `CSTeleportEnded`, `CSLeaveWorld`, `CSCancelLeaveWorld`, `CSChangeAppellation` (see "Titles"), `CSConstructHouseTax`, `CSCreateHouse`, `CSDecorateHouse`, `CSChangeHouseName`, `CSChangeHousePermission`, `CSRequestHouseTax`, `CSAllowHousingRecover`, `CSSellHouse`, `CSSellHouseCancel`, `CSBuyHouse`, `CSCreateDoodad`, `CSRequestCommonFarmList` (see "Housing and public farms") |
-| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCEmotionExpressed`, `SCChatBubble`, `SCAreaChatBubble`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `SCAppellations`, `SCAppellationGained`, `SCAppellationChanged` (see "Titles"), `SCHouseState`, `SCHouseBuildProgress`, `SCHouseBuildPayChanged`, `SCHousePermissionChanged`, `SCHouseDemolished`, `SCMyHouse`, `SCMyHouseRemoved`, `SCHouseFarm`, `SCHouseTaxInfo`, `SCConstructHouseTax`, `SCHousingRecoverToggle`, `SCHouseSetForSale`, `SCHouseResetForSale`, `SCHouseSold`, `SCHouseOwnerNameChanged`, `SCLoginCharInfoHouse`, `SCResponseCommonFarmList`, `SCShowCommonFarm`, `SCIsUnitInFarm` (see "Housing and public farms"), `CompressedGamePackets` |
+| game → client | `X2EnterWorldResponse`, `ChangeState`, `Pong`, `SCReconnectAuth`, `SCGetSlotCount`, `SCAccountInfo`, `SCUpdatePremiumPoint`, `SCRaceCongestion`, `SCCharacterList`, `SCCreateCharacterResponse`, `SCCharacterCreationFailed`, `SCDeleteCharacterResponse`, `SCCancelCharacterDeleteResponse`, `SCCharacterDeleted`, `SCCharacterState`, `SCUnitState` (all unit kinds), `SCUnitsRemoved`, `SCOneUnitMovement`, `SCUnitPoints`, `SCUnitDeath`, `SCTeleportUnit`, `SCDoodadCreated/sCreated`, `SCDoodadRemoved/sRemoved`, `SCDoodadPhaseChanged`, `SCChatMessage`, `SCEmotionExpressed`, `SCChatBubble`, `SCAreaChatBubble`, `SCErrorMsg`, `SCKicked`, `SCPrepareLeaveWorld`, `SCLeaveWorldGranted`, `SCLeaveWorldCanceled`; for the HUD (see "In-game HUD data"): `SCExpChanged`, `SCAbilityExpChanged`, `SCRecoverableExp`, `SCLevelChanged`, `SCAbilitySwapped`, `SCCharacterLaborPowerChanged`, `SCCharacterGamePoints`, `SCGamePointChanged`, `SCBmPoint`, `SCCombatEngaged/Cleared`, `SCUnitFactionChanged`, `SCCharacterResurrected`, `SCBuffCreated/Removed/Learned`, `SCActionSlots`, `SCCharacterInvenInit/Contents`, `SCItemTaskSuccess`, `SCUnitEquipmentsChanged`, `SCInvenExpanded`, `SCTimeOfDay`, `SCDetailedTimeOfDay`, `SCOnOffSnow`, `SCConflictZoneState`, `SCJoinedChatChannel`, `SCLeavedChatChannel`, `SCTargetChanged`, `SCSkillStarted/Fired/Ended/Stopped`, `SCCastingStopped`, `SCLootableState`, `SCUnitLootingState`, `SCLootBagData`, `SCLootItemTook`, `SCLootItemFailed`, `SCLootDice/Notify/Summary`, `SCCooldowns`, `SCSkillCooldownReset`, `SCSkillLearned/Upgraded`, `SCSkillsReset`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCPlotEvent/Ended/CastingStopped/ChannelingStopped`, `SCQuests`, `SCCompletedQuests`, `SCQuestContextStarted/Updated/Completed/Reset`, `SCQuestContextFailed`, `SCQuestUnitReqFailed`, `SCQuestMailSent`, `SCNpcInteractionSkillList`, `SCDoodadQuestAccept`, `SCQuestRewardedByMail`, `SCNpcChatMessage`, `SCAppellations`, `SCAppellationGained`, `SCAppellationChanged` (see "Titles"), `SCHouseState`, `SCHouseBuildProgress`, `SCHouseBuildPayChanged`, `SCHousePermissionChanged`, `SCHouseDemolished`, `SCMyHouse`, `SCMyHouseRemoved`, `SCHouseFarm`, `SCHouseTaxInfo`, `SCConstructHouseTax`, `SCHousingRecoverToggle`, `SCHouseSetForSale`, `SCHouseResetForSale`, `SCHouseSold`, `SCHouseOwnerNameChanged`, `SCLoginCharInfoHouse`, `SCResponseCommonFarmList`, `SCShowCommonFarm`, `SCIsUnitInFarm` (see "Housing and public farms"), `CompressedGamePackets` |
 | client ↔ stream | `CTJoin`, `TCJoinResponse` (joined and kept open, other traffic ignored) |
 
 Everything else the server sends is decoded as `game::ServerMsg::Unhandled { level, opcode, len }`
@@ -640,6 +640,7 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 | `Start { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, modifier_keys }` | `CSStartInteraction` 0x068: `bc bc i32 i32 u8 i32` | `SCNpcInteractionSkillList` (the NPC's or slave's interaction skills) |
 | `QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id }` | `CSStartQuestContext` 0x0d5: `u32 bc bc u32` | `SCQuestContextStarted` (+ `Updated`), nothing when refused |
 | `QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected }` | `CSCompleteQuestContext` 0x0d6: `u32 bc bc i32` | `SCQuestContextCompleted`, `SCExpChanged`, items / money |
+| `TryQuestCompleteAsLetItDone { quest_id, obj_id, selected }` | `CSTryQuestCompleteAsLetItDone` 0x0dd: `u32 bc i32` (the server's `packets.rs:443`; `obj_id` 0 from the journal) | the same rewards as a hand-in, or `SCQuestContextFailed` |
 | `QuestDrop { quest_id }` | `CSDropQuestContext` 0x0d7: `u32` | `SCQuestContextUpdated` with status 4 (dropped) |
 | `QuestTalk { npc_obj_id, quest_id, component_id, act_id }` | `CSQuestTalkMade` 0x0da: `bc u32 u32 u32` | `SCQuestContextUpdated` |
 
@@ -647,8 +648,26 @@ byte for byte against the server's own test vectors. `bc` is the 3-byte object i
 |---|---|
 | `SkillList { npc_obj_id, obj_id, extra_info, pick_id, mouse_button, skills, interactable, modifier_keys }` | `SCNpcInteractionSkillList` 0x07b (the request's values echoed, `i32` count + `u32` skills, `bool`, `i32`) |
 | `DoodadQuestAccept { doodad_obj_id, quest_id }` | `SCDoodadQuestAccept` 0x111 (a doodad's quest function offers a quest: the client opens the dialog) |
-| `RewardedByMail { quests }` | `SCQuestRewardedByMail` 0x14e (`u8` count + `u32` ids) |
+| `RewardedByMail { success, quest }` | `SCQuestRewardedByMail` 0x14e (`u8` success + `u32` quest id; `FUN_397b5ec0`) |
+
+| `DoodadCompleteQuest { doodad_obj_id, quest_id }` | `SCDoodadCompleteQuest` 0x14d (`bc` doodad, `u32` quest, the same pair as the accept packet; x2game `FUN_391dc050`): the doodad can take the quest in |
 | `NpcChat { chat_type, faction_id, npc_obj_id, npc_name, character_obj_id, kind, text_id, message }` | `SCNpcChatMessage` 0x0cf (`kind` 1: a text id, else a string) |
+
+The quest notices are their own `Event` variants (`aa_net::quest`), not interactions:
+
+| `Event` | packet | 1.2 reader / handler |
+|---|---|---|
+| `QuestContextFailed { quest_id, err }` | `SCQuestContextFailed` 0x146: `u32` quest id, `u8` error | `FUN_397b5c90` (fields `"type"` u32, `"err"` u8) -> `OnQuestContextFailed` `FUN_391dbcd0` -> `FUN_3937a130`, which raises `QUEST_ERROR_INFO` |
+| `QuestUnitReqFailed { quest_id, unit_obj_id, result }` | `SCQuestUnitReqFailed` 0x148: `u32` id, `bc` unit, `SkillResult` | `FUN_397b5d00` (`"type"`, `"bc"`, `SkillResult` through `FUN_397b1ef0`) -> `OnQuestUnitReqFailed` `FUN_391dbdd0` -> `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` when it is the current target |
+| `QuestMailSent { id }` | `SCQuestMailSent` 0x150: one `u32` (`quest_mails.id`) | `FUN_397b5f00` (`"type"`) -> `OnQuestMailSent` `FUN_391dc1d0` -> `FUN_3937a650`, `DOODAD_PHASE_MSG(QUEST_MAIL_SENT with the row's name)` |
+
+`SCQuestContextFailed` matches the server's writer (`systems/quests/packets.rs`). The other two have no
+server writer (only the opcode constants); their tests use the client reader's bytes. The 1.2 reader for
+`SCQuestRewardedByMail` 0x14e (`FUN_397b5ec0`) reads a success byte and one quest id
+(`OnQuestRewardMailSent` `FUN_391dc150` -> `FUN_3937a520`), so `RewardedByMail { success, quest }`
+follows the client. The server writes a `u8` count and that many `u32` ids; for the single-quest packet
+it sends (`quests/engine.rs:1023`) the bytes are the same, and a `success` 0 makes the client raise
+`QUEST_ERROR_INFO` error 0xb for that quest.
 
 `SCQuestContextStarted` and `SCQuestContextUpdated` are read by `quest::read_context`. After the quest,
 they carry the component the quest is at as a trailing `u32` (`Updated` then has four more values). The
@@ -663,7 +682,8 @@ The client side of the dialog, which NPC offers what and the quest windows, is t
 What the lane server (`bevy`) does not do:
 
 * It sends no refusal: `SCQuestContextFailed` and `SCQuestUnitReqFailed` are never sent, so a refused
-  accept or hand-in gets no answer (the HUD's dialog stays open until Escape).
+  accept or hand-in gets no answer. Bevy now decodes and shows them when a server does send them; with
+  the lane server the dialog stays open until Escape.
 * `CSQuestStartWith` and `CSRestartMainQuest` are only logged.
 * No distance check on talk, accept or hand-in: any NPC in view can be talked to.
 * `CSInteractNPC` only gets an empty `SCAiAggro`: no greeting, no `SCNpcChatMessage`.
@@ -1669,9 +1689,13 @@ the expansion count. Character selection, world leave and disconnect reset stale
 
 **`LaborChanged.point` is a delta**, not the new total. Active
 `economy/inventory.rs::change_labor` sends `a.point - previous` after the server caps the
-gain, with `action=actabilityId` and the current `step`. The resource adds it to a known
-snapshot base. A missing base stays unknown, rather than pretending a gain is a total.
-Normal labor regeneration (`action=0`) creates no proficiency row.
+gain. The native `FUN_397a9880` caps each gain at the grade-0 limit and clamps the resulting
+total to the current grade's limit, then recomputes the grade. Languages 21..30 use the
+grade-0 limit; id 19 uses the last limit. A new entry starts with the capped gain at grade 0.
+The static `up_limits` survive character selection and world leave. A downgrade's unknown
+base stays unknown until catalog reconciliation. Labor regeneration (`action=0`) and a
+zero point delta preserve all proficiency entries and grades. `SCAddActionPoint` (0x047,
+i32 action and i32 value) uses the same gain rules even for a zero delta.
 
 Expert changes wait for matching authoritative ACKs; sending never changes tier, points,
 currency, inventory or expansion count. Upgrade preserves known points. Downgrade changes
@@ -2108,9 +2132,10 @@ undecoded; they are decoded, see their sections).
 * No maximum HP / MP on the wire: `PlayerStats::max_hp` is the highest value seen (a character that
   spawns dead or hurt shows too small a maximum until it has been at full health once) unless the
   application sets the formula value with `PlayerStats::set_max` (the HUD does).
-* Quests: `SCQuestContextFailed`, `SCQuestUnitReqFailed` and the quest error notices are not decoded
-  (the lane server never sends them). The objective texts are not on the wire: the HUD makes them from
-  the game database. Quest cinemas are reported watched, not rendered (see "Small server messages").
+* Quests: the failure, unit-requirement and quest-mail notices are decoded (the lane server never
+  sends them; the tests pin the client readers, and the server writer where one exists). The objective
+  texts are not on the wire: the HUD makes them from the game database. Quest cinemas are reported
+  watched, not rendered (see "Small server messages").
 * The sub zone name of the minimap header is not sent: derive it from the position and the
   `sub_zones` table. The zone group follows the zone chat channel (Shout).
 * NPC names are empty on the wire (the client resolves them from the NPC template); `Unit.kind` has the

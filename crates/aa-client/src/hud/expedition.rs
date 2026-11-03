@@ -61,6 +61,11 @@ impl View {
         &self.dominion
     }
 
+    /// The received expedition cache: the player's nation and the faction records.
+    pub(super) fn received(&self) -> &Expeditions {
+        &self.cache
+    }
+
     pub(super) fn identity(&self) -> Option<(u32, u32)> {
         Some((self.cache.local_character_id?, self.cache.local_object_id?))
     }

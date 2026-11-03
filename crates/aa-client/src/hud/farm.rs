@@ -16,7 +16,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
+use web_time::Instant;
 
 use aa_net::farm::{CommonFarmList, FarmEvent};
 use aa_net::{Command, Event, NetCommand, NetEvent};
@@ -433,11 +433,11 @@ fn sync(
                 aa_ui::lua::queue_ui_event(&rt.lua, "COMMON_FARM_UPDATED", Vec::new());
             }
             Event::Farm(FarmEvent::Show(show)) => {
-                let pos = aa_world::cry_to_bevy(Vec3::new(
+                let pos = Vec3::new(
                     show.position().x,
                     show.position().y,
                     show.position().z,
-                ));
+                );
                 state.0.borrow_mut().show = Some(Shown {
                     farm_type: show.farm_type,
                     pos,
