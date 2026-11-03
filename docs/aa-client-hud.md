@@ -428,19 +428,20 @@ Holding a key or clicking fast must not flood the server, so a press is first he
   player started) or `last_failure` (the server refused one) is newer than it, or after 500 ms. Presses of ignore-gcd skills neither
   set it nor wait for it.
 
-A held-back press still shows the native refusal (`Env::held_back_refusal` -> `UseFailed`, still nothing sent): `ON_CASTING`
-("Already performing an action.") for the cast, and `NOT_NOW` ("Can't be used right now.") for the global cooldown. The
-2026-11-03 capture pressed Charge five times in one GCD: one `CSStartSkill`, no queue, and "Can't be used right now." at
-185.5-190 s (the press's own 12 s cooldown was already running, so the GCD is what the press path reports); B4 showed
-"Already performing an action." during the Insidious Whisper cast. The native unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151525-151649)
-checks the cast before the cooldowns and writes `ON_CASTING` 7, then `COOLDOWN_TIME` 8 with detail 1 for the skill's own
-cooldown and detail 2 for the global one (`FUN_3989a400`); `FUN_39390900` (742241-742499) prints the text from `FUN_39897990`'s
-result names and hides `8` detail 2. The detail-2 suppression does not name the path that raised `NOT_NOW` 0x2c in the capture,
-so the GCD-before-own-cooldown order and the `NOT_NOW` code are inferred from the capture; the own cooldown after the GCD stays
-`COOLDOWN_TIME` (`FUN_390b7b00` detail 1). Both names print the same text: `ui_texts` 1725 `skill_cooldown_time` and 1759
-`skill_not_now` are both "지금은 사용할 수 없습니다." (the localized "Can't be used right now."). The auto attack latch and an
-unanswered press stay silent, as `FUN_393989e0` returns without a result for the latch and the in-flight wait is this client's
-own guard.
+A held-back press still shows the native refusal (`Env::held_back_refusal` -> `UseFailed`, still nothing sent). The native
+unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151604-151622) tests any ongoing cast first and writes
+`ON_CASTING` 7 ("Already performing an action."), then `COOLDOWN_TIME` 8 with `FUN_3989a400` (1931224-1931240): the skill's
+own/tag cooldown is detail 1 and only when that is done, for a skill that does not ignore the GCD (`+0xdc == 0`), the running
+global cooldown is detail 2. `FUN_39390900` (742279) prints the text through `FUN_39897990`'s result names and hides result 8
+detail 2, so a GCD-only press is silent natively; detail 1 prints `skill_cooldown_time` ("Can't be used right now."). Nothing
+on the bar press path (`FUN_393989e0` 748802-748918 -> `FUN_39390900`) writes `NOT_NOW` 0x2c: the 0x2c writers are the
+pet/mate-bar checks. The 2026-11-03 capture pressed Charge five times in one GCD: one `CSStartSkill`, no queue, and "Can't be
+used right now." at 185.5-190 s because Charge was on its own 12 s cooldown (detail 1); B4's press 0.44 s into the Insidious
+Whisper cast, another skill's cast inside the GCD, showed "Already performing an action." (the cast check comes first). The
+auto attack latch and an unanswered press stay silent, as `FUN_393989e0` returns without a result for the latch and the
+in-flight wait is this client's own guard. The `ingame/combat.rs` clip half of the acceptance-batch regression
+(`the_charge_acceptance_plot_step_starts_the_clip_without_a_start_or_fire`) returns early when the game data or the base
+rig/CAL is missing, so it passes vacuously in such runs; the `aa-net` state half always checks the GCD, cooldown and cast.
 
 Checked on the lane server with account `bevyhud` (`shots/hud/r5/`): a fox 10.7 m away darkens Triple Slash, Melee Attack and Kick but not
 Shoot Arrow (range 20, bow worn) (`far.png`); the angry rat walking up lights them one by one (log); `--hud-sim mp=10` darkens only
