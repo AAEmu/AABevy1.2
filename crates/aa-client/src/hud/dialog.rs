@@ -129,6 +129,9 @@ pub struct DialogView {
     pub talk: Vec<(u32, u32, u32)>,
     /// The dialog is up (the rest of the HUD hidden).
     pub directing: bool,
+    /// The quest whose step the dialog is directing (`quest_context_directing.alb`'s window
+    /// `questType`): the last accept / hand-in / talk request it sent.
+    pub quest: Option<u32>,
     /// The top-level widgets hidden for it.
     hidden: Vec<aa_ui::tree::Id>,
     /// The movie wants every top-level widget hidden (C5).
@@ -1171,6 +1174,66 @@ pub(super) fn talk_pointer(
     }
 }
 
+/// The quest packets that are notices rather than quest state: a refused request
+/// (`SCQuestContextFailed`), a needed unit gone (`SCQuestUnitReqFailed`) and quest mail
+/// (`SCQuestMailSent`, `SCQuestRewardedByMail`).
+///
+/// `FUN_391dbcd0` raises `QUEST_ERROR_INFO(qtype, err)` and `FUN_3937a130` first clears the quest's
+/// timer (`FUN_39379ea0` publishes `QUEST_LEFT_TIME_UPDATED(qtype, 0)`); the directing script ends
+/// its window when the event's quest is the one it shows (`quest_context_directing.alb` F37).
+/// `FUN_391dbdd0` raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when the failed unit is the current
+/// target (`FUN_39376590`); the directing script closes the same window (F36). The mail packets
+/// show the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` system texts (`FUN_3937a650`,
+/// `FUN_3937a520`).
+pub fn route_quest_notices(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    target: Res<Target>,
+    mut events: MessageReader<NetEvent>,
+) {
+    let Some(rt) = rt else { return };
+    for NetEvent(e) in events.read() {
+        match e {
+            Event::QuestContextFailed(failed) => {
+                {
+                    let mut d = bridge.0.borrow_mut();
+                    if d.dialog.directing && d.dialog.quest == Some(failed.quest_id) {
+                        apply_directing(&rt, &mut d.dialog, false);
+                        d.dialog.quest = None;
+                    }
+                }
+                info!("hud: quest {} failed ({})", failed.quest_id, failed.err);
+                rt.fire_event("QUEST_ERROR_INFO", (failed.quest_id, u32::from(failed.err)));
+            }
+            Event::QuestUnitReqFailed(failed) => {
+                if target.obj_id != Some(failed.unit_obj_id) {
+                    continue;
+                }
+                {
+                    let mut d = bridge.0.borrow_mut();
+                    if d.dialog.directing && d.dialog.quest == Some(failed.quest_id) {
+                        apply_directing(&rt, &mut d.dialog, false);
+                        d.dialog.quest = None;
+                    }
+                }
+                info!("hud: quest {} needs unit {} ({:?})", failed.quest_id, failed.unit_obj_id, failed.pos);
+                rt.fire_event("QUEST_QUICK_CLOSE_EVENT", failed.quest_id);
+            }
+            Event::QuestMailSent(sent) => {
+                let text = super::alerts::localized(&rt, "ERROR_MSG", "QUEST_MAIL_SENT").unwrap_or_else(|| "QUEST_MAIL_SENT".to_string());
+                info!("hud: quest mail {} sent: {text}", sent.id);
+                rt.fire_event("SYSMSG", text);
+            }
+            Event::Interaction(InteractEvent::RewardedByMail { quests }) if !quests.is_empty() => {
+                let text = super::alerts::localized(&rt, "ERROR_MSG", "QUEST_REWARDED_BY_MAIL").unwrap_or_else(|| "QUEST_REWARDED_BY_MAIL".to_string());
+                info!("hud: quests {quests:?} rewarded by mail: {text}");
+                rt.fire_event("SYSMSG", text);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// The cinema of the quest's `kind` component (`quest_components.cinema_id`).
 fn component_cinema(game: &GameData, quest: u32, kind: u8) -> Option<(u32, CinemaDef)> {
     let def = game.quests.def(quest)?;
@@ -1234,6 +1297,7 @@ pub fn handle_dialog(
         };
         match r {
             Req::Accept(quest_id) => {
+                d.dialog.quest = Some(quest_id);
                 let then = Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 };
                 let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::START))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
@@ -1248,6 +1312,7 @@ pub fn handle_dialog(
                 }
             }
             Req::Complete(quest_id, selected) => {
+                d.dialog.quest = Some(quest_id);
                 let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
                 let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::READY))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
@@ -1276,7 +1341,10 @@ pub fn handle_dialog(
                     }
                 }
             }
-            Req::Talk(quest_id, component_id, act_id) => send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id }),
+            Req::Talk(quest_id, component_id, act_id) => {
+                d.dialog.quest = Some(quest_id);
+                send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id });
+            }
             Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
             Req::Drop(quest_id) => send(&mut net, Interact::QuestDrop { quest_id }),
             Req::End => end_talk(&mut d, &mut net),
@@ -1323,6 +1391,7 @@ pub fn handle_dialog(
 
 fn end_talk(d: &mut HudData, _net: &mut MessageWriter<NetCommand>) {
     d.dialog.doodad = None;
+    d.dialog.quest = None;
     if let Some(scope) = active_scope(d).or_else(|| npc::cancel_scope(d)) { close_npc(d, scope); }
     d.dialog.start.clear(); d.dialog.complete.clear(); d.dialog.talk.clear();
 }
@@ -2120,6 +2189,83 @@ mod tests {
         };
         assert_eq!(find(true), Some((20, 42)), "the scripted talk finds an NPC at 10 m");
         assert_eq!(find(false), None, "the interact key stays inside the interaction reach");
+    }
+
+    fn quest_notice_app() -> Option<(App, Shared)> {
+        if !aa_world::pak_available() { return None; }
+        let rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).ok()?;
+        rt.lua
+            .load(
+                r#"
+                OBSERVED={}
+                local w=UIParent:CreateWidget('emptywidget','questNotice','UIParent')
+                w:SetHandler('OnEvent',function(self,event,...) table.insert(OBSERVED,{event=event,args={...}}) end)
+                w:RegisterEvent('QUEST_ERROR_INFO');w:RegisterEvent('QUEST_QUICK_CLOSE_EVENT');w:RegisterEvent('QUEST_LEFT_TIME_UPDATED')
+            "#,
+            )
+            .exec()
+            .ok()?;
+        let shared: Shared = Rc::new(RefCell::new(HudData {
+            dialog: DialogView { directing: true, quest: Some(1065), npc: Some((1, 1)), ..Default::default() },
+            ..HudData::default()
+        }));
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .insert_resource(Target::default())
+            .insert_non_send(HudBridge(shared.clone()))
+            .add_systems(Update, route_quest_notices);
+        app.insert_non_send(rt);
+        Some((app, shared))
+    }
+
+    #[test]
+    fn a_refused_quest_ends_directing_only_for_that_quest_and_raises_error_info() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        // The failed quest is not the one the window is directing: it stays up.
+        app.world_mut()
+            .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1066, err: 6 })));
+        app.update();
+        assert!(shared.borrow().dialog.directing);
+        // The directed quest itself: the window ends and QUEST_ERROR_INFO carries (qtype, err).
+        app.world_mut()
+            .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1065, err: 6 })));
+        app.update();
+        assert!(!shared.borrow().dialog.directing);
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_ERROR_INFO' and OBSERVED[1].args[1]==1066)
+                assert(OBSERVED[2].event=='QUEST_ERROR_INFO')
+                assert(OBSERVED[2].args[1]==1065 and OBSERVED[2].args[2]==6)
+            "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_failed_quest_unit_quick_closes_the_directing_window_only_for_the_current_target() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        app.world_mut().resource_mut::<Target>().obj_id = Some(42);
+        let failed = |unit_obj_id| {
+            NetEvent(Event::QuestUnitReqFailed(aa_net::quest::QuestUnitReqFailed {
+                quest_id: 1065,
+                unit_obj_id,
+                pos: aa_net::Pos::new(1.0, 2.0, 3.0),
+            }))
+        };
+        app.world_mut().write_message(failed(43));
+        app.update();
+        assert!(shared.borrow().dialog.directing, "another unit failing does not close the window");
+        app.world_mut().write_message(failed(42));
+        app.update();
+        assert!(!shared.borrow().dialog.directing);
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(#OBSERVED==1 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
+            .exec()
+            .unwrap();
     }
 
     #[test]

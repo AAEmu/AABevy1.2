@@ -659,7 +659,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, targeting::self_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
+                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::route_quest_notices, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, targeting::self_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )

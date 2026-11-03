@@ -3,7 +3,7 @@
 //!
 //! Layouts follow the server's `Quest.Write` (`ActiveQuest::write`) and `CompletedQuest`.
 
-use crate::wire::{Reader, Result};
+use crate::wire::{Pos, Reader, Result};
 
 /// `QuestStatus` of an active quest.
 pub mod status {
@@ -59,6 +59,61 @@ impl Quest {
         let acceptor_type = r.u8()?;
         let acceptor_id = r.u32()?;
         Ok(Quest { id, template_id, status, objectives, time_left_ms, component_id, accept_time, acceptor_type, acceptor_id })
+    }
+}
+
+/// `SCQuestContextFailed` (`0x146`): the server refused the request for `quest_id` with the client's
+/// `questContext.errors` index `err` (`aaemu-game systems/quests/packets.rs`).
+///
+/// The 1.2 reader `FUN_397b5c90` (packet vtable `399b3a5c`) reads the field `"type"` as a `u32` at
+/// `+0xc` and `"err"` as one byte at `+0x10`; `OnQuestContextFailed` (`FUN_391dbcd0`) forwards both
+/// to `FUN_3937a130`, which raises `QUEST_ERROR_INFO` (`0x73`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QuestContextFailed {
+    pub quest_id: u32,
+    pub err: u8,
+}
+
+impl QuestContextFailed {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { quest_id: r.u32()?, err: r.u8()? })
+    }
+}
+
+/// `SCQuestUnitReqFailed` (`0x148`): the unit `unit_obj_id` a step needs failed (died or left) at `pos`.
+///
+/// The 1.2 reader `FUN_397b5d00` (packet vtable `399b3a68`) reads the field `"type"` as a `u32`, the
+/// field `"bc"` as a 3-byte object id, then the packed 9-byte position through `FUN_397b1ef0`.
+/// `OnQuestUnitReqFailed` (`FUN_391dbdd0`) passes the first two values and the position to
+/// `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` (`0xf4`) when the failed unit is the
+/// current target. The server has only the opcode constant (no writer).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct QuestUnitReqFailed {
+    pub quest_id: u32,
+    pub unit_obj_id: u32,
+    pub pos: Pos,
+}
+
+impl QuestUnitReqFailed {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { quest_id: r.u32()?, unit_obj_id: r.bc()?, pos: r.position()? })
+    }
+}
+
+/// `SCQuestMailSent` (`0x150`): the quest mail `id` was sent.
+///
+/// The 1.2 reader `FUN_397b5f00` (packet vtable `399b3abc`) reads the single `u32` field `"type"`.
+/// `OnQuestMailSent` (`FUN_391dc1d0`) resolves it through `FUN_398562a0` and shows the
+/// `QUEST_MAIL_SENT` system text (`FUN_3937a650`). The server has only the opcode constant (no
+/// writer).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct QuestMailSent {
+    pub id: u32,
+}
+
+impl QuestMailSent {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { id: r.u32()? })
     }
 }
 
@@ -167,6 +222,36 @@ mod tests {
         let bytes = w.finish();
         let read = read_context(&mut Reader::new(&bytes)).unwrap();
         assert_eq!((read.template_id, read.component_id), (330, 1521));
+    }
+
+    #[test]
+    fn quest_failures_and_mail_match_the_client_readers() {
+        // SCQuestContextFailed: reader FUN_397b5c90 "type" u32 + "err" u8; the server's
+        // `SCQuestContextFailedPacket` writer (`quests/tests.rs`: quest 4781, err 12).
+        let bytes = [0xad, 0x12, 0, 0, 12];
+        assert_eq!(
+            QuestContextFailed::read(&mut Reader::new(&bytes)).unwrap(),
+            QuestContextFailed { quest_id: 4781, err: 12 }
+        );
+        for cut in 0..bytes.len() {
+            assert!(QuestContextFailed::read(&mut Reader::new(&bytes[..cut])).is_err());
+        }
+        // SCQuestUnitReqFailed: reader FUN_397b5d00 u32 "type", bc "bc", packed position
+        // (FUN_397b1ef0); zero position bytes decode to (0, 0, -100).
+        let bytes = [4, 3, 2, 1, 7, 6, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            QuestUnitReqFailed::read(&mut Reader::new(&bytes)).unwrap(),
+            QuestUnitReqFailed { quest_id: 0x0102_0304, unit_obj_id: 0x05_0607, pos: Pos::new(0.0, 0.0, -100.0) }
+        );
+        for cut in 0..bytes.len() {
+            assert!(QuestUnitReqFailed::read(&mut Reader::new(&bytes[..cut])).is_err());
+        }
+        // SCQuestMailSent: reader FUN_397b5f00, the single u32 "type".
+        let bytes = [4, 3, 2, 1];
+        assert_eq!(QuestMailSent::read(&mut Reader::new(&bytes)).unwrap(), QuestMailSent { id: 0x0102_0304 });
+        for cut in 0..bytes.len() {
+            assert!(QuestMailSent::read(&mut Reader::new(&bytes[..cut])).is_err());
+        }
     }
 
     #[test]
