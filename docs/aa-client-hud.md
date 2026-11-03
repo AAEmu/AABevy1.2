@@ -1643,7 +1643,8 @@ Received proficiency points/grades back GetMyActabilityInfo; unknown totals (inc
 downgrade ACK without points) remain unknown. Unit-attribute item/buff modifiers are retained
 for the displayed modifier and labor calculation. Native SSE f32 labor rounding/previous-grade
 threshold selection matches independent original-byte oracle cases. This does not yet fold
-the separate enclosing-owned-house decoration bonus or emit the complete proficiency event set.
+the separate enclosing-owned-house decoration bonus, and the housing decoration
+ACTABILITY_MODIFIER_UPDATE path has no received decoration state.
 
 The native X2Item numeric-grade lookup now converts raw grades0/1 exactly once into the existing
 internal display-order tooltip path, returning the original raw itemGrade. Internal bag lookups
@@ -1867,8 +1868,16 @@ Received events update state before original callbacks, including four-argument 
 and grade notifications. Complete lane snapshots refresh the original page; the native
 SC136 handler itself ignores last and refreshes per packet (all current34 lane groups
 fit one packet). The explicit lane downgrade helper uses ALL raw rows, distinct from
-the original SHOW grade map. Housing proficiency modifiers and live transactions remain
-unverified; unsupported premium-cost paths are not claimed complete.
+the original SHOW grade map. A nonzero labor-packet point delta raises the native
+ACTABILITY_EXPERT_CHANGED (0xc3) with the localized group name, capped delta and total
+including unit-attribute modifiers; `chat/chat_msg_event.alb` prints the original
+`actability_value_changed` line (`|cFFFFF65EAlchemy proficiency rose +|,17;. Current
+proficiency: |,10017;` in the en_us texts) and the tab bar updates. The login snapshot
+only raises ACTABILITY_REFRESH_ALL, so it prints no gain. A change to a modifier of an
+attribute an actability group reads raises ACTABILITY_MODIFIER_UPDATE (0x54), as the
+native buff manager does; unrelated stat modifiers do not. Housing decoration
+modifiers and live transactions remain unverified; unsupported premium-cost paths are
+not claimed complete.
 
 The full client suite passes168 tests (29 ignored,2.04s), including five focused tests.
 The exact ignored original-script pointer probe passes1 test

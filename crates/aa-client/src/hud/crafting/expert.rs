@@ -2,6 +2,7 @@
 use super::*;
 use aa_net::{ActabilityCommand as Command, ActabilityEvent, Event, NetCommand, NetEvent};
 use mlua::Value;
+use std::collections::HashSet;
 
 #[allow(dead_code)]
 pub(super) mod fixture;
@@ -11,6 +12,8 @@ pub(super) struct View {
     pub(super) active: bool,
     requests: Vec<(u32, Command)>,
     constructed: Option<Construction>,
+    /// Actability-attribute unit modifiers already pushed to the scripts (`ACTABILITY_MODIFIER_UPDATE`).
+    modifiers: Option<Vec<(u8, bool, i32)>>,
 }
 
 /// Constructor inputs for one HUD build. Getter observations also detect transient
@@ -61,6 +64,19 @@ fn grade(tables: &Tables, grade: u8) -> Option<&super::data::Expert> {
 
 fn eligible(tables: &Tables, id: u32) -> bool {
     !matches!(id, 0 | 19 | 21..=30) && tables.groups.get(&id).is_some_and(|g| g.skill_page_visible)
+}
+
+/// The unit-attribute modifiers `X2Ability:GetMyActabilityInfo(...).modifyPoint` includes: native
+/// `FUN_3930be90` adds the group's attribute modifier (`FUN_390b3a80`) to the point total. The buff
+/// manager raises `ACTABILITY_MODIFIER_UPDATE` (0x54) when one of these is added or refreshed
+/// (`FUN_39388400` gate, `FUN_393886c0` / `FUN_393888b0`), so compare only the attributes the
+/// actability groups read; an unrelated stat buff must not refresh the proficiency pages.
+fn actability_modifiers(data: &HudData) -> Vec<(u8, bool, i32)> {
+    let Some(game) = data.game.get() else { return Vec::new() };
+    let attrs: HashSet<u8> = game.crafting.groups.values().filter_map(|g| u8::try_from(g.unit_attr).ok()).collect();
+    let mut modifiers: Vec<_> = data.tips.attrs.modifiers.iter().copied().filter(|m| attrs.contains(&m.0)).collect();
+    modifiers.sort_unstable();
+    modifiers
 }
 
 fn count(data: &HudData, target: u8, higher: bool) -> usize {
@@ -360,6 +376,12 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
     if matches!(event, Event::Actability(ActabilityEvent::Snapshot { last: true, .. })) {
         rt.fire_event("ACTABILITY_REFRESH_ALL", ());
     }
+    // Native `OnLaborPowerChanged` (0x391d3d60) calls `FUN_3930be90(action, point)` only when the
+    // point delta is nonzero; that adds the capped points and raises `ACTABILITY_EXPERT_CHANGED`
+    // (0xc3) with (id, localized group name, actual delta, base + attribute modifiers).
+    // `chat_msg_event.alb` turns it into `actability_value_changed`:
+    // "$1 proficiency rose +$2. Current proficiency: $3". SCActability itself only refreshes
+    // (`ACTABILITY_REFRESH_ALL`), so the login list never prints a gain.
     if let Event::LaborChanged { action, point, .. } = event {
         let args = (|| {
             if *action <= 0 || *point == 0 {
@@ -432,6 +454,18 @@ fn update(
         for NetEvent(event) in events.read() {
             dispatch(&rt, &bridge.0, event);
         }
+    }
+    let modifiers_changed = {
+        let mut data = bridge.0.borrow_mut();
+        let modifiers = actability_modifiers(&data);
+        // The first computed set is the baseline the constructors already read; only a later
+        // change needs the native refresh (`FUN_393886c0` / `FUN_393888b0` -> event 0x54).
+        let changed = data.crafting.expert.modifiers.as_ref().is_some_and(|seen| *seen != modifiers);
+        data.crafting.expert.modifiers = Some(modifiers);
+        changed
+    };
+    if modifiers_changed {
+        rt.fire_event("ACTABILITY_MODIFIER_UPDATE", ());
     }
     let mut data = bridge.0.borrow_mut();
     let mut sent = Vec::new();

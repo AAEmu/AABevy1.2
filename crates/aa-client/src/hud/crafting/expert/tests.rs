@@ -521,3 +521,132 @@ fn original_proficiency_upgrade_cancel_confirm_and_received_downgrade() -> Resul
     }
     Ok(())
 }
+
+/// The original chat scripts' `All` tab lines (`chat/chat_msg_event.alb` dispatches to `X2Chat`).
+fn chat_lines(rt: &aa_ui::UiRuntime) -> Vec<String> {
+    let ui = aa_ui::lua::ui(&rt.lua);
+    let window = ui
+        .tree
+        .of_class("chatwindow")
+        .into_iter()
+        .find(|&id| ui.tree.widget(id).and_then(|w| w.chat.as_ref()).is_some_and(|c| c.window_id == 0))
+        .expect("original chat window 0");
+    let chat = ui.tree.widget(window).and_then(|w| w.chat.as_ref()).expect("chat state");
+    let message = chat.tabs.iter().find(|tab| tab.id == 0).map(|tab| tab.message).expect("All tab");
+    ui.tree
+        .widget(message)
+        .and_then(|w| w.message.as_ref())
+        .map(|m| m.lines.iter().map(|(line, _)| line.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// The World stage with the real chat scripts, texts and actability catalog, or `None` without
+/// the game files (the test then skips like the other real-data fixtures).
+fn proficiency_chat_runtime() -> Result<Option<(aa_ui::UiRuntime, Shared, std::path::PathBuf)>, Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&db).exists() {
+        eprintln!("proficiency chat: needs game_pak (AA_PAK) and compact.sqlite3 (AA_DB); skipped");
+        return Ok(None);
+    }
+    let (rt, bridge, path) = crate::hud::breath::fixture::runtime(1280., 720.)?;
+    Ok(Some((rt, bridge, path)))
+}
+
+#[test]
+fn login_snapshot_prints_no_gain_line_and_a_labor_delta_prints_the_native_line() -> Result<(), Box<dyn std::error::Error>> {
+    let Some((rt, bridge, path)) = proficiency_chat_runtime()? else { return Ok(()) };
+    bridge.borrow_mut().crafting.actabilities.expanded_expert = Some(0);
+    let snapshot = Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 10000, step: 0 }],
+    });
+    let before = chat_lines(&rt).len();
+    dispatch(&rt, &bridge, &snapshot);
+    assert_eq!(chat_lines(&rt).len(), before, "a received proficiency list must not print a gain line");
+    // Native `OnLaborPowerChanged` ignores a zero point delta (`0x391d3d60`).
+    dispatch(&rt, &bridge, &Event::LaborChanged { amount: 1, action: 1, point: 0, step: 0 });
+    assert_eq!(chat_lines(&rt).len(), before, "a zero delta prints nothing");
+    dispatch(&rt, &bridge, &Event::LaborChanged { amount: -1, action: 1, point: 17, step: 0 });
+    let lines = chat_lines(&rt);
+    assert_eq!(lines.len(), before + 1, "one gain line");
+    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy proficiency rose +|,17;. Current proficiency: |,10017;");
+    // The bar/page getter reads the same updated state.
+    rt.lua.load("assert(X2Ability:GetMyActabilityInfo(1).point==10017)").exec()?;
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_grade_change_prints_the_native_grade_notice() -> Result<(), Box<dyn std::error::Error>> {
+    let Some((rt, bridge, path)) = proficiency_chat_runtime()? else { return Ok(()) };
+    let snapshot = Event::Actability(ActabilityEvent::Snapshot {
+        last: true,
+        entries: vec![ActabilityValue { id: 1, point: 10000, step: 0 }],
+    });
+    dispatch(&rt, &bridge, &snapshot);
+    let before = chat_lines(&rt).len();
+    dispatch(&rt, &bridge, &Event::Actability(ActabilityEvent::TierChanged { is_upgrade: true, id: 1, step: 1 }));
+    let lines = chat_lines(&rt);
+    assert_eq!(lines.len(), before + 1, "one grade-up line");
+    assert_eq!(lines.last().unwrap(), "|cFFFFF65EAlchemy's proficiency increased to Rank Novice.");
+    drop(rt);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn modifier_data() -> HudData {
+    let mut game = GameData::default();
+    for id in [1, 2] {
+        game.crafting.groups.insert(
+            id,
+            super::super::data::Group {
+                name: format!("Group{id}"),
+                visible: true,
+                skill_page_visible: true,
+                unit_attr: 99,
+                ..default()
+            },
+        );
+    }
+    let data = HudData { character_id: 47, ..default() };
+    data.game.0.set(game).ok().unwrap();
+    data
+}
+
+#[test]
+fn actability_modifier_update_fires_only_for_proficiency_attribute_changes() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(modifier_data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua
+        .load("modifierUpdates=0;actabilityTab={expandBtn={Update=function()end}};UIParent:SetEventHandler('ACTABILITY_MODIFIER_UPDATE',function(...)assert(select('#',...)==0);modifierUpdates=modifierUpdates+1 end)")
+        .exec()?;
+    let mut app = activation_app(rt, bridge.clone());
+    let updates = |app: &App| {
+        app.world()
+            .get_non_send::<aa_ui::UiRuntime>()
+            .unwrap()
+            .lua
+            .globals()
+            .get::<u32>("modifierUpdates")
+            .unwrap()
+    };
+    app.update();
+    assert_eq!(updates(&app), 0, "the first computed modifier set is the constructor baseline");
+    bridge.borrow_mut().tips.attrs.modifiers.push((99, false, 25));
+    app.update();
+    assert_eq!(updates(&app), 1, "a proficiency attribute modifier refresh raises the event");
+    bridge.borrow_mut().tips.attrs.modifiers.push((3, false, 5));
+    app.update();
+    assert_eq!(updates(&app), 1, "an unrelated stat modifier must not refresh the proficiency pages");
+    bridge.borrow_mut().tips.attrs.modifiers[0] = (99, false, 30);
+    app.update();
+    assert_eq!(updates(&app), 2, "a changed proficiency modifier raises the event again");
+    Ok(())
+}
