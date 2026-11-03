@@ -652,9 +652,9 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | Func (`actual_func_type`) | Native case | What 1.2 does | aa-client |
 |---|---|---|---|
 | `DoodadFuncQuest` 0x08 | `FUN_393bc260` case 8 | sets interaction state 9, then returns 0 (the skill, if any, is sent) | dialog/quest worker |
-| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | checks the crime/item and raises `REPORT_CRIME` (0x202/514) with the two strings; returns 1 | missing (crime report dialog) |
+| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the crime/item data and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | missing (crime report dialog) |
 | `DoodadFuncStampMaker` 0x3d | `FUN_393b82a0` 774630 | state 7, `OPEN_EMBLEM_UPLOAD_UI` (0x1a4/420) with the doodad id as a string; returns 1 | missing (`X2Ucc` upload is a stub) |
-| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` shows the func's bubble, then a message box (0xe9) when the count is positive; returns 1 | missing (stuffed-toy text) |
+| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's bubble (`doodad_func_bubbles.bubble_id`); with a positive extra value it also opens a native message box (0xe9); returns 1 | missing (stuffed-toy text) |
 | `DoodadFuncPurchase` 0x40 | `FUN_393b80d0` 774524 | state 8, a purchase task dialog (10 `DLG_TASK_PURCHASE` / 11 `DLG_TASK_PURCHASE_COIN`) built from `doodad_func_purchases`; returns 1 | missing (purchase confirm) |
 | `DoodadFuncParentInfo` 0x43 | `FUN_393b8400` 774707 | opens the parent house's info through `FUN_393befd0` (`HOUSE_INTERACTION_START` 0x6d/109); returns 1 | missing for doodad parents (housing implements `FUN_393befd0` for house units) |
 | `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; returns 1 | missing (`X2Book.GetBookInfo` is a stub) |
