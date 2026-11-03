@@ -365,14 +365,24 @@ fn zone_protects(game: Option<&GameData>, zone_faction: u32, faction: u32) -> bo
     }
 }
 
-/// `FUN_390298d0` (`x2game.dll.c:39098`): the grouped zone's value only applies while its controller
-/// is in state 7 (peace). A received conflict state other than 7 disables it. No report is treated as
-/// peace: the native needs a controller to exist, and the HUD has no default for that (inferred).
-fn conflict_peace(world: &World, zone_group: u32) -> bool {
-    world
-        .get_resource::<aa_net::state::ConflictZones>()
-        .and_then(|z| z.get(zone_group as u16))
-        .is_none_or(|s| s.state == 7)
+/// `FUN_39027eb0` (`x2game.dll.c:39098`): the zone's protection value. A group with a static
+/// `conflict_zones` row (`FUN_397f2080`) is a conflict zone: `closed` means 0, and otherwise the row's
+/// `peace_protected_faction_id` applies only while the received runtime state is 7 (peace); any other
+/// state or no state means 0 (`FUN_390298d0`, `40895`). A group without a row is a home zone and uses
+/// `zones.faction_id`; the timed controller override that also returns 5 there is not modeled
+/// (capture-pending).
+fn zone_protection_value(world: &World, game: Option<&GameData>, me: &Snapshot) -> u32 {
+    if let Some((closed, peace_faction)) = game.and_then(|g| g.conflict_zones.get(&me.zone_group)).copied() {
+        if closed {
+            return 0;
+        }
+        let peace = world
+            .get_resource::<aa_net::state::ConflictZones>()
+            .and_then(|z| z.get(me.zone_group as u16))
+            .is_some_and(|s| s.state == 7);
+        return if peace { peace_faction } else { 0 };
+    }
+    me.zone_faction
 }
 
 /// Compute the panels from aa-net's state. `own_faction` is the player's faction id, `me` and `pos` the player's numbers and
@@ -477,7 +487,7 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
         // come first and refuse as INVALID_TARGET (0x22); reasons 5/6 then use `FUN_39837a90`'s level <= 10
         // and the zone value of `FUN_39027eb0`/`FUN_39837b90`. The native code reads each unit's own zone;
         // the HUD has only the player's (`Snapshot::zone_faction`), so both sides use it (inferred,
-        // capture-pending). The ungrouped timed controller override is not modeled (capture-pending).
+        // capture-pending). The home-zone timed controller override is not modeled (capture-pending).
         let own_character = world
             .get_resource::<Player>()
             .and_then(|p| p.spawn.as_ref())
@@ -492,12 +502,12 @@ pub fn refresh(world: &World, game: Option<&GameData>, own_faction: u32, own_obj
                 .is_some_and(|p| p.id != 0 && p.member(a).is_some() && p.member(b).is_some())
         });
         let invalid_attack = relation != "hostile" && both_owned.is_some() && (same_owner || same_party);
+        let zone_value = zone_protection_value(world, game, me);
         let zone_protected = both_owned.is_some()
-            && conflict_peace(world, me.zone_group)
-            && me.zone_faction != 0
+            && zone_value != 0
             && game.is_some_and(|g| {
-                let own = me.level <= 10 && zone_protects(Some(g), me.zone_faction, own_faction);
-                let target = u.level <= 10 && zone_protects(Some(g), me.zone_faction, faction);
+                let own = me.level <= 10 && zone_protects(Some(g), zone_value, own_faction);
+                let target = u.level <= 10 && zone_protects(Some(g), zone_value, faction);
                 own || target
             });
         let protected_level = zone_protected && !invalid_attack;
@@ -984,7 +994,7 @@ mod tests {
             .insert_resource(Player { spawn: Some(spawn) })
             .init_resource::<Target>()
             .init_resource::<Buffs>();
-        let check = |app: &mut App, level: u8, zone: u32, target_level: u8, group: u32| {
+        let check = |app: &mut App, game: &GameData, level: u8, zone: u32, target_level: u8, group: u32| {
             app.world_mut().resource_mut::<Target>().obj_id = Some(7);
             app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().level = target_level;
             let me = Snapshot {
@@ -993,45 +1003,62 @@ mod tests {
                 zone_group: group,
                 ..Snapshot::default()
             };
-            let (panels, _, _) = refresh(app.world(), Some(&game), 101, 100, Instant::now(), &me, Vec3::ZERO);
+            let (panels, _, _) = refresh(app.world(), Some(game), 101, 100, Instant::now(), &me, Vec3::ZERO);
             let t = panels.target.unwrap();
             (t.protected_level, t.attackable, t.invalid_attack)
         };
-        // a hostile character target: the attacker is level 10 in a zone its own faction holds (reason 5)
-        assert_eq!(check(&mut app, 10, 101, 32, 0), (true, false, false));
+        // a hostile character target in a home zone: the attacker is level 10 in a zone its own faction
+        // holds (reason 5), using `zones.faction_id` because group 0 has no conflict row
+        assert_eq!(check(&mut app, &game, 10, 101, 32, 0), (true, false, false));
         // level 11 is outside `FUN_39837a90`'s level <= 10
-        assert_eq!(check(&mut app, 11, 101, 32, 0), (false, true, false));
-        // the target is level 10 in a zone its own faction holds (reason 6)
-        assert_eq!(check(&mut app, 32, 102, 10, 0), (true, false, false));
-        assert_eq!(check(&mut app, 32, 102, 11, 0), (false, true, false));
-        // no zone faction: no protection
-        assert_eq!(check(&mut app, 10, 0, 10, 0), (false, true, false));
+        assert_eq!(check(&mut app, &game, 11, 101, 32, 0), (false, true, false));
+        // the target is level 10 in a home zone its own faction holds (reason 6)
+        assert_eq!(check(&mut app, &game, 32, 102, 10, 0), (true, false, false));
+        assert_eq!(check(&mut app, &game, 32, 102, 11, 0), (false, true, false));
+        // no zone faction and no conflict row: no protection
+        assert_eq!(check(&mut app, &game, 10, 0, 10, 0), (false, true, false));
         // an NPC target has no owning character, so the level protection never applies to it
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().kind = UnitKind::Npc { template_id: 0, owner_id: 0 };
-        assert_eq!(check(&mut app, 5, 101, 1, 0), (false, true, false));
+        assert_eq!(check(&mut app, &game, 5, 101, 1, 0), (false, true, false));
         // a neutral character target: reason 6 still applies ...
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().kind = UnitKind::Character { char_id: 103 };
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().faction_id = 103;
-        assert_eq!(check(&mut app, 32, 103, 10, 0), (true, false, false));
+        assert_eq!(check(&mut app, &game, 32, 103, 10, 0), (true, false, false));
         // ... unless the same party makes reasons 3/4 come first
         app.insert_resource(Party {
             id: 9,
             members: vec![PartyMember { id: 47, ..Default::default() }, PartyMember { id: 103, ..Default::default() }],
             ..Default::default()
         });
-        assert_eq!(check(&mut app, 32, 103, 10, 0), (false, false, true));
-        // a conflict state other than peace disables the grouped zone value (`FUN_390298d0`)
+        assert_eq!(check(&mut app, &game, 32, 103, 10, 0), (false, false, true));
         app.world_mut().resource_mut::<Party>().id = 0;
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().kind = UnitKind::Character { char_id: 102 };
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().faction_id = 102;
+        // a conflict group (row 14, peace_protected_faction_id 5) protects every owned unit in peace;
+        // its `zones.faction_id` is NULL, so the value comes from the row, not from the snapshot
+        game.conflict_zones.insert(14, (false, 5));
         app.insert_resource(ConflictZones {
-            by_group: [(61, ConflictZoneState { zone_group_id: 61, state: 6, end_time: 0 })].into(),
+            by_group: [(14, ConflictZoneState { zone_group_id: 14, state: 7, end_time: 0 })].into(),
         });
-        assert_eq!(check(&mut app, 10, 101, 32, 61), (false, true, false));
-        // sentinel 5 protects every owned unit; sentinel 4 protects one friendly to faction 148/149
-        assert_eq!(check(&mut app, 10, 5, 32, 0), (true, false, false));
+        assert_eq!(check(&mut app, &game, 5, 0, 32, 14), (true, false, false));
+        // any other received state, no state, and a closed row are no protection
+        app.insert_resource(ConflictZones {
+            by_group: [(14, ConflictZoneState { zone_group_id: 14, state: 6, end_time: 0 })].into(),
+        });
+        assert_eq!(check(&mut app, &game, 5, 0, 32, 14), (false, true, false));
+        app.world_mut().remove_resource::<ConflictZones>();
+        assert_eq!(check(&mut app, &game, 5, 0, 32, 14), (false, true, false));
+        game.conflict_zones.insert(14, (true, 5));
+        app.insert_resource(ConflictZones {
+            by_group: [(14, ConflictZoneState { zone_group_id: 14, state: 7, end_time: 0 })].into(),
+        });
+        assert_eq!(check(&mut app, &game, 5, 0, 32, 14), (false, true, false));
+        game.conflict_zones.insert(14, (false, 5));
+        // a home zone still uses `zones.faction_id`; sentinel 5 protects every owned unit and 4 one
+        // friendly to faction 148/149
+        assert_eq!(check(&mut app, &game, 10, 5, 32, 0), (true, false, false));
         app.world_mut().resource_mut::<Units>().by_id.get_mut(&7).unwrap().faction_id = 148;
-        assert_eq!(check(&mut app, 32, 4, 10, 0), (true, false, false));
+        assert_eq!(check(&mut app, &game, 32, 4, 10, 0), (true, false, false));
     }
 
     #[test]
