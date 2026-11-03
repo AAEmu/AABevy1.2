@@ -809,13 +809,6 @@ fn interaction_gap(
     ))
 }
 
-/// The native interaction range: `FUN_39093800` refuses when the surface offset is greater than
-/// `max_interaction_doodad_distance` (2.1 m). Workbench entry opens only inside it and the craft
-/// validator (`FUN_394d6dc0`) rechecks it before `CSExecuteCraft`.
-pub(super) fn in_interaction_reach(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
-    interaction_gap(data, doodads, units, obj_id).is_some_and(|(gap, _)| gap < INTERACTION_DISTANCE)
-}
-
 /// `FUN_393b7e40` (774405): the interaction ended. A real measured gap at or past the 2.1 m reach
 /// ends it; a fallback gap (no drawn bounds, a parented doodad) is a centre distance, and the
 /// action was offered up to [`DOODAD_REACH`], so only a gap past that proves the player left. A
@@ -832,13 +825,15 @@ pub(super) fn left_interaction(
     match interaction_gap(data, doodads, units, obj_id) {
         Some((gap, true)) => gap >= INTERACTION_DISTANCE,
         Some((gap, false)) => gap >= DOODAD_REACH,
-        None => false,
+        // The doodad exists but has no composed world position: `FUN_39093800` cannot measure it
+        // either, and the interaction must not stay open forever.
+        None => true,
     }
 }
 
 /// Ends the interaction that is active before a new local window, the native `FUN_393b7aa0`
-/// (774053): the bench (state 5, `FUN_394d08c0` raises `NPC_INTERACTION_END`), the shown
-/// interaction list, the coffer, and the store/bank (states 0xe/0xf/0x11, also
+/// (774053): the bench and the shown interaction list, the coffer (state 5, `FUN_394d08c0` sends
+/// the `CSCofferInteraction` close packet), and the store/bank (states 0xe/0xf/0x11, which raise
 /// `NPC_INTERACTION_END`). It then raises `INTERACTION_END` (0xd2) once when something was active.
 pub(super) fn end_interaction(
     rt: Option<&UiRuntime>,
@@ -848,9 +843,11 @@ pub(super) fn end_interaction(
     let (bench, menu, coffer) = {
         let mut data = bridge.borrow_mut();
         let bench = super::crafting::close_bench(&mut data);
-        let menu = data.doodad.menu.take().is_some();
+        // Only a list that was shown (`other_interaction`) is an active interaction; a single
+        // action kept in `menu` for the immediate-use path is not.
+        let menu = std::mem::take(&mut data.doodad.menu_shown);
         if menu {
-            data.doodad.menu_shown = false;
+            data.doodad.menu = None;
         }
         let coffer = inventory.coffer.is_open();
         if coffer {
@@ -862,10 +859,6 @@ pub(super) fn end_interaction(
     let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
     let ended = bench || menu || coffer || store;
     if ended && let Some(rt) = rt {
-        // `FUN_394d08c0` raises 0x6c for the bench; the store's own close already did.
-        if bench {
-            rt.fire_event("NPC_INTERACTION_END", ());
-        }
         rt.fire_event("INTERACTION_END", ());
     }
     ended
@@ -2245,17 +2238,17 @@ pub(super) fn execute(
         houses: env_res.houses.as_deref(),
         world: env_res.world_info.as_deref().map(|w| w.0.as_ref()),
     };
-    // The native `FUN_393b3300` gate, with the same player/doodad facts as the listing.
-    let permitted = |obj_id: u32, perm: u8| {
+    // The native `FUN_393b3300` gate, with the same player/doodad facts as the listing. `None`
+    // means the doodad cannot be measured, so the listing would not offer it either: skip it
+    // silently instead of showing a permission error.
+    let permitted = |obj_id: u32, perm: u8| -> Option<bool> {
         let data = bridge.0.borrow();
         let player = player_facts(&data, env);
         doodads
             .by_id
             .get(&obj_id)
             .and_then(|o| doodad_world(o, &units).map(|pos| (o, pos)))
-            .is_some_and(|(o, pos)| {
-                craft_permitted(perm, &player, &doodad_facts(&data, o, pos, env))
-            })
+            .map(|(o, pos)| craft_permitted(perm, &player, &doodad_facts(&data, o, pos, env)))
     };
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
@@ -2266,11 +2259,15 @@ pub(super) fn execute(
                 .zip(game)
                 .and_then(|(g, game)| game.doodad.local(g, *skill_id))
             {
-                if !permitted(obj_id, local.perm) {
-                    if let Some(errors) = errors.as_mut() {
-                        errors.write(crate::hud::ShowError(local::NO_PERM));
+                match permitted(obj_id, local.perm) {
+                    Some(true) => {}
+                    Some(false) => {
+                        if let Some(errors) = errors.as_mut() {
+                            errors.write(crate::hud::ShowError(local::NO_PERM));
+                        }
+                        continue;
                     }
-                    continue;
+                    None => continue,
                 }
                 local::run(
                     rt.as_deref(),
@@ -2287,11 +2284,15 @@ pub(super) fn execute(
                 .zip(game)
                 .and_then(|(g, game)| game.doodad.insert_counter(g, *skill_id))
             {
-                if !permitted(obj_id, counter.perm) {
-                    if let Some(errors) = errors.as_mut() {
-                        errors.write(crate::hud::ShowError(local::NO_PERM));
+                match permitted(obj_id, counter.perm) {
+                    Some(true) => {}
+                    Some(false) => {
+                        if let Some(errors) = errors.as_mut() {
+                            errors.write(crate::hud::ShowError(local::NO_PERM));
+                        }
+                        continue;
                     }
-                    continue;
+                    None => continue,
                 }
                 // Native case 0x54 returns 1 with no local player: handled, not sent.
                 if player.as_ref().is_none_or(|p| p.spawn.is_none()) {

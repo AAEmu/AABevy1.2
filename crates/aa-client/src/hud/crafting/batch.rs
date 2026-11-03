@@ -207,8 +207,9 @@ fn command(data: &HudData, doodads: &Doodads, units: &Units, owner: u32, request
         return Err(Refusal::Silent);
     }
     // Native `FUN_394d6dc0` rechecks `FUN_39093800` with `max_interaction_doodad_distance`
-    // (2.1 m surface gap) before `CSExecuteCraft` and shows 0x9a (`TOO_FAR_AWAY`) when it fails.
-    if !super::super::doodad::in_interaction_reach(data, doodads, units, bench.object) {
+    // (2.1 m surface gap) before `CSExecuteCraft` and shows 0x9a (`TOO_FAR_AWAY`) when it
+    // fails. Use the same close rule as the window, so a fallback-gap open can still craft.
+    if super::super::doodad::left_interaction(data, doodads, units, bench.object) {
         return Err(Refusal::OutOfRange);
     }
     let game = data.game.get().ok_or(Refusal::Silent)?;
@@ -403,6 +404,74 @@ mod tests {
             matches!(command(&data, &doodads, &Units::default(), 47, quote), Err(Refusal::OutOfRange)),
             "the out-of-range request is answered with 0x9a"
         );
+    }
+
+    /// A fallback gap inside `DOODAD_REACH` is not measurable proof of leaving, so the same
+    /// `left_interaction` rule the window uses lets the craft request through (the server checks).
+    #[test]
+    fn a_fallback_gap_craft_request_is_allowed() {
+        let mut data = HudData::default();
+        data.character_id = 47;
+        data.pos = Vec3::new(0.0, 3.0, 0.0);
+        data.player_radius = 0.0;
+        let mut game = super::super::super::data::GameData::default();
+        game.crafting = super::super::fixture_tables([(568, vec![5557])]);
+        game.crafting.recipes.insert(
+            5557,
+            super::super::data::Recipe {
+                skill: 42,
+                ..Default::default()
+            },
+        );
+        game.crafting.craft_skills.insert(42);
+        assert!(data.game.0.set(game).is_ok());
+        assert_eq!(super::super::bench::open(&mut data, 300, 568), Some(1));
+        let quote = Request::Start {
+            owner: 47,
+            bench: Bench {
+                object: 300,
+                template: 568,
+            },
+            recipe: 5557,
+            count: 3,
+        };
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, super::super::fixture::doodad());
+        assert!(matches!(
+            command(&data, &doodads, &Units::default(), 47, quote),
+            Ok(Command::ExecuteCraft { .. })
+        ));
+    }
+
+    /// A doodad that exists but has no world position cannot be measured (`FUN_39093800` fails):
+    /// the request is refused, not left open.
+    #[test]
+    fn a_craft_request_at_a_positionless_doodad_is_out_of_range() {
+        let mut data = HudData::default();
+        data.character_id = 47;
+        data.pos = Vec3::new(0.0, 3.0, 0.0);
+        data.player_radius = 0.0;
+        let mut game = super::super::super::data::GameData::default();
+        game.crafting = super::super::fixture_tables([(568, vec![5557])]);
+        assert!(data.game.0.set(game).is_ok());
+        assert_eq!(super::super::bench::open(&mut data, 300, 568), Some(1));
+        let quote = Request::Start {
+            owner: 47,
+            bench: Bench {
+                object: 300,
+                template: 568,
+            },
+            recipe: 5557,
+            count: 3,
+        };
+        let mut doodad = super::super::fixture::doodad();
+        doodad.parent_obj_id = 999;
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, doodad);
+        assert!(matches!(
+            command(&data, &doodads, &Units::default(), 47, quote),
+            Err(Refusal::OutOfRange)
+        ));
     }
 
     #[test]

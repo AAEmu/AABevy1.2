@@ -432,6 +432,32 @@ fn a_local_action_use_checks_its_permission() {
     assert!(sent(&mut app).is_empty());
 }
 
+/// A local action on a doodad that cannot be measured is not offered (the listing filter drops
+/// it too): the use is skipped silently, not refused with `NO_PERM`. Runs without the pak.
+#[test]
+fn a_local_action_without_a_world_position_is_skipped_silently() {
+    let game = GameData {
+        doodad: fixture_tables(),
+        ..Default::default()
+    };
+    let mut app = dispatch_app(game, 1, 100, 12_087, 42, Inventory::default(), None);
+    app.world_mut()
+        .resource_mut::<Doodads>()
+        .by_id
+        .get_mut(&2075)
+        .unwrap()
+        .parent_obj_id = 999;
+    app.update();
+    assert!(
+        app.world_mut()
+            .resource_mut::<Messages<crate::hud::ShowError>>()
+            .drain()
+            .next()
+            .is_none()
+    );
+    assert!(sent(&mut app).is_empty());
+}
+
 /// `FUN_393bc260` case 0x54: no local player -> handled, no send; with a player, the item must be
 /// in the bag or in the 28 equipment slots (`FUN_393b8f00`). Runs without the pak.
 #[test]
@@ -709,6 +735,90 @@ fn a_fallback_gap_store_stays_open() {
         lua(&app, "return STORE_ENDS").unwrap().as_integer(),
         Some(0)
     );
+}
+
+/// `end_interaction` closes the bench, the coffer and a shown interaction list, and raises
+/// `INTERACTION_END` once. Only a list that was shown counts (like `other_interaction`).
+#[test]
+fn end_interaction_closes_the_bench_coffer_and_shown_list() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game_data) = game() else { return };
+    let mut app = app(
+        game_data,
+        STORE_GROUP,
+        STORE_TEMPLATE,
+        12_087,
+        Inventory::default(),
+    );
+    lua(
+        &app,
+        "NPC_ENDS=0; INTER_ENDS=0;          local a=UIParent:CreateWidget('emptywidget','benchEndProbe','UIParent');          a:RegisterEvent('NPC_INTERACTION_END');          a:SetHandler('OnEvent',function() NPC_ENDS=NPC_ENDS+1 end);          local b=UIParent:CreateWidget('emptywidget','interEndProbe4','UIParent');          b:RegisterEvent('INTERACTION_END');          b:SetHandler('OnEvent',function() INTER_ENDS=INTER_ENDS+1 end)",
+    )
+    .unwrap();
+    app.world_mut().resource_mut::<Inventory>().coffer.obj_id = 42;
+    let inventory = app.world().resource::<Inventory>().clone();
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        assert!(crate::hud::crafting::open_bench(&mut d, 300, 0).is_some());
+        d.doodad.menu = Some((2075, Vec::new()));
+        d.doodad.menu_shown = true;
+    }
+    {
+        let rt = app.world().get_non_send::<UiRuntime>().unwrap();
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        assert!(crate::hud::doodad::end_interaction(
+            Some(rt),
+            &bridge.0,
+            &inventory
+        ));
+        let d = bridge.0.borrow();
+        assert_eq!(crate::hud::crafting::active_bench(&d), None);
+        assert!(d.doodad.coffer_close);
+        assert!(!d.doodad.menu_shown && d.doodad.menu.is_none());
+    }
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
+
+    // A list kept for the immediate-use path (not shown) is not an active interaction.
+    app.world_mut().resource_mut::<Inventory>().coffer.close();
+    let inventory = app.world().resource::<Inventory>().clone();
+    {
+        let rt = app.world().get_non_send::<UiRuntime>().unwrap();
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        bridge.0.borrow_mut().doodad.menu = Some((2075, Vec::new()));
+        assert!(!crate::hud::doodad::end_interaction(
+            Some(rt),
+            &bridge.0,
+            &inventory
+        ));
+        assert!(bridge.0.borrow().doodad.menu.is_some());
+    }
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+}
+
+/// A doodad that exists but has no composed world position has no measurable interaction:
+/// `left_interaction` reports it ended, like a failed `FUN_39093800`.
+#[test]
+fn a_doodad_without_a_world_position_has_left() {
+    let mut doodad = world_doodad(1, 100, 1, Vec3::new(10.0, 10.0, 100.0));
+    doodad.parent_obj_id = 999;
+    let mut doodads = Doodads::default();
+    doodads.by_id.insert(1, doodad);
+    assert!(crate::hud::doodad::left_interaction(
+        &HudData::default(),
+        &doodads,
+        &Units::default(),
+        1
+    ));
 }
 
 /// An `execute` app without a UI runtime: the pak-free dispatch/permission tests.

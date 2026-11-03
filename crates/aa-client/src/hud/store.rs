@@ -480,12 +480,17 @@ pub(super) fn end_interaction(rt: &UiRuntime, bridge: &Shared) -> bool {
     if data.store.npc.is_none() {
         return false;
     }
-    if let Some(scope) = data.store.scope {
+    let scope = data.store.scope.take();
+    if let Some(scope) = scope {
+        // `close_npc` owes the end through `flush_ends`; firing it here too would duplicate it.
         super::dialog::close_npc(&mut data, scope);
     }
     data.store.close();
     drop(data);
-    rt.fire_event("NPC_INTERACTION_END", ());
+    if scope.is_none() {
+        // A doodad store/bank has no NPC flow to flush its end.
+        rt.fire_event("NPC_INTERACTION_END", ());
+    }
     true
 }
 
@@ -701,6 +706,116 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
 mod tests {
     use super::super::data::{ItemInfo, Named};
     use super::*;
+    use aa_net::interaction::InteractEvent;
+
+    /// Replacing an NPC store with a local window must not add a second
+    /// `NPC_INTERACTION_END`: `close_npc` already owes the talk's end through `flush_ends`.
+    #[test]
+    fn replacing_an_npc_store_fires_one_npc_end() -> Result<(), Box<dyn std::error::Error>> {
+        if !aa_cry::pak_available() {
+            return Ok(());
+        }
+        let (rt, shared, _path, inventory) =
+            crate::hud::expansion::fixture::runtime(1280.0, 720.0)?;
+        rt.lua
+            .load(
+                "NPC_ENDS=0; local w=UIParent:CreateWidget('emptywidget','npcStoreEndProbe','UIParent');                  w:RegisterEvent('NPC_INTERACTION_END');                  w:SetHandler('OnEvent',function() NPC_ENDS=NPC_ENDS+1 end)",
+            )
+            .exec()?;
+        let spawn = crate::hud::fixture_spawn();
+        let player = Player {
+            spawn: Some(spawn.clone()),
+        };
+        let mut npc = spawn.unit.clone();
+        npc.obj_id = 0x010203;
+        npc.kind = aa_net::model::UnitKind::Npc {
+            template_id: 1024,
+            owner_id: 0,
+        };
+        npc.pos = aa_net::Pos::new(1.0, 0.0, 0.0);
+        npc.dead = false;
+        let mut units = Units::default();
+        units.by_id.insert(npc.obj_id, npc.clone());
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(HudBridge(shared.clone()))
+            .insert_non_send(rt)
+            .insert_resource(player)
+            .insert_resource(units)
+            .insert_resource(inventory)
+            .init_resource::<aa_net::state::PlayerStats>()
+            .init_resource::<aa_net::state::Quests>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::HudSuspended>()
+            .insert_resource(crate::hud::HudBuilt {
+                up: true,
+                fresh: false,
+            })
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .add_systems(
+                Update,
+                (crate::hud::dialog::track_npc, crate::hud::dialog::drive_npc).chain(),
+            );
+        for event in [
+            Event::CharacterSelected(Box::new(spawn.state.clone())),
+            Event::PlayerSpawn(Box::new(spawn.clone())),
+            Event::EnteredWorld,
+        ] {
+            app.world_mut().write_message(NetEvent(event));
+        }
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(npc.clone()))));
+        app.update();
+        {
+            let mut data = shared.borrow_mut();
+            if let Ok(game) = crate::hud::data::GameData::load(aa_anim::db::DEFAULT_DB) {
+                assert!(data.game.0.set(game).is_ok());
+            }
+            data.pos = Vec3::ZERO;
+            data.panels.target = Some(crate::hud::panels::TargetSnap {
+                obj_id: npc.obj_id,
+                npc_type: Some(1024),
+                detail: "npc",
+                ..Default::default()
+            });
+            data.target_pos = Some(Vec3::X);
+            crate::hud::dialog::query_npc(&mut data, (npc.obj_id, 1024), None);
+        }
+        app.update();
+        app.update();
+        app.world_mut()
+            .write_message(NetEvent(Event::Interaction(InteractEvent::SkillList {
+                npc_obj_id: npc.obj_id,
+                obj_id: 0,
+                extra_info: 0,
+                pick_id: 0,
+                mouse_button: 2,
+                modifier_keys: 0,
+                skills: vec![12_087],
+                interactable: true,
+            })));
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert!(lua.load("return IsActivatedStore()").eval::<bool>()?);
+        assert!(shared.borrow().store.npc.is_some());
+        // Count only the end the replacement causes; the talk's own target-change end already
+        // fired when the store opened.
+        lua.load("NPC_ENDS=0").exec()?;
+
+        let inventory = app.world().resource::<Inventory>().clone();
+        {
+            let rt = app.world().non_send::<UiRuntime>();
+            let bridge = app.world().non_send::<HudBridge>();
+            assert!(end_interaction(rt, &bridge.0));
+        }
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert_eq!(lua.load("return NPC_ENDS").eval::<i64>()?, 1);
+        assert!(shared.borrow().store.npc.is_none());
+        Ok(())
+    }
 
     #[test]
     fn catalog_preserves_native_currency_order_and_first_duplicate() {
