@@ -633,6 +633,14 @@ fn run_script(mut r: ResMut<Runner>, mut ctx: Ctx, mut events: MessageReader<Net
     }
 }
 
+/// A script mark (`trace TEXT`, `echo TEXT`): a row in the skill trace, and `video-start` also opens `--video-gate`.
+fn script_mark(label: &str) {
+    crate::skilltrace::mark(label);
+    if label == aa_dev::GATE_MARK {
+        aa_dev::open_video_gate();
+    }
+}
+
 /// Begins a command: `Some` when it has to wait, `None` when it is done (or failed: the run is then stopping).
 #[allow(clippy::too_many_lines)]
 fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
@@ -641,11 +649,11 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
         Cmd::Enter => None,
         Cmd::Echo(t) => {
             say(r, t);
-            crate::skilltrace::mark(t);
+            script_mark(t);
             None
         }
         Cmd::Trace(t) => {
-            crate::skilltrace::mark(t);
+            script_mark(t);
             None
         }
         Cmd::Mark => {
