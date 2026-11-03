@@ -44,7 +44,8 @@ use aa_anim::{Animator, ClipLibrary};
 use aa_fx::{ChrEffect, Effect, FxSettings, Ground};
 use aa_net::buff::BuffCaster;
 use aa_net::skill::{CastAction, PlotEvent, SkillFired, SkillStarted, SkillTarget, UnitDamage, hit_type, target_kind};
-use aa_net::state::{Skills, Units};
+use aa_net::model::UnitKind;
+use aa_net::state::{Player, Skills, Units};
 use aa_net::{Command, Event, MoveCommand, NetCommand, NetEvent, Pos};
 use aa_world::sky::SunLight;
 use aa_world::{TerrainQuery, WaterQuery, cry_to_bevy};
@@ -753,6 +754,7 @@ struct Stage<'w, 's> {
     clips: Res<'w, ClipLibrary>,
     book: Res<'w, SkillBook>,
     emotes: Option<Res<'w, super::emote::Emotes>>,
+    player: Option<Res<'w, Player>>,
     net_units: Res<'w, Units>,
     /// A skill aimed at a doodad (a Memory Tome ...) is aimed at its position (object ids are shared by units and doodads).
     net_doodads: Res<'w, aa_net::state::Doodads>,
@@ -1659,13 +1661,47 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
         }
         Event::UnitDamaged(d) => {
-            // buff ticks (kind 2) have no blow to show, and a unit that is not drawn has no blow to wait for: the numbers go on at once
             let now_landed = DamageLanded { damage: d.clone(), received: now };
+            let target = st.entity(d.target_obj_id);
+            let caster = st.entity(d.caster_obj_id);
+            let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
+            // A real blow puts both sides in the battle stance (`FUN_39391670` from the damage handler), and so keeps the
+            // combat idle alive (the next update refreshes its deadline from the stance byte). It needs a caster unit, a hit
+            // (not a miss or a zero), and both units alive: the decompile tests `+0x50 != 0`, `+0x6e != 0` and neither unit's
+            // `+0x3c26` / `+0x3c27` dead flags. The damage handler calls it after every kind (749000-749128), so buff,
+            // passive and doodad damage flags too, not only a skill's blow.
+            let dead = |id: u32, entity: Option<Entity>| st.net_units.get(id).is_some_and(|u| u.dead) || entity.is_some_and(|e| st.dead.contains(e));
+            if !missed && d.caster_obj_id != 0 && d.target_obj_id != 0 && caster.is_some() && !dead(d.target_obj_id, target) && !dead(d.caster_obj_id, caster) {
+                if let Some(target) = target {
+                    st.commands.entity(target).insert((CombatStance, CombatIdle::at(now)));
+                }
+                if let Some(attacker) = caster {
+                    st.commands.entity(attacker).insert((CombatStance, CombatIdle::at(now)));
+                }
+                // The third `FUN_390b36f0` of the damage handler: a blow on the local player's own mate flags the owner
+                // too. The decompile tests the TARGET (`+0x410 == 5` mate, `+0x420` owner character id equal to the local
+                // character id), looks the owner up by character id (`FUN_3935e370`) and needs it alive (`+0x3c26` /
+                // `+0x3c27` zero); the caster is not tested, so a blow the mate deals flags the mate and its victim only.
+                let own = st
+                    .player
+                    .as_ref()
+                    .and_then(|p| p.spawn.as_ref())
+                    .map(|spawn| (spawn.character().id, spawn.obj_id))
+                    .filter(|(char_id, _)| *char_id != 0);
+                if let Some((char_id, obj_id)) = own
+                    && st.net_units.get(d.target_obj_id).is_some_and(|u| matches!(&u.kind, UnitKind::Mate { owner_id, .. } if *owner_id == char_id))
+                    && let Some(owner) = st.local.iter().find(|(_, l)| l.obj_id == obj_id).map(|(e, _)| e)
+                    && !dead(obj_id, Some(owner))
+                {
+                    st.commands.entity(owner).insert((CombatStance, CombatIdle::at(now)));
+                }
+            }
+            // buff ticks (kind 2) have no blow to show, and a unit that is not drawn has no blow to wait for: the numbers go on at once
             if d.action.kind > 1 {
                 combat.landed.push(now_landed);
                 return;
             }
-            let Some(target) = st.entity(d.target_obj_id) else {
+            let Some(target) = target else {
                 combat.landed.push(now_landed);
                 return;
             };
@@ -1694,20 +1730,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             // Native weapon audio requires a known cast. Preserve the received attack
             // holdable / packed hit until impact; hurt FX and audio admission are separate.
             let sound = cast.map(|_| d.clone());
-            let missed = hit_type::is_miss(d.hit_type) || d.damage <= 0;
             let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
-            let caster = st.entity(d.caster_obj_id);
-            // A real blow puts both sides in the battle stance (`FUN_39391670` from the damage handler), and so keeps the
-            // combat idle alive (the next update refreshes its deadline from the stance byte). It needs a caster unit, a hit
-            // (not a miss or a zero), and both units alive: the decompile tests `+0x50 != 0`, `+0x6e != 0` and neither unit's
-            // `+0x3c26` / `+0x3c27` dead flags.
-            let dead = |id: u32, entity: Option<Entity>| st.net_units.get(id).is_some_and(|u| u.dead) || entity.is_some_and(|e| st.dead.contains(e));
-            if !missed && d.caster_obj_id != 0 && caster.is_some() && !dead(d.target_obj_id, Some(target)) && !dead(d.caster_obj_id, caster) {
-                st.commands.entity(target).insert((CombatStance, CombatIdle::at(now)));
-                if let Some(attacker) = caster {
-                    st.commands.entity(attacker).insert((CombatStance, CombatIdle::at(now)));
-                }
-            }
             if let Some(attacker) = caster.filter(|c| *c != target) {
                 combat.last_attacker.insert(d.target_obj_id, attacker);
             }
@@ -2994,6 +3017,93 @@ mod tests {
         world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::UnitDamaged(damage(100, hit_type::MELEE_HIT))));
         schedule.run(&mut world);
         assert!(world.get::<CombatStance>(local).is_none() && world.get::<CombatStance>(rat).is_none(), "a dead target is no blow");
+    }
+
+    /// `FUN_39398c80` calls `FUN_39391670` after every damage kind (`749000-749128`): a buff tick is a
+    /// real blow for the battle flag too, while the visuals still skip it (the number lands at once).
+    #[test]
+    fn buff_damage_also_flags_both_units() {
+        let Some(book) = SkillBook::open() else { return };
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetEvent>>();
+        let local = world.spawn((LocalPlayer { obj_id: 1 }, GlobalTransform::default())).id();
+        let rat = world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default())).id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((handle_events, bevy::ecs::schedule::ApplyDeferred).chain());
+        let Event::UnitDamaged(mut d) = Fake::event("hit", &[1, 2, 100], 1, 2, None).expect("a hit event") else { unreachable!() };
+        d.action.kind = 2;
+        d.action.buff_id = 1234;
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(Event::UnitDamaged(d)));
+        schedule.run(&mut world);
+        for unit in [local, rat] {
+            assert!(world.get::<CombatStance>(unit).is_some(), "a buff tick flags both sides");
+        }
+        assert_eq!(world.resource::<Combat>().landed.len(), 1, "the tick still lands as a number at once");
+    }
+
+    /// `FUN_39391670`'s third `FUN_390b36f0`: a blow on the local player's own mate (`+0x410 == 5`, `+0x420` the local
+    /// character id) also sets the owner's battle flag when the owner (`FUN_3935e370`) is alive. The check is on the
+    /// target only: a blow the mate deals flags the mate and its victim, not the owner; another owner's mate and a dead
+    /// owner are left out.
+    #[test]
+    fn a_blow_on_the_local_players_mate_flags_the_owner() {
+        let Some(book) = SkillBook::open() else { return };
+        let spawn = crate::hud::fixture_spawn();
+        let (owner_obj, owner_char) = (spawn.obj_id, spawn.character().id);
+        let mut world = World::new();
+        world.insert_resource(book);
+        world.init_resource::<ClipLibrary>();
+        world.init_resource::<Time>();
+        world.init_resource::<Time<Virtual>>();
+        world.init_resource::<Units>();
+        world.init_resource::<aa_net::state::Doodads>();
+        world.init_resource::<Skills>();
+        world.init_resource::<super::super::skill_motion::Inbox>();
+        world.init_resource::<Combat>();
+        world.init_resource::<Messages<NetEvent>>();
+        world.insert_resource(Player { spawn: Some(spawn.clone()) });
+        let owner = world.spawn((LocalPlayer { obj_id: owner_obj }, GlobalTransform::default())).id();
+        let mate = world.spawn((LocalPlayer { obj_id: 200 }, GlobalTransform::default())).id();
+        let attacker = world.spawn((LocalPlayer { obj_id: 2 }, GlobalTransform::default())).id();
+        let mut mate_unit = spawn.unit.clone();
+        mate_unit.obj_id = 200;
+        mate_unit.kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char };
+        world.resource_mut::<Units>().by_id.insert(200, mate_unit);
+        let mut schedule = Schedule::default();
+        schedule.add_systems((handle_events, bevy::ecs::schedule::ApplyDeferred).chain());
+        let hit = |from: u32, on: u32, tl: u32| Fake::event("hit", &[tl, 2, 100], from, on, None).expect("a hit event");
+        // the attacker strikes the mate: all three flags
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 1)));
+        schedule.run(&mut world);
+        for unit in [owner, mate, attacker] {
+            assert!(world.get::<CombatStance>(unit).is_some(), "the mate's owner is flagged too");
+        }
+        // the mate strikes the attacker: the owner's flag is not the mate's to set
+        world.entity_mut(owner).remove::<(CombatStance, CombatIdle)>();
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(200, 2, 2)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "a blow dealt by the mate leaves the owner alone");
+        assert!(world.get::<CombatStance>(mate).is_some() && world.get::<CombatStance>(attacker).is_some());
+        // the mate belongs to another character: no owner flag
+        world.resource_mut::<Units>().by_id.get_mut(&200).unwrap().kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char + 1 };
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 3)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "another character's mate is not the player's");
+        // the owner is dead: `FUN_39391670` needs the owner alive (`+0x3c26` / `+0x3c27` zero)
+        world.resource_mut::<Units>().by_id.get_mut(&200).unwrap().kind = UnitKind::Mate { tl_id: 9, template_id: 1, owner_id: owner_char };
+        world.entity_mut(owner).insert(Dead { at: 0.0 });
+        world.resource_mut::<Messages<NetEvent>>().write(NetEvent(hit(2, 200, 4)));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatStance>(owner).is_none(), "a dead owner is not flagged");
     }
 
     /// Putting the weapon away zeroes `+0x5fc0` (`FUN_39360920`), so the combat idle ends with it; the stance byte is separate.

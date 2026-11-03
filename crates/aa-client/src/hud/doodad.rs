@@ -1516,6 +1516,11 @@ fn pointer_use(
     // A use that started the walk (an action out of the 2.1 m range) runs on arrival instead of
     // rebuilding the right-click decision (`FUN_390a6af0`'s pending action). The phase, the view
     // generation and the permission are re-checked: a doodad that changed on the way drops it.
+    // A fresh click wins even on the frame the previous walk arrives. Otherwise the arrival
+    // consumes its pending action below and swallows the new target.
+    if clicked.is_some() && data.doodad.cancel_walk() {
+        dev.script_keys.retain(|c| c != 'W');
+    }
     let pending = if data
         .doodad
         .pending
@@ -4537,6 +4542,37 @@ mod tests {
             ),
             "{sent:?}"
         );
+    }
+
+    #[test]
+    fn a_new_click_wins_over_a_pending_use_arriving_this_frame() {
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            let mut game = craft_tables(1088, craft_perm::ANY);
+            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0);
+            assert!(d.game.0.set(game).is_ok());
+            d.doodad.pending = Some(Pending {
+                obj_id: 300,
+                action: i64::from(CRAFT_ACTION),
+                phase: 1088,
+                generation: None,
+            });
+            d.doodad.arrived = Some(300);
+            d.doodad.pointer_pick = Some(400);
+        }
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        doodads.by_id.insert(400, world_doodad(400, 1, 2, Vec3::ZERO));
+        let mut app = pending_app(bridge.clone(), doodads, Units::default(), Views::default());
+        app.update();
+        assert!(crate::hud::crafting::active_bench(&bridge.borrow()).is_none());
+        assert!(matches!(sent_commands(&mut app).as_slice(), [Command::UseDoodadSkill {
+            skill_id: 14602, doodad_obj_id: 400,
+        }]));
+        assert!(bridge.borrow().doodad.pending.is_none());
     }
 
     /// Native `FUN_3932aaf0` walks the player's own house list (`DAT_3a167ec4`); the port used

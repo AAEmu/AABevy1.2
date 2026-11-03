@@ -96,7 +96,7 @@ X2Quest.GetObjectiveComponentCount = function(self, qtype)
   return q and #q.objectives or 0
 end
 X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
-X2Quest.GetQuestContextLeftTime = function(self, qtype) return 0 end
+X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
 X2Quest.GetUseTypeQuestItems = function(self, qtype, all) return {} end
 X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, qtype, index) return {} end
 X2Quest.IsQuestStartItem = function(self, itemType) return false end
@@ -307,6 +307,8 @@ end
 
 local function playLines(which, qtype, ctype, atype)
   play = { chain = HUD.quest_bubbles(which, qtype, ctype or 0) or {}, pos = 1, qtype = qtype, ctype = ctype or 0, atype = atype or 0 }
+  -- the window's own quest, which a late refusal for an older quest must not close
+  HUD.quest_show(qtype)
   HUD.quest_cinema_permission(qtype, which)
   startCloseUp(qtype)
   if #play.chain == 0 then
@@ -342,6 +344,7 @@ X2Quest.LeaveQuestDirectingMode = function(self)
   directing = false
   talkCalled = false
   play = { chain = {}, pos = 0, qtype = 0, ctype = 0, atype = 0 }
+  HUD.quest_show(0)
   -- a cut back to the follow camera and the player shown (quest_camera::set_active(0))
   closeUp = false
   HUD.quest_camera(false)
