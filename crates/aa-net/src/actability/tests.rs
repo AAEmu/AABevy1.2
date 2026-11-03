@@ -377,3 +377,15 @@ fn kick_and_character_lifecycle_clear_pending_and_unresolved_downgrade_evidence(
         assert!(!state.resolve_downgrade_points(&ack, &[10000]));
     }
 }
+
+#[test]
+fn add_action_point_adds_like_labor_without_a_wire_step() {
+    let mut state = Actabilities::default();
+    snapshot(&mut state, true, &[(5, 10000, 1)]);
+    assert!(state.apply(&Event::ActionPoint { action: 5, value: 17 }));
+    assert_eq!(state.get(5).unwrap().point, Some(10017));
+    assert_eq!(state.get(5).unwrap().step, 1, "the packet carries no grade step");
+    assert!(state.apply(&Event::ActionPoint { action: 5, value: 0 }));
+    assert_eq!(state.get(5).unwrap().point, Some(10017));
+    assert!(!state.apply(&Event::ActionPoint { action: 0, value: 5 }));
+}

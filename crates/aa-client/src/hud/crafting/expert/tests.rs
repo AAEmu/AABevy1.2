@@ -170,6 +170,31 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
 }
 
 #[test]
+fn action_point_gain_fires_the_four_native_arguments() -> Result<(), Box<dyn std::error::Error>> {
+    let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
+    let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
+    crate::hud::api::install(&mut rt, &bridge)?;
+    rt.lua
+        .load(
+            r#"
+        points={}
+        UIParent:SetEventHandler('ACTABILITY_EXPERT_CHANGED',function(id,name,delta,total)
+            assert(id==1 and name=='Group1' and total==10017)
+            table.insert(points,delta)
+        end)
+    "#,
+        )
+        .exec()?;
+    // `SCAddActionPoint(action, value)` has no grade step and no nonzero gate (`391861f0`).
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 17 });
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 1, value: 0 });
+    dispatch(&rt, &bridge, &Event::ActionPoint { action: 0, value: 5 });
+    rt.lua.load("assert(#points==2 and points[1]==17 and points[2]==0)").exec()?;
+    assert_eq!(bridge.borrow().crafting.actabilities.get(1).unwrap().point, Some(10017));
+    Ok(())
+}
+
+#[test]
 fn original_language_constructor_already_contains_the_received_snapshot() -> Result<(), Box<dyn std::error::Error>> {
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;

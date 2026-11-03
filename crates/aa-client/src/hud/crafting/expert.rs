@@ -402,6 +402,28 @@ fn notify_receipt(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
             rt.fire_event("ACTABILITY_EXPERT_CHANGED", args);
         }
     }
+    // Native `SCAddActionPoint` (0x047) handler `391861f0` calls `FUN_3930be90` directly, with
+    // no nonzero gate: the same 0xc3 line follows a quest/reward action point.
+    if let Event::ActionPoint { action, value } = event {
+        let args = (|| {
+            if *action <= 0 {
+                return None;
+            }
+            let data = bridge.borrow();
+            let id = *action as u32;
+            let group = data.game.get()?.crafting.groups.get(&id).filter(|g| g.skill_page_visible)?;
+            let base = data.crafting.actabilities.get(id)?.point?;
+            Some((
+                f64::from(id as f32),
+                group.name.clone(),
+                f64::from(*value as f32),
+                f64::from(base.wrapping_add(super::modify_point(&data, id)) as f32),
+            ))
+        })();
+        if let Some(args) = args {
+            rt.fire_event("ACTABILITY_EXPERT_CHANGED", args);
+        }
+    }
     if matches!(event, Event::Actability(ActabilityEvent::Expanded { .. })) {
         rt.fire_event("ACTABILITY_EXPERT_EXPANDED", ());
     }

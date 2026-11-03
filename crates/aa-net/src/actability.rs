@@ -218,6 +218,13 @@ impl Actabilities {
                     entry.step = *step;
                     return true;
                 }
+                Event::ActionPoint { action, value } if *action > 0 => {
+                    self.unresolved_downgrades.remove(&(*action as u32));
+                    let entry = self.get_mut(*action as u32);
+                    // SCAddActionPoint carries no grade step: native recomputes it from the total.
+                    entry.point = entry.point.map(|old| old.wrapping_add(*value));
+                    return true;
+                }
                 _ => return false,
             }
         };
