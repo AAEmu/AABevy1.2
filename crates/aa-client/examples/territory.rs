@@ -8,6 +8,8 @@ mod ingame;
 mod login;
 #[path = "../src/script/mod.rs"]
 mod script;
+#[path = "../src/skilltrace/mod.rs"]
+mod skilltrace;
 #[path = "../src/settings.rs"]
 mod settings;
 #[path = "../src/sound/mod.rs"]
