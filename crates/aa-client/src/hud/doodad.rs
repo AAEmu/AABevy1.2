@@ -1642,7 +1642,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 
 /// Uses a workbench: opens it inside the 2.1 m range, else walks there and opens on arrival
 /// (native `FUN_393b3ec0` checks `FUN_39093800`, then `FUN_390a6af0` keeps the pending action).
-fn use_bench(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> Option<(u32, usize)> {
+fn use_bench(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> Option<(u32, usize, bool)> {
     let o = doodads.by_id.get(&obj_id)?;
     if !in_interaction_reach(d, doodads, units, obj_id) {
         let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
@@ -1650,7 +1650,7 @@ fn use_bench(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now
         d.doodad.pending = Some((obj_id, i64::from(CRAFT_ACTION)));
         return None;
     }
-    super::crafting::open_bench(d, obj_id, o.template_id).map(|count| (obj_id, count))
+    super::crafting::open_bench(d, obj_id, o.template_id).map(|(count, replaced)| (obj_id, count, replaced))
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
@@ -1685,7 +1685,7 @@ pub(super) fn execute(
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
     let mut commands = Vec::new();
-    let mut opens: Vec<(u32, usize)> = Vec::new();
+    let mut opens: Vec<(u32, usize, bool)> = Vec::new();
     for pick in execute {
         match pick.source {
             super::dynamic_actions::Source::Doodad {
@@ -1788,10 +1788,15 @@ pub(super) fn execute(
     }
     drop(d);
     if let Some(rt) = rt {
-        // Native `FUN_394dc360` fires event 0x78 with the doodad object id and the unique recipe
+        // Native `FUN_393b7b10` runs `FUN_393b7aa0` first when an interaction is already active,
+        // so opening a second bench fires `INTERACTION_END` before the new `CRAFTING_START`.
+        // `FUN_394dc360` then fires event 0x78 with the doodad object id and the unique recipe
         // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
         // count) treats either argument nil/zero as the general recipe book.
-        for (object, count) in opens {
+        for (object, count, replaced) in opens {
+            if replaced {
+                rt.fire_event("INTERACTION_END", ());
+            }
             rt.fire_event("CRAFTING_START", (object, count));
         }
     }
@@ -3649,4 +3654,71 @@ mod tests {
         assert_eq!(crate::hud::crafting::active_bench(&data), Some((300, 568)));
     }
 
+    /// Native `FUN_393b7b10` runs `FUN_393b7aa0` first, so a second bench fires `INTERACTION_END`
+    /// before its `CRAFTING_START`.
+    #[test]
+    fn opening_a_second_bench_fires_interaction_end_first() {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+        if !std::path::Path::new(&pak).is_file() {
+            eprintln!("skip: no game_pak at {pak}");
+            return;
+        }
+        let rt = UiRuntime::new("en_us", 800.0, 600.0).unwrap();
+        rt.lua
+            .load(
+                "EVENTS='';local w=UIParent:CreateWidget('emptywidget','benchProbe','UIParent');                 w:RegisterEvent('INTERACTION_END');w:RegisterEvent('CRAFTING_START');                 w:SetHandler('OnEvent',function(_,event) EVENTS=EVENTS..event..';' end)",
+            )
+            .exec()
+            .unwrap();
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            assert!(d.game.0.set(craft_tables(1088, craft_perm::ANY)).is_ok());
+        }
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        doodads.by_id.insert(400, world_doodad(400, 2241, 1088, Vec3::ZERO));
+        let mut app = craft_app(rt, bridge.clone(), doodads, Units::default());
+        let open = |app: &mut App, bridge: &Shared, id: u32| {
+            let mut d = bridge.borrow_mut();
+            d.doodad.menu = Some((id, Vec::new()));
+            d.doodad.chosen.push(i64::from(CRAFT_ACTION));
+            drop(d);
+            app.update();
+        };
+        open(&mut app, &bridge, 300);
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua.load("assert(EVENTS=='CRAFTING_START;','first open: '..EVENTS)").exec().unwrap();
+        open(&mut app, &bridge, 400);
+        assert_eq!(crate::hud::crafting::active_bench(&bridge.borrow()), Some((400, 2241)));
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(EVENTS=='CRAFTING_START;INTERACTION_END;CRAFTING_START;','second open: '..EVENTS)")
+            .exec()
+            .unwrap();
+    }
+
+    fn craft_app(rt: UiRuntime, bridge: Shared, doodads: Doodads, units: Units) -> App {
+        let mut app = App::new();
+        app.insert_non_send(rt)
+            .insert_non_send(HudBridge(bridge))
+            .insert_resource(units)
+            .insert_resource(doodads)
+            .insert_resource(Views::default())
+            .insert_resource(Inventory::default())
+            .init_resource::<NextState<crate::Screen>>()
+            .init_resource::<aa_net::state::ActionBar>()
+            .init_resource::<aa_net::state::Target>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::InFlight>()
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_systems(Update, execute);
+        app
+    }
 }

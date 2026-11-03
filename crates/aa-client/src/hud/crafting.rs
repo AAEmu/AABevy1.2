@@ -40,10 +40,12 @@ pub(super) struct View {
 }
 
 /// Opens the bench at `object` (template `template`), the local entry of native `FUN_394dc360`.
-/// Returns the unique recipe count for `CRAFTING_START`, or `None` when the object is invalid or
-/// the catalog is not loaded.
-pub(super) fn open_bench(data: &mut HudData, object: u32, template: u32) -> Option<usize> {
-    bench::open(data, object, template)
+/// Returns the unique recipe count for `CRAFTING_START` and whether another bench was active
+/// (`FUN_393b7b10` runs `FUN_393b7aa0` first then), or `None` when the object is invalid or the
+/// catalog is not loaded.
+pub(super) fn open_bench(data: &mut HudData, object: u32, template: u32) -> Option<(usize, bool)> {
+    let replaced = data.crafting.current.active.is_some();
+    bench::open(data, object, template).map(|count| (count, replaced))
 }
 
 /// The live workbench identity `(object, template)`, or `None` after a close.
