@@ -330,7 +330,7 @@ fn build_runtime(
                 .is_some_and(|ids| ids.contains(&climate));
         let growth_ms =
             growth_remaining_ms(game, entry.func_group_id, entry.time_left, climate_flag);
-        let guard_secs = (f64::from(common.guard_time) * 0.001) as i64;
+        let guard_secs = (common.guard_time as f32 * 0.001) as i64;
         let left_protect = (guard_secs - (now - entry.plant_time)).max(0);
         out.push(RuntimeCrop {
             farm_group_id: group.id,
@@ -366,7 +366,7 @@ fn growth_remaining_ms(
     time_left: u32,
     climate_flag: bool,
 ) -> u32 {
-    let scale = if climate_flag { 0.7f64 } else { 1.0 };
+    let scale = if climate_flag { 0.7f32 } else { 1.0 };
     let mut budget = GROWTH_PHASE_LIMIT;
     let mut next = game
         .doodad
@@ -378,7 +378,7 @@ fn growth_remaining_ms(
             break;
         };
         budget -= 1;
-        sum += f64::from(step.delay_ms) * scale;
+        sum += f64::from(step.delay_ms as f32 * scale);
         next = step.next_phase;
     }
     (sum.round() as i64 + i64::from(time_left)).max(0) as u32
