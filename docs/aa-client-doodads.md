@@ -85,8 +85,13 @@ also closed through `CSCofferInteraction` on the next frame.
 
 The bar and right-click list use the normal doodad candidate distance (4 m): native
 `393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
-`FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap); out of range it
-walks to the doodad (`FUN_390a6af0` pending action) and opens on arrival. `FUN_394d6dc0`
+`FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap) for every
+action, skills included; out of range it walks to the doodad (`FUN_390a6af0` pending
+action) and runs the action on arrival. A phase that also offers a skill or navi use
+therefore walks before its list is offered, while a craft-only phase is listed from the
+4 m centre distance. The pending action stores the phase and view generation it was
+picked from; on arrival the port re-checks the phase, the generation and a craft
+permission and drops the use if any changed, and a different bar or list pick cancels it. `FUN_394d6dc0`
 rechecks the same distance before `CSExecuteCraft` (`batch::command`) and shows error 0x9a
 (`TOO_FAR_AWAY`) when the request is out of range. The active-interaction monitor `393b7e40`
 closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
