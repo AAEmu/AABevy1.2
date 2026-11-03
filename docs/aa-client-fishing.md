@@ -53,8 +53,9 @@ All three rod skills and the big-fish skills set `target_only_water`, `target_wa
   0x23 `INVALID_LOCATION`.
 * Server (`aaemu-game`): `source_not_swim` refuses `skill_cannot_cast_in_swimming` (0x15,
   `validation.rs:265`) and `target_only_water` refuses `skill_invalid_location` (0x23,
-  `validation.rs:290`) when `is_water(target + 0.1)` is false. `target_fishing` is parsed
-  (`data/templates.rs:150,311`) and **not enforced anywhere** (reported, server not changed).
+  `validation.rs:290`) when the water probe fails. The probe (`in_water` / `is_water`) was fixed in
+  [AAEmu/AAEmu-1.2-Rust#43](https://github.com/AAEmu/AAEmu-1.2-Rust/pull/43). `target_fishing` is
+  parsed (`data/templates.rs:150,311`) and **not enforced anywhere** (reported, server not changed).
 
 ## What the Bevy client does
 
@@ -67,6 +68,9 @@ All three rod skills and the big-fish skills set `target_only_water`, `target_wa
 * A `target_only_water` spot is refused with `INVALID_LOCATION` (0x23), without sending, when
   `water_at(x, y, z - 0.1)` is missing or above `z - 0.1`, or when the terrain floor is shallower
   than `level - 1.0`. This mirrors `FUN_390b43b0`. The reticle turns red for the same reason.
+  **Approximation:** the native floor query (`I3DEngine` vtbl+0x108 with arg 1.5) is likely a
+  bottom-level query that includes static geometry; Bevy uses `TerrainQuery` only, so a floating
+  static floor over deep water is not seen here.
 * The picked surface point is sent **unchanged** (`FUN_393594c0` only clamps horizontally); there is
   no bobber sink.
 * There is no client `source_not_swim` pre-check: the cast goes out and the server's 0x15 refusal
@@ -105,29 +109,51 @@ an ordinary `SCNpc(s)Created` unit and is fought/looted like any other. The basi
 
 `doodad_funcs` gives the fish-scale phases (`tool.fish_scale_a`, groups 17262/19948/17729) skill
 21904 (`DoodadFuncBuyFish`, sells the fish worn on the back) and 22201 (`DoodadFuncConvertFish`,
-makes the trophy/furniture). Both are ordinary phase skills, so the dynamic action bar offers them
-and the use sends `UseDoodadSkill` at the doodad (`hud/doodad.rs`, already generic);
+makes the trophy/furniture). Both are ordinary phase skills, so the dynamic action bar offers them;
 `hud::doodad::tests::the_fish_stands_offer_their_sell_and_convert_skills` pins the real rows.
 
-The client also exposes the dialog tasks `DLG_TASK_BUY_FISH` = 12 and `DLG_TASK_CONVERT_FISH` = 13
-(`crates/aa-ui/src/lua/constants.rs:210,215`; native registration in `FUN_3905f3c0`, ~89430/89441).
-`dialog_handler.alb` registers handlers F12 (line 254) and F21 (line 679). F12 builds a
-`confirm_buy_fish_title` / `confirm_buy_fish_body` message box with the item icon, name, count and
-the refund (`|m%s;`), OK text `sellAll`; F21 the same for `ask_convert_fish` / `ask_convert_fish_description`
-with OK `make`. Both cancel on `INTERACTION_END`, and OK calls `X2DialogManager:OnOK`, i.e. the
-native opener owns the action.
+The 1.2 doodad-skill use path `FUN_393b3ec0` (770741) calls `FUN_393bc260(skill, funcId, doodad)`
+(770820, 778111) before sending and switches on the func type (ids assigned by name in
+`FUN_39673b90`, 1388594-1388674): `DoodadFuncBuyFish` (0x4f) -> `FUN_393b8870` (774963),
+`DoodadFuncConvertFish` (0x50) -> `FUN_393b8a30` (775055). Both **return 1 = handled, do not send**
+after the dialog opens (or after a check error).
 
-What opens them is not established: no 1.2 script opens either task (the only `DLG_TASK_*` use in
-`game/scriptsbin/x2ui` is the registration in `dialog_handler.alb`), the client's native opener was
-not located, and the server's `DoodadFuncBuyFish.Use` / `ConvertFish.Use` sell/convert immediately
-when the skill arrives, with no dialog packet. The evidence-backed fish-stand path is therefore the
-func skill; a confirmation dialog before the skill (if it exists natively) is **capture-pending**
-and not implemented.
+* Buy checks `FUN_397cf5a0` (1727959): no item on the back -> 0x169 `STORE_BACKPACK_NOGOODS` (361);
+  template not in `doodad_func_buy_fish_items` -> 0xe1 `STORE_NPC_NOT_HANDLE_THIS_ITEM` (225); item
+  kind (`item_backpacks.backpack_type_id`) not 6 -> 0x58 `STORE_NOT_SELLABLE_ITEM` (88). The
+  decompile checks the list **before** the kind. The refund is `FUN_397cd350`.
+* Convert `FUN_397cf660`: no item -> 0x169; kind not 6 -> 0x58 (checked **before** the list);
+  template not in `doodad_func_convert_fish_items` -> 0xe1. No refund.
+* On success the native enters interaction state 0xb/0xc (`FUN_393b7b10`), closes an open task-12/13
+  dialog (`FUN_3902cef0`), and shows dialog type 0xC/0xD (`FUN_393b87b0` / `FUN_393b8970`,
+  `FUN_3902d670` -> `FUN_3902d570` -> `FUN_3902d400`). The info table gets the base keys
+  (`type`, `buttonType`, `isModal`) and `itemInfo` from `FUN_393b93e0` (775600) via
+  `FUN_39421e20` (865691), which writes the refund. `dialog_handler.alb` F12 (task 12) /
+  F21 (task 13) format it: `confirm_buy_fish_title/body` with the icon, name, count and refund,
+  OK `sellAll`; or `ask_convert_fish` / `ask_convert_fish_description`, OK `make`. Both cancel on
+  `INTERACTION_END`.
+* OK is `FUN_393b8800` (774939): it sends the ordinary doodad func skill (the same call as 770836),
+  i.e. `UseDoodadSkill` 21904/22201. Cancel sends nothing.
+
+Bevy implements this in `hud/doodad/fish.rs` + `hud/doodad/fish.lua`, hooked by a few lines in
+`hud/doodad.rs`:
+
+* `Tables` records `(func_group, skill)` -> `FishFunc { kind, actual_func_id }` and loads the two
+  item lists (`doodad_func_buy_fish_items`, `doodad_func_convert_fish_items`).
+* `execute` runs the existing labor/attachment checks first, then for a fish func runs `check`
+  (the errors above through `ShowError`) and opens task 12/13 with
+  `X2DialogManager:RequestTaskDialog`. `fish.lua` passes
+  `{ type, buttonType, isModal, itemInfo, itemType, itemCount }`, `HUD.item_tip` supplies the icon
+  and name, and buy adds `itemInfo.refund`.
+* Nothing is sent before OK. `fish::tick` reads the state from the wrapped `OnOK`/`OnCancel`; OK
+  sends the stored `UseDoodadSkill`, cancel drops it. Losing the doodad focus fires
+  `INTERACTION_END` (the script's cancel handler) and drops it too.
+* Tests drive the real `execute` and the original `dialog_handler.alb` from the pak:
+  `hud::doodad::fish::tests` (three errors, the info/refund, OK send, cancel and interaction end).
 
 ## Open (capture-pending)
 
 * the native reticle material for a `target_only_water` skill on land;
 * a real `NoFishing="1"` volume (none in the 1.2 pak) and its gameplay use;
 * net fishing: how 1.2 picks the fish-school doodad as the skill target;
-* a native opener for `DLG_TASK_BUY_FISH` / `DLG_TASK_CONVERT_FISH` (the dialog confirmation);
-* a live cast/loot on a lane server.
+* a live fish-stand sale/convert and cast/loot on a lane server.
