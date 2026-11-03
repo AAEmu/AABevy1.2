@@ -130,17 +130,16 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
                 return Ok(Value::Nil);
             }
             let out = lua.create_table()?;
-            let mut i = 0;
-            for d in game
+            for (i, d) in game
                 .housing
                 .farm_group_doodads
                 .iter()
                 .filter(|d| d.farm_group_id == kind)
+                .enumerate()
             {
                 // `FUN_39445BA0` returns the doodad template's name, in row order.
                 let name = game.doodad.name(d.doodad_id).unwrap_or_default();
                 out.raw_set(i + 1, name)?;
-                i += 1;
             }
             Ok(Value::Table(out))
         })?,
@@ -237,11 +236,15 @@ fn runtime_info(lua: &Lua, state: &State, bridge: &Shared, kind: u32) -> mlua::R
     let at = received.at;
     let unix = received.unix_ms;
     let out = lua.create_table()?;
-    let mut i = 0;
-    for entry in received.list.entries.iter().filter(|e| e.farm_type == kind) {
+    for (i, entry) in received
+        .list
+        .entries
+        .iter()
+        .filter(|e| e.farm_type == kind)
+        .enumerate()
+    {
         let t = runtime_entry(lua, game, snapshot, entry, at, unix)?;
         out.raw_set(i + 1, t)?;
-        i += 1;
     }
     Ok(Value::Table(out))
 }
