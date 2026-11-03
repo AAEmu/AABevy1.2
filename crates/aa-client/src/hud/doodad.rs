@@ -60,6 +60,7 @@ use rusqlite::Connection;
 use super::api::{HudBridge, HudData, Shared};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
+mod fish;
 mod gather;
 
 /// Skills the dynamic action bar leaves out (`dynamic_action_bar.lua`, `ShoulPassShow`).
@@ -140,6 +141,11 @@ pub(super) struct Tables {
     zone_messages: HashSet<u32>,
     /// Attachment funcs require a known-free doodad bond and the separate mount gate.
     attachment_skills: HashSet<(u32, u32)>,
+    /// `(doodad_func_group_id, skill)` -> the fish-stand func and its `actual_func_id`.
+    fish_funcs: HashMap<(u32, u32), fish::FishFunc>,
+    /// `doodad_func_buy_fish_id` / `doodad_func_convert_fish_id` -> accepted item templates.
+    fish_buy_items: HashMap<u32, HashSet<u32>>,
+    fish_convert_items: HashMap<u32, HashSet<u32>>,
 }
 
 impl Tables {
@@ -161,6 +167,7 @@ impl Tables {
                 &detail,
             );
         }
+        (t.fish_buy_items, t.fish_convert_items) = fish::load_items(conn);
         let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -224,7 +231,31 @@ impl Tables {
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
+        if skill != 0 {
+            match kind {
+                "DoodadFuncBuyFish" => {
+                    self.fish_funcs.insert((group, skill), fish::FishFunc { kind: fish::FishKind::Buy, func_id });
+                }
+                "DoodadFuncConvertFish" => {
+                    self.fish_funcs.insert((group, skill), fish::FishFunc { kind: fish::FishKind::Convert, func_id });
+                }
+                _ => {}
+            }
+        }
         self.add(group, skill, kind);
+    }
+
+    /// The fish-stand func of a phase skill, if the bar's skill is one.
+    fn fish_func(&self, group: u32, skill: u32) -> Option<fish::FishFunc> {
+        self.fish_funcs.get(&(group, skill)).copied()
+    }
+
+    /// The item templates a fish-stand func accepts.
+    fn fish_items(&self, kind: fish::FishKind, func_id: u32) -> Option<&HashSet<u32>> {
+        match kind {
+            fish::FishKind::Buy => self.fish_buy_items.get(&func_id),
+            fish::FishKind::Convert => self.fish_convert_items.get(&func_id),
+        }
     }
 
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
@@ -614,7 +645,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    lua.load(include_str!("coffer.lua")).set_name("@coffer.lua").exec()
+    lua.load(include_str!("coffer.lua")).set_name("@coffer.lua").exec()?;
+    fish::install(lua)
 }
 
 /// `--doodad-key N T` and `--doodad-rclick T`.
@@ -1401,6 +1433,9 @@ pub(super) fn execute(
     poses: super::pick::UnitPoses,
     mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
+    rt: Option<NonSend<UiRuntime>>,
+    mut fish: Option<ResMut<fish::FishDialog>>,
+    mut errors: Option<MessageWriter<crate::hud::ShowError>>,
 ) {
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
@@ -1476,14 +1511,14 @@ pub(super) fn execute(
     // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
     // cast ran and the phase changed to 4514; the server only added `SCErrorMsg` BAG_FULL after it
     // (`tools/evidence/gather/capture-results.txt`).
-    let game = d.game.get();
+    let game_slot = d.game.clone();
+    let labor = d.snapshot.labor;
+    drop(d);
+    let game = game_slot.get();
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
-            if lacks_labor(game.map(|g| &g.rules), *skill_id, d.snapshot.labor) {
-                debug!(
-                    "doodad: skill {skill_id} needs more labor than {}",
-                    d.snapshot.labor
-                );
+            if lacks_labor(game.map(|g| &g.rules), *skill_id, labor) {
+                debug!("doodad: skill {skill_id} needs more labor than {labor}");
                 failed.write(super::alerts::UseFailed {
                     skill: *skill_id,
                     result: super::usable::code::NEED_LABOR_POWER,
@@ -1499,6 +1534,13 @@ pub(super) fn execute(
             let bond_free = seats.as_ref().is_some_and(|seats| seats.own_free());
             if group.zip(game).is_some_and(|(group, game)| !game.doodad.allows_attachment(group, *skill_id, bond_free, mount_free)) {
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
+                continue;
+            }
+            let fishing = group.and_then(|group| game.and_then(|game| game.doodad.fish_func(group, *skill_id)));
+            if let (Some(func), Some(rt), Some(dialog)) = (fishing, rt.as_deref(), fish.as_deref_mut()) {
+                let game = game.expect("a fish func needs the game data");
+                let items = game.doodad.fish_items(func.kind, func.func_id);
+                fish::request(Some(rt), game, items, &inventory, func, *skill_id, obj_id, dialog, errors.as_mut());
                 continue;
             }
         }
@@ -1600,6 +1642,7 @@ fn reset(bridge: NonSend<HudBridge>) {
 
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
+        .init_resource::<fish::FishDialog>()
         .add_systems(
             Update,
             (
@@ -1619,7 +1662,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(super::hud_up)
                 .run_if(in_state(crate::Screen::InGame)),
         )
-        .add_systems(Update, (pointer_use, execute).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
+        .add_systems(Update, (pointer_use, execute, fish::tick).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
         .add_systems(OnExit(crate::Screen::InGame), reset);
 }
 
