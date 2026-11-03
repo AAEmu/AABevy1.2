@@ -2003,6 +2003,62 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_doodad_completion_without_a_report_act_completes_directly() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        let Some(rt) = world_runtime(&shared) else { return };
+        // Quest 182's Ready step is a QuestActConReportJournal, so FUN_397d42d0 is false.
+        let (q, doodad) = {
+            let d = shared.borrow();
+            let g = d.game.get().expect("the World runtime loaded the game data");
+            let ready = g.quests.parts_of(182, kind::READY).next().expect("quest 182 has a Ready step");
+            assert!(!g.quests.ready_has_report(182));
+            let q = Quest { template_id: 182, status: status::READY, component_id: ready.id, ..Quest::default() };
+            let doodad = aa_net::model::Doodad {
+                obj_id: 0x201,
+                template_id: 3020,
+                owner_obj_id: 0,
+                parent_obj_id: 0,
+                attach_point: 0,
+                pos: aa_net::Pos::new(0.0, 0.0, 0.0),
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: 1.0,
+                has_loot_item: false,
+                func_group_id: 0,
+                owner_id: 0,
+                ucc_id: 0,
+                item_template_id: 0,
+                type2: 0,
+                time_left: 0,
+                plant_time: 0,
+                quest_glow: 0,
+                family: 0,
+                puzzle_group: 0,
+                owner_type: 0,
+                owner_db_id: 0,
+                data: 0,
+            };
+            (q, doodad)
+        };
+        shared.borrow_mut().dialog.quests = vec![q.clone()];
+        let mut app = handle_dialog_app(shared.clone(), rt);
+        app.insert_resource(Quests { active: vec![q], ..Quests::default() });
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(0x201, doodad);
+        app.insert_resource(doodads);
+
+        app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::DoodadCompleteQuest {
+            doodad_obj_id: 0x201,
+            quest_id: 182,
+        })));
+        app.update();
+        assert!(!shared.borrow().dialog.directing, "without a report act the hand-in completes directly");
+        assert_eq!(
+            sent_requests(&mut app),
+            [Interact::QuestComplete { quest_id: 182, npc_obj_id: 0, doodad_obj_id: 0x201, selected: 0 }]
+        );
+    }
+
     /// Loads the game database into `shared` (the bare runtime's `HUD.quest_info`, rewards and the
     /// hand-in checks need it). Skips when the database is not there.
     fn with_game(shared: &Shared) -> bool {
