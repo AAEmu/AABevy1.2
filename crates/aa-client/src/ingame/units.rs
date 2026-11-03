@@ -1307,7 +1307,7 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
                 requested: None,
                 dying_start: None,
                 dying_time,
-                death_seen: state == 5,
+                death_seen: matches!(state, 5 | 6),
                 dead_effect_played: false,
             });
             super::vehicle::spawn_state_effects(commands, root, &variant, false);
@@ -1898,7 +1898,8 @@ pub fn move_units(
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
     mut views: ResMut<Views>,
-    mut query: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    sinks: Query<&super::vehicle::WreckSink>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
 ) {
@@ -1917,7 +1918,7 @@ pub fn move_units(
         }
     }
     let measure = smoothness_wanted();
-    for (mut unit, mut transform, motion) in &mut query {
+    for (entity, mut unit, mut transform, motion) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
         // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
         // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position. A
@@ -1936,7 +1937,12 @@ pub fn move_units(
         }
         // only a real move touches the transform: a changed root propagates through every bone and part of the unit and
         // re-extracts its meshes, and most of a town stands still
-        let placed = unit.drawn();
+        let mut placed = unit.drawn();
+        // a dead ship's sink is an offset from the server pose; keeping it here means a fully sunk
+        // wreck is written once and then left alone
+        if let Ok(sink) = sinks.get(entity) {
+            placed = sink.apply(placed);
+        }
         if !(transform.translation.abs_diff_eq(placed.translation, 1e-4) && transform.rotation.abs_diff_eq(placed.rotation, 1e-6) && transform.scale == placed.scale) {
             *transform = placed;
         }
@@ -2022,6 +2028,41 @@ mod lifecycle_tests {
         assert_ne!(views.doodads[&7].source_generation,next);
         assert!(views.finish_doodad(7,next).is_none());
         assert_eq!(views.doodads[&7].doodad_source.as_ref().unwrap().template_id,8065);
+    }
+
+    /// `SCSlaveRemoved` only clears the owned-slave timeline (`FUN_39345cb0`); the wreck stays drawn
+    /// until the server's `SCUnitsRemoved` (`FUN_39366480`). The 2026-11-02 capture's cart wreck was
+    /// still there at video 60-61 s (SCUnitsRemoved at log 12:36:02, ~21 s after death), so the ~15 s
+    /// "wreck timer" in the capture summary is a camera-pan misread, not a client timer.
+    #[test]
+    fn a_removed_slave_keeps_its_wreck_until_the_unit_is_removed() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .add_systems(Update, receive_moves);
+        let wreck = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Views>()
+            .units
+            .insert(7, View { entity: Some(wreck), ..View::default() });
+        app.world_mut()
+            .write_message(NetEvent(Event::Slave(aa_net::slave::SlaveEvent::Removed {
+                obj_id: 7,
+                tl_id: 1,
+            })));
+        app.update();
+        assert!(
+            app.world().get_entity(wreck).is_ok(),
+            "SCSlaveRemoved does not remove the wreck"
+        );
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitsRemoved(vec![7])));
+        app.update();
+        assert!(
+            app.world().get_entity(wreck).is_err(),
+            "SCUnitsRemoved removes the wreck"
+        );
     }
 
     #[test]

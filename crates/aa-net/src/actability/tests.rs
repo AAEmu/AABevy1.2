@@ -380,6 +380,19 @@ fn kick_and_character_lifecycle_clear_pending_and_unresolved_downgrade_evidence(
 }
 
 #[test]
+fn labor_without_an_action_point_gain_does_not_change_proficiencies() {
+    let mut state = Actabilities { up_limits: vec![10000, 20000], ..Default::default() };
+    snapshot(&mut state, true, &[(5, 10000, 1)]);
+    let before = state.clone();
+    for action in [5, 6] {
+        assert_eq!(state.apply_with_gain(&Event::LaborChanged {
+            amount: 5, action, point: 0, step: 0,
+        }), (false, None));
+        assert_eq!(state, before, "a labor-only update must not change a grade or insert a profession");
+    }
+}
+
+#[test]
 fn add_action_point_adds_like_labor_without_a_wire_step() {
     let mut state = Actabilities { up_limits: vec![10000, 20000, 30000], ..Default::default() };
     snapshot(&mut state, true, &[(5, 10000, 1)]);

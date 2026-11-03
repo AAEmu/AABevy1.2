@@ -276,7 +276,7 @@ impl Actabilities {
                     *self = Self::default();
                     return (changed, None);
                 }
-                Event::LaborChanged { action, point, .. } if *action > 0 => {
+                Event::LaborChanged { action, point, .. } if *action > 0 && *point != 0 => {
                     self.unresolved_downgrades.remove(&(*action as u32));
                     let limits = self.up_limits.clone();
                     let new_entry = self.get(*action as u32).is_none();

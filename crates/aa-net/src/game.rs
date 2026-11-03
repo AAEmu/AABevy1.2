@@ -636,6 +636,14 @@ pub enum ServerMsg {
     QuestCompleted { quest_id: u32, block: CompletedBlock },
     /// Quest `quest_id` may be taken again (its completed flag was cleared).
     QuestReset { quest_id: u32, block: CompletedBlock },
+    /// `SCQuestContextFailed`: the server refused a quest request; `err` indexes the client's
+    /// `questContext.errors` and raises `QUEST_ERROR_INFO`.
+    QuestContextFailed(quest::QuestContextFailed),
+    /// `SCQuestUnitReqFailed`: a unit a quest step needs failed at a position; closes the directing
+    /// dialog when it is the current target (`QUEST_QUICK_CLOSE_EVENT`).
+    QuestUnitReqFailed(quest::QuestUnitReqFailed),
+    /// `SCQuestMailSent`: a quest mail was sent (`QUEST_MAIL_SENT` system text).
+    QuestMailSent(quest::QuestMailSent),
     // -- skills and combat
     SkillStarted(SkillStarted),
     SkillFired(SkillFired),
@@ -812,6 +820,9 @@ impl ServerMsg {
             Self::QuestUpdated(_) => "SCQuestContextUpdated",
             Self::QuestCompleted { .. } => "SCQuestContextCompleted",
             Self::QuestReset { .. } => "SCQuestContextReset",
+            Self::QuestContextFailed(_) => "SCQuestContextFailed",
+            Self::QuestUnitReqFailed(_) => "SCQuestUnitReqFailed",
+            Self::QuestMailSent(_) => "SCQuestMailSent",
             Self::SkillStarted(_) => "SCSkillStarted",
             Self::SkillFired(_) => "SCSkillFired",
             Self::SkillEnded { .. } => "SCSkillEnded",
@@ -1322,6 +1333,9 @@ impl ServerMsg {
             sc::SCInvenExpandedPacket => Self::InvenExpanded { container: r.u8()?, slots: r.u8()? },
             sc::SCQuestsPacket => Self::Quests(quest::read_quests(r)?),
             sc::SCCompletedQuestsPacket => Self::CompletedQuests(quest::read_completed(r)?),
+            sc::SCQuestContextFailedPacket => Self::QuestContextFailed(quest::QuestContextFailed::read(r)?),
+            sc::SCQuestUnitReqFailedPacket => Self::QuestUnitReqFailed(quest::QuestUnitReqFailed::read(r)?),
+            sc::SCQuestMailSentPacket => Self::QuestMailSent(quest::QuestMailSent::read(r)?),
             sc::SCQuestContextStartedPacket => Self::QuestStarted(quest::read_context(r)?),
             sc::SCQuestContextUpdatedPacket => Self::QuestUpdated(quest::read_context(r)?),
             sc::SCQuestContextCompletedPacket | sc::SCQuestContextResetPacket => {
@@ -1995,6 +2009,25 @@ mod tests {
         }
         // SCQuests with none
         assert_eq!(decode(sc::SCQuestsPacket, &[0, 0, 0, 0]), ServerMsg::Quests(vec![]));
+        // SCQuestContextFailed: u32 quest id + u8 err (server writer: 4781, 12).
+        assert_eq!(
+            decode(sc::SCQuestContextFailedPacket, &[0xad, 0x12, 0, 0, 12]),
+            ServerMsg::QuestContextFailed(quest::QuestContextFailed { quest_id: 4781, err: 12 })
+        );
+        // SCQuestUnitReqFailed: u32 id + bc unit + skill result (client reader FUN_397b5d00).
+        assert_eq!(
+            decode(sc::SCQuestUnitReqFailedPacket, &[4, 3, 2, 1, 7, 6, 5, 7, 9, 2, 3, 4, 5, 6, 7]),
+            ServerMsg::QuestUnitReqFailed(quest::QuestUnitReqFailed {
+                quest_id: 0x0102_0304,
+                unit_obj_id: 0x05_0607,
+                result: crate::skill::SkillResult { raw_flags: 7, code: 9, extra: 0x0302, value: 0x0706_0504 },
+            })
+        );
+        // SCQuestMailSent: u32 id (client reader FUN_397b5f00).
+        assert_eq!(
+            decode(sc::SCQuestMailSentPacket, &[4, 3, 2, 1]),
+            ServerMsg::QuestMailSent(quest::QuestMailSent { id: 0x0102_0304 })
+        );
     }
 
     #[test]

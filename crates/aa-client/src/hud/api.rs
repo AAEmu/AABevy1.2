@@ -194,6 +194,10 @@ pub struct HudData {
     pub(super) look_conversion: super::look_conversion::View,
     pub party_pushed: Option<aa_net::Party>,
     pub character_id: u32,
+    /// The logged-in account (`Worlds.account`), for `doodad_func_permission` 6.
+    pub account_id: u32,
+    /// The account's character ids (`Characters.list`), for `doodad_func_permission` 6.
+    pub account_characters: Vec<u32>,
     pub store: super::store::View,
     pub(super) specialty: super::specialty::View,
 }
@@ -276,6 +280,8 @@ impl Default for HudData {
             look_conversion: Default::default(),
             party_pushed: None,
             character_id: 0,
+            account_id: 0,
+            account_characters: Vec::new(),
             store: Default::default(),
             specialty: Default::default(),
         }
@@ -851,6 +857,17 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::pvp::refresh(world, &mut data, &spawn);
     super::radar::refresh(world, &mut data, &spawn);
     data.character_id = spawn.character().id;
+    data.account_id = world
+        .get_resource::<aa_net::state::Worlds>()
+        .and_then(|w| w.account)
+        .map_or(0, |a| a.account_id);
+    if let Some(chars) = world.get_resource::<aa_net::state::Characters>() {
+        let same = data.account_characters.len() == chars.list.len()
+            && data.account_characters.iter().zip(&chars.list).all(|(id, c)| *id == c.id);
+        if !same {
+            data.account_characters = chars.list.iter().map(|c| c.id).collect();
+        }
+    }
     super::battlefield::refresh(world, &mut data, &spawn);
     super::expansion::refresh(world, &mut data);
     super::repair::refresh(world, &mut data);
@@ -865,7 +882,12 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::pets::refresh(world, &mut data);
     data.mounted.local_cart = world
         .get_resource::<crate::ingame::cart::CartDrive>()
-        .and_then(crate::ingame::cart::CartDrive::speed);
+        .and_then(crate::ingame::cart::CartDrive::motion)
+        .map(|(obj_id, speed, turn_rate)| super::mounted::LocalCart {
+            obj_id,
+            speed,
+            turn_rate,
+        });
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }

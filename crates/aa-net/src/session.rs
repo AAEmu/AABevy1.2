@@ -767,6 +767,14 @@ pub enum Event {
     QuestCompleted { quest_id: u32, block: CompletedBlock },
     /// Quest `quest_id` can be taken again.
     QuestReset { quest_id: u32, block: CompletedBlock },
+    /// The server refused a quest request (`SCQuestContextFailed`): `err` indexes the client's
+    /// `questContext.errors`; the UI raises `QUEST_ERROR_INFO`.
+    QuestContextFailed(crate::quest::QuestContextFailed),
+    /// A unit a quest step needs failed (`SCQuestUnitReqFailed`), with the position it failed at;
+    /// when it is the current target the UI raises `QUEST_QUICK_CLOSE_EVENT`.
+    QuestUnitReqFailed(crate::quest::QuestUnitReqFailed),
+    /// A quest mail was sent (`SCQuestMailSent`); the UI shows `QUEST_MAIL_SENT`.
+    QuestMailSent(crate::quest::QuestMailSent),
     /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
@@ -2343,6 +2351,9 @@ impl Session {
             M::QuestUpdated(q) => self.emit(Event::QuestUpdated(q)),
             M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
             M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
+            M::QuestContextFailed(failed) => self.emit(Event::QuestContextFailed(failed)),
+            M::QuestUnitReqFailed(failed) => self.emit(Event::QuestUnitReqFailed(failed)),
+            M::QuestMailSent(sent) => self.emit(Event::QuestMailSent(sent)),
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
