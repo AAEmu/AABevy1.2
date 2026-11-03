@@ -35,7 +35,31 @@ The factor scales the whole pressed direction (`direction_factor`), as 1.2 does:
 with only its backward part slowed. 1.2 interpolates one factor over eight directions; the keys give only those eight and every player row has
 its diagonal columns equal to the straight ones, so the straight, strafe and backward factors are enough. A body in the air moves by the frame's
 mean vertical speed (`air_step`): a standing jump peaks at v^2 / 2g = 1.30 m at any frame rate (a speed-then-position step peaked at 1.23 m at
-60 fps).
+60 fps), with its horizontal speed carried when no direction is pressed and the input still live.
+
+**Feel capture 1** (2026-11-02, `handoff/2026-11-02-feel-capture-1.md`): the on-foot speeds are a step - full on the first frame, no
+acceleration, and a release stops dead (the capture's slide is at most 0.13 m). A / D turn at a constant 90 deg/s and a running turn snaps the
+velocity to the new facing (no curve). On a terrain slope the horizontal speed is the run speed times `cos^2` of the slope along the step and the
+vertical part follows the ground (CryPhysics' ground projection, `aaemu-physics` `entities/living/step.rs:247-251` / `1736-1739`), so the 3D
+speed is 5.30 at 11 degrees, 5.06 at 21 and 4.1-4.2 at 38-41, symmetric up and down (`step_slope`; a brush or a ledge keeps full speed and
+reports no vertical part, so a 0.2-0.5 m step does not report 12-30 m/s). The active-movement threshold is 0.05 m/s to start and 0.02 m/s to
+keep going, so a slide along a wall does not toggle the packets. The capture's velocity field on flat ground is 5.40 run / 2.43 walk / 3.51
+backward / 1.58 walking backward (the 1/1024 wire scale is unchanged).
+
+The movement sender is the capture's 10 Hz timer plus one immediate packet when a key-down starts a movement (the old, usually zero velocity with
+the pressed direction), two on a release 7-9 ms apart (the old velocity, then zero), one on a jump start and on a landing, and a 3 s idle heartbeat
+with flags 0. A jump takes off at `sqrt(2 g h)` 8.06 m/s with actor flags 0x08 standing / 0x0c moving, carries its horizontal speed through the
+air, and lands with flags 0x06 moving / 0x04 standing and actor 0x14; only a fall of 20 m/s or more carries the 0x80 fall-velocity block (the
+capture's jumps never do).
+
+Stopping in water still sends one zero-velocity swimming packet immediately; the land stop pair does not replace the swim sender's stop.
+
+A ridden mount follows its wanted speed at the actor model's `game_inertia_accel` (11) whenever a move is requested and at `game_inertia` (4)
+only with no input (`mount_velocity`; the rate choice is `aaemu-physics` `entities/living/step.rs:171-179`, where `|vel_requested|^2 > 0.1`
+uses `inertia_accel`), so a turn at speed and a brake both use 11 and a rate of 0 means no inertia. The captured Leomorph reads 5.9 m/s at its
+first 103 ms packet and 8.85 by 0.5 s, and a release coasts 12.65 -> 8.3 -> 0.7 -> 0 over 1.5 s and 3.2-3.3 m, ending with an explicit
+`v = 0` stop packet. The position step is the frame's mean speed while the packet carries the new carried one, as the capture's first coast row
+does (position 10.65, velocity 8.39); the velocity direction lags a turn instead of snapping.
 
 The own buffs' `MoveSpeedMul` rows scale the run and walk speed (`sprint::speed_multiplier`: Dash at level 1 is x 1.384, 7.47 m/s); the run clip
 plays faster with it. A buff with `sprint_motion` (Dash) runs with the second tier of the run group instead: 1.2's `fist_mo_normal_run.lmg`

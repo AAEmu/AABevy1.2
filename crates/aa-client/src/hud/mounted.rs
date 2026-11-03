@@ -96,6 +96,8 @@ enum Link {
 
 struct Actor {
     name: Vec<u8>,
+    /// The native unit kind byte (`+0x410`): 2 is a slave, 5 a mate.
+    is_slave: bool,
     slave_template: Option<u32>,
     /// `UnitKind::Mate.owner_id`, the character the mate belongs to (the native `+0x420`).
     mate_owner: Option<u32>,
@@ -110,9 +112,22 @@ struct Actor {
     /// unbind check reads the model's entity velocity (`vtable+0xa4`, `FUN_39345970`); for a
     /// replicated slave this is the same pose the client moves the model with.
     speed_squared: f32,
+    /// Forward speed along the movement's facing, in m/s (negative in reverse), and the vehicle
+    /// yaw rate in rad/s. `FUN_394aabd0` / `FUN_394aae90` read the local controller's live
+    /// getters; these are the replicated stand-in for a remote slave.
+    forward_speed: f32,
+    turn_rate: f32,
     speed_at: Option<Instant>,
     link: Link,
     equipment: Box<Equipment>,
+}
+
+/// The cart this client drives: its controller speed (m/s, signed) and yaw rate (rad/s).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct LocalCart {
+    pub obj_id: u32,
+    pub speed: f32,
+    pub turn_rate: f32,
 }
 
 pub(super) fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
@@ -123,6 +138,36 @@ pub(super) fn movement_speed_squared(movement: Option<&Movement>) -> f32 {
         let [x, y, z] = m.velocity_mps();
         x * x + y * y + z * z
     })
+}
+
+/// The Summon Info motion of a replicated vehicle movement: forward speed (m/s, signed) and yaw
+/// rate (rad/s). `FUN_394aabd0` returns the velocity's length signed by its component along the
+/// body's forward axis; `FUN_394aae90` returns the angular velocity's z times 57.29578. For a
+/// remote slave the vehicle/ship body carries both.
+pub(super) fn movement_motion(movement: &Movement) -> (f32, f32) {
+    let [x, y, z] = movement.velocity_mps();
+    let (sin, cos) = movement.yaw().sin_cos();
+    let along = x * -sin + y * cos;
+    let magnitude = (x * x + y * y + z * z).sqrt();
+    // The native reduces the forward projection to an integer sign; this stand-in keeps the
+    // sign of any nonzero projection, reads 0 across the body, and is negative in reverse.
+    let speed = if along == 0.0 {
+        0.0
+    } else {
+        magnitude * along.signum()
+    };
+    let turn_rate = movement
+        .vehicle
+        .as_ref()
+        .map(|vehicle| vehicle.angular_velocity[2])
+        .or_else(|| {
+            movement
+                .ship
+                .as_ref()
+                .map(|ship| ship.angular_velocity[2])
+        })
+        .unwrap_or(0.0);
+    (speed, turn_rate)
 }
 
 fn c_name(name: &str) -> Vec<u8> {
@@ -159,8 +204,8 @@ pub(super) struct View {
     /// Native passenger walk-off throttle (`FUN_39362170`, 1500 ms).
     last_walk_off: Option<Instant>,
     pending: Vec<(u32, Attachment)>,
-    /// The cart this client drives and its controller speed: no `UnitMoved` reports it.
-    pub(super) local_cart: Option<(u32, f32)>,
+    /// The cart this client drives and its controller motion: no `UnitMoved` reports it.
+    pub(super) local_cart: Option<LocalCart>,
 }
 
 impl View {
@@ -177,6 +222,7 @@ impl View {
         if unit.obj_id == 0 || self.actors.contains_key(&unit.obj_id) {
             return;
         }
+        let is_slave = matches!(unit.kind, UnitKind::Slave { .. });
         let (slave_template, slave_tl, slave_kind) = match unit.kind {
             UnitKind::Slave {
                 id,
@@ -191,16 +237,24 @@ impl View {
             _ => None,
         };
         let now = Instant::now();
+        let (forward_speed, turn_rate) = unit
+            .movement
+            .as_ref()
+            .map(movement_motion)
+            .unwrap_or_default();
         self.actors.insert(
             unit.obj_id,
             Actor {
                 name: c_name(&unit.name),
+                is_slave,
                 slave_template,
                 mate_owner,
                 slave_tl,
                 slave_kind,
                 model_id: unit.model_id,
                 speed_squared: movement_speed_squared(unit.movement.as_ref()),
+                forward_speed,
+                turn_rate,
                 speed_at: unit.movement.as_ref().map(|_| now),
                 link: snapshot_link(unit),
                 equipment: Box::new(unit.equipment.clone()),
@@ -402,8 +456,8 @@ impl View {
     /// uses its controller speed instead.
     pub(super) fn speed_squared(&self, obj_id: u32, now: Instant) -> Option<f32> {
         let actor = self.actors.get(&obj_id)?;
-        if let Some((_, speed)) = self.local_cart.filter(|(id, _)| *id == obj_id) {
-            return Some(speed * speed);
+        if let Some(cart) = self.local_cart.filter(|cart| cart.obj_id == obj_id) {
+            return Some(cart.speed * cart.speed);
         }
         Some(
             if actor
@@ -415,6 +469,66 @@ impl View {
                 actor.speed_squared
             },
         )
+    }
+
+    /// The player's loaded attachment when it is a slave (the native `+0x410 == 2`), without
+    /// needing its template or slave-kind row.
+    fn seated_slave(&self) -> Option<(u32, &Actor)> {
+        let link = self.player_attachment()?;
+        let actor = self.actors.get(&link.obj_id)?;
+        actor.is_slave.then_some((link.obj_id, actor))
+    }
+
+    /// The native gates both motion getters on the physics entity's class: 3 (living) or 4
+    /// (wheeled). Ships are kind 1..=4 or 9 here, so neither branch matches and they read 0.
+    fn seat_motion(&self) -> (f32, f32) {
+        let Some((obj_id, actor)) = self.seated_slave() else {
+            return (0.0, 0.0);
+        };
+        if actor.slave_kind.is_some_and(|kind| matches!(kind, 1..=4 | 9)) {
+            return (0.0, 0.0);
+        }
+        if let Some(cart) = self.local_cart.filter(|cart| cart.obj_id == obj_id) {
+            return (cart.speed, cart.turn_rate);
+        }
+        if actor
+            .speed_at
+            .is_some_and(|at| Instant::now().saturating_duration_since(at) > SPEED_STALE_AFTER)
+        {
+            return (0.0, 0.0);
+        }
+        (actor.forward_speed, actor.turn_rate)
+    }
+
+    /// `X2SiegeWeapon:GetSiegeWeaponSpeed`: the seated slave's forward speed in m/s. The native
+    /// `FUN_394aabd0` falls through to number 0 outside its first `FUN_39345f10` branch (this
+    /// client's player attachment), never nil, because `slave_info.alb` multiplies the result.
+    pub(super) fn siege_weapon_speed(&self) -> f32 {
+        self.seat_motion().0
+    }
+
+    /// `X2SiegeWeapon:GetSiegeWeaponTurnSpeed`: the seated slave's effective yaw rate in
+    /// degrees/s (`FUN_394aae90` multiplies the angular velocity by 57.29578), 0 outside a slave
+    /// seat or for a ship.
+    pub(super) fn siege_weapon_turn_speed(&self) -> f32 {
+        self.seat_motion().1.to_degrees()
+    }
+
+    /// Whether `event` takes the player off a slave seat: the native `FUN_393628a0` fires
+    /// `SIEGEWEAPON_UNBOUND` (event 98) on that detach, and `FUN_39345dc0` does the same when the
+    /// bound slave goes away. `mode_action.alb` F5 hides the Summon Info window on it.
+    fn leaves_slave_seat(&self, event: &Event) -> bool {
+        let Some((seat, ..)) = self.seated_slave() else {
+            return false;
+        };
+        match event {
+            Event::UnitDetached { obj_id, .. } => self.player == Some(*obj_id),
+            Event::Slave(SlaveEvent::Removed { obj_id, .. })
+            | Event::Slave(SlaveEvent::Despawn { obj_id }) => *obj_id == seat,
+            Event::Slave(SlaveEvent::Escaped(escape)) => escape.obj_id == seat,
+            Event::UnitsRemoved(ids) => ids.contains(&seat),
+            _ => false,
+        }
     }
 
     /// Starts the native passenger walk-off throttle (`_DAT_3a169948`, 1500 ms).
@@ -509,7 +623,10 @@ pub(super) fn receive(state: &Shared, event: &Event) {
         }
         Event::UnitMoved { obj_id, movement } => {
             if let Some(actor) = view.actors.get_mut(obj_id) {
+                let (forward_speed, turn_rate) = movement_motion(movement);
                 actor.speed_squared = movement_speed_squared(Some(movement));
+                actor.forward_speed = forward_speed;
+                actor.turn_rate = turn_rate;
                 actor.speed_at = Some(Instant::now());
             }
         }
@@ -590,7 +707,11 @@ pub(super) fn receive(state: &Shared, event: &Event) {
 }
 
 pub(super) fn dispatch(rt: Option<&aa_ui::UiRuntime>, state: &Shared, event: &Event) {
+    let unbound = state.borrow().mounted.leaves_slave_seat(event);
     receive(state, event);
+    if unbound && let Some(rt) = rt {
+        rt.fire_event("SIEGEWEAPON_UNBOUND", ());
+    }
     equipment::notify(rt, event);
 }
 
@@ -624,6 +745,27 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             value.set("unitId", format!("{id:x}"))?;
             Ok(Some(value))
         })?,
+    )?;
+    let shared = state.clone();
+    namespace.set(
+        "GetSiegeWeaponSpeed",
+        lua.create_function(move |_, _: MultiValue| {
+            Ok(shared.borrow().mounted.siege_weapon_speed())
+        })?,
+    )?;
+    let shared = state.clone();
+    namespace.set(
+        "GetSiegeWeaponTurnSpeed",
+        lua.create_function(move |_, _: MultiValue| {
+            Ok(shared.borrow().mounted.siege_weapon_turn_speed())
+        })?,
+    )?;
+    // The stock window draws its gear/handbrake/traction block only when this table exists
+    // (`FUN_394ab270` needs a vehicle object with `+0x2a0` set). This client has no such
+    // controller state, and the captured hauler shows no block, so nil is the honest answer.
+    namespace.set(
+        "GetVehicleInfo",
+        lua.create_function(|_, _: MultiValue| Ok(mlua::Value::Nil))?,
     )?;
     equipment::install(lua, state)?;
     super::slave::install(lua, state)
@@ -920,6 +1062,225 @@ mod tests {
         );
         lua.load("assert(X2SiegeWeapon:GetMountedSiegeWeaponInfo()==nil)")
             .exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn summon_info_reads_the_seated_slaves_template_for_type_and_classification() -> mlua::Result<()>
+    {
+        let state = state();
+        let mut game = super::super::data::GameData::default();
+        game.mounted.rows.insert(
+            146,
+            Descriptor {
+                name: "Red Farm Hauler".into(),
+                kind: "machine",
+                customizing: None,
+            },
+        );
+        assert!(state.borrow().game.0.set(game).is_ok());
+        own(&state);
+        let mut hauler = slave(20, 146);
+        hauler.name = "Red Farm Hauler".into();
+        receive(&state, &Event::UnitSpawned(Box::new(hauler)));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        let lua = Lua::new();
+        lua.globals().set("X2SiegeWeapon", lua.create_table()?)?;
+        install(&lua, &state)?;
+        lua.load(
+            r#"
+        local v = X2SiegeWeapon:GetMountedSiegeWeaponInfo()
+        assert(v.name == 'Red Farm Hauler')
+        assert(v.desc_name == 'Red Farm Hauler', 'classification from slaves.name')
+        assert(v.kind == 'machine', 'kind key the locale maps to Production Equipment')
+        assert(v.unitId == '14')
+    "#,
+        )
+        .exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn siege_weapon_speed_and_turn_speed_are_live_and_zero_outside_the_seat() -> mlua::Result<()> {
+        let state = state();
+        own(&state);
+        receive(&state, &Event::UnitSpawned(Box::new(slave(20, 146))));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        let lua = Lua::new();
+        lua.globals().set("X2SiegeWeapon", lua.create_table()?)?;
+        install(&lua, &state)?;
+        lua.load(
+            r#"
+        assert(X2SiegeWeapon:GetSiegeWeaponSpeed() == 0)
+        assert(X2SiegeWeapon:GetSiegeWeaponTurnSpeed() == 0)
+        assert(X2SiegeWeapon:GetVehicleInfo() == nil)
+    "#,
+        )
+        .exec()?;
+        state.borrow_mut().mounted.local_cart = Some(LocalCart {
+            obj_id: 20,
+            speed: 5.0,
+            turn_rate: 0.4,
+        });
+        lua.load(
+            r#"
+        assert(X2SiegeWeapon:GetSiegeWeaponSpeed() == 5)
+        assert(math.abs(X2SiegeWeapon:GetSiegeWeaponTurnSpeed() - 22.918312) < 0.001,
+               tostring(X2SiegeWeapon:GetSiegeWeaponTurnSpeed()))
+    "#,
+        )
+        .exec()?;
+        receive(
+            &state,
+            &Event::UnitDetached {
+                obj_id: 100,
+                reason: 0,
+            },
+        );
+        lua.load(
+            "assert(X2SiegeWeapon:GetSiegeWeaponSpeed() == 0); \
+             assert(X2SiegeWeapon:GetSiegeWeaponTurnSpeed() == 0)",
+        )
+        .exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn siege_weapon_speed_and_turn_speed_are_zero_for_ships() -> mlua::Result<()> {
+        let state = state();
+        own(&state);
+        let mut boat = slave(20, 21);
+        if let UnitKind::Slave { id, .. } = &mut boat.kind {
+            *id = 2;
+        }
+        receive(&state, &Event::UnitSpawned(Box::new(boat)));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        state.borrow_mut().mounted.local_cart = Some(LocalCart {
+            obj_id: 20,
+            speed: 5.0,
+            turn_rate: 0.4,
+        });
+        let lua = Lua::new();
+        lua.globals().set("X2SiegeWeapon", lua.create_table()?)?;
+        install(&lua, &state)?;
+        lua.load(
+            r#"
+        assert(X2SiegeWeapon:GetSiegeWeaponSpeed() == 0)
+        assert(X2SiegeWeapon:GetSiegeWeaponTurnSpeed() == 0)
+    "#,
+        )
+        .exec()?;
+        Ok(())
+    }
+
+    #[test]
+    fn leaving_a_slave_seat_is_the_unbind_event() {
+        let state = state();
+        own(&state);
+        receive(&state, &Event::UnitSpawned(Box::new(slave(20, 146))));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        assert!(
+            state
+                .borrow()
+                .mounted
+                .leaves_slave_seat(&Event::UnitDetached {
+                    obj_id: 100,
+                    reason: 0,
+                })
+        );
+        assert!(
+            state
+                .borrow()
+                .mounted
+                .leaves_slave_seat(&Event::Slave(SlaveEvent::Removed {
+                    obj_id: 20,
+                    tl_id: 8,
+                }))
+        );
+        assert!(
+            !state
+                .borrow()
+                .mounted
+                .leaves_slave_seat(&Event::UnitDetached {
+                    obj_id: 101,
+                    reason: 0,
+                })
+        );
+    }
+
+    #[test]
+    fn siege_weapon_speed_and_turn_speed_follow_replicated_vehicle_motion() -> mlua::Result<()> {
+        let state = state();
+        own(&state);
+        receive(&state, &Event::UnitSpawned(Box::new(slave(20, 146))));
+        receive(
+            &state,
+            &Event::UnitAttached {
+                obj_id: 100,
+                mount: 20,
+                point: 1,
+                reason: 1,
+            },
+        );
+        let mut movement = Movement::unit(aa_net::Pos::new(0.0, 0.0, 0.0), 0.0, 1);
+        movement.move_type = 2;
+        movement.velocity = [0, 5461, 0];
+        movement.vehicle_yaw = Some(0.0);
+        movement.vehicle = Some(aa_net::model::VehicleMove {
+            angular_velocity: [0.0, 0.0, 0.4],
+            ..Default::default()
+        });
+        receive(
+            &state,
+            &Event::UnitMoved {
+                obj_id: 20,
+                movement,
+            },
+        );
+        let lua = Lua::new();
+        lua.globals().set("X2SiegeWeapon", lua.create_table()?)?;
+        install(&lua, &state)?;
+        lua.load(
+            r#"
+        local speed = X2SiegeWeapon:GetSiegeWeaponSpeed()
+        assert(math.abs(speed - 5.0) < 0.01, tostring(speed))
+        local turn = X2SiegeWeapon:GetSiegeWeaponTurnSpeed()
+        assert(math.abs(turn - 22.918312) < 0.001, tostring(turn))
+    "#,
+        )
+        .exec()?;
         Ok(())
     }
 }

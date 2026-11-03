@@ -11,8 +11,11 @@
 //! down to the next lower non-empty row). A death enters dying (5) first, shows that prefab for
 //! `models.dying_time`, then switches to dead (6) (`FUN_390e7ad0`, `FUN_390eaac0`). The variant prefab's
 //! active particle entities (the fire and smoke of the damaged and dead looks) are drawn with it, and a
-//! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). The
-//! new prefab is read on the workers ([`VehicleSwaps`]); the old parts stay until it is ready.
+//! state that worsens plays the new prefab's `_spawn_effect*` entities once ([`spawn_state_effects`]). A
+//! rigged part also plays its `AnimObject`'s authored `<Animation>` (`Animation`, `bPlaying`, `bLoop`;
+//! `Part::animation`), the dying cart's tip/roll. The new prefab is read on the workers (`VehicleSwaps`);
+//! the old parts stay until it is ready. A dead ship starts [`WreckSink`] and keeps the previous prefab's
+//! fire (`carry_ship_fire`); the wreck itself stays until the server's `SCUnitsRemoved` (no client timer).
 //!
 //! The maximum is unit attribute 6 as `FUN_390b4a70` reads it: the `unit_formulas` base of the slave
 //! plus its `unit_modifiers`. It is cached in [`VehicleDamage`] at spawn ([`slave_max_hp`]).
@@ -20,8 +23,10 @@
 //! A slave the server creates (`SCSlaveCreatedPacket` with `hideSpawnEffect` false) emerges from its
 //! `slaves.portal_spawn_fx_id` portal: the unit starts two bounding extents behind its position, behind the portal
 //! plane, and moves out over `portal_time` while the portal hangs at the plane (`FUN_3909ea30` / `FUN_39097220`,
-//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). A vehicle that merely
-//! streams into view later has no creation packet, so it plays none.
+//! [`track_summon_portals`] / [`spawn_summon_portals`] / [`animate_summon_emergence`]). The group's `FxSound` items
+//! and particle sounds start at the portal through [`super::sounds::Audio`]. A ship (the Eznan Cutter) instead
+//! floats up out of the sea with the captured bow-up buoyancy rise (inferred; see [`SummonEmergence`]), clipped at
+//! the sea surface. A vehicle that merely streams into view later has no creation packet, so it plays none.
 //!
 //! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
 //! Combat effects anchored to a body
@@ -111,6 +116,129 @@ pub struct VehicleDamage {
     pub dead_effect_played: bool,
 }
 
+/// How long a destroyed ship takes to sink below the sea after its dead prefab is applied. The
+/// 2026-11-02 capture (`2026-11-02-vehicle-visuals-capture.md`, "Eznan Cutter damage and death") shows
+/// the hull listing and going under over ~12 s, still burning; the original client has no traced sink
+/// function (the ship model update has no damage-state gate and the server stops moving the hull), so
+/// the rate is measured from the capture (inferred).
+pub const WRECK_SINK_TIME: f64 = 12.0;
+
+/// How far the wreck drops by the end of [`WRECK_SINK_TIME`]. The dead galleon hull is ~20 m tall;
+/// the capture's bow is the only part left above the water at 365 s, ~12.6 s after death.
+pub const WRECK_SINK_DEPTH: f32 = 14.0;
+
+/// Bow-up pitch at the end of the sink, and the list to port. The capture shows the bow still above
+/// water at 365 s while the stern is under, with a visible heel (inferred).
+pub const WRECK_SINK_PITCH: f32 = 0.14;
+pub const WRECK_SINK_ROLL: f32 = 0.18;
+
+/// A dead ship's sink: the pose it started from, the [`Time::elapsed_secs_f64`] of the dead swap and
+/// the offset from the server pose that `units::move_units` applies. The original client's hull
+/// list/sink is not in the decompiled ship update (it has no damage-state gate) and the server removes
+/// the ship from its physics at death, so the captured motion is client side; the original mechanism
+/// (engine buoyancy/physics) is not recovered (inferred).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct WreckSink {
+    pub base: Transform,
+    pub started: f64,
+    /// Pose relative to the server pose; fixed once [`Self::finished`].
+    pub offset: Transform,
+    pub finished: bool,
+}
+
+impl WreckSink {
+    fn at(base: &Transform, now: f64) -> Self {
+        Self { base: *base, started: now, offset: Transform::IDENTITY, finished: false }
+    }
+
+    /// A wreck that was already dead when it entered view: start at the fully sunk pose (inferred; the
+    /// client has no death timestamp for a unit that was culled or reconnected).
+    fn sunk(base: &Transform, now: f64) -> Self {
+        Self {
+            base: *base,
+            started: now - WRECK_SINK_TIME,
+            offset: Self::sunk_offset(1.0),
+            finished: true,
+        }
+    }
+
+    fn sunk_offset(ease: f32) -> Transform {
+        Transform {
+            translation: -Vec3::Y * (WRECK_SINK_DEPTH * ease),
+            rotation: Quat::from_axis_angle(Vec3::X, WRECK_SINK_PITCH * ease)
+                * Quat::from_axis_angle(Vec3::Z, WRECK_SINK_ROLL * ease),
+            ..Transform::IDENTITY
+        }
+    }
+
+    /// The server pose with this sink's offset applied.
+    pub fn apply(&self, base: Transform) -> Transform {
+        Transform {
+            translation: base.translation + self.offset.translation,
+            rotation: base.rotation * self.offset.rotation,
+            scale: base.scale,
+        }
+    }
+}
+
+/// Starts the sink of a ship that was already dead when it entered view (streamed in as a corpse,
+/// reconnected within the server's ~20 s wreck window). The dead prefab alone floats at the surface;
+/// the wreck is placed at its end pose, and the 25 % prefab's fire is carried so it burns like the
+/// capture's wreck (both inferred: the original client has no death timestamp for such a unit).
+pub fn start_dead_ship_sinks(
+    mut commands: Commands,
+    db: Option<Res<Db>>,
+    time: Res<Time>,
+    roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform), Added<VehicleDamage>>,
+    sinks: Query<(), With<WreckSink>>,
+) {
+    let Some(db) = db else { return };
+    let now = time.elapsed_secs_f64();
+    for (entity, remote, damage, transform) in &roots {
+        if damage.state != 6 || sinks.contains(entity) || !db.is_ship(remote.model_id) {
+            continue;
+        }
+        let sink = WreckSink::sunk(transform, now);
+        if let Some(variants) = db.vehicle_variants(remote.model_id) {
+            carry_ship_fire(&mut commands, entity, &variants.for_state(4));
+        }
+        commands.entity(entity).insert((sink, sink.apply(*transform)));
+    }
+}
+
+/// The sinks of dead ships: move the offset from the server pose (which `units::move_units` applies)
+/// along the capture's gentle bow-up list over [`WRECK_SINK_TIME`]. Only writes a transform while the
+/// offset changes; once fully sunk it leaves the fixed offset for `move_units`, so a stationary wreck
+/// does not fight it every frame. A heal removes the sink and restores the server pose.
+pub fn sink_ship_wrecks(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut sinks: Query<(Entity, &mut WreckSink, &VehicleDamage, &mut Transform)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for (entity, mut sink, damage, mut transform) in &mut sinks {
+        if damage.state != 6 {
+            commands.entity(entity).remove::<WreckSink>();
+            *transform = sink.base;
+            continue;
+        }
+        if sink.finished {
+            continue;
+        }
+        let p = ((now - sink.started) / WRECK_SINK_TIME).clamp(0.0, 1.0) as f32;
+        // smoothstep: the hull settles slowly at first, like the captured list
+        let ease = p * p * (3.0 - 2.0 * p);
+        let offset = WreckSink::sunk_offset(ease);
+        if sink.offset != offset {
+            sink.offset = offset;
+            *transform = sink.apply(sink.base);
+        }
+        if p >= 1.0 {
+            sink.finished = true;
+        }
+    }
+}
+
 /// A body part root spawned by [`spawn`]: replaced when the damage state changes.
 #[derive(Component)]
 pub struct VehiclePart;
@@ -160,12 +288,22 @@ impl SummonPortals {
 /// The 1.2 summon emergence (`FUN_3909ea30` / `FUN_39097220`): the unit starts at `start = end - axis * 2 * extent`,
 /// behind the portal plane at `end - axis * extent`, and moves to `end` over `slaves.portal_time`.
 /// `FUN_39097390` restores `end` and sends the portal effect's end event 5.
+///
+/// Ships add the captured rise (`FUN_390df580` builds the ship's CryPhysics buoyancy volumes, but it is reached via
+/// the model vtable (`FUN_390e2220`/`FUN_390e3530`/`FUN_390eb720`), not directly from `ShipUnitModel::Init`/`Update`
+/// (`FUN_390e8b30`/`FUN_390ebc50` do not reference it), so the attribution itself is **inferred**): the root starts
+/// below the sea with the hull top at the surface (`ship_models.mass_center_z` + half `mass_box_size_z`), starts
+/// pitched bow up and rights over the same `portal_time`, and the clip plane is the horizontal sea surface instead
+/// of the native vertical portal plane. The start depth, the horizontal-only sea clip, the 50 degree pitch and the
+/// easing are capture approximations, not decompiled values (2026-11-02 Eznan Cutter capture, case
+/// `ship-sea-summon`).
 #[derive(Component, Clone, Copy, Debug)]
 #[allow(dead_code)] // `plane`, `axis` and `extent` are read by `examples/slave_summon` and the tests
 pub struct SummonEmergence {
     pub start: Vec3,
     pub end: Vec3,
-    /// The clip-plane point and portal anchor: `end - axis * extent` (`FUN_3909ea30` state +0x74).
+    /// The clip-plane point and portal anchor: `end - axis * extent` (`FUN_3909ea30` state +0x74); for a ship the
+    /// same x/z lifted to the sea surface (the horizontal clip plane then; capture-inferred).
     pub plane: Vec3,
     /// The unit's forward axis projected to the horizontal plane.
     pub axis: Vec3,
@@ -174,10 +312,24 @@ pub struct SummonEmergence {
     pub started: f64,
     pub duration: f32,
     pub ended: bool,
+    /// The root rotation at the start (the unit's yaw for land vehicles, pitched bow up for a ship).
+    pub start_rotation: Quat,
+    /// The unit's rotation at `end` (its yaw only); the ship rights itself to this.
+    pub end_rotation: Quat,
+    /// The clip-plane normal: the unit's forward for the native vertical portal plane, `+Y` for a ship's sea surface
+    /// (the horizontal-only ship clip is capture-inferred).
+    pub clip_normal: Vec3,
+    /// A ship rises and rights itself (the inferred buoyancy); a land vehicle only slides through the portal.
+    pub buoyant: bool,
 }
 
 /// Safety cap for a summon effect whose library def never resolved (no client pak or a failed read).
 const SUMMON_EFFECT_CAP: f64 = 30.0;
+
+/// The bow-up pitch a summoned ship starts with before righting itself. The 2026-11-02 Eznan Cutter capture shows
+/// the mast/yard line at 45-60 degrees, so 50 is the middle; the native value comes from CryPhysics buoyancy and
+/// is not a decompiled constant (capture-pending, case `ship-sea-summon`).
+pub const SHIP_SUMMON_PITCH: f32 = 50.0 * std::f32::consts::PI / 180.0;
 
 /// A summon portal effect: it stops emitting at `until`, its live particles fade, and the fallback cap
 /// `despawn_at` removes it even if the simulation never finishes (the 1.2 end event 5 plus a bounded life).
@@ -244,11 +396,14 @@ pub fn track_summon_portals(
 ///
 /// The pending map is keyed by timeline id and resolved in one pass over the drawn roots (no per-pending scan); an
 /// entry older than [`SUMMON_PENDING_TTL`] is dropped.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_summon_portals(
     mut commands: Commands,
     db: Option<Res<Db>>,
     book: Option<Res<super::combat::skills::SkillBook>>,
     units: Option<Res<Units>>,
+    water: Option<Res<aa_world::WaterQuery>>,
+    audio: super::sounds::Audio,
     mut portals: ResMut<SummonPortals>,
     time: Res<Time>,
     roots: Query<(Entity, &RemoteUnit, &VehicleDamage, &Transform, Option<&VehicleExtent>)>,
@@ -293,8 +448,32 @@ pub fn spawn_summon_portals(
         let axis = axis.normalize_or_zero();
         let axis = if axis == Vec3::ZERO { Vec3::NEG_Z } else { axis };
         let end = transform.translation;
-        let plane = end - axis * extent;
-        let start = end - axis * (2.0 * extent);
+        let end_rotation = transform.rotation;
+        let mut plane = end - axis * extent;
+        let mut start = end - axis * (2.0 * extent);
+        let mut start_rotation = end_rotation;
+        let mut clip_normal = axis;
+        let mut buoyant = false;
+        // A ship does not slide out of a vertical portal in the capture: it floats up out of the sea. The buoyancy
+        // attribution (`FUN_390df580`, reached via the model vtable) and this whole result -- the horizontal sea clip
+        // replacing the native vertical plane, the hull-top start depth, the bow-up pitch and the rise shape -- are
+        // inferred from the 2026-11-02 Eznan Cutter capture, not decompiled values (case `ship-sea-summon`).
+        if db.is_ship(unit.model_id)
+            && let Some(surface) = water.as_ref().and_then(|water| {
+                water
+                    .water_at(aa_world::bevy_to_cry(end))
+                    .map(|(height, _)| height)
+            })
+        {
+            let hull_top = db.ship_hull_height(unit.model_id).map_or(1.0, |(_, high)| high.max(0.0));
+            start.y = (surface - hull_top).min(end.y);
+            // keep the native anchor x/z (`end - axis * extent`, FUN_3909ea30 state +0x74) and only lift it to the
+            // sea surface: the horizontal clip plane needs a water point, and the anchor stays where 1.2 puts it
+            plane.y = surface;
+            clip_normal = Vec3::Y;
+            start_rotation = end_rotation * Quat::from_axis_angle(Vec3::X, SHIP_SUMMON_PITCH);
+            buoyant = true;
+        }
         // the portal hangs at the clip-plane point, oriented by the unit, scaled by unit_scale x portal_scale
         let anchor = commands
             .spawn((
@@ -311,31 +490,61 @@ pub fn spawn_summon_portals(
             ))
             .id();
         let unit_scale = transform.scale.y.max(0.0);
+        let mut sounds: Vec<String> = Vec::new();
         for item in book.fx_group(portal.fx_group).iter() {
-            // the group's FxSound item has no effect name; 1.2 plays it with the portal, this slice draws the particles
-            if item.effect.is_empty() {
-                continue;
+            let mut parent = anchor;
+            let at = plane + cry_to_bevy(item.offset);
+            let effect = if item.effect.is_empty() {
+                None
+            } else {
+                let effect = commands
+                    .spawn((
+                        aa_fx::Effect {
+                            scale: portal.scale * item.scale * unit_scale,
+                            prime: false,
+                            item: true,
+                            no_body: true,
+                            despawn_when_finished: true,
+                            ..aa_fx::Effect::new(item.effect.clone())
+                        },
+                        Transform {
+                            translation: cry_to_bevy(item.offset),
+                            ..default()
+                        },
+                        ChildOf(anchor),
+                        SummonPortalEffect {
+                            until: now + f64::from(portal.time),
+                            despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
+                            stopped: false,
+                        },
+                    ))
+                    .id();
+                parent = effect;
+                Some(effect)
+            };
+            // `FxSound` items and the `fx_particles.sound_id` of the group's particles start with the portal, at the
+            // anchor (1.2 hands the whole group to the effect system at once, `FUN_3909ea30` -> `FUN_393eb7f0`).
+            // The particle library's own emitter `Sound=""` events play the same way as a skill effect's.
+            let mut play = |path: &str| {
+                if sounds.iter().any(|seen| seen.eq_ignore_ascii_case(path)) {
+                    return;
+                }
+                sounds.push(path.to_string());
+                audio.start(
+                    &mut commands,
+                    &super::sounds::Play { path, class: super::sounds::Class::Skill, unit: root, parent, at },
+                );
+            };
+            if let Some(super::combat::Sfx::Event(path)) = item.sound.as_ref() {
+                play(path);
             }
-            commands.spawn((
-                aa_fx::Effect {
-                    scale: portal.scale * item.scale * unit_scale,
-                    prime: false,
-                    item: true,
-                    no_body: true,
-                    despawn_when_finished: true,
-                    ..aa_fx::Effect::new(item.effect.clone())
-                },
-                Transform {
-                    translation: cry_to_bevy(item.offset),
-                    ..default()
-                },
-                ChildOf(anchor),
-                SummonPortalEffect {
-                    until: now + f64::from(portal.time),
-                    despawn_at: now + f64::from(portal.time) + SUMMON_EFFECT_CAP,
-                    stopped: false,
-                },
-            ));
+            if effect.is_some()
+                && let Some(sound_book) = audio.book()
+            {
+                for path in sound_book.particle_sounds(&item.effect).iter() {
+                    play(path);
+                }
+            }
         }
         // the prefab's own inactive `portal_exhaust` follows the moving unit (FUN_39097140 / FUN_39097220)
         spawn_portal_exhaust(&mut commands, root, &damage.variant, now + f64::from(portal.time));
@@ -349,6 +558,10 @@ pub fn spawn_summon_portals(
                 started: now,
                 duration: portal.time,
                 ended: false,
+                start_rotation,
+                end_rotation,
+                clip_normal,
+                buoyant,
             },
             // the first rendered frame must already be clipped: hide the model until the material clones are in
             // (`units::cull_units` owns the root's `Visibility` and honours this marker)
@@ -399,6 +612,10 @@ fn spawn_portal_exhaust(commands: &mut Commands, root: Entity, variant: &str, un
 /// Moves an emerging unit from its start to its real position over `portal_time` (`FUN_39097220`), unless the local
 /// player is driving it (`Driven`, `cart::drive_cart` owns the transform then). The portal-plane clip (1.2's model
 /// vfunc 0xf8) is applied by [`apply_emergence_clip`] and restored by [`restore_emergence_clip`].
+///
+/// The horizontal slide is the native linear `FUN_39097220` path for every unit. A ship also rises and rights over
+/// the same window; that part is eased (buoyancy is strong while the hull is deep and dies out as it floats) and is
+/// the capture approximation described on [`SummonEmergence`].
 pub fn animate_summon_emergence(
     time: Res<Time>,
     mut roots: Query<(&mut Transform, &mut SummonEmergence), Without<super::mount::Driven>>,
@@ -413,9 +630,22 @@ pub fn animate_summon_emergence(
         } else {
             1.0
         };
-        transform.translation = emergence.start.lerp(emergence.end, progress);
+        let float = if emergence.buoyant { 1.0 - (1.0 - progress).powi(3) } else { progress };
+        transform.translation = Vec3::new(
+            emergence.start.x + (emergence.end.x - emergence.start.x) * progress,
+            emergence.start.y + (emergence.end.y - emergence.start.y) * float,
+            emergence.start.z + (emergence.end.z - emergence.start.z) * progress,
+        );
+        // Only a ship's rise owns the rotation; a land vehicle's server/remote-driver turn during the portal window
+        // must not be overwritten and then snapped back (`FUN_39097220` moves the unit, it does not rotate it).
+        if emergence.buoyant {
+            transform.rotation = emergence.start_rotation.slerp(emergence.end_rotation, float);
+        }
         if progress >= 1.0 {
             transform.translation = emergence.end;
+            if emergence.buoyant {
+                transform.rotation = emergence.end_rotation;
+            }
             emergence.ended = true;
         }
     }
@@ -423,8 +653,9 @@ pub fn animate_summon_emergence(
 
 /// Gives every mesh of an emerging vehicle a clone of its `IllumMaterial` with the portal clip plane, so the part
 /// still behind the ring is discarded (`FUN_3909ea30` model vfunc 0xf8: plane at `pos - axis * extent`, normal
-/// `axis`). It runs every frame while the emergence lasts, so parts swapped in during it are clipped too; the
-/// material is per vehicle, other objects keep the shared asset.
+/// `axis`; a ship's plane is the horizontal sea surface, normal `+Y`, capture-inferred instead of the native
+/// vertical plane). It runs every frame while the emergence lasts, so parts swapped in during it are clipped too;
+/// the material is per vehicle, other objects keep the shared asset.
 /// Keeps a summoned vehicle hidden until its clipped material copies are in place. A marker rather than
 /// `Visibility`, because [`super::units::cull_units`] rewrites the root's `Visibility` every frame.
 #[derive(Component)]
@@ -457,10 +688,10 @@ pub fn apply_emergence_clip(
             continue;
         };
         let plane = Vec4::new(
-            emergence.axis.x,
-            emergence.axis.y,
-            emergence.axis.z,
-            -emergence.axis.dot(emergence.plane),
+            emergence.clip_normal.x,
+            emergence.clip_normal.y,
+            emergence.clip_normal.z,
+            -emergence.clip_normal.dot(emergence.plane),
         );
         let mut stack = vec![root];
         let mut clipped_any = false;
@@ -796,6 +1027,7 @@ fn body_parts(look: &VehicleLook) -> Vec<Part> {
                     pos: Vec3::ZERO,
                     rot: Quat::IDENTITY,
                     scale: Vec3::ONE,
+                    animation: None,
                 }]
             })
             .unwrap_or_default()
@@ -832,6 +1064,7 @@ fn assemble(look: &VehicleLook) -> Vec<Placed> {
                         pos,
                         rot: rot.normalize(),
                         scale,
+                        animation: None,
                     },
                     wheel: Some(slot),
                     spindle: None,
@@ -1312,15 +1545,28 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
                 for m in models {
                     cry.finish_model(m);
                 }
-                // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn
-                let spawned = super::creature::spawn_with_idle(commands, cry, clips, &part.model, None, placed, false);
+                // the vehicle path owns the idle (the 1.2 `UpdateIdleAnim` rule), not the creature spawn;
+                // an `AnimObject` that names a playing animation (the dying prefab's `dead_01`) starts that
+                // instead (`FUN_39109d20` opens the Animation child and reads `bPlaying`; the clip name and
+                // loop are engine AnimObject behaviour).
+                let spawned = super::creature::spawn_with_idle(
+                    commands,
+                    cry,
+                    clips,
+                    &part.model,
+                    None,
+                    placed,
+                    false,
+                    part.animation.as_ref(),
+                );
                 if let Some(bodies) = &spawned
                     && let Some(idle) = &bodies.idle
                 {
                     commands.entity(bodies.root).insert(VehicleIdle {
                         clip: idle.clone(),
                         dead: bodies.dead.clone(),
-                        stopped: false,
+                        // a one-shot authored animation (dead_01) stays on its last frame; the idle must not replace it
+                        stopped: bodies.authored == Some(false),
                     });
                 }
                 spawned.map(|spawned| spawned.root)
@@ -1399,6 +1645,23 @@ pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str,
             continue;
         }
         spawn_effect(commands, root, &named.effect, false);
+    }
+}
+
+/// The fire the damaged ship prefab was already showing when it died. The 2026-11-02 capture keeps the
+/// aft-deck fire burning through the ~12 s sink (`ship_sinking_t358.66`, `ship_sunk_burning_t365`), while
+/// the dead prefab (`galleon.dead`) names only the water-destroy burst. A ship swap into dead therefore
+/// re-spawns the previous prefab's active fire emitters at the same authored anchors. The original
+/// client almost certainly keeps the old prefab's live particle entities instead; the target poses and
+/// effect are the damaged prefab's, so the result matches the capture (inferred).
+fn carry_ship_fire(commands: &mut Commands, root: Entity, previous: &str) {
+    if previous.to_ascii_lowercase().starts_with("prefab://") {
+        for named in super::data::prefab_effects_named(previous) {
+            let name = named.name.to_ascii_lowercase();
+            if named.active && name.contains("fire") && !name.starts_with('_') {
+                spawn_effect(commands, root, &named.effect, false);
+            }
+        }
     }
 }
 
@@ -1520,11 +1783,12 @@ pub fn update_damage(
 pub fn finish_damage_swaps(
     mut commands: Commands,
     units: Option<Res<Units>>,
+    db: Option<Res<Db>>,
     mut cry: CryAssets,
     clips: Res<ClipLibrary>,
     swaps: ResMut<VehicleSwaps>,
     time: Res<Time>,
-    mut roots: Query<(Entity, &mut VehicleDamage)>,
+    mut roots: Query<(Entity, &mut VehicleDamage, &Transform)>,
     stale: Query<(Entity, &ChildOf), Or<(With<VehiclePart>, With<VehicleEffect>)>>,
 ) {
     let mut done = Vec::new();
@@ -1536,7 +1800,7 @@ pub fn finish_damage_swaps(
     }
     let now = time.elapsed_secs_f64();
     for built in done {
-        let Ok((root, mut damage)) = roots.get_mut(built.root) else {
+        let Ok((root, mut damage, pose)) = roots.get_mut(built.root) else {
             continue;
         };
         if damage.requested != Some(built.state) {
@@ -1577,8 +1841,18 @@ pub fn finish_damage_swaps(
         commands.entity(root).remove::<super::turret::TurretGun>();
         add_parts(&mut commands, &mut cry, &clips, built.pieces, root);
         spawn_state_effects(&mut commands, root, &built.variant, effects);
+        let ship = units
+            .as_deref()
+            .and_then(|units| units.by_id.get(&built.obj_id))
+            .zip(db.as_deref())
+            .is_some_and(|(unit, db)| db.is_ship(unit.model_id));
         if built.state == 6 {
             damage.dead_effect_played = true;
+            if ship {
+                // the capture keeps the damaged prefab's fire burning through the sink
+                carry_ship_fire(&mut commands, root, &damage.variant);
+                commands.entity(root).insert(WreckSink::at(pose, now));
+            }
         }
         adopt_state(&mut damage, built.state);
         damage.variant = built.variant;
@@ -1702,6 +1976,7 @@ mod tests {
             pos: Vec3::ZERO,
             rot: Quat::IDENTITY,
             scale: Vec3::ONE,
+            animation: None,
         };
         assert_eq!(static_options(&part).shading, Shading::Full);
         let rigged = model_options(None, true);
@@ -1981,6 +2256,10 @@ mod tests {
                 started: 0.0,
                 duration: 1.0,
                 ended: false,
+                start_rotation: Quat::IDENTITY,
+                end_rotation: Quat::IDENTITY,
+                clip_normal: Vec3::new(0.0, 0.0, -1.0),
+                buoyant: false,
             })
             .id();
         let mesh = app
@@ -2039,6 +2318,10 @@ mod tests {
                 started: 0.0,
                 duration: 1.0,
                 ended: false,
+                start_rotation: Quat::IDENTITY,
+                end_rotation: Quat::IDENTITY,
+                clip_normal: Vec3::new(0.0, 0.0, -1.0),
+                buoyant: false,
             })
             .id();
         let mesh = app
@@ -2117,6 +2400,9 @@ mod tests {
         assert!((axis - hull_forward).length() < 1e-5, "axis {axis:?} vs hull forward {hull_forward:?}");
         assert!((emergence.plane - (end - axis * emergence.extent)).length() < 1e-4);
         assert!((emergence.start - (end - axis * (2.0 * emergence.extent))).length() < 1e-4);
+        assert_eq!(emergence.clip_normal, axis, "a land vehicle keeps the vertical portal plane");
+        assert_eq!(emergence.start_rotation, emergence.end_rotation, "a land vehicle does not tilt");
+        assert!(!emergence.buoyant);
         let transform = *app.world().get::<Transform>(root).expect("the root");
         // the emergence may run in this same schedule, so allow one frame of progress from the start
         let path = (emergence.end - emergence.start).length().max(1e-4);
@@ -2141,6 +2427,17 @@ mod tests {
         assert_eq!(portal_effects(&mut app).len(), 2, "the portal plays once");
         let moved = app.world().get::<Transform>(root).unwrap().translation;
         assert!((moved - emergence.start).length() > 0.0, "the cart is emerging");
+        // the land path is translation-only: a turn the server/remote driver makes during the portal window is not
+        // overwritten and then snapped back
+        let turned = Quat::from_rotation_y(1.1);
+        app.world_mut().get_mut::<Transform>(root).unwrap().rotation = turned;
+        for _ in 0..5 {
+            app.update();
+        }
+        assert!(
+            app.world().get::<Transform>(root).unwrap().rotation.angle_between(turned) < 1e-6,
+            "the land emergence does not write the rotation"
+        );
         // `portal_time` is 1.0 s: the cart reaches its position and the effects stop emitting
         for _ in 0..40 {
             app.update();
@@ -2156,6 +2453,224 @@ mod tests {
             app.update();
         }
         assert!(portal_markers(&mut app).is_empty(), "the stopped effect is despawned by its cap");
+    }
+
+    /// A ship's summon (Eznan Cutter, slave 21) floats up out of the sea instead of sliding out of a vertical
+    /// portal: the root starts below the surface with the hull top at the water, pitched bow up; the clip plane is
+    /// the sea surface; midway it is partly righted and still clipped; after `portal_time` 7 s it is upright at its
+    /// position on the surface. The rise/righting shape is the 2026-11-02 capture approximation documented on
+    /// [`SummonEmergence`].
+    #[test]
+    fn a_summoned_ship_starts_below_the_water_tilted_and_ends_upright() {
+        use aa_world::{TerrainQuery, WaterQuery};
+        let Some((mut app, db, root)) = vehicle_app(21, 393) else { return };
+        assert!(db.is_ship(393), "the galleon is a ShipModel");
+        let portal = db.slave_summon_portal(21).expect("the Eznan Cutter's portal");
+        assert_eq!((portal.fx_group, portal.scale, portal.time), (619, 10.0, 7.0));
+        let sea = WaterQuery::fixture_sea("test", 2.0, TerrainQuery::fixture_flat("test", 0.0));
+        app.insert_resource(sea);
+        app.init_asset::<IllumMaterial>();
+        // the ship's end position is on the sea surface; a child with an Illum material proves the sea clip is
+        // applied for the whole window (the ship's own parts are StandardMaterial until PostUpdate's swap, which
+        // this headless app does not run)
+        app.world_mut().get_mut::<Transform>(root).unwrap().translation.y = 2.0;
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<IllumMaterial>>()
+            .add(IllumMaterial::default());
+        let mesh = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), MeshMaterial3d(original.clone()), ChildOf(root)))
+            .id();
+        app.world_mut().write_message(created(1, false));
+        app.update();
+        app.update();
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the ship's emergence");
+        assert!(emergence.buoyant, "a ship floats up; the land path slides");
+        assert_eq!(emergence.clip_normal, Vec3::Y, "the sea surface is the clip plane");
+        assert!((emergence.plane.y - 2.0).abs() < 1e-4, "{:?}", emergence.plane);
+        assert!((emergence.end.y - 2.0).abs() < 1e-4, "the ship ends on the surface: {:?}", emergence.end);
+        assert!(emergence.start.y < 2.0, "the ship starts below the sea: {:?}", emergence.start);
+        assert!(emergence.start.y < emergence.end.y, "it rises to its position: {:?} {:?}", emergence.start, emergence.end);
+        // the horizontal start is still the native two extents behind, so the hull also slides through the portal
+        let behind = emergence.end - emergence.axis * (2.0 * emergence.extent);
+        assert!((emergence.start.x - behind.x).abs() < 1e-4 && (emergence.start.z - behind.z).abs() < 1e-4);
+        // the anchor keeps the native x/z (end - axis * extent) and only moves to the water height; here the end is
+        // on the water too, so it is the native plane point exactly
+        assert!(
+            (Vec2::new(emergence.plane.x, emergence.plane.z) - Vec2::new(behind.x, behind.z)).length() > 1e-4,
+            "the anchor is not at the start"
+        );
+        assert!(
+            (emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length() < 1e-4,
+            "the anchor stays native: {:?}",
+            emergence.plane
+        );
+        // bow up: the local forward (-Z) of the start rotation points up
+        let forward = emergence.start_rotation * Vec3::NEG_Z;
+        assert!(forward.y > 0.5, "{forward:?}");
+        let tilt = emergence.start_rotation.angle_between(emergence.end_rotation);
+        assert!((tilt - SHIP_SUMMON_PITCH).abs() < 0.02, "start pitch {tilt}");
+        // the clip plane the shader gets is the horizontal sea surface (normal +Y, height 2)
+        let clip = Vec4::new(
+            emergence.clip_normal.x,
+            emergence.clip_normal.y,
+            emergence.clip_normal.z,
+            -emergence.clip_normal.dot(emergence.plane),
+        );
+        assert_eq!(clip, Vec4::new(0.0, 1.0, 0.0, -2.0));
+        // ~3.5 s of 7: partly righted, between start and end, still clipped
+        for _ in 0..103 {
+            app.update();
+        }
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        assert!(!emergence.ended, "the ship is still emerging at 3.5 s");
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y > emergence.start.y && transform.translation.y < emergence.end.y,
+            "mid-window height {:?} between {:?} and {:?}",
+            transform.translation.y,
+            emergence.start.y,
+            emergence.end.y
+        );
+        let from_start = emergence.start_rotation.angle_between(transform.rotation);
+        let to_end = transform.rotation.angle_between(emergence.end_rotation);
+        assert!(from_start > 1e-2 && to_end > 1e-2, "partly righted: {from_start} / {to_end}");
+        assert!(to_end < tilt - 1e-2, "not upright yet: {to_end} of {tilt}");
+        let mid = app
+            .world()
+            .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+            .expect("the mesh material")
+            .0
+            .clone();
+        let mid_plane = app
+            .world()
+            .resource::<Assets<IllumMaterial>>()
+            .get(&mid)
+            .expect("the clipped material")
+            .extension
+            .clip_plane;
+        assert_eq!(mid_plane, Vec4::new(0.0, 1.0, 0.0, -2.0), "still clipped at 3.5 s");
+        // the rest of `portal_time`: upright at its position on the surface, the clip restored
+        for _ in 0..135 {
+            app.update();
+        }
+        let emergence = *app.world().get::<SummonEmergence>(root).expect("the emergence");
+        assert!(emergence.ended, "the ship's emergence ends after portal_time");
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!((transform.translation - emergence.end).length() < 1e-4, "{:?}", transform.translation);
+        assert!(
+            transform.rotation.angle_between(emergence.end_rotation) < 1e-4,
+            "upright: {:?} vs {:?}",
+            transform.rotation,
+            emergence.end_rotation
+        );
+        assert_eq!(
+            app.world()
+                .get::<MeshMaterial3d<IllumMaterial>>(mesh)
+                .expect("the mesh material")
+                .0
+                .id(),
+            original.id(),
+            "the sea clip is restored after portal_time"
+        );
+    }
+
+    /// The fx group's sounds (`FxSound` items and each particle's `fx_particles.sound_id`) start once per summon,
+    /// through the same audio system as the skill effects, at the portal.
+    #[test]
+    fn a_summon_portal_plays_its_fx_sounds_once_at_the_portal() {
+        use super::super::combat::Sfx;
+        use super::super::sounds::SoundBook;
+        let Some((mut app, db, root)) = hauler() else { return };
+        let portal = db.slave_summon_portal(146).expect("the Red Farm Hauler's portal");
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let expected: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter_map(|item| match item.sound.as_ref() {
+                Some(Sfx::Event(path)) => Some(path.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            expected.iter().any(|path| path.eq_ignore_ascii_case("Sounds/x2eventsounds:portal:portal_tank")),
+            "{expected:?}"
+        );
+        app.insert_resource(SoundBook::open());
+        app.world_mut().write_message(created(1, false));
+        for _ in 0..3 {
+            app.update();
+        }
+        let count = |app: &mut App| {
+            app.world_mut()
+                .query::<&aa_audio::Sound>()
+                .iter(app.world())
+                .filter(|sound| expected.iter().any(|path| path.eq_ignore_ascii_case(&sound.event)))
+                .count()
+        };
+        assert_eq!(count(&mut app), expected.len(), "one sound per group item");
+        let anchor = app
+            .world_mut()
+            .query::<(Entity, &SummonPortalAnchor)>()
+            .iter(app.world())
+            .find(|(_, anchor)| anchor.root == root)
+            .map(|(entity, _)| entity)
+            .expect("the portal anchor");
+        let hearing: Vec<Entity> = app
+            .world_mut()
+            .query::<(&aa_audio::Sound, &ChildOf)>()
+            .iter(app.world())
+            .filter(|(sound, _)| expected.iter().any(|path| path.eq_ignore_ascii_case(&sound.event)))
+            .map(|(_, child)| child.parent())
+            .collect();
+        assert!(hearing.contains(&anchor), "the FxSound item hangs at the portal: {hearing:?}");
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(count(&mut app), expected.len(), "the portal sound starts once per summon");
+    }
+
+    /// The sea portal's sound is the particle's `fx_particles.sound_id` (group 619 item 890 -> sound 2413
+    /// `portal_ship_15`), not an `FxSound` item; it must take the same path once per summon.
+    #[test]
+    fn the_sea_portal_plays_its_particle_sound_once() {
+        use super::super::combat::Sfx;
+        use super::super::sounds::SoundBook;
+        let Some((mut app, db, _root)) = vehicle_app(21, 393) else { return };
+        let portal = db.slave_summon_portal(21).expect("the Eznan Cutter's portal");
+        assert_eq!(portal.fx_group, 619);
+        let book = super::super::combat::skills::SkillBook::open().expect("the game database");
+        let expected = "Sounds/x2eventsounds:portal:portal_ship_15";
+        let sounds: Vec<String> = book
+            .fx_group(portal.fx_group)
+            .iter()
+            .filter_map(|item| match item.sound.as_ref() {
+                Some(Sfx::Event(path)) => Some(path.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            sounds.iter().any(|path| path.eq_ignore_ascii_case(expected)),
+            "the particle sound_id path: {sounds:?}"
+        );
+        app.insert_resource(SoundBook::open());
+        app.world_mut().write_message(created(1, false));
+        for _ in 0..3 {
+            app.update();
+        }
+        let count = |app: &mut App| {
+            app.world_mut()
+                .query::<&aa_audio::Sound>()
+                .iter(app.world())
+                .filter(|sound| sound.event.eq_ignore_ascii_case(expected))
+                .count()
+        };
+        assert_eq!(count(&mut app), 1, "the sea portal sound starts once");
+        for _ in 0..20 {
+            app.update();
+        }
+        assert_eq!(count(&mut app), 1, "the sea portal sound starts once per summon");
     }
 
     /// The portal belongs to creation, not to coming into view: a vehicle the server only streams in later
@@ -2399,6 +2914,78 @@ mod tests {
         let bone = app.world().get::<Transform>(joint).expect("the spindle bone transform").rotation;
         let turned = animated.angle_between(bone);
         assert!(turned > 0.05, "the idle overwrote the steered spindle (the bone is {turned} from its pose)");
+    }
+
+    /// The dying prefab's `AnimObject` starts its authored `dead_01` on its own (`Animation="dead_01"`,
+    /// `bPlaying="1"` in `vehicle_tractor.tractor_body_dying`; `FUN_39109d20` opens the Animation child and
+    /// reads `bPlaying`, and the clip name/loop are engine AnimObject behaviour): the cart tips and rolls
+    /// without waiting for a `Dead` marker. The clip is 3.33 s and the body's bones move.
+    #[test]
+    fn the_dying_prefab_plays_its_authored_dead_01_and_tips_the_body() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(1553) else { return };
+        let variants = db.vehicle_variants(1553).expect("the Red Farm Hauler's rows");
+        let variant = variants.for_state(5).to_string();
+        assert!(variant.ends_with("tractor_body_dying"), "{variant}");
+        let max_hp = db.slave_max_hp(146, 50).expect("the Red Farm Hauler's MaxHealth");
+        let unit = slave_unit_kind(7, 146, 146, 1553, max_hp, max_hp);
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            5,
+            variant,
+            max_hp,
+            false,
+        );
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f32(1.0 / 30.0),
+        ));
+        app.update();
+        let body = app
+            .world_mut()
+            .query_filtered::<Entity, With<VehicleIdle>>()
+            .iter(app.world())
+            .next()
+            .expect("the dying body carries its idle");
+        let source = app
+            .world()
+            .get::<aa_anim::Animator>(body)
+            .and_then(|a| a.current.as_ref())
+            .and_then(|p| p.clip.source.as_deref())
+            .map(str::to_string);
+        assert!(
+            source.as_deref().is_some_and(|s| s.contains("dead_01")),
+            "the prefab's authored dead_01 starts without Dead: {source:?}"
+        );
+        assert!(
+            app.world().get::<VehicleIdle>(body).is_some_and(|idle| idle.stopped),
+            "a one-shot authored animation keeps the idle from replacing it"
+        );
+        let bones = |app: &mut App| {
+            app.world_mut()
+                .query::<(&Name, &Transform)>()
+                .iter(app.world())
+                .map(|(name, transform)| (name.as_str().to_string(), transform.rotation))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let before = bones(&mut app);
+        for _ in 0..30 {
+            app.update();
+        }
+        let after = bones(&mut app);
+        let moved = before
+            .iter()
+            .filter_map(|(name, rotation)| after.get(name).map(|now| (name, rotation.angle_between(*now))))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("the body's bones");
+        assert!(
+            moved.1 > 0.02,
+            "dead_01 tips the cart: only {moved:?} moved"
+        );
     }
 
     /// A destroyed vehicle stops its idle and plays the body's `dead_01` (its Animator is a child of the root that
@@ -2781,6 +3368,212 @@ mod tests {
         );
     }
 
+    /// The Eznan Cutter (slave 21, model 393): death has no explosion (`dying_time` 0, and `galleon.dead`
+    /// has no `_dead_effect`), the damaged prefab's aft-deck fire keeps burning, the hull sinks over
+    /// [`WRECK_SINK_TIME`] with the captured bow-up list, and the dead prefab's water-destroy effect is
+    /// drawn. See the 2026-11-02 capture, "Eznan Cutter damage and death".
+    #[test]
+    fn a_dead_ship_sinks_burning_without_an_explosion() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(393) else { return };
+        let variants = db.vehicle_variants(393).expect("the Eznan Cutter's rows");
+        let max_hp = db.slave_max_hp(21, 50).expect("Eznan Cutter template 21's MaxHealth");
+        let hp = max_hp * 25 / 100;
+        let unit = slave_unit_kind(7, 21, 21, 393, hp, max_hp);
+        let variant = variants.for_state(4).to_string();
+        assert!(variant.ends_with("galleon.damaged75"), "{variant}");
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            4,
+            variant,
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let fire = |app: &mut App| effect_names(app, root);
+        {
+            let names = fire(&mut app);
+            assert!(
+                names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+                "the 25 % prefab burns: {names:?}"
+            );
+        }
+        die(&mut app);
+        let dead = wait_for_state(&mut app, 6);
+        assert!(dead.variant.ends_with("galleon.dead"), "{}", dead.variant);
+        let names = fire(&mut app);
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+            "the damaged prefab's fire keeps burning through the sink: {names:?}"
+        );
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.caraval_water_destroy"),
+            "the dead prefab's water-destroy effect: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|name| name == "x2_effects.housing_test.small_ship_exp"),
+            "no explosion: {names:?}"
+        );
+        // the captured ~12 s sink: lower the hull and list it
+        let sink = *app.world().get::<WreckSink>(root).expect("the dead ship sinks");
+        assert_eq!(sink.base.translation, Vec3::ZERO);
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        app.world_mut().get_mut::<WreckSink>(root).unwrap().started = now - WRECK_SINK_TIME;
+        app.update();
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y < -10.0,
+            "the dead hull sinks well below the waterline: {transform:?}"
+        );
+        assert!(
+            transform.rotation.angle_between(sink.base.rotation) > 0.05,
+            "the dead hull lists: {transform:?}"
+        );
+        assert!(app.world().get::<WreckSink>(root).is_some_and(|sink| sink.finished));
+        // a fully sunk wreck keeps its fixed offset; the sink does not rewrite the root every frame
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(root).expect("the root"),
+            &transform,
+            "the finished sink leaves the pose alone"
+        );
+        // a heal (or resurrection) makes the sink stop and restores the server pose
+        {
+            let mut units = app.world_mut().resource_mut::<Units>();
+            let unit = units.by_id.get_mut(&7).expect("the ship unit");
+            unit.dead = false;
+            unit.hp = max_hp;
+        }
+        app.world_mut().get_mut::<VehicleDamage>(root).unwrap().state = 1;
+        app.update();
+        assert!(app.world().get::<WreckSink>(root).is_none(), "the sink ends on a heal");
+        assert_eq!(
+            app.world().get::<Transform>(root).expect("the root").translation,
+            sink.base.translation,
+            "the server pose is restored"
+        );
+    }
+
+    /// A ship that is already dead when it enters view (streamed corpse, reconnect) is built in the
+    /// dead look and has no death swap to start the wreck, so `start_dead_ship_sinks` places it at the
+    /// end pose (inferred) and carries the burning 25 % prefab's fire.
+    #[test]
+    fn an_announced_dead_ship_starts_at_its_sunk_pose_and_burns() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(look) = db.vehicle_look(393) else { return };
+        let variants = db.vehicle_variants(393).expect("the Eznan Cutter's rows");
+        let max_hp = db.slave_max_hp(21, 50).expect("Eznan Cutter template 21's MaxHealth");
+        let mut unit = slave_unit_kind(7, 21, 21, 393, 0, max_hp);
+        unit.dead = true;
+        let variant = variants.for_state(6).to_string();
+        let mut units = Units::default();
+        units.apply(&aa_net::Event::UnitSpawned(Box::new(unit.clone())));
+        let mut app = damage_app(
+            &db,
+            VehicleLook { normal: variant.clone(), wheels: look.wheels },
+            unit,
+            6,
+            variant,
+            max_hp,
+            true,
+        );
+        app.insert_resource(units);
+        app.update();
+        let root = app.world().resource::<DamageRoot>().0;
+        let sink = *app.world().get::<WreckSink>(root).expect("the announced dead ship sinks");
+        assert!(sink.finished, "it starts at its end pose");
+        let transform = *app.world().get::<Transform>(root).expect("the root");
+        assert!(
+            transform.translation.y < -10.0,
+            "the wreck starts under the waterline: {transform:?}"
+        );
+        let names = effect_names(&mut app, root);
+        assert!(
+            names.iter().any(|name| name == "x2_effects.e_effect.ship_damage_fireflame"),
+            "the announced-dead wreck burns: {names:?}"
+        );
+    }
+
+    /// The Eznan Cutter's damage stages and wreck use the real prefab effects: the 25 % hull
+    /// (`galleon.damaged75`) burns at its aft deck, the dead look has no `_dead_effect` explosion and
+    /// carries the water-destroy burst. Its hp25/50/75 repair doodads (`slave_healing_point_doodads`)
+    /// and the 16 death debris (`slave_drop_doodads`) all have readable models, so SCDoodadCreated
+    /// draws them.
+    #[test]
+    fn the_eznan_cutters_damage_effects_and_doodads_are_readable() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let damaged = super::super::data::prefab_effects_named(
+            "prefab://Prefabs/galleon.xml/galleon.damaged75",
+        );
+        assert!(
+            damaged.iter().any(|effect| {
+                effect.active
+                    && effect.effect.effect.eq_ignore_ascii_case(
+                        "X2_EFFECTS.e_effect.ship_damage_fireflame",
+                    )
+            }),
+            "the 25 % hull's aft-deck fire"
+        );
+        let dead = super::super::data::prefab_effects_named(
+            "prefab://Prefabs/galleon.xml/galleon.dead",
+        );
+        assert!(
+            !dead.iter().any(|effect| effect.name.eq_ignore_ascii_case("_dead_effect")),
+            "no explosion on ship death"
+        );
+        assert!(dead.iter().any(|effect| {
+            effect.active
+                && effect
+                    .effect
+                    .effect
+                    .eq_ignore_ascii_case("X2_EFFECTS.e_effect.caraval_water_destroy")
+        }));
+        // slave 21's four hp repair doodads and its 16 debris doodads (12 planks + chest + helm +
+        // figurehead + net mass)
+        for (template, phase) in [
+            (2510, 5510),
+            (2511, 5511),
+            (2512, 5512),
+            (2513, 5342),
+            (1327, 2140),
+            (1322, 2130),
+            (1323, 2132),
+            (1324, 2134),
+            (1330, 2146),
+        ] {
+            let reference = db
+                .doodad_phase_visual(template, phase)
+                .unwrap_or_else(|| panic!("doodad {template} phase {phase} has a model"));
+            let parts = super::super::housing::prefab::load(&reference);
+            let models = if parts.is_empty() {
+                vec![reference.clone()]
+            } else {
+                parts.into_iter().map(|part| part.model).collect()
+            };
+            for model in models {
+                assert!(
+                    aa_cry::mesh::Model::load(&model).is_ok(),
+                    "doodad {template} model {model} is readable"
+                );
+            }
+        }
+    }
+
     /// The dead `_dead_effect` burst is spawned unprimed and actually retires when its simulation ends; the
     /// continuous smoke stays.
     #[test]
@@ -2939,11 +3732,22 @@ mod tests {
                         dead_effect_played: false,
                     },
                 ));
+                // a freshly announced unit draws its state's standing effects (units::spawn_unit)
+                spawn_state_effects(&mut commands, root, &variant, false);
                 commands.insert_resource(DamageRoot(root));
             },
         );
         if finish {
-            app.add_systems(Update, (update_damage, finish_damage_swaps).chain());
+            app.add_systems(
+                Update,
+                (
+                    update_damage,
+                    finish_damage_swaps,
+                    start_dead_ship_sinks,
+                    sink_ship_wrecks,
+                )
+                    .chain(),
+            );
         } else {
             app.add_systems(Update, update_damage);
         }

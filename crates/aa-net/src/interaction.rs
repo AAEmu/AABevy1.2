@@ -169,8 +169,9 @@ pub enum InteractEvent {
     /// (`OnDoodadCompleteQuest`, x2game `FUN_391dc050`, reads the same `bc` + `u32` pair as the
     /// accept packet).
     DoodadCompleteQuest { doodad_obj_id: u32, quest_id: u32 },
-    /// `SCQuestRewardedByMail`: the rewards of these quests were sent by mail (the bag was full).
-    RewardedByMail { quests: Vec<u32> },
+    /// `SCQuestRewardedByMail`: the rewards of quest `quest` were sent by mail (the bag was full);
+    /// `success` 0 means the mail could not be sent (`QUEST_ERROR_INFO` error 0xb).
+    RewardedByMail { success: bool, quest: u32 },
     /// `SCNpcChatMessage`: an NPC says something (`kind` 1: the text `text_id` of the client's table,
     /// else `message`).
     NpcChat { chat_type: i16, faction_id: u32, npc_obj_id: u32, npc_name: String, character_obj_id: u32, kind: u8, text_id: u32, message: String },
@@ -213,12 +214,9 @@ impl InteractEvent {
             sc::SCDoodadQuestAcceptPacket => Self::DoodadQuestAccept { doodad_obj_id: r.bc()?, quest_id: r.u32()? },
             sc::SCDoodadCompleteQuestPacket => Self::DoodadCompleteQuest { doodad_obj_id: r.bc()?, quest_id: r.u32()? },
             sc::SCQuestRewardedByMailPacket => {
-                let n = r.u8()?;
-                let mut quests = Vec::with_capacity(usize::from(n));
-                for _ in 0..n {
-                    quests.push(r.u32()?);
-                }
-                Self::RewardedByMail { quests }
+                // FUN_397b5ec0 reads "success" (u8) and one quest id; the server's single-quest
+                // packet (a count byte of 1 and the id) has the same bytes.
+                Self::RewardedByMail { success: r.u8()? != 0, quest: r.u32()? }
             }
             _ => {
                 let chat_type = r.i16()?;
@@ -314,10 +312,22 @@ mod tests {
         }
         let e = InteractEvent::read(sc::SCDoodadQuestAcceptPacket, &mut Reader::new(&[1, 2, 0, 250, 0, 0, 0])).unwrap();
         assert_eq!(e, InteractEvent::DoodadQuestAccept { doodad_obj_id: 0x201, quest_id: 250 });
+        // FUN_397b5ec0: "success" u8 and one quest id.
+        let bytes = [1, 1, 0, 0, 0];
+        let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes)).unwrap();
+        assert_eq!(e, InteractEvent::RewardedByMail { success: true, quest: 1 });
+        let bytes = [0, 2, 0, 0, 0];
+        let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes)).unwrap();
+        assert_eq!(e, InteractEvent::RewardedByMail { success: false, quest: 2 });
+        // FUN_3937a520 tests the byte against 0: any other value is success.
+        let bytes = [2, 1, 0, 0, 0];
+        let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes)).unwrap();
+        assert_eq!(e, InteractEvent::RewardedByMail { success: true, quest: 1 });
+        for cut in 0..bytes.len() {
+            assert!(InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&bytes[..cut])).is_err());
+        }
         let e = InteractEvent::read(sc::SCDoodadCompleteQuestPacket, &mut Reader::new(&[1, 2, 0, 250, 0, 0, 0])).unwrap();
         assert_eq!(e, InteractEvent::DoodadCompleteQuest { doodad_obj_id: 0x201, quest_id: 250 });
-        let e = InteractEvent::read(sc::SCQuestRewardedByMailPacket, &mut Reader::new(&[2, 1, 0, 0, 0, 2, 0, 0, 0])).unwrap();
-        assert_eq!(e, InteractEvent::RewardedByMail { quests: vec![1, 2] });
         assert!(InteractEvent::handles(0x07b) && InteractEvent::handles(0x14d) && !InteractEvent::handles(0x147));
         with_world_tail(
             sc::SCDoodadCompleteQuestPacket,

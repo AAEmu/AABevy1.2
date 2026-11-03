@@ -172,3 +172,115 @@ pub(in crate::hud) fn run_vehicle_bar() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+/// The stock Summon Info window (`slave_info.alb`) over the driven Red Farm Hauler (slave 146):
+/// `showSlaveInfo` opens it, the header is the received name and the slave template's localized
+/// classification, and the two motion rows read the local controller live. The example draws the
+/// original window so `--shot` captures it. Needs `AA_PAK` and `AA_DB`.
+pub(in crate::hud) fn run_summon_info() {
+    use aa_net::model::UnitKind;
+    use aa_net::{Event, Pos};
+    use bevy::prelude::*;
+
+    let (width, height) = aa_dev::DevArgs::from_env().size;
+    let (rt, state, path) =
+        crate::hud::breath::fixture::runtime(width as f32, height as f32).unwrap();
+    let own = crate::hud::expansion::fixture::spawn();
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::CharacterSelected(Box::new(own.state.clone())),
+        None,
+    );
+    crate::hud::enchant::dispatch(Some(&rt), &state, &Event::PlayerSpawn(Box::new(own)), None);
+    let mut hauler = crate::hud::expansion::fixture::spawn().unit;
+    hauler.obj_id = 20;
+    hauler.name = "Red Farm Hauler".into();
+    hauler.kind = UnitKind::Slave {
+        id: 6,
+        tl_id: 8,
+        template_id: 146,
+        summoner_id: 100,
+    };
+    hauler.model_id = 1553;
+    hauler.pos = Pos::new(10.0, 10.0, 0.0);
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitSpawned(Box::new(hauler)),
+        None,
+    );
+    crate::hud::enchant::dispatch(
+        Some(&rt),
+        &state,
+        &Event::UnitAttached {
+            obj_id: 100,
+            mount: 20,
+            point: 1,
+            reason: 1,
+        },
+        None,
+    );
+    {
+        let mut data = state.borrow_mut();
+        data.mounted.local_cart = Some(crate::hud::mounted::LocalCart {
+            obj_id: 20,
+            speed: 0.0,
+            turn_rate: 0.0,
+        });
+        super::run_function(
+            &mut data,
+            super::Function::ShowSlaveInfo,
+            web_time::Instant::now(),
+        );
+    }
+    super::ready(Some(&rt), &state);
+    aa_ui::lua::tick(&rt.lua, 16.);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame and slaveInfoFrame:IsVisible(), 'Summon Info window')
+        assert(slaveInfoFrame.name:GetText() == 'Red Farm Hauler')
+        assert(slaveInfoFrame.kind:GetText() == locale.map.slaveKind('machine'), 'Production Equipment')
+        assert(slaveInfoFrame.class:GetText() == 'Red Farm Hauler')
+        assert(slaveInfoFrame.moveSpeed:GetText() == '0 '..locale.util.speed_unit,
+               slaveInfoFrame.moveSpeed:GetText())
+        assert(slaveInfoFrame.turnSpeed:GetText() == '0 '..locale.util.rotation_unit,
+               slaveInfoFrame.turnSpeed:GetText())
+    "#,
+        )
+        .exec()
+        .unwrap();
+    state.borrow_mut().mounted.local_cart = Some(crate::hud::mounted::LocalCart {
+        obj_id: 20,
+        speed: 5.0,
+        turn_rate: 0.4,
+    });
+    aa_ui::lua::tick(&rt.lua, 16.);
+    rt.lua
+        .load(
+            r#"
+        assert(slaveInfoFrame.moveSpeed:GetText() == '5 '..locale.util.speed_unit,
+               slaveInfoFrame.moveSpeed:GetText())
+        assert(slaveInfoFrame.turnSpeed:GetText() == '22.9 '..locale.util.rotation_unit,
+               slaveInfoFrame.turnSpeed:GetText())
+    "#,
+        )
+        .exec()
+        .unwrap();
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    App::new()
+        .add_plugins((
+            aa_dev::default_plugins("aa-client: original Summon Info window"),
+            aa_dev::DevPlugin,
+        ))
+        .add_plugins(aa_ui::UiPlugin {
+            config: Some(crate::login::host::ui_config()),
+        })
+        .insert_non_send(rt)
+        .insert_non_send(crate::hud::api::HudBridge(state))
+        .run();
+    if path.exists() {
+        std::fs::remove_file(path).unwrap();
+    }
+}

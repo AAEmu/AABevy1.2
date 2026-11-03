@@ -1,7 +1,7 @@
 //! One full batch request; UI progress follows observed local CraftEffect casts.
 use super::super::api::{HudBridge, HudData, Shared};
 use super::bench::Bench;
-use aa_net::state::{Doodads, Player};
+use aa_net::state::{Doodads, Player, Units};
 use aa_net::{Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -160,7 +160,7 @@ impl Batch {
     }
 }
 
-fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
+pub(super) fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
     if data.character_id == 0 || count <= 0 || data.crafting.batch.left > 0 {
         return;
     }
@@ -177,7 +177,16 @@ fn queue(data: &mut HudData, recipe: u32, object: u32, count: i32) {
     }
 }
 
-fn command(data: &HudData, doodads: &Doodads, owner: u32, request: Request) -> Option<Command> {
+/// Why a batch request sends nothing. Only the range check has a native message
+/// (`FUN_394d6dc0` -> `FUN_39428370(0x9a)` = `TOO_FAR_AWAY`); the other stale/invalid cases are
+/// silent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Refusal {
+    Silent,
+    OutOfRange,
+}
+
+fn command(data: &HudData, doodads: &Doodads, units: &Units, owner: u32, request: Request) -> Result<Command, Refusal> {
     let Request::Start {
         owner: quoted_owner,
         bench,
@@ -185,24 +194,29 @@ fn command(data: &HudData, doodads: &Doodads, owner: u32, request: Request) -> O
         count,
     } = request
     else {
-        return None;
+        return Err(Refusal::Silent);
     };
     if owner == 0 || owner != quoted_owner || data.character_id != owner || data.crafting.batch.left > 0 || count <= 0 {
-        return None;
+        return Err(Refusal::Silent);
     }
     if data.crafting.current.active != Some(bench) || !data.crafting.current.recipes.contains(&recipe) {
-        return None;
+        return Err(Refusal::Silent);
     }
-    let actual = doodads.by_id.get(&bench.object)?;
+    let actual = doodads.by_id.get(&bench.object).ok_or(Refusal::Silent)?;
     if actual.template_id != bench.template {
-        return None;
+        return Err(Refusal::Silent);
     }
-    let game = data.game.get()?;
-    let definition = game.crafting.recipes.get(&recipe)?;
+    // Native `FUN_394d6dc0` rechecks `FUN_39093800` with `max_interaction_doodad_distance`
+    // (2.1 m surface gap) before `CSExecuteCraft` and shows 0x9a (`TOO_FAR_AWAY`) when it fails.
+    if !super::super::doodad::in_interaction_reach(data, doodads, units, bench.object) {
+        return Err(Refusal::OutOfRange);
+    }
+    let game = data.game.get().ok_or(Refusal::Silent)?;
+    let definition = game.crafting.recipes.get(&recipe).ok_or(Refusal::Silent)?;
     if !game.crafting.craft_skills.contains(&definition.skill) {
-        return None;
+        return Err(Refusal::Silent);
     }
-    Some(Command::ExecuteCraft {
+    Ok(Command::ExecuteCraft {
         craft_id: recipe,
         doodad_obj_id: bench.object,
         count,
@@ -237,6 +251,14 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
+    let state = bridge.clone();
+    craft.set(
+        "EndCraftingInteraction",
+        lua.create_function(move |_, _: Value| {
+            state.borrow_mut().crafting.requests.push(Request::Close);
+            Ok(())
+        })?,
+    )?;
     let interaction: Table = lua.globals().get("X2Interaction")?;
     let prior: mlua::Function = interaction.get("CancelInteraction")?;
     let state = bridge.clone();
@@ -260,7 +282,9 @@ pub(super) fn update(
     bridge: NonSend<HudBridge>,
     player: Res<Player>,
     doodads: Res<Doodads>,
+    units: Res<Units>,
     mut net: MessageWriter<NetCommand>,
+    mut show: MessageWriter<super::super::alerts::ShowError>,
 ) {
     let Some(rt) = rt else {
         events.clear();
@@ -270,6 +294,7 @@ pub(super) fn update(
     let owner = player.spawn.as_ref().map_or(0, |s| s.character().id);
     let mut fires = Vec::new();
     let mut messages = Vec::new();
+    let mut errors = Vec::new();
     let mut ended_interaction = false;
     {
         let mut data = bridge.0.borrow_mut();
@@ -296,20 +321,18 @@ pub(super) fn update(
                 fires.extend(failed_links(&data, notice).into_iter().map(Fire::Failed));
             }
         }
-        if data
-            .crafting
-            .current
-            .active
-            .is_some_and(|b| !doodads.by_id.get(&b.object).is_some_and(|d| d.template_id == b.template))
-        {
-            ended_interaction = super::bench::close(&mut data);
-        }
+        // Requests first: a request that is out of range is answered with 0x9a by
+        // `FUN_394d6dc0`; the monitor below then closes the interaction through `393b7aa0`.
         for request in std::mem::take(&mut data.crafting.requests) {
             match request {
                 Request::Start { recipe, bench, count, .. } => {
-                    if let Some(command) = command(&data, &doodads, owner, request) {
-                        data.crafting.batch.start(recipe, bench.object, count);
-                        net.write(NetCommand(command));
+                    match command(&data, &doodads, &units, owner, request) {
+                        Ok(command) => {
+                            data.crafting.batch.start(recipe, bench.object, count);
+                            net.write(NetCommand(command));
+                        }
+                        Err(Refusal::OutOfRange) => errors.push(0x9a),
+                        Err(Refusal::Silent) => {}
                     }
                 }
                 Request::Stop => {
@@ -319,6 +342,14 @@ pub(super) fn update(
                 }
                 Request::Close => ended_interaction |= super::bench::close(&mut data),
             }
+        }
+        // Native `393b7e40` monitors the active interaction with the same 2.1 m predicate and
+        // closes through `393b7aa0` (INTERACTION_END) when the doodad is gone or out of range.
+        if data.crafting.current.active.is_some_and(|b| {
+            !doodads.by_id.get(&b.object).is_some_and(|d| d.template_id == b.template)
+                || !super::super::doodad::in_interaction_reach(&data, &doodads, &units, b.object)
+        }) {
+            ended_interaction |= super::bench::close(&mut data);
         }
     }
     for fire in fires {
@@ -332,6 +363,9 @@ pub(super) fn update(
     if ended_interaction {
         rt.fire_event("INTERACTION_END", ());
     }
+    for code in errors {
+        show.write(super::super::alerts::ShowError(code));
+    }
     for message in messages {
         rt.fire_event("SYSMSG", message);
     }
@@ -342,6 +376,33 @@ mod tests {
     use super::*;
     use aa_net::buff::BuffCaster;
     use aa_net::skill::{SkillFired, SkillStarted, SkillTarget};
+
+    /// Native `FUN_394d6dc0` refuses an out-of-range request with `TOO_FAR_AWAY` before the
+    /// server sees it (the pak-free half of the refusal; the `ShowError` wiring is in
+    /// `crafting/tests.rs`).
+    #[test]
+    fn an_out_of_range_craft_request_is_refused_with_too_far_away() {
+        let mut data = HudData::default();
+        data.character_id = 47;
+        data.pos = Vec3::new(0.0, 10.0, 0.0);
+        data.player_radius = 0.0;
+        let mut game = super::super::super::data::GameData::default();
+        game.crafting = super::super::fixture_tables([(568, vec![5557])]);
+        assert!(data.game.0.set(game).is_ok());
+        assert_eq!(super::super::bench::open(&mut data, 300, 568), Some(1));
+        let quote = Request::Start {
+            owner: 47,
+            bench: Bench { object: 300, template: 568 },
+            recipe: 5557,
+            count: 3,
+        };
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, super::super::fixture::doodad());
+        assert!(
+            matches!(command(&data, &doodads, &Units::default(), 47, quote), Err(Refusal::OutOfRange)),
+            "the out-of-range request is answered with 0x9a"
+        );
+    }
 
     #[test]
     fn failure_notice_item_links_preserve_duplicates_and_do_not_change_batch() {
@@ -480,13 +541,13 @@ mod tests {
             count: 3,
         };
         assert!(
-            command(&bridge.borrow(), &doodads, 46, quote).is_none(),
+            matches!(command(&bridge.borrow(), &doodads, &Units::default(), 46, quote), Err(Refusal::Silent)),
             "a changed character invalidates the button request"
         );
         let mut replaced = doodads.clone();
         replaced.by_id.get_mut(&300).unwrap().template_id = 2241;
         assert!(
-            command(&bridge.borrow(), &replaced, 47, quote).is_none(),
+            matches!(command(&bridge.borrow(), &replaced, &Units::default(), 47, quote), Err(Refusal::Silent)),
             "an object ID reused for a different bench is stale"
         );
         let mut app = App::new();
@@ -497,8 +558,10 @@ mod tests {
                 spawn: Some(super::super::super::expansion::fixture::spawn()),
             })
             .insert_resource(doodads)
+            .insert_resource(Units::default())
             .add_message::<NetEvent>()
             .add_message::<NetCommand>()
+            .add_message::<super::super::super::alerts::ShowError>()
             .add_systems(Update, update);
         let drain = |app: &mut App| app.world_mut().resource_mut::<Messages<NetCommand>>().drain().map(|v| v.0).collect::<Vec<_>>();
         let click = |app: &App, widget: &str| super::super::super::expansion::fixture::click(app.world().non_send::<UiRuntime>(), widget);
