@@ -250,6 +250,10 @@ pub struct GameData {
     pub zones: HashMap<u32, (u32, u32)>,
     /// `zone_groups.id` -> name, map rectangle.
     pub zone_groups: HashMap<u32, ZoneGroup>,
+    /// `zones.zone_key` -> `zones.zone_climate_id` (`FUN_39032470`).
+    pub zone_climate: HashMap<u32, u32>,
+    /// `zone_climate_elems.zone_climate_id` -> its `climate_id`s.
+    pub zone_climate_elems: HashMap<u32, Vec<u32>>,
     /// Item grades by the number the server and the icons use (`item_grades.grade_order`): English name and
     /// colour (`FFBA976D`).
     pub grades: HashMap<i64, (String, String)>,
@@ -780,6 +784,23 @@ impl GameData {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 data.zones.insert(r.get(0)?, (r.get(1)?, r.get::<_, Option<u32>>(2)?.unwrap_or(0)));
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT zone_key, zone_climate_id FROM zones WHERE zone_climate_id IS NOT NULL AND zone_climate_id <> 0")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.zone_climate.insert(r.get(0)?, r.get(1)?);
+            }
+        }
+        {
+            let mut q = conn.prepare("SELECT zone_climate_id, climate_id FROM zone_climate_elems")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.zone_climate_elems
+                    .entry(r.get(0)?)
+                    .or_default()
+                    .push(r.get(1)?);
             }
         }
         {
