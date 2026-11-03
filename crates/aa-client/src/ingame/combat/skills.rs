@@ -1100,6 +1100,53 @@ mod tests {
         assert!(book.plot_event(12144).is_none(), "the hit check step has nothing to show");
     }
 
+    /// Fishing (18711/21571/22106, plots 659/809/903): the steps play `fist_fishing_casting` on the cast,
+    /// `fist_fishing_idle` on the channel start and the `all_ac_stop` marker on the channel end, and the cast
+    /// step's `ProjectileAnim` is the fishing line projectile 359 (`황의 낚시 투사체`).
+    #[test]
+    fn fishing_plots_play_the_cast_idle_and_landing_clips() {
+        let Some(book) = book() else { return };
+        for skill_id in [18_711, 21_571, 22_106] {
+            let skill = book.skill(skill_id).expect("a fishing skill");
+            assert!(skill.plot, "{skill_id}");
+            let steps = book.plot_steps(skill_id);
+            let with = |anim: &str| {
+                steps.iter().find_map(|&id| {
+                    let step = book.plot_event(id)?;
+                    (step.anim.as_deref() == Some(anim)).then_some(step)
+                })
+            };
+            assert!(with("fist_fishing_casting").is_some(), "{skill_id}: the cast clip");
+            assert!(with("fist_fishing_idle").is_some(), "{skill_id}: the channel idle clip");
+            assert!(with("all_ac_stop").is_some(), "{skill_id}: the landing step stops the clip");
+            let line = steps.iter().find_map(|&id| book.plot_event(id).and_then(|s| s.projectile.as_ref().map(|p| p.id)));
+            assert_eq!(line, Some(359), "{skill_id}: the fishing line projectile");
+        }
+    }
+
+    /// Big-fish fishing (21578, plot 821 and the other 대어 plots) plays the same cast/idle/landing clips and
+    /// spawns the fish NPC on its "챔질" (hook) step with a `SpawnFishEffect`. The NPC is an ordinary unit to
+    /// the client (aa-net's `SCNpcCreated`); nothing fishing-specific has to show it.
+    #[test]
+    fn big_fish_plots_play_the_clips_and_spawn_the_fish_on_the_hook() {
+        let Some(book) = book() else { return };
+        let steps = book.plot_steps(21_578);
+        let anims: Vec<_> = steps.iter().filter_map(|&id| book.plot_event(id).map(|s| s.anim.clone())).collect();
+        for clip in ["fist_fishing_casting", "fist_fishing_idle", "all_ac_stop"] {
+            assert!(anims.iter().any(|a| a.as_deref() == Some(clip)), "{clip:?} in {anims:?}");
+        }
+        let inner = book.inner();
+        let spawned: i64 = inner
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM plot_effects pe JOIN plot_events ev ON ev.id = pe.event_id WHERE ev.plot_id = 821 AND pe.actual_type = 'SpawnFishEffect'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(spawned, 1, "the hook step spawns the fish");
+    }
+
     /// The Angry Rat bites with skill 2 and clip id 1 (`fist_co_attack_r`); the plain attack has a hit spark on the target.
     #[test]
     fn melee_and_monster_attacks() {
