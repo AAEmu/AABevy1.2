@@ -457,6 +457,10 @@ pub struct House {
 #[cfg_attr(feature = "bevy", derive(bevy::ecs::resource::Resource))]
 pub struct Houses {
     pub by_tl_id: HashMap<u16, House>,
+    /// The account's own houses (`SCMyHouse`, `SCLoginCharInfoHouse`), kept after the house unit
+    /// leaves view (`UnitsRemoved` only prunes `by_tl_id`). The native player house list
+    /// `DAT_3a167ec4` that `FUN_3932aaf0` walks is this one.
+    pub my_houses: HashMap<u16, HouseSnapshot>,
     /// Character ID to received (name, race), for house sale identity lookups.
     pub character_briefs: HashMap<u32, (String, u8)>,
     /// Last `SCConstructHouseTax` quote; it does not authorize a build.
@@ -508,6 +512,15 @@ impl Houses {
         true
     }
 
+    /// Keeps `SCMyHouse` / `SCLoginCharInfoHouse` as the account's own house list.
+    fn remember_own(&mut self, snapshot: &HouseSnapshot) -> bool {
+        if self.my_houses.get(&snapshot.tl_id) == Some(snapshot) {
+            return false;
+        }
+        self.my_houses.insert(snapshot.tl_id, snapshot.clone());
+        true
+    }
+
     fn mark_demolished(&mut self, tl_id: u16) -> bool {
         let Some(house) = self.by_tl_id.get_mut(&tl_id) else {
             return false;
@@ -533,10 +546,15 @@ impl Houses {
                 self.character_briefs.insert(*character_id, brief);
                 true
             }
-            Event::Housing(HousingEvent::State(snapshot) | HousingEvent::MyHouse(snapshot)) => {
-                self.upsert(snapshot)
+            Event::Housing(HousingEvent::State(snapshot)) => self.upsert(snapshot),
+            Event::Housing(HousingEvent::MyHouse(snapshot)) => {
+                let changed = self.upsert(snapshot);
+                self.remember_own(snapshot) || changed
             }
-            Event::Housing(HousingEvent::LoginCharInfoHouse { house, .. }) => self.upsert(house),
+            Event::Housing(HousingEvent::LoginCharInfoHouse { house, .. }) => {
+                let changed = self.upsert(house);
+                self.remember_own(house) || changed
+            }
             Event::Housing(HousingEvent::BuildProgress {
                 tl_id,
                 model_id,
@@ -572,7 +590,8 @@ impl Houses {
                 true
             }
             Event::Housing(HousingEvent::Demolished { tl_id } | HousingEvent::MyHouseRemoved { tl_id }) => {
-                self.mark_demolished(*tl_id)
+                let own = self.my_houses.remove(tl_id).is_some();
+                self.mark_demolished(*tl_id) || own
             }
             Event::Housing(HousingEvent::Farm(farm)) => replace(&mut self.last_farm, farm.clone()),
             Event::Housing(HousingEvent::TaxInfo(info)) => {
@@ -678,10 +697,12 @@ impl Houses {
             }
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 let changed = !self.by_tl_id.is_empty()
+                    || !self.my_houses.is_empty()
                     || !self.character_briefs.is_empty()
                     || self.construct_quote.is_some()
                     || self.last_farm.is_some();
                 self.by_tl_id.clear();
+                self.my_houses.clear();
                 self.character_briefs.clear();
                 self.construct_quote = None;
                 self.last_farm = None;
@@ -1141,6 +1162,48 @@ pub(crate) mod tests {
             assert!(!world.houses.apply(&reset));
             assert!(world.houses.construct_quote.is_none());
         }
+    }
+
+    /// The native own-house list (`DAT_3a167ec4`, walked by `FUN_3932aaf0`) is built from
+    /// `SCMyHouse` / `SCLoginCharInfoHouse` and is not pruned when the house unit leaves view.
+    #[test]
+    fn the_own_house_list_survives_leaving_view() {
+        let mut houses = Houses::default();
+        let mut own = snapshot();
+        own.tl_id = 12;
+        own.obj_id = 0x010300;
+        assert!(houses.apply(&Event::Housing(HousingEvent::MyHouse(own.clone()))));
+        assert_eq!(houses.my_houses.get(&12), Some(&own));
+        let mut login = snapshot();
+        login.tl_id = 13;
+        login.obj_id = 0x010301;
+        assert!(
+            houses.apply(&Event::Housing(HousingEvent::LoginCharInfoHouse {
+                owner_id: 5,
+                house: login.clone()
+            }))
+        );
+        assert_eq!(houses.my_houses.get(&13), Some(&login));
+
+        assert!(houses.apply(&Event::UnitsRemoved(vec![own.obj_id])));
+        assert!(
+            !houses.by_tl_id.contains_key(&12),
+            "the in-view table drops the house"
+        );
+        assert_eq!(
+            houses.my_houses.get(&12),
+            Some(&own),
+            "the own house list keeps it"
+        );
+
+        assert!(houses.apply(&Event::Housing(HousingEvent::MyHouseRemoved { tl_id: 12 })));
+        assert!(
+            !houses.my_houses.contains_key(&12),
+            "a removal notice drops the own house"
+        );
+        assert!(houses.my_houses.contains_key(&13));
+        assert!(houses.apply(&Event::LeftWorld { target: 0 }));
+        assert!(houses.my_houses.is_empty());
     }
 
     #[test]

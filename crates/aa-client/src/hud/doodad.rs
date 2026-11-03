@@ -412,6 +412,10 @@ pub(super) struct View {
     bounds: HashMap<u32, (Vec3, Vec3)>,
     pointer_pick: Option<u32>,
     arrived: Option<u32>,
+    /// `Houses::my_houses` tl_id -> the zone group its position resolves to, kept per own house so
+    /// `doodad_func_permission` 8 survives the house leaving view and the world being unloaded
+    /// (native `FUN_3932aaf0` walks the own house list `DAT_3a167ec4`).
+    own_house_zones: HashMap<u16, u32>,
 }
 
 /// The doodad tooltip (`DRAW_DOODAD_TOOLTIP` of `interaction.lua`): the name, `Owner: ...` and the time the growth has left.
@@ -537,19 +541,36 @@ fn house_of<'a>(o: &aa_net::model::Doodad, houses: Option<&'a aa_net::Houses>) -
         .find(|h| (o.owner_db_id != 0 && h.db_id == o.owner_db_id) || (o.parent_obj_id != 0 && h.obj_id == o.parent_obj_id))
 }
 
+/// Keeps [`View::own_house_zones`] in step with the account's own houses: a zone group that
+/// resolves once stays cached while the house is still owned, even after its unit leaves view
+/// or the world it stands in is unloaded.
+fn sync_own_house_zones(
+    data: &mut HudData,
+    houses: Option<&aa_net::Houses>,
+    world: Option<&aa_world::World>,
+) {
+    let Some(houses) = houses else {
+        data.doodad.own_house_zones.clear();
+        return;
+    };
+    data.doodad
+        .own_house_zones
+        .retain(|tl, _| houses.my_houses.contains_key(tl));
+    let Some(world) = world else { return };
+    for (tl, house) in &houses.my_houses {
+        if data.doodad.own_house_zones.contains_key(tl) {
+            continue;
+        }
+        if let Some(zone) = zone_group(data, Some(world), to_vec(house.position())) {
+            data.doodad.own_house_zones.insert(*tl, zone);
+        }
+    }
+}
+
 fn player_facts<'a>(data: &'a HudData, env: PermEnv<'a>) -> PlayerFacts<'a> {
-    let house_zone_groups = env.houses.zip(env.world).map(|(houses, world)| {
-        houses
-            .by_tl_id
-            .values()
-            .filter(|h| !h.demolished)
-            .filter(|h| {
-                h.snapshot.owner_id == data.character_id
-                    || (data.account_id != 0 && h.snapshot.account_id == data.account_id)
-            })
-            .filter_map(|h| zone_group(data, Some(world), to_vec(h.snapshot.position())))
-            .collect()
-    });
+    let house_zone_groups = env
+        .houses
+        .map(|_| data.doodad.own_house_zones.values().copied().collect());
     PlayerFacts {
         character_id: data.character_id,
         account_id: data.account_id,
@@ -1067,6 +1088,7 @@ fn track(
         houses: houses.as_deref(),
         world: world_info.as_deref().map(|w| w.0.as_ref()),
     };
+    sync_own_house_zones(&mut d, houses.as_deref(), env.world);
     let focus = find_focus(&d, &doodads, &units, env);
     let slave = super::slave::candidate(&d, &units);
     // The bar: 1.2 puts units (`FUN_393601a0`) and doodads (`FUN_3902f010`) in one set keyed by
@@ -3561,6 +3583,32 @@ mod tests {
         }
     }
 
+    fn house_snapshot(tl_id: u16, obj_id: u32, x: f32, y: f32) -> aa_net::HouseSnapshot {
+        aa_net::HouseSnapshot {
+            tl_id,
+            db_id: u32::from(tl_id),
+            obj_id,
+            template_id: 1,
+            model_id: 1,
+            co_owner_id: 0,
+            owner_id: 47,
+            owner_name: "Me".into(),
+            account_id: 7,
+            permission: 0,
+            all_actions: 0,
+            current_actions: 0,
+            tax: 0,
+            x: aa_net::wire::coord_to_long(x),
+            y: aa_net::wire::coord_to_long(y),
+            z: 0.0,
+            name: "House".into(),
+            allow_recover: false,
+            sell_price: 0,
+            sell_to_player_id: 0,
+            sell_to_name: String::new(),
+        }
+    }
+
     fn perm_doodad(owner_id: u32, house_owner_id: u32, house_account_id: u32, faction: u32, zone_group: Option<u32>) -> DoodadFacts {
         DoodadFacts {
             owner_id,
@@ -3627,6 +3675,55 @@ mod tests {
         assert!(!craft_permitted(craft_perm::OWNER_OR_PARTY, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
         assert!(craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
         assert!(!craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(52, 0, 0, 0, Some(5))));
+    }
+
+    /// Native `FUN_3932aaf0` walks the player's own house list (`DAT_3a167ec4`); the port used
+    /// `Houses::by_tl_id`, which `UnitsRemoved` empties when a house leaves view. The house's zone
+    /// group is kept per own house, so permission 8 still matches out of view.
+    #[test]
+    fn an_own_house_keeps_its_zone_after_it_leaves_view() {
+        let mut data = HudData {
+            character_id: 47,
+            account_id: 7,
+            ..HudData::default()
+        };
+        let mut game = GameData::default();
+        game.zones.insert(129, (5, 148));
+        assert!(data.game.0.set(game).is_ok());
+        let world =
+            aa_world::World::parse_g("name test\ncellX 1\ncellY 1\ncell (x 0, y 0, zones 129)");
+        let own = house_snapshot(12, 0x010300, 100.0, 100.0);
+        let mut houses = aa_net::Houses::default();
+        assert!(
+            houses.apply(&aa_net::Event::Housing(aa_net::HousingEvent::MyHouse(
+                own.clone()
+            )))
+        );
+        sync_own_house_zones(&mut data, Some(&houses), Some(&world));
+        assert_eq!(data.doodad.own_house_zones.get(&12), Some(&5));
+
+        // the house unit leaves view: the in-view table loses it, the own list and zone stay
+        assert!(houses.apply(&aa_net::Event::UnitsRemoved(vec![own.obj_id])));
+        assert!(houses.by_tl_id.is_empty());
+        sync_own_house_zones(&mut data, Some(&houses), Some(&world));
+        let env = PermEnv {
+            houses: Some(&houses),
+            world: Some(&world),
+        };
+        let player = player_facts(&data, env);
+        assert_eq!(player.house_zone_groups, Some(vec![5]));
+        assert!(
+            craft_permitted(
+                craft_perm::ZONE_RESIDENTS,
+                &player,
+                &perm_doodad(5, 0, 0, 0, Some(5))
+            ),
+            "the resident keeps the zone with the house out of view"
+        );
+
+        // the world the house stands in is unloaded: the cached zone stays
+        sync_own_house_zones(&mut data, Some(&houses), None);
+        assert_eq!(data.doodad.own_house_zones.get(&12), Some(&5));
     }
 
     /// Native `393bd290` lists the craft action through the bar's candidate set; the 2.1 m use
