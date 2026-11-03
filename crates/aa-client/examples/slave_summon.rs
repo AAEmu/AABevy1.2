@@ -6,11 +6,15 @@
 //!
 //! `cargo run -p aa-client --example slave_summon -- --mute --offscreen-shot shots/aa-client/slave_summon.png --shot-after 3.0`
 //!
+//! Add `--ship` for the Eznan Cutter rising from the sea (`--shot-after 4` captures it mid-rise).
+//!
 //! The creation packet is sent once the scene is drawn (1.4 s in), so the screencap sees the cart emerging through its
 //! portal. Without `--shot*` the example checks the start/plane, the end after `portal_time`, and the particles
 //! fading out, and exits non-zero on a mismatch.
 
 #![allow(dead_code)]
+#[path = "support/vehicle_preview.rs"]
+mod vehicle_preview;
 #[path = "../src/graphics.rs"]
 mod graphics;
 #[path = "../src/hud/mod.rs"]
@@ -38,7 +42,6 @@ use aa_cry::shade::illum::IllumMaterial;
 use bevy::math::Vec4;
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
-use std::time::Instant;
 
 use ingame::vehicle::SummonPortals;
 use lua_value::lua_int;
@@ -54,22 +57,24 @@ pub enum Screen {
     InGame,
 }
 
-/// The owner test's slave template and its model; the same cart is used for the streamed-in control.
-const SLAVE: u32 = 146;
-const MODEL: u32 = 1553;
+/// The summoned unit and the streamed-in control use the same game template.
+#[derive(Resource)]
+struct Showcase {
+    ship: bool,
+    slave: u32,
+    model: u32,
+    gap: f32,
+    duration: f32,
+}
 const SUMMONED: u32 = 901;
 const STREAMED: u32 = 902;
-const GAP: f32 = 9.0;
 /// When the creation packet is sent (after the carts and their textures are drawn), when the emergence is checked,
 /// when it must have ended (`portal_time` 1.0) and when the effect particles must be gone.
 const ANNOUNCE_AT: f32 = 1.4;
 const DRAWN_AT: f32 = 1.7;
-const ENDED_AT: f32 = 3.0;
-const GONE_AT: f32 = 6.0;
 
 #[derive(Resource, Default)]
 struct Check {
-    start: Option<Instant>,
     announced: bool,
     drawn: bool,
     ended: bool,
@@ -82,7 +87,9 @@ fn main() -> AppExit {
         return AppExit::Success;
     }
     if !aa_anim::GameDb::available() {
-        eprintln!("slave_summon: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)");
+        eprintln!(
+            "slave_summon: skipped, the game database is missing (AA_DB=<server>/compact.sqlite3)"
+        );
         return AppExit::Success;
     }
     let Some(db) = ingame::data::Db::open() else {
@@ -93,9 +100,21 @@ fn main() -> AppExit {
         eprintln!("slave_summon: skipped, the skill database cannot be opened");
         return AppExit::Success;
     };
-    let portal = db.slave_summon_portal(SLAVE).expect("slave 146's summon portal");
-    assert_eq!(portal.fx_group, 1263, "portal_tank_spawn");
-    assert_eq!((portal.scale, portal.time), (3.0, 1.0));
+    let ship = aa_dev::args().iter().any(|a| a == "--ship");
+    let (slave, model, gap) = if ship {
+        (21, 393, 50.0)
+    } else {
+        (146, 1553, 9.0)
+    };
+    let portal = db.slave_summon_portal(slave).expect("the summon portal");
+    assert_eq!(
+        (portal.fx_group, portal.scale, portal.time),
+        if ship {
+            (619, 10.0, 7.0)
+        } else {
+            (1263, 3.0, 1.0)
+        }
+    );
     App::new()
         .add_plugins((
             aa_dev::default_plugins("Slave summon portal"),
@@ -109,11 +128,24 @@ fn main() -> AppExit {
         .insert_state(Screen::InGame)
         .insert_resource(db)
         .insert_resource(book)
+        .insert_resource(Showcase {
+            ship,
+            slave,
+            model,
+            gap,
+            duration: portal.time,
+        })
+        .insert_resource(aa_world::WaterQuery::fixture_sea(
+            "summon",
+            0.0,
+            aa_world::TerrainQuery::fixture_flat("summon", -30.0),
+        ))
         .init_resource::<aa_net::state::Units>()
         .init_resource::<SummonPortals>()
         .init_resource::<Check>()
         .add_message::<aa_net::NetEvent>()
         .add_systems(Startup, (stage, scene).chain())
+        .add_systems(Update, vehicle_preview::wait_for_pipelines)
         .add_systems(
             Update,
             (
@@ -133,15 +165,22 @@ fn main() -> AppExit {
 }
 
 fn stage(
+    showcase: Res<Showcase>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let width = GAP * 3.0;
+    let width = showcase.gap * 3.0;
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(width * 0.5, 7.0, 12.0)
-            .looking_at(Vec3::new(width * 0.5 - GAP * 0.5, 1.0, 0.0), Vec3::Y),
+        if showcase.ship {
+            Transform::from_xyz(72.0, 30.0, 72.0).looking_at(Vec3::new(20.0, 5.0, 0.0), Vec3::Y)
+        } else {
+            Transform::from_xyz(width * 0.5, 7.0, 12.0).looking_at(
+                Vec3::new(width * 0.5 - showcase.gap * 0.5, 1.0, 0.0),
+                Vec3::Y,
+            )
+        },
     ));
     commands.spawn((
         DirectionalLight {
@@ -153,19 +192,23 @@ fn stage(
     ));
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::default().mesh().size(width + 40.0, 80.0))),
-        MeshMaterial3d(materials.add(Color::srgb(0.16, 0.19, 0.21))),
-        Transform::from_xyz(width * 0.5, 0.0, 0.0),
+        MeshMaterial3d(materials.add(if showcase.ship {
+            Color::srgb(0.05, 0.18, 0.3)
+        } else {
+            Color::srgb(0.16, 0.19, 0.21)
+        })),
+        Transform::from_xyz(width * 0.5, if showcase.ship { -0.4 } else { 0.0 }, 0.0),
     ));
 }
 
-fn slave_unit(obj_id: u32) -> aa_net::model::Unit {
+fn slave_unit(obj_id: u32, showcase: &Showcase) -> aa_net::model::Unit {
     aa_net::model::Unit {
         obj_id,
-        name: format!("red farm hauler {obj_id}"),
+        name: format!("summon control {obj_id}"),
         kind: aa_net::model::UnitKind::Slave {
-            id: SLAVE,
+            id: showcase.slave,
             tl_id: obj_id as u16,
-            template_id: SLAVE,
+            template_id: showcase.slave,
             summoner_id: 1,
         },
         owner_name: String::new(),
@@ -173,7 +216,7 @@ fn slave_unit(obj_id: u32) -> aa_net::model::Unit {
         rotation: [0.0; 3],
         scale: 1.0,
         level: 50,
-        model_id: MODEL,
+        model_id: showcase.model,
         equipment: aa_net::model::Equipment::default(),
         model_params: aa_net::model::ModelParams::default(),
         hp: 100,
@@ -206,21 +249,25 @@ fn slave_unit(obj_id: u32) -> aa_net::model::Unit {
 }
 
 fn scene(
+    showcase: Res<Showcase>,
     mut commands: Commands,
     mut cry: aa_cry::scene::CryAssets,
     clips: Res<aa_anim::ClipLibrary>,
     db: Res<ingame::data::Db>,
     mut units: ResMut<aa_net::state::Units>,
 ) {
-    let look = db.vehicle_look(MODEL).expect("the Red Farm Hauler's look");
-    let max_hp = db.slave_max_hp(SLAVE, 50).expect("slave 146's MaxHealth");
+    let look = db.vehicle_look(showcase.model).expect("the vehicle look");
+    let max_hp = db
+        .slave_max_hp(showcase.slave, 50)
+        .expect("the vehicle MaxHealth");
     let loader = cry.loader();
     let rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
     for (i, obj_id) in [SUMMONED, STREAMED].into_iter().enumerate() {
-        let unit = slave_unit(obj_id);
+        let unit = slave_unit(obj_id, &showcase);
         let pieces = ingame::vehicle::prepare(&loader, &look);
         assert!(!pieces.is_empty(), "the Red Farm Hauler has parts");
-        let transform = Transform::from_xyz(i as f32 * GAP, 0.0, 0.0).with_rotation(rotation);
+        let transform =
+            Transform::from_xyz(i as f32 * showcase.gap, 0.0, 0.0).with_rotation(rotation);
         let root = ingame::vehicle::spawn(&mut commands, &mut cry, &clips, pieces, transform);
         commands.entity(root).insert((
             ingame::units::RemoteUnit::announced(&unit),
@@ -241,6 +288,8 @@ fn scene(
 
 #[allow(clippy::too_many_arguments)]
 fn check(
+    time: Res<Time>,
+    showcase: Res<Showcase>,
     mut check: ResMut<Check>,
     mut writer: MessageWriter<aa_net::NetEvent>,
     effects: Query<(&aa_fx::Effect, &ingame::vehicle::SummonPortalEffect)>,
@@ -251,8 +300,7 @@ fn check(
     materials: Query<&MeshMaterial3d<IllumMaterial>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let start = *check.start.get_or_insert_with(Instant::now);
-    let elapsed = start.elapsed().as_secs_f32();
+    let elapsed = time.elapsed_secs();
     // `SCSlaveCreatedPacket` for the first cart only; the second one is the streamed-in control. Sent after the scene is
     // up so a screencap sees the cart emerging through its portal.
     if !check.announced && elapsed >= ANNOUNCE_AT {
@@ -270,18 +318,51 @@ fn check(
         check.announced = true;
     }
     if check.announced && !check.drawn && elapsed >= DRAWN_AT {
-        let names: Vec<&str> = effects.iter().map(|(effect, _)| effect.name.as_str()).collect();
-        assert_eq!(names.len(), 2, "the summoned cart's portal: {names:?}");
-        assert!(names.iter().any(|name| name.ends_with("portal_tank_main")), "{names:?}");
-        assert!(names.iter().any(|name| name.ends_with("portal_tank_main_start")), "{names:?}");
+        let names: Vec<&str> = effects
+            .iter()
+            .map(|(effect, _)| effect.name.as_str())
+            .collect();
+        assert!(
+            !names.is_empty(),
+            "the summoned vehicle's portal: {names:?}"
+        );
+        if !showcase.ship {
+            assert_eq!(names.len(), 2, "the summoned cart's portal: {names:?}");
+            assert!(
+                names.iter().any(|name| name.ends_with("portal_tank_main")),
+                "{names:?}"
+            );
+            assert!(
+                names
+                    .iter()
+                    .any(|name| name.ends_with("portal_tank_main_start")),
+                "{names:?}"
+            );
+        }
         let (transform, emergence) = roots.single().expect("the summoned cart's emergence");
         assert!(!emergence.ended, "the emergence is still running");
         let path = (emergence.end - emergence.start).length();
         let progress = (transform.translation - emergence.start).length() / path;
-        assert!(progress > 0.0 && progress < 1.0, "the cart is emerging: {progress}");
-        assert!((emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length() < 1e-3);
+        assert!(
+            progress > 0.0 && progress < 1.0,
+            "the cart is emerging: {progress}"
+        );
+        if showcase.ship {
+            assert!(emergence.buoyant);
+            assert_eq!(emergence.clip_normal, Vec3::Y);
+            assert!(transform.translation.y < emergence.end.y);
+            assert!(transform.rotation.angle_between(emergence.end_rotation) > 0.1);
+        } else {
+            assert!(
+                (emergence.plane - (emergence.end - emergence.axis * emergence.extent)).length()
+                    < 1e-3
+            );
+        }
         let (_, anchor) = anchors.single().expect("the portal anchor");
-        assert!((anchor.translation - emergence.plane).length() < 1e-3, "{anchor:?}");
+        assert!(
+            (anchor.translation - emergence.plane).length() < 1e-3,
+            "{anchor:?}"
+        );
         let clipped = illum
             .as_deref()
             .map(|illum| {
@@ -292,7 +373,10 @@ fn check(
                     .count()
             })
             .unwrap_or(0);
-        assert!(clipped > 0, "the emerging cart's Illum materials are clipped at the plane");
+        assert!(
+            clipped > 0,
+            "the emerging cart's Illum materials are clipped at the plane"
+        );
         info!(
             "slave_summon: emergence start {:?} plane {:?} end {:?}, portal {}",
             emergence.start,
@@ -302,10 +386,14 @@ fn check(
         );
         check.drawn = true;
     }
-    if check.drawn && !check.ended && elapsed >= ENDED_AT {
+    if check.drawn && !check.ended && elapsed >= ANNOUNCE_AT + showcase.duration + 0.6 {
         let (transform, emergence) = roots.single().expect("the summoned cart's emergence");
         assert!(emergence.ended, "the emergence ends at portal_time");
-        assert!((transform.translation - emergence.end).length() < 1e-3, "{:?}", transform.translation);
+        assert!(
+            (transform.translation - emergence.end).length() < 1e-3,
+            "{:?}",
+            transform.translation
+        );
         assert!(
             effects.iter().all(|(_, marker)| marker.stopped),
             "the portal stops emitting at the end event 5"
@@ -324,10 +412,17 @@ fn check(
         info!("slave_summon: emergence ended at {:?}", emergence.end);
         check.ended = true;
     }
-    if check.ended && !check.gone && elapsed >= GONE_AT {
-        let left: Vec<&str> = portal_fx.iter().map(|effect| effect.name.as_str()).filter(|name| name.contains("portal_tank")).collect();
+    if check.ended && !check.gone && elapsed >= ANNOUNCE_AT + showcase.duration + 3.6 {
+        let left: Vec<&str> = portal_fx
+            .iter()
+            .map(|effect| effect.name.as_str())
+            .filter(|name| name.contains("portal_tank"))
+            .collect();
         assert!(left.is_empty(), "the portal particles fade out: {left:?}");
-        assert!(effects.is_empty(), "the capped portal effects are despawned");
+        assert!(
+            effects.is_empty(),
+            "the capped portal effects are despawned"
+        );
         info!("slave_summon: ok (emergence, portal end and the streamed-in control match 1.2)");
         check.gone = true;
         if !aa_dev::args()
