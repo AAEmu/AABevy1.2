@@ -529,7 +529,7 @@ class Session:
             return None
         info = None
         try:
-            self.mcp.text("client_video", pid=self.pid, action="stop", path=str(self.video_path))
+            self.mcp.text("client_video", pid=self.pid, action="stop")
         except Exception as error:
             self.warn(f"client_video stop: {error}")
         sidecar = Path(str(self.video_path) + ".json")
@@ -707,6 +707,35 @@ def connect(args: argparse.Namespace, out_dir: Path | None) -> tuple[Mcp, Sessio
     return mcp, Session(mcp, args.pid, out_dir, args)
 
 
+# The follow camera of r208022 (tools/camera_probe.py): camera::g_camera = x2game+0xb0e2b8 -> +0x20 the wheel's wanted distance (m),
+# +0x84 the yaw offset from the heading (radians). There is no Lua or cvar for either (cl_tpvYaw is not read by this camera), so
+# the runner writes the two floats; the camera keeps them until the wheel or a mouse drag changes them.
+CAMERA_GLOBAL_RVA = 0xB0E2B8
+
+
+def set_camera(pid: int, yaw_deg: float, distance: float) -> None:
+    import ctypes
+    import math
+    import struct
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    sys.path.insert(0, str(HERE.parent / "combat-side"))
+    from record_original import Mem  # noqa: E402
+
+    mem = Mem(pid)
+    camera = mem.u32(mem.module_base("x2game.dll") + CAMERA_GLOBAL_RVA)
+    if not camera:
+        raise RuntimeError("no follow camera")
+    handle = k.OpenProcess(0x0008 | 0x0020, False, pid)   # PROCESS_VM_OPERATION | PROCESS_VM_WRITE
+    try:
+        for offset, value in ((0x20, distance), (0x84, math.radians(yaw_deg))):
+            written = ctypes.c_size_t()
+            if not k.WriteProcessMemory(handle, ctypes.c_void_p(camera + offset), struct.pack("<f", value), 4, ctypes.byref(written)):
+                raise RuntimeError(f"camera write failed ({ctypes.get_last_error()})")
+    finally:
+        k.CloseHandle(handle)
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     plan = planlib.load_plan(args.plan) if args.plan else None
     if not args.target_name and plan:
@@ -794,6 +823,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         session.install_hooks()
         session.install_samplers()
         session.start_trace()
+        if args.camera:
+            set_camera(args.pid, *args.camera)
         if args.video:
             session.start_video(out_dir / "video.mp4", args.fps, args.ffmpeg)
         for batch in batches:
@@ -804,6 +835,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             for skill in batch["skills"]:
                 log("skill", skill["id"], skill.get("name"), "slot", skill["slot"], "wait", skill["wait_ms"], "ms")
                 try:
+                    if args.stage:                      # every skill from the same spot, as run_bevy.py --stage does
+                        gm(session, "/clearcombat")         # no auto-attack or combat state carried into the next skill
+                        gm(session, "/move " + args.stage.replace(",", " "), wait=args.stage_settle)
+                    if args.camera:
+                        set_camera(args.pid, *args.camera)
                     session.cast(skill, template, ground, args.stop_key)
                 except DriverGone:
                     raise
@@ -880,6 +916,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-id", default=None)
     p.add_argument("--force", action="store_true", help="append to an existing trace.jsonl")
     p.add_argument("--video", action="store_true", help="record orig/video.mp4 with the driver's client_video")
+    p.add_argument("--stage", default=None, help='"x y z": /move here before every skill (the same spot as run_bevy.py --stage)')
+    p.add_argument("--stage-settle", type=float, default=1.5, help="seconds to wait after the --stage move")
+    p.add_argument("--camera", type=lambda v: tuple(float(x) for x in v.split(",")), default=None,
+                   help="YAW_DEG,DISTANCE: the follow camera's yaw offset from the heading and wanted distance, e.g. 90,6.0835 "
+                        "(aa-client: orbit 90, zoom -3)")
     p.add_argument("--fps", type=int, default=30)
     p.add_argument("--ffmpeg", default=None, help="ffmpeg for client_video (the driver's own default when unset)")
     p.add_argument("--ground-click", default=None, help="X,Y screen pixel clicked after a ground skill's reticle shows (else ground skills are skipped)")

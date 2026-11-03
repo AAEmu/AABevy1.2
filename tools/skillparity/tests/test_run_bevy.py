@@ -46,8 +46,8 @@ class BuildScript(unittest.TestCase):
         lua = [l for l in self.lines(text) if l.startswith("lua ")]
         self.assertEqual(len(lua), 1)
         self.assertNotIn("#", lua[0])
-        self.assertIn("X2Action:SetActionSpell(1, 14376)", lua[0])
-        self.assertIn("X2Action:SetActionSpell(2, 10712)", lua[0])
+        self.assertIn("HUD.drag_action_set(1, 'skill', 14376)", lua[0])
+        self.assertIn("HUD.drag_action_set(2, 'skill', 10712)", lua[0])
 
     def test_each_skill_is_target_start_mark_key_wait_end_mark(self):
         text, _ = script_for(setup=False, spawn_doll=False)

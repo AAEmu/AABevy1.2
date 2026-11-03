@@ -57,8 +57,10 @@ RECORD_START = "skillparity:record-start"   # the mark the video recorder waits 
 
 def lua_set_bar(batch: dict, slots_per_page: int) -> str:
     """One `lua` line that clears the bar and puts the batch on it (no `#`: that starts a comment in the script)."""
-    sets = " ".join(f"X2Action:SetActionSpell({int(s)}, {int(i)})" for s, i in sorted(batch["slots"].items(), key=lambda kv: int(kv[0])))
-    return f"lua pcall(function() X2Action:SetActionBarPage(1) for s = 1, {slots_per_page} do X2Action:ClearAction(s) end {sets} end)"
+    # aa-client's own bar path (the drag-and-drop's `HUD.drag_action_set`, which sends CSUpdateActionSlot): aa-client implements
+    # X2Action:SetActionSpell only as a stub, as only the original UI's debug bar calls it. No pcall: a failure fails the script.
+    sets = " ".join(f"HUD.drag_action_set({int(s)}, 'skill', {int(i)})" for s, i in sorted(batch["slots"].items(), key=lambda kv: int(kv[0])))
+    return f"lua for s = 1, {slots_per_page} do HUD.drag_action_set(s) end {sets}"
 
 
 def mark_line(mark_command: str, text: str) -> str:
@@ -71,6 +73,7 @@ def fmt_s(ms: float) -> str:
 
 
 def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = True, move: str | None = None,
+                 stage: str | None = None, stage_settle: float = 1.5,
                  spawn_doll: bool = True, mark_command: str = "trace", ground_click: tuple[int, int] | None = None,
                  camera: list[str] | None = None, video_grace: float = 0.0, extra_gm: list[str] | None = None) -> tuple[str, list[dict]]:
     """The aa-client script text for the batches, and the skills left out (ground skills without a click position)."""
@@ -103,6 +106,10 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
                 lines.append(f"# skill {sid} {skill.get('name')}: ground skill, left out (pass --ground-click X,Y)")
                 continue
             lines.append(f"# skill {sid} {skill.get('name')} (slot {n}, {skill['target']})")
+            if stage:                                   # every skill from the same spot, as run_original.py --stage does
+                sx, sy, sz = re.split(r"[ ,]+", stage.strip())[:3]
+                lines += ["gm clearcombat", "wait 0.8", f"tp {sx} {sy} {sz}", f"wait {stage_settle:g}"]   # as run_original.py
+                lines += [c for c in camera or [] if not c.split()[0] == "zoom"]   # a teleport can turn the camera; zoom is relative
             lines.append("target self" if skill.get("select") == "self" else f"target template:{template}")
             lines.append(f"wait {GRACE_AFTER_START:g}")
             lines.append(mark_line(mark_command, f"skill:{sid}:start"))
@@ -269,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-setup", action="store_true", help="no /level and /ignoreskillcds lines")
     ap.add_argument("--gm", action="append", default=[], help="an extra GM command line (repeatable), e.g. '/ignoreskillcds true'")
     ap.add_argument("--move", default=None, help='"x y z": a `tp` line before the doll is spawned')
+    ap.add_argument("--stage", default=None, help='"x y z": a `tp` line before every skill (the same spot as run_original.py --stage)')
+    ap.add_argument("--stage-settle", type=float, default=1.5, help="seconds to wait after the --stage teleport")
     ap.add_argument("--no-spawn-doll", action="store_true", help="the doll is already there")
     ap.add_argument("--camera-line", action="append", default=[], help="a script line (orbit/zoom/pitch) before the skills, repeatable")
     ap.add_argument("--mark-command", choices=("trace", "echo"), default="trace")
@@ -304,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     script_text, skipped = build_script(
-        plan, batches, run_id=run_id, setup=not args.no_setup, move=args.move, spawn_doll=not args.no_spawn_doll,
+        plan, batches, run_id=run_id, setup=not args.no_setup, move=args.move, stage=args.stage, stage_settle=args.stage_settle,
+        spawn_doll=not args.no_spawn_doll,
         mark_command=args.mark_command, ground_click=parse_pair(args.ground_click), camera=args.camera_line,
         video_grace=args.video_grace if args.video else 0.0, extra_gm=args.gm)
     script = out / "plan.txt"
