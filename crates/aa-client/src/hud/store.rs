@@ -804,7 +804,6 @@ mod tests {
         // fired when the store opened.
         lua.load("NPC_ENDS=0").exec()?;
 
-        let inventory = app.world().resource::<Inventory>().clone();
         {
             let rt = app.world().non_send::<UiRuntime>();
             let bridge = app.world().non_send::<HudBridge>();
