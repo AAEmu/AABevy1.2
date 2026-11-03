@@ -289,6 +289,11 @@ pub(crate) fn vehicle_bar_fixture() {
 }
 
 #[allow(dead_code)]
+pub(crate) fn summon_info_fixture() {
+    mode_actions::fixture::run_summon_info();
+}
+
+#[allow(dead_code)]
 pub(crate) fn stablehand_fixture() {
     pets::fixture::run();
 }

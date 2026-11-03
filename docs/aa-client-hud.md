@@ -395,7 +395,7 @@ End!" (`combat_death`), everything is dark while Recall is cast and only the tel
 | 2 | the skill's unit requirements (`unit_reqs`, `or_unit_reqs`): level, ability level, race, gender, a worn item in a slot (a sword in the main hand) or by template, an owned item, a learned skill, "not in combat" (Recall, Dash, the dances), a buff on me / on the target, a shield, a bow or an instrument. Quests, doodads, zones and factions count as met: the server decides | `Snapshot`, `Inventory`, `Skills`, `Buffs` |
 | 3 | buffs on the player: stun, sleep, knock down (every skill but those with `source_stun`), blank minded, silence (magic skills), crippled (melee and ranged) | `buffs` flags |
 | 4 | the player is casting (every other slot is dark, the skill being cast stays lit) or channeling; a cast whose end never came stops counting 2 s after it should have ended | `Skills.casting` |
-| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`). The auto attacks 2/3/4 and every `target_relation_id` 4 skill also need the attackable bit of `FUN_39838880` (`CanAutoAttackTargetUnit` `FUN_393be4e0`): neutral units stay attackable (the type-3 `+0x40` flag and the force-attack/bloodlust flags are not recovered), only a friendly unit is refused; `npc_tendency_id` is not evidence for the bit and is not read. The code is 0x2f `PROTECTED_FACTION` with the faction value only for a character (reason byte 1 via `FUN_39837d60`, value `target+0x3adc` unconfirmed), 0x30 `PROTECTED_LEVEL` for reasons 5/6 (operand not ported), otherwise 0x22 `INVALID_TARGET` (`FUN_39898e60`) | `TargetSnap` |
+| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`). The auto attacks 2/3/4 and every `target_relation_id` 4 skill also need the attackable bit of `FUN_39838880` (`CanAutoAttackTargetUnit` `FUN_393be4e0`): neutral NPCs stay attackable (the type-3 `+0x40` flag and the force-attack/bloodlust flags are not recovered); `npc_tendency_id` is not evidence for the bit and is not read. The code is 0x2f `PROTECTED_FACTION` with the faction value only for a character (reason 1 via `FUN_39837d60`, value `target+0x3adc` unconfirmed), 0x30 `PROTECTED_LEVEL` for reasons 5/6, otherwise 0x22 `INVALID_TARGET` (`FUN_39898e60`). Reasons 2-6 only run when both owning-character ids (`+0x24`) are valid (`FUN_39356b60`: character/slave/house/mate/shipyard; an NPC or transfer is invalid), so the level protection is PvP-only and never applies to an NPC. Reason 2 (the attacker's unresolved `+0x30` byte) is not modeled. On relation 1, reasons 5/6 are the level protection (`FUN_39837a90`: level 10 or below) for the attacker (5) or the target (6); on relation 2/3, reasons 3/4 (same owning character `FUN_39837b40`, same party `FUN_398377c0`) come first and refuse as 0x22. `FUN_39898e60` writes no detail for 0x30 (the `skill_protected_level` text takes none). The zone value from `FUN_39027eb0` (`39098`) is a home zone's `zones.faction_id`, or a static `conflict_zones` row's `peace_protected_faction_id` while the runtime state is 7 (peace) and the row is not `closed` (any other state, no state or `closed` means 0; `FUN_390298d0`, `40895`); 5 protects every owned unit and 4 a unit friendly to faction 148 or 149 (`FUN_39837b90`); any other value is a faction the unit must be friendly to (`+0x4` relation state 3, Bevy's `GameData::relation`). The home-zone timed override that also returns 5 is not modeled. Bevy reads the player's `zone_faction`/`zone_group` for both sides (inferred: the target's own zone is not on `TargetSnap`) | `TargetSnap` |
 | 6 | range: the skill's `min_range` / `max_range`, or the reach of the weapon in the equipment slot `weapon_slot_for_range_id` names (fists 3 m, a sword 4); edge to edge, so 1 m is taken off the centre distance | both positions |
 | 7 | mana `((ability level - 1) * 1.6 + 8) * 3 / 3.65 * mana_level_md + mana_cost` (the skill's own ability level), labor points | `Snapshot.mp`, the ability exp |
 
@@ -3352,12 +3352,34 @@ order.
   added when the model has `model_bindings` point 2 (`FUN_390c9f70(2)`) and no unit is attached
   there. F / `ExecuteDynamicAction` sends `CSBindSlave` 0x031 for 12076 (`FUN_393b1de0` ->
   `FUN_393be280`), or the plain 13863 `CSStartSkill`.
-* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window, which shows the received name, class,
-  slave kind, lowercase hex unit id and any received slave equipment (`GetMountedSiegeWeaponInfo`,
-  `GetSlaveEquipSlotInfo`). `X2SiegeWeapon:GetVehicleInfo`, `GetSiegeWeaponSpeed` and
-  `GetSiegeWeaponTurnSpeed` are still stubs, so the window has no gear/handbrake/traction-control
-  block and no speed/turn-speed rows. It guards the nil values and logs no script error (the ignored
-  `original_summon_info_window_opens_on_show_slave_info` test opens it against the real UI/pak/DB).
+* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window (`scriptsbin/x2ui/slave/slave_info.alb`;
+  the 15:05 capture is "Summon Info" from the vehicle ring's "?" slot). Its rows come from
+  `X2SiegeWeapon:GetMountedSiegeWeaponInfo` (`FUN_394ab0d0`): the received slave name (`+0xc`),
+  `desc_name` from the slave template's localized name (`FUN_39696380(+0x420)` -> `+0x28`), `kind`
+  from that row's kind id (`+0x68`) through `FUN_39571630`, which the stock locale maps
+  `SLAVE_KIND` 100 ("machine" -> "Production Equipment"), and the lowercase hex unit id
+  (`FUN_39424820`). `slave_info_view.alb` labels the rows Type/Classification/Move Speed/Turn
+  Speed and calls `Update` each frame, so the motion rows are live.
+  `GetSiegeWeaponSpeed` (`FUN_394aabd0`) returns the velocity's length signed by its component
+  along the body's forward axis in m/s; `GetSiegeWeaponTurnSpeed` (`FUN_394aae90`) returns the
+  angular velocity's z times 57.29578 in degrees/s. Both inline only the first `FUN_39345f10`
+  branch (the player's `+0x3af0` attachment, unit type 2); the native second branch (`this+0x18`)
+  is not ported. Outside that branch they return the native fall-through number 0, never nil,
+  because `slave_info.alb` multiplies the value. A driven cart uses its controller speed and
+  effective yaw rate (`CartDrive::motion`; the rate is the wire `0.4 * steering` faded by
+  `(speed / 0.5).clamp(-1, 1)`, so a parked cart reads 0); a remote slave uses its last type-2/3
+  movement, reading 0 after `SPEED_STALE_AFTER` of silence. Ships (slave kinds 1..=4 and 9) read
+  0: the native gates on physics class 3 (living) or 4 (wheeled), and this port has no ship case
+  for those getters. The unit text is the database's `ui_texts` category 31 (`m/s`, `degree/s`;
+  the 15:05 capture's client data says `degrees/s`). Leaving the seat raises
+  `SIEGEWEAPON_UNBOUND` (event 98, `FUN_393628a0` / `FUN_39345dc0`), which `mode_action.alb` F5
+  uses to hide the window. `GetVehicleInfo` stays nil: `FUN_394ab270` needs the native
+  vehicle object's `+0x2a0` state, which this port has no source for, and the captured hauler
+  shows no gear/brake/traction block. A mate's bar is only `command_unmount`
+  (`FUN_392045f0`), so it has no "?" entry. The window's stock X closes it. The ignored
+  `original_summon_info_window_opens_on_show_slave_info` and
+  `original_summon_info_rows_follow_the_seated_hauler` tests open it against the real UI/pak/DB,
+  and `examples/summon_info.rs` draws it (slave 146, parked and at 5 m/s).
 * **Seat bar deviation**: 1.2 composes the seat bar and then appends the buff skills
   (`FUN_392044a0` runs after `FUN_39204500`), so its bar is the seat skills, the functions and the
   buffs. This port replaces the buff skills with the seat bar instead. Left as a documented gap.

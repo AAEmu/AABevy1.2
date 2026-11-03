@@ -244,6 +244,13 @@ impl Plugin for InGamePlugin {
                             .after(units::sync_views)
                             .after(units::move_units),
                         vehicle::finish_damage_swaps.after(vehicle::update_damage),
+                        vehicle::start_dead_ship_sinks
+                            .after(vehicle::finish_damage_swaps)
+                            .after(units::move_units),
+                        vehicle::sink_ship_wrecks
+                            .after(vehicle::start_dead_ship_sinks)
+                            .before(vehicle::track_motion)
+                            .before(ship::drive_ship),
                     ),
                     vehicle::track_motion
                         .after(units::move_units)

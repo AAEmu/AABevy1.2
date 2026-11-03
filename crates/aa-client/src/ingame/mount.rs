@@ -1412,6 +1412,9 @@ pub fn track_local_mount(
     }
     let old = seat_state.0;
     if old.map(|s| (s.mount, s.point)) != attached.map(|a| (a.obj_id, a.point)) {
+        // the seat changed: no carried speed or air velocity from the old one
+        send.reset_drive();
+        send.reset_air();
         // the mate the player drove goes back to its movement packets, from where it stands
         if let Some(e) = old.filter(|s| s.drives).and_then(|s| drawn.views.unit_entity(s.mount)) {
             commands.entity(e).remove::<Driven>();
