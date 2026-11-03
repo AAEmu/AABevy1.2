@@ -36,6 +36,7 @@ mod achievement;
 mod alerts;
 pub(crate) use alerts::{ShowError, UseFailed};
 mod auction;
+mod farm;
 pub(crate) mod housing;
 mod battlefield;
 mod breath;
@@ -601,6 +602,7 @@ impl Plugin for HudPlugin {
         mail::plugin(app);
         auction::plugin(app);
         housing::plugin(app);
+        farm::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
         store::plugin(app);

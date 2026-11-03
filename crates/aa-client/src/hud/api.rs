@@ -391,6 +391,7 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::mail::install(lua, bridge)?;
     super::auction::install(lua, bridge)?;
     super::housing::install(lua, bridge)?;
+    super::farm::install(lua, bridge)?;
     super::itemlinks::install(lua, bridge)?;
     super::item_effects::install(lua, bridge)?;
     super::enchant::install(lua, bridge)?;

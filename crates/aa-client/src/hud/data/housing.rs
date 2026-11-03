@@ -136,6 +136,14 @@ pub struct CommonFarm {
     pub comments: String,
 }
 
+/// The first `DoodadFuncGrowth` of a phase: `doodad_func_growths.delay` and `next_phase`
+/// (`FUN_3983c170` / `FUN_3983c1b0`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FarmGrowthStep {
+    pub delay_ms: u32,
+    pub next_phase: u32,
+}
+
 /// The housing and farm tables the HUD resolves static data from.
 #[derive(Clone, Debug, Default)]
 pub struct Tables {
@@ -159,8 +167,19 @@ pub struct Tables {
     /// `deco_actability_groups.id` -> localized name.
     pub deco_actability_groups: HashMap<u32, String>,
     pub farm_groups: HashMap<u32, FarmGroup>,
+    /// `farm_groups` ids in the database's row order: `X2.GetFarmGroups` answers them as the
+    /// native's descriptor vector does (`FUN_394447C0`).
+    pub farm_group_ids: Vec<u32>,
     pub farm_group_doodads: Vec<FarmGroupDoodad>,
     pub common_farms: Vec<CommonFarm>,
+    /// `doodad_func_groups.id` -> first `DoodadFuncGrowth` (`doodad_phase_funcs` row order).
+    pub farm_growth_steps: HashMap<u32, FarmGrowthStep>,
+    /// `doodad_almighties.id` -> `climate_id` (`FUN_39032470`).
+    pub farm_climates: HashMap<u32, u32>,
+    /// `doodad_func_groups.id` -> localized `name` (the runtime entry's `currentPhaseName`).
+    pub farm_phase_names: HashMap<u32, String>,
+    /// The farm doodad templates' names (localized, else the raw `doodad_almighties.name`).
+    pub farm_doodad_names: HashMap<u32, String>,
 }
 
 #[allow(dead_code)]
@@ -391,6 +410,9 @@ impl Tables {
                     count: any_int(r, 2)?.max(0) as u32,
                     description: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 };
+                if !t.farm_groups.contains_key(&row.id) {
+                    t.farm_group_ids.push(row.id);
+                }
                 t.farm_groups.insert(row.id, row);
             }
         }
@@ -422,6 +444,63 @@ impl Tables {
             }
         }
 
+        {
+            let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_func_groups' AND tbl_column_name = 'name' AND en_us <> ''")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.farm_phase_names
+                    .insert(any_int(r, 0)?.max(0) as u32, r.get(1)?);
+            }
+            let mut q = conn.prepare("SELECT id, name FROM doodad_func_groups")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let id = any_int(r, 0)?.max(0) as u32;
+                let raw = r.get::<_, Option<String>>(1)?.unwrap_or_default();
+                t.farm_phase_names.entry(id).or_insert(raw);
+            }
+        }
+
+        {
+            let mut q = conn.prepare(
+                "SELECT p.doodad_func_group_id, g.delay, g.next_phase
+                 FROM doodad_phase_funcs p JOIN doodad_func_growths g ON g.id = p.actual_func_id
+                 WHERE p.actual_func_type = 'DoodadFuncGrowth' ORDER BY p.id",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let group = any_int(r, 0)?.max(0) as u32;
+                t.farm_growth_steps.entry(group).or_insert(FarmGrowthStep {
+                    delay_ms: any_int(r, 1)?.max(0) as u32,
+                    next_phase: any_int(r, 2)?.max(0) as u32,
+                });
+            }
+        }
+
+        {
+            let mut q = conn.prepare("SELECT id, climate_id FROM doodad_almighties")?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.farm_climates
+                    .insert(any_int(r, 0)?.max(0) as u32, any_int(r, 1)?.max(0) as u32);
+            }
+        }
+
+        {
+            let mut q = conn.prepare(
+                "SELECT DISTINCT d.id, coalesce(l.en_us, d.name, '')
+                 FROM farm_group_doodads f
+                 JOIN doodad_almighties d ON d.id = f.doodad_id
+                 LEFT JOIN localized_texts l ON l.tbl_name = 'doodad_almighties'
+                   AND l.tbl_column_name = 'name' AND l.idx = d.id AND l.en_us IS NOT NULL AND l.en_us <> ''",
+            )?;
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.farm_doodad_names
+                    .entry(any_int(r, 0)?.max(0) as u32)
+                    .or_insert(r.get(1)?);
+            }
+        }
+
         Ok(t)
     }
 
@@ -436,6 +515,39 @@ impl Tables {
             .iter()
             .filter(move |d| d.farm_group_id == kind)
             .map(|d| d.doodad_id)
+    }
+
+    /// The item a farm of `kind` plants with `doodad` (`farm_group_doodads`), in row order.
+    pub fn farm_doodad_item(&self, kind: u32, doodad: u32) -> u32 {
+        self.farm_group_doodads
+            .iter()
+            .find(|d| d.farm_group_id == kind && d.doodad_id == doodad)
+            .map_or(0, |d| d.item_id)
+    }
+
+    /// The first `DoodadFuncGrowth` of a phase (`FUN_3983c170`).
+    pub fn farm_growth_step(&self, func_group_id: u32) -> Option<FarmGrowthStep> {
+        self.farm_growth_steps.get(&func_group_id).copied()
+    }
+
+    /// `doodad_almighties.climate_id` of a template (`FUN_39032470`).
+    pub fn farm_climate(&self, template_id: u32) -> u32 {
+        self.farm_climates.get(&template_id).copied().unwrap_or(0)
+    }
+
+    /// The localized `doodad_func_groups.name` of a phase (`FUN_390324c0` +0x14).
+    pub fn farm_phase_name(&self, func_group_id: u32) -> Option<&str> {
+        self.farm_phase_names.get(&func_group_id).map(String::as_str)
+    }
+
+    /// Is `func_group_id` a loaded `doodad_func_groups` row?
+    pub fn farm_has_phase(&self, func_group_id: u32) -> bool {
+        self.farm_phase_names.contains_key(&func_group_id)
+    }
+
+    /// A farm doodad template's name (localized, else raw, `None` when the template is unknown).
+    pub fn farm_doodad_name(&self, template_id: u32) -> Option<&str> {
+        self.farm_doodad_names.get(&template_id).map(String::as_str)
     }
 
     /// The guard time (ms) of the first farm of `kind` whose comment mentions
@@ -507,6 +619,14 @@ mod tests {
             CREATE TABLE farm_groups (id INT, name TEXT, count INT, description TEXT);
             CREATE TABLE farm_group_doodads (id INT, farm_group_id INT, doodad_id INT, item_id INT);
             CREATE TABLE common_farms (id INT, name TEXT, guard_time INT, farm_group_id INT, comments TEXT);
+            CREATE TABLE doodad_func_groups (id INT, name TEXT);
+            CREATE TABLE doodad_phase_funcs (id INT, doodad_func_group_id INT, actual_func_id INT, actual_func_type TEXT);
+            CREATE TABLE doodad_func_growths (id INT, delay INT, next_phase INT);
+            CREATE TABLE doodad_almighties (id INT, name TEXT, climate_id INT);
+            INSERT INTO doodad_func_groups VALUES (77, 'Growing'), (78, 'Grown');
+            INSERT INTO doodad_phase_funcs VALUES (1, 77, 1, 'DoodadFuncGrowth');
+            INSERT INTO doodad_func_growths VALUES (1, 5000, 78);
+            INSERT INTO doodad_almighties VALUES (380, 'Parsley', 1), (381, 'Crop', 3), (413, 'Tree', 2);
             INSERT INTO taxations VALUES (3, 150000, 'small', 't');
             INSERT INTO localized_texts VALUES ('housings', 100, 'name', 'Rose Villa');
             INSERT INTO localized_texts VALUES ('deco_actability_groups', 1, 'name', 'Specialty furniture');
@@ -577,8 +697,14 @@ mod tests {
         assert_eq!(t.item_spawn_doodads.len(), 2);
         assert_eq!(t.housing_areas[&100].housing_group_id, 5);
         assert!(t.housing_groups[&5].can_extend && !t.housing_groups[&5].houseless);
+        assert_eq!(t.farm_group_ids, vec![1, 2], "X2.GetFarmGroups order");
+        assert_eq!(t.farm_growth_step(77), Some(FarmGrowthStep { delay_ms: 5000, next_phase: 78 }));
+        assert_eq!(t.farm_phase_name(78), Some("Grown"));
+        assert_eq!(t.farm_doodad_name(380), Some("Parsley"));
+        assert_eq!(t.farm_climate(381), 3);
         assert_eq!(t.farm_group_max_count(1), 10);
         assert_eq!(t.allowed_farm_doodads(1).collect::<Vec<_>>(), vec![380, 381]);
+        assert_eq!(t.farm_doodad_item(1, 381), 13726);
         assert_eq!(t.farm_guard_time(1, 33), 86400000);
         assert_eq!(t.farm_guard_time(1, 7), 86400000);
         assert_eq!(t.farm_guard_time(2, 7), 0);
