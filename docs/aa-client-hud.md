@@ -604,6 +604,44 @@ a Reward step has `QuestActSupplySelectiveItem` and no reward is selected, and e
 in progress and not let-it-done. Nothing is sent for those. Local refusal events fire after the
 HUD state is released so the original handlers can query it and close their window.
 
+### Quest items on the tracker
+
+`quest.lua` serves the original `quest_context_notifier.alb` and `centermessage/additem.alb` calls:
+
+* `X2Quest:GetUseTypeQuestItems(qtype, checkState)` (`FUN_394a55a0`): the kind-3 `SupplyItem`
+  targets with `show_action_bar`, then the Progress `ObjItemUse` targets. With `checkState` it
+  answers nil for a quest in status 2/3/4 or already completed.
+* `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items plus
+  the objective's own item acts (`ObjItemUse`, `ObjItemGather`, `EtcItemObtain`). The index is the
+  native one, 0 based. The native also merges the other objectives' items; this client returns the
+  requested objective's items and the supplied ones.
+* `X2Quest:IsQuestStartItem(itemType)` (`FUN_3949c880`): the item's `items.impl_id` is 10.
+* `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
+  `ObjItemUse` target of an active quest.
+* `X2Bag:FindFirstBagSlotItemByItemType` / `UseItemByType` (`FUN_3944dee0` / `FUN_3944d590`) and
+  `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
+  `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
+  bag / worn item use (`HUD.request("use_bag")` / `"use_equip"`). The tests drive the original
+  notifier helper (proto 47) and the original added-item message.
+
+### Restarting a main quest
+
+`X2Quest:QuestContextRestart(qtype)` (`FUN_3949b780` -> `FUN_3937b200`) sends `CSRestartMainQuest`
+0x0fd (one `u32` quest id) after the native checks in `FUN_3937a8d0`: a 3 s throttle
+(`DAT_39ac7598`, stamped even by a refused try), an existing main quest (`detail_id` 2) that is
+active and not completed, and at least as many free bag slots as the kind-3 `SupplyItem` counts it
+hands out again (error 5; everything else error 0xc through `QUEST_ERROR_INFO`). The server answers
+with a normal Started / Updated, so the journal and tracker follow through `sync_quests`.
+
+### Server-shown quest areas
+
+`SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` mark style (`FUN_393821f0`'s 1..15
+select the `prefabs/quest_mark.xml` markers), fixed-point `i64` x / `i64` y, `f32` z and `f32`
+radius. The native `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) keeps a quest-mark decal
+list; Bevy keeps the same areas and draws a circle for each in `HUD.quest_areas` on the zone map
+whose rectangle holds the place (`map_quests.rs`, scale `2^-44` from `FUN_3961de30`), on both
+maps. The ground decal itself and its mark icon are not drawn.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

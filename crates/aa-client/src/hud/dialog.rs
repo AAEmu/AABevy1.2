@@ -210,6 +210,7 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     row.set("type", q.template_id)?;
     let completed = completed.iter().any(|b| b.has(q.template_id));
     row.set("completed", completed)?;
+    row.set("aggro", active && t.is_aggro(q.template_id))?;
     for (key, list) in [
         ("actionBarItems", t.supply_item_targets(q.template_id, true)),
         ("supplyItems", t.supply_item_targets(q.template_id, false)),
@@ -271,6 +272,8 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     let r = t.rewards(q.template_id);
     row.set("exp", r.exp.to_string())?;
     row.set("copper", r.copper)?;
+    row.set("aaPoint", r.aa_point)?;
+    row.set("appellation", r.appellation)?;
     for (key, v) in [("labor", r.labor), ("honor", r.honor), ("crime", r.crime), ("living", r.living)] {
         if v != 0 {
             row.set(key, v)?;
@@ -3659,6 +3662,34 @@ mod tests {
             (event.as_str(), error, quest),
             ("QUEST_ERROR_INFO", 12, i64::from(other))
         );
+    }
+
+    #[test]
+    fn the_other_quest_getters_follow_the_native_functions() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                APPELLATION_INFO = { TYPE = 1, NAME = 2, BUFF_INFO = 3 }
+                HUD.quest_version = function() return 1 end
+                HUD.quest_list = function() return {
+                    { type = 11, status = 1, level = 5, aggro = true, aaPoint = 250, appellation = 88, objectives = {} },
+                    { type = 12, status = 1, level = 2, aggro = false, objectives = {} },
+                } end
+                HUD.state = { level = 20 }
+                HUD.appellation_row = function(id) return { id = id, name = 'title-' .. id } end
+                assert(X2Quest:GetActiveQuestComparedLevel(1) == 15, 'compared level')
+                assert(X2Quest:NowIsAggroComponent(11) and not X2Quest:NowIsAggroComponent(12))
+                assert(X2Quest:GetQuestContextRewardAAPoint(11) == 250 and X2Quest:GetQuestContextRewardAAPoint(12) == nil)
+                local a = X2Quest:GetQuestContextRewardAppellation(11)
+                assert(a[APPELLATION_INFO.TYPE] == 88 and a[APPELLATION_INFO.NAME] == 'title-88')
+                assert(X2Quest:GetQuestContextRewardAppellation(12) == nil)
+                "#,
+            )
+            .set_name("@quest-getters-native-test")
+            .exec()
+            .unwrap();
     }
 
     #[test]

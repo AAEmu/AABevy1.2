@@ -500,6 +500,7 @@ opcodes! {
         SCQuestContextUpdatedPacket = 0x149,
         SCQuestContextCompletedPacket = 0x14b,
         SCQuestContextResetPacket = 0x14c,
+        SCShowQuestAreaPacket = 0x1af,
         SCAuctionPostedPacket = 0x12e,
         SCAuctionSearchedPacket = 0x12f,
         SCAuctionLowestPricePacket = 0x130,

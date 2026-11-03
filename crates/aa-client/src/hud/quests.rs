@@ -220,6 +220,8 @@ pub struct Rewards {
     pub crime: i64,
     pub living: i64,
     pub appellation: u32,
+    /// `SupplyAaPoint`: the AA points the quest gives (`FUN_394a11a0`).
+    pub aa_point: i64,
 }
 
 /// One line of a quest's objectives.
@@ -843,6 +845,7 @@ impl QuestTables {
                     "SupplyHonorPoint" => r.honor += a.value,
                     "SupplyCrimePoint" => r.crime += a.value,
                     "SupplyLivingPoint" => r.living += a.value,
+                    "SupplyAaPoint" => r.aa_point += a.value,
                     "SupplyAppellation" => r.appellation = a.target,
                     _ => {}
                 }
@@ -904,6 +907,12 @@ impl QuestTables {
             }
         }
         out
+    }
+
+    /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): a Progress component's first act is
+    /// `ObjAggro` (0x39).
+    pub fn is_aggro(&self, quest: u32) -> bool {
+        self.parts_of(quest, kind::PROGRESS).any(|c| c.acts.first().is_some_and(|a| a.ty == "ObjAggro"))
     }
 
     /// The bubbles of a component's talk, from its start bubble along `next_bubble`.
@@ -1213,6 +1222,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(act.count, (pk + npc) as i32, "component {component}: FUN_397d3440 case 0x31 sums both counters");
+    }
+
+    #[test]
+    fn quest_item_aggro_and_aa_point_getters_read_the_native_rows() {
+        let Some(t) = tables() else { return };
+        // A real ObjAggro quest (1408) and the held item acts of quest 1222's kind-3 Supply step.
+        assert!(t.is_aggro(1408));
+        let supply = t.supply_item_targets(1222, true);
+        assert!(!supply.is_empty(), "quest 1222 has an action-bar supply item");
+        assert!(t.supply_item_targets(1222, false).len() >= supply.len());
+        assert!(t.supply_item_count(1222) > 0);
+        // A real ObjItemUse act is in the item lists and on its objective.
+        let (quest, act) = t
+            .parts
+            .values()
+            .filter(|c| c.kind == kind::PROGRESS)
+            .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
+            .find(|(_, a)| a.ty == "ObjItemUse" && a.target != 0)
+            .map(|(q, a)| (q, a.clone()))
+            .unwrap();
+        assert!(t.use_item_targets(quest).contains(&act.target));
+        assert!(t.objective_item_targets(quest, act.objective.unwrap()).contains(&act.target));
+        // `SupplyAaPoint` (the reward panel's AA points).
+        let act = |ty: &str, value| ActDef { ty: ty.into(), value, ..ActDef::default() };
+        let mut s = QuestTables::default();
+        s.defs.insert(9, QuestDef { components: vec![30], ..QuestDef::default() });
+        s.parts.insert(30, ComponentDef { id: 30, quest: 9, kind: kind::REWARD, acts: vec![act("SupplyAaPoint", 50)], ..ComponentDef::default() });
+        assert_eq!(s.rewards(9).aa_point, 50);
     }
 
     #[test]

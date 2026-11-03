@@ -120,6 +120,31 @@ impl QuestMailSent {
     }
 }
 
+/// `SCShowQuestArea` (`0x1af`): a quest-mark area of style `mark` centred on the fixed-point world
+/// position `(x, y, z)` with `radius` metres.
+///
+/// The 1.2 reader `FUN_397b7940` (packet vtable `399b3f48`) reads "type" as a `u32` at `+0xc`,
+/// "x" (8 bytes) at `+0x10`, "y" (8 bytes) at `+0x18`, "z" (float) at `+0x20` and "radius" (float)
+/// at `+0x28`; the packet constructor is `FUN_391b5110`. `OnShowQuestArea` (`FUN_391df7b0`) passes
+/// the type to `FUN_393840b0`, which draws the quest-mark decal: `FUN_393821f0` maps 1..15 to the
+/// `prefabs/quest_mark.xml` markers (exclamation / question / flower / hunt signs). No Lua event.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct QuestArea {
+    /// The quest-mark style (`FUN_393821f0`'s 1..15; other values draw the default mark).
+    pub mark: u32,
+    /// Fixed-point world X and Y; the client scales the difference to the player by `2^-44`.
+    pub x: i64,
+    pub y: i64,
+    pub z: f32,
+    pub radius: f32,
+}
+
+impl QuestArea {
+    pub fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self { mark: r.u32()?, x: r.i64()?, y: r.i64()?, z: r.f32()?, radius: r.f32()? })
+    }
+}
+
 /// The quest of `SCQuestContextStarted` / `SCQuestContextUpdated`: the quest, then the component it is
 /// at (`Updated` adds four parameters, skipped). `Quest.Write` only fills its own component field for a
 /// quest with a time limit, so the trailing one is the step the quest is at.
@@ -258,6 +283,21 @@ mod tests {
         assert_eq!(QuestMailSent::read(&mut Reader::new(&bytes)).unwrap(), QuestMailSent { id: 0x0102_0304 });
         for cut in 0..bytes.len() {
             assert!(QuestMailSent::read(&mut Reader::new(&bytes[..cut])).is_err());
+        }
+    }
+
+    #[test]
+    fn show_quest_area_reads_the_native_fields() {
+        // Reader FUN_397b7940: "type" u32, "x" i64, "y" i64, "z" f32, "radius" f32.
+        let mut w = Writer::new();
+        w.u32(9).i64(0x1234_5678_9abc_def0u64 as i64).i64(-7).f32(12.5).f32(30.0);
+        let bytes = w.finish();
+        assert_eq!(
+            QuestArea::read(&mut Reader::new(&bytes)).unwrap(),
+            QuestArea { mark: 9, x: 0x1234_5678_9abc_def0u64 as i64, y: -7, z: 12.5, radius: 30.0 }
+        );
+        for cut in 0..bytes.len() {
+            assert!(QuestArea::read(&mut Reader::new(&bytes[..cut])).is_err());
         }
     }
 

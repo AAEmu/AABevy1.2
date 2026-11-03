@@ -153,6 +153,10 @@ pub struct HudData {
     pub loot: super::loot::LootView,
     /// The NPC talked to, the quest dialog and the quest rows the scripts read (`dialog.rs`).
     pub dialog: super::dialog::DialogView,
+    /// The areas `SCShowQuestArea` placed (`map_quests.rs`), newest last.
+    pub quest_areas: Vec<aa_net::quest::QuestArea>,
+    /// Bumped when an area is added or replaced, so the maps rebuild their markers.
+    pub quest_area_version: u64,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
     /// When the player may stand up again after dying (HUD clock, ms): `X2Player:GetResurrectionCountdown` counts down to it.
@@ -253,6 +257,8 @@ impl Default for HudData {
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
+            quest_areas: Vec::new(),
+            quest_area_version: 0,
             afk: false,
             death_ends: Default::default(),
             death_started: Default::default(),

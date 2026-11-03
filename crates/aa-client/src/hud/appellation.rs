@@ -83,6 +83,20 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             }
         })?,
     )?;
+    // `X2Quest.GetQuestContextRewardAppellation` (`FUN_391a4cf0`): the raw row of the title a
+    // quest reward gives (the script side builds the APPELLATION_INFO table).
+    let s = state.clone();
+    hud.raw_set(
+        "appellation_row",
+        lua.create_function(move |lua, id: u32| {
+            let d = s.borrow();
+            // `FUN_397f2250` returning 0 makes `FUN_391a4cf0` answer nil.
+            if d.game.get().is_some_and(|g| g.appellations.get(&id).is_none()) {
+                return Ok(None);
+            }
+            row(lua, &d, id).map(Some)
+        })?,
+    )?;
     // true when the request went out: the server owns the decision (an id the character does not own is refused there)
     let s = state.clone();
     hud.raw_set(
