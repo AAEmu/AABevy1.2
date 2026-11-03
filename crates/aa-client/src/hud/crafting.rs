@@ -16,6 +16,16 @@ use bevy::prelude::*;
 pub(super) use data::Tables;
 use mlua::{Lua, Table};
 
+/// A catalog with only workbench recipe maps, for tests that do not need the pak or database.
+#[cfg(test)]
+pub(super) fn fixture_tables(benches: impl IntoIterator<Item = (u32, Vec<u32>)>) -> Tables {
+    let mut tables = Tables::default();
+    for (template, recipes) in benches {
+        tables.benches.insert(template, recipes.into_iter().collect());
+    }
+    tables
+}
+
 #[derive(Default)]
 pub(super) struct View {
     owner: u32,

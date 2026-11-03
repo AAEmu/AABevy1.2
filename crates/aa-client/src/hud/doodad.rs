@@ -69,8 +69,19 @@ const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
 /// port uses a sentinel above the skill range and resolves its icon separately. The workbench
 /// callback (`FUN_393b7ba0` -> `FUN_394dc360`) is the local open, not a skill cast.
 pub(super) const CRAFT_ACTION: u32 = 0xffff_fffe;
-/// `doodad_func_permission::OWNER_ONLY`: the craft action is offered only to the doodad's owner.
-const CRAFT_OWNER_ONLY: u8 = 3;
+/// `doodad_func_permission` ids (native `FUN_393b3300`). The 1.2 data uses every value except 9;
+/// the craft rows are 0, 1, 6, 7 and 8.
+pub(super) mod craft_perm {
+    pub const ANY: u8 = 0;
+    pub const OWNER: u8 = 1;
+    pub const OWNER_OR_FRIEND: u8 = 2;
+    pub const EXPEDITION: u8 = 3;
+    pub const OWNER_OR_PARTY: u8 = 4;
+    pub const OWNER_OR_RAID: u8 = 5;
+    pub const SAME_ACCOUNT: u8 = 6;
+    pub const SAME_NATION: u8 = 7;
+    pub const ZONE_RESIDENTS: u8 = 8;
+}
 /// Keys of the dynamic action bar (`do_interaction_1` ... ) that use a doodad.
 const KEYS: usize = 4;
 /// The dynamic action bar's candidate distance (`FUN_3902f010`), as a **centre distance**,
@@ -124,10 +135,13 @@ pub(super) struct Uses {
     /// The skills of its funcs, in func order, without repeats.
     pub skills: Vec<u32>,
     pub navi: Vec<Navi>,
-    /// The `perm_id` of a `DoodadFuncCraftStart` / `DoodadFuncCraftPack` in this phase: the
-    /// workbench window opens locally (native `FUN_394dc360`); the recipe list is the template's
-    /// static CraftStart/CraftPack lists (`FUN_394dc210`).
-    pub craft: Option<u8>,
+    /// The `perm_id` of every `DoodadFuncCraftStart` / `DoodadFuncCraftPack` func in this phase,
+    /// in func order. Native `FUN_393bd290` checks each func's permission separately; the
+    /// workbench window opens locally (native `FUN_394dc360`) and the recipe list is the
+    /// template's static CraftStart/CraftPack lists (`FUN_394dc210`). `FUN_398a9480` checks a
+    /// recipe against that template-wide union (every function group on the `doodad_almighties`
+    /// row), not only the current phase; `crafting::data::Tables::benches` is built the same way.
+    pub craft: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -273,13 +287,13 @@ impl Tables {
             uses.navi.push(n);
         }
         if let Some(perm) = craft {
-            uses.craft.get_or_insert(perm);
+            uses.craft.push(perm);
         }
     }
 
     /// What the phase `group` can be used for (`None`: nothing).
     pub(super) fn uses(&self, group: u32) -> Option<&Uses> {
-        self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty() || u.craft.is_some())
+        self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty() || !u.craft.is_empty())
     }
 
     fn allows_attachment(&self, group: u32, skill: u32, bond_free: bool, mount_free: bool) -> bool {
@@ -387,6 +401,10 @@ pub(super) struct View {
     preferred: Option<u32>,
     /// The walk to a doodad that was right clicked out of reach.
     approach: Option<Approach>,
+    /// The use that is waiting for that walk to arrive (`(obj_id, action id)`).
+    pending: Option<(u32, i64)>,
+    /// `obj_id` -> the faction from `SCDoodadOriginator` (native doodad+0x350; `FUN_393b3300` case 3).
+    factions: HashMap<u32, u32>,
     /// The coffer window was closed.
     coffer_close: bool,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
@@ -434,6 +452,7 @@ struct Approach {
 pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
     super::pets::cancel_mount_walk(data);
     super::dialog::cancel_walk(data);
+    data.doodad.pending = None;
     data.doodad.approach = Some(Approach {
         obj_id,
         best: dist,
@@ -444,6 +463,7 @@ pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
 impl View {
     /// Ends a doodad walk because a mount walk takes over: no use follows. Returns whether a walk was running.
     pub(super) fn cancel_walk(&mut self) -> bool {
+        self.pending = None;
         self.approach.take().is_some()
     }
 
@@ -469,13 +489,141 @@ impl View {
     }
 }
 
-/// 1.2's craft action is offered only to the doodad's owner for `perm_id` 3. The same-account
-/// and zone-resident permissions (6/8, the 61 housing workbench rows in the 1.2 data) need the
-/// owner's account / house-zone data the HUD does not keep for a generic doodad; the server's
-/// `bench_denial` rechecks them on `CSExecuteCraft`. The current phase's craft func must be the
-/// one that offers the recipe (`FUN_398a9480`), which the CURRENT recipe map enforces.
-fn craft_permitted(perm: u8, owner_id: u32, character_id: u32) -> bool {
-    perm != CRAFT_OWNER_ONLY || (owner_id != 0 && owner_id == character_id)
+/// What the permission check can resolve from the world (`FUN_393b3300`): houses for the house
+/// owner / account and the terrain zone map for the nation / resident cases.
+#[derive(Clone, Copy, Default)]
+pub(super) struct PermEnv<'a> {
+    pub houses: Option<&'a aa_net::Houses>,
+    pub world: Option<&'a aa_world::World>,
+}
+
+/// The local player's facts for `FUN_393b3300`.
+struct PlayerFacts<'a> {
+    character_id: u32,
+    account_id: u32,
+    account_characters: &'a [u32],
+    expedition_id: u32,
+    zone_group: u32,
+    party: &'a aa_net::Party,
+    friends: &'a aa_net::Friends,
+    /// Zone groups of the account's houses; `None` when the client cannot know them.
+    house_zone_groups: Option<Vec<u32>>,
+}
+
+/// The doodad's facts for `FUN_393b3300`.
+struct DoodadFacts {
+    owner_id: u32,
+    house_owner_id: u32,
+    house_account_id: u32,
+    /// `SCDoodadOriginator.new_faction` (native doodad+0x350).
+    faction: u32,
+    /// The zone group at the doodad; `None` when the world does not know it.
+    zone_group: Option<u32>,
+}
+
+/// The zone group at a world position (the terrain's zone key through the zone table).
+fn zone_group(data: &HudData, world: Option<&aa_world::World>, pos: Vec3) -> Option<u32> {
+    let key = u32::from(world?.zone_at(pos)?);
+    data.game.get()?.zones.get(&key).map(|z| z.0)
+}
+
+/// The house a doodad belongs to: `owner_db_id` is its database id, `parent_obj_id` its object.
+fn house_of<'a>(o: &aa_net::model::Doodad, houses: Option<&'a aa_net::Houses>) -> Option<&'a aa_net::HouseSnapshot> {
+    houses?
+        .by_tl_id
+        .values()
+        .filter(|h| !h.demolished)
+        .map(|h| &h.snapshot)
+        .find(|h| (o.owner_db_id != 0 && h.db_id == o.owner_db_id) || (o.parent_obj_id != 0 && h.obj_id == o.parent_obj_id))
+}
+
+fn player_facts<'a>(data: &'a HudData, env: PermEnv<'a>) -> PlayerFacts<'a> {
+    let house_zone_groups = env.houses.zip(env.world).map(|(houses, world)| {
+        houses
+            .by_tl_id
+            .values()
+            .filter(|h| !h.demolished)
+            .filter(|h| {
+                h.snapshot.owner_id == data.character_id
+                    || (data.account_id != 0 && h.snapshot.account_id == data.account_id)
+            })
+            .filter_map(|h| zone_group(data, Some(world), to_vec(h.snapshot.position())))
+            .collect()
+    });
+    PlayerFacts {
+        character_id: data.character_id,
+        account_id: data.account_id,
+        account_characters: &data.account_characters,
+        expedition_id: data.expedition.own_id(),
+        zone_group: data.snapshot.zone_group,
+        party: &data.party,
+        friends: &data.friends,
+        house_zone_groups,
+    }
+}
+
+fn doodad_facts(data: &HudData, o: &aa_net::model::Doodad, pos: Vec3, env: PermEnv<'_>) -> DoodadFacts {
+    let house = house_of(o, env.houses);
+    DoodadFacts {
+        owner_id: house.map_or(o.owner_id, |h| h.owner_id),
+        house_owner_id: house.map_or(0, |h| h.owner_id),
+        house_account_id: house.map_or(0, |h| h.account_id),
+        faction: data.doodad.factions.get(&o.obj_id).copied().unwrap_or(0),
+        zone_group: zone_group(data, env.world, pos),
+    }
+}
+
+/// Whether the owner is in the same five-person party group as `me` (native `FUN_39308e40`: it
+/// walks the player's five-slot block of the 50-slot raid list).
+fn same_party_group(party: &aa_net::Party, me: u32, owner: u32) -> bool {
+    if party.id == 0 || owner == 0 {
+        return false;
+    }
+    if party.is_party {
+        return party.member(owner).is_some();
+    }
+    match (party.member(me), party.member(owner)) {
+        (Some(a), Some(b)) => a.slot / 5 == b.slot / 5,
+        _ => false,
+    }
+}
+
+/// `FUN_393b3300`: each craft func's `perm_id` is checked on its own. Cases the client cannot
+/// resolve (a character's account outside the login list, the doodad's zone when the terrain has
+/// not loaded it) are inferred as allowed; the server rechecks them on `CSExecuteCraft`.
+fn craft_permitted(perm: u8, player: &PlayerFacts, doodad: &DoodadFacts) -> bool {
+    use craft_perm::*;
+    let owner = if doodad.owner_id != 0 { doodad.owner_id } else { doodad.house_owner_id };
+    let me = player.character_id;
+    match perm {
+        ANY => true,
+        OWNER => owner != 0 && owner == me,
+        OWNER_OR_FRIEND => owner == me || (owner != 0 && player.friends.friend(owner).is_some()),
+        // Native: the player must be in an expedition; a doodad with no faction (0) is open to it,
+        // otherwise its `SCDoodadOriginator` faction must be the player's expedition id.
+        EXPEDITION => player.expedition_id != 0 && (doodad.faction == 0 || doodad.faction == player.expedition_id),
+        OWNER_OR_PARTY => owner == me || same_party_group(player.party, me, owner),
+        OWNER_OR_RAID => owner == me || player.party.member(owner).is_some(),
+        SAME_ACCOUNT => {
+            owner == me
+                || (doodad.house_account_id != 0 && doodad.house_account_id == player.account_id)
+                || (owner != 0 && player.account_characters.contains(&owner))
+        }
+        // "This zone is my nation": the doodad's zone group is the player's. Unknown terrain zone
+        // data is inferred as allowed.
+        SAME_NATION => match doodad.zone_group {
+            Some(zone) if player.zone_group != 0 => zone == player.zone_group,
+            _ => true,
+        },
+        // "My house in this zone": the account has a house in the doodad's zone group. Unknown
+        // house zones are inferred as allowed.
+        ZONE_RESIDENTS => match (&player.house_zone_groups, doodad.zone_group) {
+            (Some(groups), Some(zone)) => groups.contains(&zone),
+            _ => true,
+        },
+        // Native's default refuses unknown permissions.
+        _ => false,
+    }
 }
 
 /// The 3D surface gap from the player to a doodad, the distance `FUN_39093800` compares against
@@ -536,7 +684,7 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
 /// 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see the
 /// module doc). The tomes' own 14602 was not observed. A doodad has no recovered collision shape, so its gap is
 /// the centre distance minus the player's radius; the doodad's own radius is 0 here.
-fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus> {
+fn find_focus(data: &HudData, doodads: &Doodads, units: &Units, env: PermEnv<'_>) -> Option<Focus> {
     if data.doodad.seated {
         return None;
     }
@@ -544,6 +692,7 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
     let world = super::slave::replicated_pose(units);
     let from = super::slave::player_centre(data, &world);
     let forward = super::slave::player_forward(data, &world);
+    let player = player_facts(data, env);
     let mut best: Option<(bool, f32, Focus)> = None;
     for o in doodads.by_id.values() {
         let Some(uses) = game.doodad.uses(o.func_group_id) else {
@@ -556,15 +705,13 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
         if dist >= DOODAD_REACH {
             continue;
         }
-        // The workbench callback is reached through the same action list, but its native
-        // validator (`FUN_394d6dc0` -> `FUN_39093800`) uses `max_interaction_doodad_distance`
-        // (2.1 m surface gap), not the bar's 4 m centre reach; only offer it inside that.
-        let craft = uses
-            .craft
-            .filter(|perm| craft_permitted(*perm, o.owner_id, data.character_id))
-            .and_then(|_| in_interaction_reach(data, doodads, units, o.obj_id).then_some(()));
+        // Native `FUN_393bd290` checks each craft func's permission separately and lists the
+        // action through the same shared action list, so the bar's candidate distance is the
+        // same as a skill's; the 2.1 m use range is checked when the action is used.
+        let facts = doodad_facts(data, o, pos, env);
+        let craft = uses.craft.iter().any(|perm| craft_permitted(*perm, &player, &facts));
         let mut skills = uses.skills.clone();
-        if craft.is_some() {
+        if craft {
             skills.push(CRAFT_ACTION);
         }
         if skills.is_empty() {
@@ -576,7 +723,7 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units) -> Option<Focus>
         let focus = Focus {
             obj_id: o.obj_id,
             skills,
-            craft_icon: craft.and_then(|_| super::crafting::bench_icon(data, o.template_id)),
+            craft_icon: craft.then(|| super::crafting::bench_icon(data, o.template_id)).flatten(),
             key,
             dist,
         };
@@ -892,6 +1039,8 @@ fn track(
         ladder_claim,
         db,
         ladder_visuals,
+        houses,
+        world_info,
     ): (
         ResMut<DoodadHighlights>,
         Res<aa_net::CharacterNames>,
@@ -903,6 +1052,8 @@ fn track(
         Option<Res<crate::ingame::ladder::LadderClaim>>,
         Option<Res<Db>>,
         Query<(&DoodadVisual, &GlobalTransform)>,
+        Option<Res<aa_net::Houses>>,
+        Option<Res<aa_world::stream::WorldInfo>>,
     ),
     mut out: MessageWriter<NetCommand>,
     mut asked: Local<std::collections::HashSet<u32>>,
@@ -912,7 +1063,11 @@ fn track(
     let world = |u: &aa_net::model::Unit| poses.get(u, &units).map(|(pos, _)| pos);
     script.since += time.delta_secs();
     let mut d = bridge.0.borrow_mut();
-    let focus = find_focus(&d, &doodads, &units);
+    let env = PermEnv {
+        houses: houses.as_deref(),
+        world: world_info.as_deref().map(|w| w.0.as_ref()),
+    };
+    let focus = find_focus(&d, &doodads, &units, env);
     let slave = super::slave::candidate(&d, &units);
     // The bar: 1.2 puts units (`FUN_393601a0`) and doodads (`FUN_3902f010`) in one set keyed by
     // the same `native_key` (surface gap minus `1 + facing`, `FUN_3902ed20` orders it ascending).
@@ -1225,6 +1380,7 @@ fn track(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn pointer_use(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -1232,6 +1388,8 @@ fn pointer_use(
     units: Res<Units>,
     time: Res<Time>,
     mut dev: ResMut<crate::ingame::DevOptions>,
+    houses: Option<Res<aa_net::Houses>>,
+    world_info: Option<Res<aa_world::stream::WorldInfo>>,
 ) {
     let mut data = bridge.0.borrow_mut();
     let clicked = data.doodad.pointer_pick.take();
@@ -1239,9 +1397,22 @@ fn pointer_use(
         .then_some(clicked)
         .flatten();
     let arrived = data.doodad.arrived.take();
-    let menu = clicked
-        .or(arrived)
-        .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev));
+    // A use that started the walk (a workbench out of the 2.1 m range) opens on arrival instead
+    // of rebuilding the right-click decision.
+    let pending = data.doodad.pending.take().filter(|(id, _)| Some(*id) == arrived);
+    let menu = if let Some((id, action)) = pending {
+        data.doodad.menu = Some((id, Vec::new()));
+        data.doodad.chosen.push(action);
+        false
+    } else {
+        let env = PermEnv {
+            houses: houses.as_deref(),
+            world: world_info.as_deref().map(|w| w.0.as_ref()),
+        };
+        clicked
+            .or(arrived)
+            .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev, env))
+    };
     drop(data);
     if menu && let Some(rt) = rt {
         rt.fire_event("INTERACTION_START", ());
@@ -1354,6 +1525,7 @@ pub(super) fn walk_to(
         Walk::Cancel => {
             stop(dev);
             d.doodad.approach = None;
+            d.doodad.pending = None;
             return None;
         }
         Walk::Arrived => {
@@ -1366,7 +1538,11 @@ pub(super) fn walk_to(
             d.doodad.approach = None;
             info!("doodad: stopped {gap:.1} m from {} (no progress)", a.obj_id);
             // close enough for the interaction reach: use it from here
-            return (gap < INTERACTION_DISTANCE).then_some(a.obj_id);
+            if gap < INTERACTION_DISTANCE {
+                return Some(a.obj_id);
+            }
+            d.doodad.pending = None;
+            return None;
         }
         Walk::Run => {}
     }
@@ -1410,9 +1586,9 @@ fn nearest_usable(d: &HudData, doodads: &Doodads, units: &Units) -> Option<u32> 
 /// A right click on doodad `obj_id` at `now` (`Time::elapsed_secs`): one use is made at once, several open the interaction
 /// list (`true`); out of reach the character walks to it first ([`walk_to`]). A new target (or a click that is already
 /// in reach) drops the old walk, whose held W key nothing else would release.
-fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions) -> bool {
+fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32, dev: &mut crate::ingame::DevOptions, env: PermEnv<'_>) -> bool {
     let Some(o) = doodads.by_id.get(&obj_id) else { return false };
-    if doodad_world(o, units).is_none() { return false; }
+    let Some(pos) = doodad_world(o, units) else { return false };
     let (name, uses) = {
         let Some(game) = d.game.get() else { return false };
         let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
@@ -1427,26 +1603,33 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     if d.doodad.cancel_walk() {
         dev.script_keys.retain(|c| c != 'W');
     }
-    if gap >= INTERACTION_DISTANCE {
-        info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
-        start_walk(d, obj_id, gap, now);
-        return false;
-    }
     let Some(game) = d.game.get() else { return false };
     let mut entries: Vec<Entry> = uses
         .skills
         .iter()
         .map(|s| Entry { id: i64::from(*s), name: game.skills.get(s).map(|i| i.named.name.clone()).unwrap_or_else(|| format!("skill {s}")) })
         .collect();
-    if uses.craft.is_some_and(|perm| craft_permitted(perm, o.owner_id, d.character_id))
-        && in_interaction_reach(d, doodads, units, obj_id)
-    {
+    // Each craft func's permission is checked on its own (native `FUN_393bd290` calls
+    // `FUN_393b3300` per func); the action is listed at the bar's distance, not the 2.1 m use range.
+    let craft = {
+        let player = player_facts(d, env);
+        let facts = doodad_facts(d, o, pos, env);
+        uses.craft.iter().any(|perm| craft_permitted(*perm, &player, &facts))
+    };
+    if craft {
         entries.push(Entry {
             id: i64::from(CRAFT_ACTION),
             name: "Craft".into(),
         });
     }
     entries.extend(uses.navi.iter().map(|n| Entry { id: NAVI_ID + *n as i64, name: n.label().into() }));
+    // A craft action is listed out to the bar's distance and its use walks on its own (`FUN_393b3ec0`
+    // checks 2.1 m); other uses still walk before the list, as before.
+    if gap >= INTERACTION_DISTANCE && (!craft || gap >= DOODAD_REACH) {
+        info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
+        start_walk(d, obj_id, gap, now);
+        return false;
+    }
     if entries.len() == 1 {
         d.doodad.menu = Some((obj_id, entries.clone()));
         d.doodad.chosen.push(entries[0].id);
@@ -1455,6 +1638,19 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     info!("doodad: {name} ({obj_id}) offers {:?}", entries.iter().map(|e| &e.name).collect::<Vec<_>>());
     d.doodad.menu = Some((obj_id, entries));
     true
+}
+
+/// Uses a workbench: opens it inside the 2.1 m range, else walks there and opens on arrival
+/// (native `FUN_393b3ec0` checks `FUN_39093800`, then `FUN_390a6af0` keeps the pending action).
+fn use_bench(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> Option<(u32, usize)> {
+    let o = doodads.by_id.get(&obj_id)?;
+    if !in_interaction_reach(d, doodads, units, obj_id) {
+        let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
+        start_walk(d, obj_id, gap, now);
+        d.doodad.pending = Some((obj_id, i64::from(CRAFT_ACTION)));
+        return None;
+    }
+    super::crafting::open_bench(d, obj_id, o.template_id).map(|count| (obj_id, count))
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
@@ -1472,7 +1668,9 @@ pub(super) fn execute(
     poses: super::pick::UnitPoses,
     mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
+    time: Option<Res<Time>>,
 ) {
+    let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
     let mut d = bridge.0.borrow_mut();
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
         let obj_id = inventory.coffer.obj_id;
@@ -1504,11 +1702,8 @@ pub(super) fn execute(
                         f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
                     });
                 if current && pick.skill == CRAFT_ACTION {
-                    if in_interaction_reach(&d, &doodads, &units, obj_id)
-                        && let Some(o) = doodads.by_id.get(&obj_id)
-                        && let Some(count) = super::crafting::open_bench(&mut d, obj_id, o.template_id)
-                    {
-                        opens.push((obj_id, count));
+                    if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now) {
+                        opens.push(open);
                     }
                 } else if current {
                     commands.push((
@@ -1544,11 +1739,8 @@ pub(super) fn execute(
     {
         for id in chosen {
             if id == i64::from(CRAFT_ACTION) {
-                if in_interaction_reach(&d, &doodads, &units, obj_id)
-                    && let Some(o) = doodads.by_id.get(&obj_id)
-                    && let Some(count) = super::crafting::open_bench(&mut d, obj_id, o.template_id)
-                {
-                    opens.push((obj_id, count));
+                if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now) {
+                    opens.push(open);
                 }
                 continue;
             }
@@ -1635,7 +1827,7 @@ fn coffer_window(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, inv
 }
 
 /// What the server made of a use, for the log: the cast at a doodad, the doodad's next phase, a new recall point.
-fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::state::Player>, doodads: Res<Doodads>) {
+fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::state::Player>, doodads: Res<Doodads>, bridge: NonSend<HudBridge>) {
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
     for aa_net::NetEvent(e) in events.read() {
         match e {
@@ -1644,6 +1836,17 @@ fn results(mut events: MessageReader<aa_net::NetEvent>, player: Res<aa_net::stat
             }
             aa_net::Event::DoodadPhaseChanged { obj_id, func_group_id, time_left, .. } if doodads.by_id.contains_key(obj_id) => {
                 debug!("doodad: {obj_id} is in phase {func_group_id} now ({time_left} ms left)");
+            }
+            // Native `OnDoodadOriginator` stores the packet's faction in doodad+0x350, which
+            // `FUN_393b3300` case 3 compares with the player's expedition id.
+            aa_net::Event::DoodadOriginator { obj_id, new_faction, .. } => {
+                bridge.0.borrow_mut().doodad.factions.insert(*obj_id, *new_faction);
+            }
+            aa_net::Event::DoodadsRemoved(ids) => {
+                let mut data = bridge.0.borrow_mut();
+                for id in ids {
+                    data.doodad.factions.remove(id);
+                }
             }
             aa_net::Event::Portal(aa_net::portal::PortalEvent::ReturnDistricts { portals, return_point_id }) => {
                 info!("doodad: recall point is {return_point_id} ({} districts in the book)", portals.len());
@@ -1773,10 +1976,10 @@ mod tests {
         t.add(1351, 0, "DoodadFuncNaviNaming");
         t.add(7851, 15193, "DoodadFuncNaviTeleport");
         t.add(9, 10994, "DoodadFuncUse");
-        assert_eq!(t.uses(13066), Some(&Uses { skills: vec![14602], navi: vec![], craft: None }));
+        assert_eq!(t.uses(13066), Some(&Uses { skills: vec![14602], navi: vec![], craft: vec![] }));
         assert_eq!(t.uses(13067), None);
-        assert_eq!(t.uses(1351), Some(&Uses { skills: vec![], navi: vec![Navi::Teleport, Navi::OpenPortal], craft: None }));
-        assert_eq!(t.uses(7851), Some(&Uses { skills: vec![15193], navi: vec![], craft: None }));
+        assert_eq!(t.uses(1351), Some(&Uses { skills: vec![], navi: vec![Navi::Teleport, Navi::OpenPortal], craft: vec![] }));
+        assert_eq!(t.uses(7851), Some(&Uses { skills: vec![15193], navi: vec![], craft: vec![] }));
         assert_eq!(t.uses(9), None, "the bar hides skill 10994");
     }
 
@@ -1784,7 +1987,7 @@ mod tests {
     fn a_safe_opens_without_a_skill() {
         let mut t = Tables::default();
         t.add(5602, 0, "DoodadFuncCoffer");
-        assert_eq!(t.uses(5602), Some(&Uses { skills: vec![], navi: vec![Navi::Coffer], craft: None }));
+        assert_eq!(t.uses(5602), Some(&Uses { skills: vec![], navi: vec![Navi::Coffer], craft: vec![] }));
         assert_eq!(Navi::Coffer.label(), "Open");
     }
 
@@ -1835,7 +2038,7 @@ mod tests {
     /// The skills the bar offers a player `metres` south of the herb.
     fn bar_skills(data: &mut HudData, doodads: &Doodads, metres: f32) -> Option<Vec<u32>> {
         data.pos = Vec3::new(10990.0, 10123.0 - metres, 102.5);
-        find_focus(data, doodads, &Units::default()).map(|focus| focus.skills)
+        find_focus(data, doodads, &Units::default(), PermEnv::default()).map(|focus| focus.skills)
     }
 
     #[test]
@@ -2254,7 +2457,7 @@ mod tests {
         for doodad in doodads {
             state.by_id.insert(doodad.obj_id, doodad);
         }
-        find_focus(&data, &state, &Units::default())
+        find_focus(&data, &state, &Units::default(), PermEnv::default())
     }
 
     /// The capture's `tome_851` reading: standing at (15379.922, 13853.5, 159.6), 4.9 m south of the tome, the bar offered
@@ -2389,7 +2592,7 @@ mod tests {
         d.pos = harness.player;
         let now = harness.now;
         if let Some(id) = harness.click.take() {
-            right_click(&mut d, &doodads, &units, id, now, &mut dev);
+            right_click(&mut d, &doodads, &units, id, now, &mut dev, PermEnv::default());
             harness.click_w.push(dev.script_keys.contains('W'));
         }
         if let Some(id) = walk_to(
@@ -2401,7 +2604,7 @@ mod tests {
             &mut cameras,
             &mut dev,
         ) {
-            right_click(&mut d, &doodads, &units, id, now, &mut dev);
+            right_click(&mut d, &doodads, &units, id, now, &mut dev, PermEnv::default());
             harness.acted.push(id);
         }
     }
@@ -2763,7 +2966,7 @@ mod tests {
         // wagon in the shared candidate set (1.2 orders units and doodads on the native key).
         data.doodad.preferred = Some(3446);
 
-        let focus = find_focus(&data, &doodads, &units).expect("the storage box in reach");
+        let focus = find_focus(&data, &doodads, &units, PermEnv::default()).expect("the storage box in reach");
         assert_eq!(focus.obj_id, 3446);
         assert!(
             (focus.dist - 0.4).abs() < 1e-4,
@@ -2848,7 +3051,7 @@ mod tests {
             .by_id
             .insert(2, world_doodad(2, 850, 1, Vec3::new(0.0, 2.0, 0.0)));
         data.doodad.preferred = Some(1);
-        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        let focus = find_focus(&data, &doodads, &Units::default(), PermEnv::default()).expect("a doodad");
         assert_eq!(
             focus.obj_id, 1,
             "the right-clicked doodad stays the bar's among doodads"
@@ -2859,7 +3062,7 @@ mod tests {
             focus.key
         );
         data.doodad.preferred = None;
-        let focus = find_focus(&data, &doodads, &Units::default()).expect("a doodad");
+        let focus = find_focus(&data, &doodads, &Units::default(), PermEnv::default()).expect("a doodad");
         assert_eq!(
             focus.obj_id, 2,
             "without a click the native key picks the front one"
@@ -2907,7 +3110,7 @@ mod tests {
         hauler.pos = aa_net::Pos::new(10.0, 10.0, 0.0);
         units.by_id.insert(20, hauler);
 
-        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        let focus = find_focus(&data, &doodads, &units, PermEnv::default()).expect("the facing storage box");
         assert_eq!(focus.obj_id, 3446);
         let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
         assert_eq!(candidate.obj_id, 20);
@@ -2993,7 +3196,7 @@ mod tests {
         hauler.pos = aa_net::Pos::new(100.0, 200.0, 5.0);
         units.by_id.insert(20, hauler);
 
-        let focus = find_focus(&data, &doodads, &units).expect("the facing storage box");
+        let focus = find_focus(&data, &doodads, &units, PermEnv::default()).expect("the facing storage box");
         let candidate = crate::hud::slave::candidate(&data, &units).expect("the hauler");
         assert!(
             focus.key < candidate.key,
@@ -3275,7 +3478,7 @@ mod tests {
             let mut d = bridge.borrow_mut();
             let mut dev = crate::ingame::DevOptions::default();
             assert!(
-                !right_click(&mut d, &doodads, &units, 300, 0.0, &mut dev),
+                !right_click(&mut d, &doodads, &units, 300, 0.0, &mut dev, PermEnv::default()),
                 "a single craft action uses the doodad at once"
             );
             assert_eq!(d.doodad.chosen, vec![i64::from(CRAFT_ACTION)]);
@@ -3326,4 +3529,124 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(sent.is_empty(), "opening a bench is local (no packet): {sent:?}");
     }
+    fn craft_tables(group: u32, perm: u8) -> GameData {
+        let mut tables = Tables::default();
+        tables.add_full(group, 0, "DoodadFuncCraftPack", perm);
+        GameData {
+            doodad: tables,
+            crafting: crate::hud::crafting::fixture_tables([(568, vec![5557]), (2241, vec![6666])]),
+            ..Default::default()
+        }
+    }
+
+    fn test_player<'a>(party: &'a aa_net::Party, friends: &'a aa_net::Friends, chars: &'a [u32]) -> PlayerFacts<'a> {
+        PlayerFacts {
+            character_id: 47,
+            account_id: 7,
+            account_characters: chars,
+            expedition_id: 900,
+            zone_group: 5,
+            party,
+            friends,
+            house_zone_groups: Some(vec![5]),
+        }
+    }
+
+    fn perm_doodad(owner_id: u32, house_owner_id: u32, house_account_id: u32, faction: u32, zone_group: Option<u32>) -> DoodadFacts {
+        DoodadFacts {
+            owner_id,
+            house_owner_id,
+            house_account_id,
+            faction,
+            zone_group,
+        }
+    }
+
+    /// Native `FUN_393b3300` cases 0-8 and the default, each craft func checked on its own.
+    #[test]
+    fn craft_permissions_follow_native_393b3300() {
+        let mut friends = aa_net::Friends::default();
+        friends.friends.push(aa_net::FriendInfo { id: 99, ..Default::default() });
+        let chars = [47u32, 48];
+        let party = aa_net::Party::default();
+        let player = test_player(&party, &friends, &chars);
+        assert!(craft_permitted(craft_perm::ANY, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
+        assert!(!craft_permitted(craft_perm::OWNER, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
+        assert!(craft_permitted(craft_perm::OWNER, &player, &perm_doodad(47, 0, 0, 0, Some(5))));
+        assert!(
+            craft_permitted(craft_perm::OWNER, &player, &perm_doodad(0, 47, 0, 0, Some(5))),
+            "the house owner is the doodad's owner"
+        );
+        assert!(craft_permitted(craft_perm::OWNER_OR_FRIEND, &player, &perm_doodad(99, 0, 0, 0, Some(5))));
+        assert!(!craft_permitted(craft_perm::OWNER_OR_FRIEND, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
+        assert!(
+            craft_permitted(craft_perm::EXPEDITION, &player, &perm_doodad(5, 0, 0, 0, Some(5))),
+            "a doodad with no faction is open to an expedition member"
+        );
+        assert!(craft_permitted(craft_perm::EXPEDITION, &player, &perm_doodad(5, 0, 0, 900, Some(5))));
+        assert!(!craft_permitted(craft_perm::EXPEDITION, &player, &perm_doodad(5, 0, 0, 901, Some(5))));
+        let mut no_expedition = test_player(&party, &friends, &chars);
+        no_expedition.expedition_id = 0;
+        assert!(!craft_permitted(craft_perm::EXPEDITION, &no_expedition, &perm_doodad(5, 0, 0, 0, Some(5))));
+        assert!(craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(48, 0, 0, 0, Some(5))), "an alt from the login list");
+        assert!(craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(5, 0, 7, 0, Some(5))), "the house's account");
+        assert!(!craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(5, 0, 8, 0, Some(5))));
+        assert!(craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
+        assert!(!craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
+        assert!(
+            craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, None)),
+            "unknown terrain zone data is inferred as allowed"
+        );
+        assert!(craft_permitted(craft_perm::ZONE_RESIDENTS, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
+        assert!(!craft_permitted(craft_perm::ZONE_RESIDENTS, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
+        let mut no_houses = test_player(&party, &friends, &chars);
+        no_houses.house_zone_groups = Some(Vec::new());
+        assert!(!craft_permitted(craft_perm::ZONE_RESIDENTS, &no_houses, &perm_doodad(5, 0, 0, 0, Some(5))));
+        no_houses.house_zone_groups = None;
+        assert!(
+            craft_permitted(craft_perm::ZONE_RESIDENTS, &no_houses, &perm_doodad(5, 0, 0, 0, Some(5))),
+            "unknown house zones are inferred as allowed"
+        );
+        assert!(!craft_permitted(9, &player, &perm_doodad(5, 0, 0, 0, Some(5))), "the default refuses");
+
+        let mut raid = aa_net::Party { id: 3, is_party: false, ..Default::default() };
+        raid.members.push(aa_net::PartyMember { id: 47, slot: 0, ..Default::default() });
+        raid.members.push(aa_net::PartyMember { id: 50, slot: 4, ..Default::default() });
+        raid.members.push(aa_net::PartyMember { id: 51, slot: 5, ..Default::default() });
+        let raider = test_player(&raid, &friends, &chars);
+        assert!(craft_permitted(craft_perm::OWNER_OR_PARTY, &raider, &perm_doodad(50, 0, 0, 0, Some(5))));
+        assert!(!craft_permitted(craft_perm::OWNER_OR_PARTY, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
+        assert!(craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
+        assert!(!craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(52, 0, 0, 0, Some(5))));
+    }
+
+    /// Native `393bd290` lists the craft action through the bar's candidate set; the 2.1 m use
+    /// range (`FUN_393b3ec0` -> `FUN_39093800`) only decides whether the use walks.
+    #[test]
+    fn a_workbench_craft_is_offered_at_the_bar_distance_and_its_use_walks_then_opens() {
+        let mut data = HudData {
+            character_id: 47,
+            pos: Vec3::ZERO,
+            player_radius: 0.0,
+            ..HudData::default()
+        };
+        assert!(data.game.0.set(craft_tables(1088, craft_perm::ANY)).is_ok());
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::new(0.0, 3.0, 0.0)));
+        let units = Units::default();
+        let focus = find_focus(&data, &doodads, &units, PermEnv::default()).expect("the bench is on the bar at 3 m");
+        assert_eq!(focus.skills, vec![CRAFT_ACTION]);
+        let mut dev = crate::ingame::DevOptions::default();
+        assert!(!right_click(&mut data, &doodads, &units, 300, 0.0, &mut dev, PermEnv::default()));
+        assert_eq!(data.doodad.chosen, vec![i64::from(CRAFT_ACTION)]);
+        assert!(data.doodad.approach.is_none(), "the list is offered before the walk");
+        assert!(use_bench(&mut data, &doodads, &units, 300, 1.0).is_none());
+        assert!(data.doodad.approach.is_some(), "the out-of-range use walks");
+        assert_eq!(data.doodad.pending, Some((300, i64::from(CRAFT_ACTION))));
+        assert!(crate::hud::crafting::active_bench(&data).is_none(), "the bench opens on arrival");
+        data.pos = Vec3::new(0.0, 1.0, 0.0);
+        assert!(use_bench(&mut data, &doodads, &units, 300, 2.0).is_some());
+        assert_eq!(crate::hud::crafting::active_bench(&data), Some((300, 568)));
+    }
+
 }

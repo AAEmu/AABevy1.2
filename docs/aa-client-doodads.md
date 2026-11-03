@@ -74,24 +74,32 @@ group, taking `DoodadFuncCraftStart` (kind 0x0c) recipe lists and `DoodadFuncCra
 (kind 0x3a) pack membership, deduplicated and grouped by the recipe's `ac_id`. That is the
 same union `crafting/data.rs` loads into `benches` by `doodad_almighties.id`.
 
-The port adds that action to the phase's `Uses` (`craft: Option<perm_id>`), offers it on F,
-the right-click list and the dynamic bar (a sentinel id, since no skill exists), and
-`doodad::execute` opens the bench through `crafting::open_bench`, firing
+The port adds that action to the phase's `Uses` (`craft: Vec<perm_id>`, one entry per craft
+func), offers it on F, the right-click list and the dynamic bar (a sentinel id, since no
+skill exists), and `doodad::execute` opens the bench through `crafting::open_bench`, firing
 `CRAFTING_START` with the two numeric arguments the script's `SetDoodad` reads. No packet
 goes out on open.
 
-The native range is `max_interaction_doodad_distance` (2.1 m surface gap): the bar only
-offers craft inside it (`in_interaction_reach`), `FUN_394d6dc0`/`FUN_39093800` recheck it
-before `CSExecuteCraft` (`batch::command`), and the active-interaction monitor `393b7e40`
+The bar and right-click list use the normal doodad candidate distance (4 m): native
+`393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
+`FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap); out of range it
+walks to the doodad (`FUN_390a6af0` pending action) and opens on arrival. `FUN_394d6dc0`
+rechecks the same distance before `CSExecuteCraft` (`batch::command`). The active-interaction monitor `393b7e40`
 closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
 (`batch::update`, which keeps CURRENT maps until the next bench, as `393b7aa0` does).
-`X2Craft:EndCraftingInteraction` (wrapper `39460890`) now queues the same close.
+`X2Craft:EndCraftingInteraction` (wrapper `39460890`) queues the same close.
 
-Permission: `doodad_funcs.perm_id` 3 (owner only) is checked against the doodad owner; the
-1.2 client's same-account / zone-resident checks (perms 6/8 — the 61 housing workbench rows)
-need the owner's account and house-zone data the HUD does not keep per doodad, so the
-server's `bench_denial` stays authoritative for those. The send carries the live bench
-object id (`CSExecuteCraft` 0x0f8: recipe, doodad, count).
+Permission is `FUN_393b3300`, checked per craft func (`doodad_funcs.perm_id`):
+0 any; 1 owner; 2 owner or friend; 3 expedition (the player must be in one; a doodad with
+faction 0 is open to it, else `SCDoodadOriginator.new_faction`, native doodad+0x350, must be
+the player's expedition id); 4 owner or the same five-person party group; 5 owner or any
+party/raid member; 6 owner, an alt in the login character list, or the house's account;
+7 the doodad's zone group is the player's ("this zone is my nation"); 8 the account has a
+house in the doodad's zone group; unknown values are refused. The owner is the house owner
+for a housing doodad. The client cannot resolve a character's account outside the login
+list or a zone before the terrain loads it; those are inferred as allowed and the server's
+`bench_denial` stays authoritative. The send carries the live bench object id
+(`CSExecuteCraft` 0x0f8: recipe, doodad, count).
 
 ## Natural gathering
 
