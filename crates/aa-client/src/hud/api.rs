@@ -858,7 +858,12 @@ pub fn refresh_snapshot(world: &mut World, bridge: &Shared) {
     super::pets::refresh(world, &mut data);
     data.mounted.local_cart = world
         .get_resource::<crate::ingame::cart::CartDrive>()
-        .and_then(crate::ingame::cart::CartDrive::speed);
+        .and_then(crate::ingame::cart::CartDrive::motion)
+        .map(|(obj_id, speed, turn_rate)| super::mounted::LocalCart {
+            obj_id,
+            speed,
+            turn_rate,
+        });
     if let Some(party) = world.get_resource::<aa_net::Party>() {
         if data.party != *party { data.party.clone_from(party); }
     }
