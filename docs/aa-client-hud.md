@@ -534,6 +534,25 @@ NPCs within 45 m. The white beams over Maude in the capture are a particle effec
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
 
+### Quest notices and the clock
+
+A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(qtype, err)`; the native
+`FUN_3937a130` first clears the quest's timer through `FUN_39379ea0`, so the directing window also gets
+`QUEST_LEFT_TIME_UPDATED(qtype, 0)`. `route_quest_notices` (`dialog.rs`) ends the directing window when
+the failed quest is the one the window shows (`quest_context_directing.alb` F37) and lets the original
+scripts print `locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148)
+raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when it is the current target (`FUN_39376590`), which
+closes the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
+shows the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` `ERROR_MSG` texts (`FUN_3937a650`,
+`FUN_3937a520`).
+
+Timed quests count down from the server's `time_left_ms` and `accept_time`: `FUN_39379e30` returns
+`end - (now - start) * 1000`. `HUD.quest_left_time(qtype)` feeds `X2Quest.GetQuestContextLeftTime`
+(`quest.lua`). Once a second (`FUN_3937cd80`'s 1.0 s constant) the tick publishes
+`QUEST_LEFT_TIME_UPDATED(qtype, remaining_ms)`; under 1000 ms it publishes 0 once and removes the clock
+(`FUN_39379ea0`), and a quest leaving the list clears the same way. A refusal latches the quest instance
+so the next tick does not bring the clock back.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

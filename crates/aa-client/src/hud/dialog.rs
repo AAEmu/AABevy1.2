@@ -33,6 +33,10 @@ pub(super) use npc::candidates::Catalog as NpcCandidateCatalog;
 pub(super) mod fixture;
 pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
 
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+use web_time::{Instant, SystemTime, UNIX_EPOCH};
+
 use aa_net::interaction::Interact;
 use aa_net::model::{Unit, UnitKind};
 use aa_net::quest::{Quest, status};
@@ -142,6 +146,12 @@ pub struct DialogView {
     cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
+    /// Milliseconds left of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
+    /// the server's `time_left_ms` counts down from the quest's `accept_time` (`FUN_39379e30`).
+    pub left_times: HashMap<u32, i32>,
+    /// Quest instances whose clock a refusal cleared: `FUN_3937a130` removes the timer entry and
+    /// the tick must not add it again while the same quest is active.
+    cleared_left: HashSet<(u32, i64)>,
     pub version: u64,
     /// Whether `quests` holds the server's list yet (the first one raises no events).
     seen: bool,
@@ -271,6 +281,11 @@ fn bubble_table(lua: &Lua, game: &GameData, texts: &Texts, which: &str, quest: u
 pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     let b = bridge.clone();
     hud.raw_set("quest_version", lua.create_function(move |_, ()| Ok(b.borrow().dialog.version))?)?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_left_time",
+        lua.create_function(move |_, qtype: u32| Ok(b.borrow().dialog.left_times.get(&qtype).copied().unwrap_or(0)))?,
+    )?;
     let b = bridge.clone();
     hud.raw_set(
         "quest_list",
@@ -577,6 +592,86 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
             Fire::Objective(text) => rt.fire_event("QUEST_CONTEXT_OBJECTIVE_EVENT", text),
             Fire::Condition(condition) => rt.fire_event("QUEST_CONTEXT_CONDITION_EVENT", ("", condition)),
         }
+    }
+}
+
+/// Milliseconds left of timed quest `q` at `now` (Unix seconds): the server's `time_left_ms` counts
+/// down from the quest's `accept_time` (`FUN_39379e30`: `end - (now - start) * 1000`, start and end
+/// in seconds / milliseconds). The server's accept stamp can be ahead of the local clock; that does
+/// not make the clock gain time. 0 when the quest has no limit.
+pub fn left_time_ms(q: &Quest, now: i64) -> i32 {
+    if q.time_left_ms <= 0 {
+        return 0;
+    }
+    let elapsed = now.saturating_sub(q.accept_time).max(0).saturating_mul(1000);
+    let left = i64::from(q.time_left_ms).saturating_sub(elapsed);
+    left.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
+/// One tick of the quest clock (`X2::GameClient::UpdateQuestLeftTime`, `FUN_3937cd80`): the timed
+/// active quests get their remaining time and one with at least 1000 ms left is published as
+/// `(qtype, remaining_ms)`. A quest under that takes the native timeout path (`FUN_39379ea0`): its
+/// clock is removed and `QUEST_LEFT_TIME_UPDATED(qtype, 0)` is published once, so the notifier
+/// hides it (`quest_context_notifier.alb` F81). A timed quest that leaves the list is cleared the
+/// same way.
+pub fn tick_left_times(left: &mut HashMap<u32, i32>, quests: &[Quest], now: i64) -> Vec<(u32, i32)> {
+    let mut events = Vec::new();
+    left.retain(|qtype, remaining| {
+        if quests.iter().any(|q| q.template_id == *qtype && q.time_left_ms > 0) {
+            return true;
+        }
+        if *remaining >= 1000 {
+            events.push((*qtype, 0));
+        }
+        false
+    });
+    for q in quests.iter().filter(|q| q.time_left_ms > 0) {
+        let remaining = left_time_ms(q, now);
+        let before = left.get(&q.template_id).copied();
+        if remaining < 1000 {
+            if before.is_none_or(|before| before >= 1000) {
+                events.push((q.template_id, 0));
+            }
+        } else {
+            events.push((q.template_id, remaining));
+        }
+        left.insert(q.template_id, remaining);
+    }
+    events
+}
+
+/// The quest clock runs at most once a second (the native's 1.0 s constant `0x3999c488`) and tells
+/// the tracker the remaining milliseconds of every timed quest (`QUEST_LEFT_TIME_UPDATED`).
+pub fn tick_quest_left_time(
+    rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
+    quests: Res<Quests>,
+    mut last: Local<Option<Instant>>,
+) {
+    let now = Instant::now();
+    if last.is_some_and(|t| now.duration_since(t) < Duration::from_secs(1)) {
+        return;
+    }
+    *last = Some(now);
+    let now_unix = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let events = {
+        let mut d = bridge.0.borrow_mut();
+        if d.game.get().is_none() {
+            return;
+        }
+        let active: HashSet<(u32, i64)> = quests.active.iter().map(|q| (q.template_id, q.id)).collect();
+        d.dialog.cleared_left.retain(|key| active.contains(key));
+        let timed: Vec<Quest> = quests
+            .active
+            .iter()
+            .filter(|q| !d.dialog.cleared_left.contains(&(q.template_id, q.id)))
+            .cloned()
+            .collect();
+        tick_left_times(&mut d.dialog.left_times, &timed, now_unix)
+    };
+    let Some(rt) = rt else { return };
+    for (qtype, left) in events {
+        rt.fire_event("QUEST_LEFT_TIME_UPDATED", (qtype, left));
     }
 }
 
@@ -1195,14 +1290,23 @@ pub fn route_quest_notices(
     for NetEvent(e) in events.read() {
         match e {
             Event::QuestContextFailed(failed) => {
-                {
+                let had_timer = {
                     let mut d = bridge.0.borrow_mut();
                     if d.dialog.directing && d.dialog.quest == Some(failed.quest_id) {
                         apply_directing(&rt, &mut d.dialog, false);
                         d.dialog.quest = None;
                     }
-                }
+                    let instance = d.dialog.quests.iter().find(|q| q.template_id == failed.quest_id).map(|q| q.id);
+                    if let Some(id) = instance {
+                        d.dialog.cleared_left.insert((failed.quest_id, id));
+                    }
+                    d.dialog.left_times.remove(&failed.quest_id).is_some()
+                };
                 info!("hud: quest {} failed ({})", failed.quest_id, failed.err);
+                // FUN_3937a130 clears the quest's timer before raising the error.
+                if had_timer {
+                    rt.fire_event("QUEST_LEFT_TIME_UPDATED", (failed.quest_id, 0i32));
+                }
                 rt.fire_event("QUEST_ERROR_INFO", (failed.quest_id, u32::from(failed.err)));
             }
             Event::QuestUnitReqFailed(failed) => {
@@ -2221,6 +2325,7 @@ mod tests {
     #[test]
     fn a_refused_quest_ends_directing_only_for_that_quest_and_raises_error_info() {
         let Some((mut app, shared)) = quest_notice_app() else { return };
+        shared.borrow_mut().dialog.left_times.insert(1065, 5_000);
         // The failed quest is not the one the window is directing: it stays up.
         app.world_mut()
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1066, err: 6 })));
@@ -2231,13 +2336,16 @@ mod tests {
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1065, err: 6 })));
         app.update();
         assert!(!shared.borrow().dialog.directing);
+        assert!(shared.borrow().dialog.left_times.is_empty(), "the failure clears the quest clock");
         let rt = app.world().non_send::<UiRuntime>();
         rt.lua
             .load(
                 r#"
-                assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_ERROR_INFO' and OBSERVED[1].args[1]==1066)
-                assert(OBSERVED[2].event=='QUEST_ERROR_INFO')
-                assert(OBSERVED[2].args[1]==1065 and OBSERVED[2].args[2]==6)
+                assert(#OBSERVED==3 and OBSERVED[1].event=='QUEST_ERROR_INFO' and OBSERVED[1].args[1]==1066)
+                assert(OBSERVED[2].event=='QUEST_LEFT_TIME_UPDATED')
+                assert(OBSERVED[2].args[1]==1065 and OBSERVED[2].args[2]==0)
+                assert(OBSERVED[3].event=='QUEST_ERROR_INFO')
+                assert(OBSERVED[3].args[1]==1065 and OBSERVED[3].args[2]==6)
             "#,
             )
             .exec()
@@ -2266,6 +2374,80 @@ mod tests {
             .load("assert(#OBSERVED==1 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
             .exec()
             .unwrap();
+    }
+
+    fn timed(left_ms: i32, accept_time: i64) -> Quest {
+        Quest { template_id: 330, status: status::PROGRESS, time_left_ms: left_ms, accept_time, ..Quest::default() }
+    }
+
+    #[test]
+    fn the_quest_clock_counts_down_from_accept_time() {
+        let q = timed(60_000, 1_000);
+        assert_eq!(left_time_ms(&q, 1_000), 60_000);
+        assert_eq!(left_time_ms(&q, 1_030), 30_000);
+        // the server's own clock may be ahead of the acceptance stamp
+        assert_eq!(left_time_ms(&q, 900), 60_000);
+        assert_eq!(left_time_ms(&q, 1_061), -1_000);
+        assert_eq!(left_time_ms(&Quest { time_left_ms: -1, ..q }, 1_030), 0);
+    }
+
+    #[test]
+    fn the_quest_clock_publishes_seconds_and_clears_the_clock_at_one() {
+        let q = timed(60_000, 1_000);
+        let mut left = HashMap::from([(331, 5_000), (330, 0)]);
+        // the stale timed quest is cleared, then the new one is published
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_000), vec![(331, 0), (330, 60_000)]);
+        assert_eq!(left.get(&330), Some(&60_000));
+        assert!(!left.contains_key(&331));
+        // the last published second, then FUN_39379ea0's timeout path publishes 0 once
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_059), vec![(330, 1_000)]);
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_060), vec![(330, 0)]);
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_061), Vec::new());
+        assert_eq!(left.get(&330), Some(&-1_000));
+        // leaving the list before its last second also hides the clock
+        let mut left = HashMap::from([(330, 5_000)]);
+        assert_eq!(tick_left_times(&mut left, &[], 1_000), vec![(330, 0)]);
+        assert!(left.is_empty());
+    }
+
+    #[test]
+    fn the_quest_clock_system_publishes_the_live_time_the_scripts_read() {
+        if !aa_world::pak_available() { return; }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
+        let Ok(rt) = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0) else { return };
+        rt.lua
+            .load(
+                r#"
+                LEFT={}
+                local w=UIParent:CreateWidget('emptywidget','questClock','UIParent')
+                w:SetHandler('OnEvent',function(self,event,...) table.insert(LEFT,{...}) end)
+                w:RegisterEvent('QUEST_LEFT_TIME_UPDATED')
+            "#,
+            )
+            .exec()
+            .unwrap();
+        let data = HudData { game: super::super::SharedGameData::default(), ..HudData::default() };
+        let _ = data.game.0.set(game);
+        let shared: Shared = Rc::new(RefCell::new(data));
+        let hud = rt.lua.create_table().unwrap();
+        super::install(&rt.lua, &hud, &shared).unwrap();
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mut quests = Quests::default();
+        quests.active.push(timed(60_000, now - 30));
+        let mut app = App::new();
+        app.insert_resource(quests)
+            .insert_non_send(HudBridge(shared.clone()))
+            .add_systems(Update, tick_quest_left_time);
+        app.insert_non_send(rt);
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load("assert(#LEFT==1 and LEFT[1][1]==330 and LEFT[1][2]>0 and LEFT[1][2]<=60000)")
+            .exec()
+            .unwrap();
+        let left: i32 = hud.get::<mlua::Function>("quest_left_time").unwrap().call(330).unwrap();
+        assert!(left > 0 && left <= 60_000, "the getter reads the live clock: {left}");
     }
 
     #[test]
