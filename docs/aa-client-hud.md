@@ -534,6 +534,35 @@ NPCs within 45 m. The white beams over Maude in the capture are a particle effec
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
 
+### Quest notices and the clock
+
+A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(err, qtype)`; the native
+`FUN_3937a130` first clears the quest's timer through `FUN_39379ea0`, so the directing window also gets
+`QUEST_LEFT_TIME_UPDATED(qtype, 0)`. `route_quest_notices` (`dialog.rs`) ends the directing window when
+the failed quest is the one the window itself shows (`quest_context_directing.alb` F37): `playLines`
+reports its questType through `HUD.quest_show` (the only setter; the quest is cleared when directing
+ends), so a late refusal for an older quest cannot close a newer window. The original scripts print
+`locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148) reports its
+`SkillResult` through the skill-result message first and then raises `QUEST_QUICK_CLOSE_EVENT(qtype)`,
+only when it is the current target (`FUN_39376590`), which closes the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
+raises `DOODAD_PHASE_MSG(text)` (`FUN_3937a650`, `FUN_3937a520`) with the `QUEST_MAIL_SENT` /
+`QUEST_REWARDED_BY_MAIL` `ERROR_MSG` text and the `quest_mails` name / the quest title as its `$1`;
+a failed reward mail (`success` 0) raises `QUEST_ERROR_INFO(0xb, qtype)` instead. A name the client
+cannot look up shows nothing.
+
+Timed quests count down from the local receipt time: on every `SCQuestContextStarted` / `Updated`
+`FUN_3937b240` stores the packet's `time_left_ms` as the end and the local timer as the start, and
+`FUN_39379e30` returns `end - (now - start) * 1000` (the server's `accept_time` is not used). An
+`Updated` whose status is not in progress (1) stores -1, so the next tick removes the clock and
+publishes `(qtype, 0)` (723452). `HUD.quest_left_time(qtype)` feeds
+`X2Quest.GetQuestContextLeftTime` (`quest.lua`) and reads -1 when there is no entry. Once a second
+(`FUN_3937cd80`'s 1.0 s constant) the tick publishes `QUEST_LEFT_TIME_UPDATED(qtype, remaining_ms)`;
+under 1000 ms it publishes 0 once and removes the clock (`FUN_39379ea0`), and a quest leaving the list
+clears the same way. The tick seeds a clock only once per instance (the login list has no Started
+packet); an expired clock stays gone until the server's next Started / Updated (`FUN_3937b240` is the
+only creator). A refusal latches the quest instance so the next tick does not bring the clock back;
+the next Started / Updated of that instance releases the latch and starts the clock anew.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
