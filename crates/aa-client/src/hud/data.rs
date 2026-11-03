@@ -86,10 +86,9 @@ pub struct SkillInfo {
     /// `skills.target_type_id`: 11 is `BallisticPos` (a cannon's fire skill), the only type that
     /// needs a `Position` target instead of a unit.
     pub target_type: u8,
-    /// `skill_products.item_id`: the items the skill makes.
+    /// `skill_products.item_id`: the items the skill makes (`FUN_394a2930`'s first list,
+    /// skill `+0x1f8`).
     pub products: Vec<u32>,
-    /// `skill_reagents.item_id`: the items the skill consumes.
-    pub reagents: Vec<u32>,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -229,6 +228,9 @@ pub struct GameData {
     /// global cooldown (Triple Slash's finishing step: 2 s).
     pub plot_gcd: HashMap<u32, u32>,
     pub items: HashMap<u32, ItemInfo>,
+    /// `spheres.id`: `FUN_3963b590(type)` resolves the SCShowQuestArea label's `stype` through the
+    /// `spheres` table (the native `+0x9db4`).
+    pub spheres: HashSet<u32>,
     pub buffs: HashMap<u32, BuffInfo>,
     /// `appellations`: the titles by id.
     pub appellations: HashMap<u32, AppellationInfo>,
@@ -561,12 +563,13 @@ impl GameData {
         self.items.get(&id).is_some_and(|i| i.use_skill != 0 && self.skills.contains_key(&i.use_skill))
     }
 
-    /// The relation test of `FUN_394a2930`, as far as the data proves it: the item's use skill
-    /// produces (`skill_products`) or consumes (`skill_reagents`) one of `ids`.
+    /// `FUN_394a2930`'s first test: the item's use skill produces (`skill_products`, the native
+    /// skill list at `+0x1f8`) one of `ids`. Its effect-list test (`+0x1e8`, act type 0x18 /
+    /// sub-type 0x1b) is not recovered.
     pub fn skill_relates_to(&self, item: u32, ids: &HashSet<u32>) -> bool {
         let Some(skill) = self.items.get(&item).map(|i| i.use_skill).filter(|s| *s != 0) else { return false };
         let Some(s) = self.skills.get(&skill) else { return false };
-        s.products.iter().chain(&s.reagents).any(|id| ids.contains(id))
+        s.products.iter().any(|id| ids.contains(id))
     }
 
     pub fn load(path: &str) -> rusqlite::Result<GameData> {
@@ -659,9 +662,14 @@ impl GameData {
                         target_type: any_int(r, 15)?.clamp(0, 255) as u8,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
                         products: Vec::new(),
-                        reagents: Vec::new(),
                     },
                 );
+            }
+        }
+        if let Ok(mut q) = conn.prepare("SELECT id FROM spheres") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                data.spheres.insert(any_int(r, 0)?.max(0) as u32);
             }
         }
         if let Ok(mut q) = conn.prepare("SELECT skill_id, item_id FROM skill_products ORDER BY id") {
@@ -669,14 +677,6 @@ impl GameData {
             while let Some(r) = rows.next()? {
                 if let Some(s) = data.skills.get_mut(&(any_int(r, 0)?.max(0) as u32)) {
                     s.products.push(any_int(r, 1)?.max(0) as u32);
-                }
-            }
-        }
-        if let Ok(mut q) = conn.prepare("SELECT skill_id, item_id FROM skill_reagents ORDER BY id") {
-            let mut rows = q.query([])?;
-            while let Some(r) = rows.next()? {
-                if let Some(s) = data.skills.get_mut(&(any_int(r, 0)?.max(0) as u32)) {
-                    s.reagents.push(any_int(r, 1)?.max(0) as u32);
                 }
             }
         }

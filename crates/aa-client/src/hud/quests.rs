@@ -900,27 +900,33 @@ impl QuestTables {
     /// (`GameData::skill_relates_to`); objective 1 gets the ones unrelated to any other objective.
     /// `ObjItemGather` / `EtcItemObtain` only feed the relation, they are never returned.
     pub fn items_by_objective(&self, game: &GameData, quest: u32, active: Option<&Quest>, index: u32) -> Vec<u32> {
+        let score = self.defs.get(&quest).map_or(0, |d| d.score);
+        let objectives = active.map(|q| q.objectives).unwrap_or([0; 5]);
         let mut supplies = Vec::new();
         let mut selected_use = Vec::new();
         let mut other_use = Vec::new();
         let mut selected_aux = Vec::new();
         let mut other_aux = Vec::new();
         let mut current = 0u32;
-        for (slot, c) in self.parts_of(quest, kind::PROGRESS).enumerate() {
-            let count = c.acts.first().map_or(0, |a| a.count);
-            let done = active.is_some_and(|q| count > 0 && q.objectives.get(slot).copied().unwrap_or(0) >= count);
+        for c in self.parts_of(quest, kind::PROGRESS) {
+            let done = self.component_done(score, c, objectives);
             if !done {
                 current = current.wrapping_add(1);
             }
             for a in &c.acts {
-                if a.target == 0 || !game.item_usable(a.target) {
+                if a.target == 0 {
                     continue;
                 }
                 match a.ty.as_str() {
                     "ObjItemUse" => {
+                        // Only the use act's item is filtered (`FUN_39695dc0` + `+0x98`).
+                        if !game.item_usable(a.target) {
+                            continue;
+                        }
                         if !done && current == index { selected_use.push(a.target) } else { other_use.push(a.target) }
                     }
                     "ObjItemGather" | "EtcItemObtain" => {
+                        // Relation data: not filtered by the use skill.
                         if !done && current == index { selected_aux.push(a.target) } else { other_aux.push(a.target) }
                     }
                     _ => {}
@@ -952,6 +958,74 @@ impl QuestTables {
             }
         }
         out
+    }
+
+    /// The first act in `FUN_397d5b90`'s counted set (here [`counts_as_objective`]).
+    fn counted_act<'a>(&self, c: &'a ComponentDef) -> Option<&'a ActDef> {
+        c.acts.iter().find(|a| counts_as_objective(&a.ty))
+    }
+
+    /// The component's slot among the template's kind-4 components (`FUN_397d4360`); only the first
+    /// five slots exist (0..=4), everything else is `None`.
+    fn slot_of_component(&self, quest: u32, id: u32) -> Option<usize> {
+        let def = self.defs.get(&quest)?;
+        let mut slot = 0usize;
+        for cid in &def.components {
+            let Some(c) = self.parts.get(cid) else { continue };
+            if c.kind != kind::PROGRESS {
+                continue;
+            }
+            if slot >= 5 {
+                return None;
+            }
+            if c.id == id {
+                return Some(slot);
+            }
+            slot += 1;
+        }
+        None
+    }
+
+    /// `FUN_397d3370`: whether the first counted act's requirement is met by `counter`. Types with
+    /// a detail count compare it; the rest are met by any progress.
+    fn act_met(a: &ActDef, counter: i32) -> bool {
+        match a.ty.as_str() {
+            "ObjMonsterHunt" | "ObjMonsterGroupHunt" | "ObjInteraction" | "ObjZoneMonsterHunt"
+            | "ObjItemGather" | "ObjItemUse" | "ObjZoneQuestComplete" | "ObjEffectFire"
+            | "ObjItemGroupGather" | "ObjItemGroupUse" | "ObjExpressFire" | "ObjCraft"
+            | "ObjZoneKill" => counter >= a.count,
+            "ObjTalk" | "ObjSphere" | "ObjZoneNpcTalk" | "ObjTalkNpcGroup" | "ObjDoodadPhaseCheck"
+            | "ObjCompleteQuest" | "ObjSendMail" | "ObjMateLevel" | "ObjLevel" | "ObjAbilityLevel"
+            | "ObjCinema" | "ObjDistance" | "ObjCondition" => counter > 0,
+            _ => false,
+        }
+    }
+
+    /// `FUN_397d6180`'s dependency test for a component's `CheckCompleteComponent` act (0xc): the
+    /// referenced component must exist and its first counted act must be met in its own slot.
+    fn dependency_met(&self, component: &ComponentDef, objectives: [i32; 5]) -> bool {
+        let Some(act) = component.acts.iter().find(|a| a.ty == "CheckCompleteComponent") else { return true };
+        if act.target == 0 || !self.parts.contains_key(&act.target) {
+            return true;
+        }
+        let Some(slot) = self.slot_of_component(component.quest, act.target) else { return true };
+        let Some(first) = self.parts.get(&act.target).and_then(|c| self.counted_act(c)) else { return true };
+        Self::act_met(first, objectives[slot])
+    }
+
+    /// `FUN_397d6210`: a score quest is never done; a component without a counted act is done; else
+    /// the 0xc dependency must pass, the slot must exist, and the first counted act's per-type test
+    /// must be met in that slot.
+    fn component_done(&self, score: u32, component: &ComponentDef, objectives: [i32; 5]) -> bool {
+        if score > 0 {
+            return false;
+        }
+        let Some(first) = self.counted_act(component) else { return true };
+        if !self.dependency_met(component, objectives) {
+            return false;
+        }
+        let Some(slot) = self.slot_of_component(component.quest, component.id) else { return false };
+        Self::act_met(first, objectives[slot])
     }
 
     /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): `FUN_397d5b90` returns the first act whose
@@ -1314,6 +1388,62 @@ mod tests {
         p.defs.insert(10, QuestDef { components: vec![40], ..QuestDef::default() });
         p.parts.insert(40, ComponentDef { id: 40, quest: 10, kind: kind::REWARD, acts: vec![point(50), point(70)], ..ComponentDef::default() });
         assert_eq!(p.rewards(10).aa_point, 50);
+    }
+
+    #[test]
+    fn objective_done_follows_fun_397d6210() {
+        let act = |ty: &str, target, count| ActDef { ty: ty.into(), target, count, ..ActDef::default() };
+        let mut t = QuestTables::default();
+        t.defs.insert(20, QuestDef { components: vec![10, 11, 12], ..QuestDef::default() });
+        t.parts.insert(10, ComponentDef { id: 10, quest: 20, kind: kind::PROGRESS, acts: vec![act("ObjMonsterHunt", 1, 2)], ..ComponentDef::default() });
+        t.parts.insert(11, ComponentDef {
+            id: 11,
+            quest: 20,
+            kind: kind::PROGRESS,
+            acts: vec![act("ObjInteraction", 2, 1), act("CheckCompleteComponent", 10, 1)],
+            ..ComponentDef::default()
+        });
+        t.parts.insert(12, ComponentDef { id: 12, quest: 20, kind: kind::PROGRESS, acts: vec![act("ObjTalk", 3, 1)], ..ComponentDef::default() });
+        // The first act's count is the requirement; the slot holds the counter.
+        assert!(!t.component_done(0, t.parts.get(&10).unwrap(), [1, 0, 0, 0, 0]));
+        assert!(t.component_done(0, t.parts.get(&10).unwrap(), [2, 0, 0, 0, 0]));
+        // The 0xc dependency must pass before the component's own first act is tested.
+        assert!(!t.component_done(0, t.parts.get(&11).unwrap(), [1, 9, 0, 0, 0]));
+        assert!(t.component_done(0, t.parts.get(&11).unwrap(), [2, 1, 0, 0, 0]));
+        assert!(!t.component_done(0, t.parts.get(&12).unwrap(), [0, 0, 0, 0, 0]));
+        assert!(t.component_done(0, t.parts.get(&12).unwrap(), [0, 0, 1, 0, 0]));
+        // A component with no counted act is done and does not shift the index.
+        t.parts.insert(13, ComponentDef { id: 13, quest: 20, kind: kind::PROGRESS, acts: vec![act("SupplyItem", 9, 1)], ..ComponentDef::default() });
+        assert!(t.component_done(0, t.parts.get(&13).unwrap(), [0; 5]));
+        // Score quests are never done.
+        assert!(!t.component_done(100, t.parts.get(&10).unwrap(), [99, 99, 99, 99, 99]));
+        // Only five kind-4 slots exist (FUN_397d4360).
+        let mut six = QuestTables::default();
+        six.defs.insert(21, QuestDef { components: (30..36).collect(), ..QuestDef::default() });
+        for id in 30..36 {
+            six.parts.insert(id, ComponentDef { id, quest: 21, kind: kind::PROGRESS, acts: vec![act("ObjTalk", 1, 1)], ..ComponentDef::default() });
+        }
+        assert!(six.component_done(0, six.parts.get(&34).unwrap(), [1; 5]));
+        assert!(!six.component_done(0, six.parts.get(&35).unwrap(), [1; 5]));
+    }
+
+    #[test]
+    fn gather_and_obtain_items_feed_the_relation_unfiltered() {
+        let mut game = GameData::default();
+        game.items.insert(1, super::super::data::ItemInfo { use_skill: 5, ..Default::default() });
+        game.items.insert(2, super::super::data::ItemInfo { use_skill: 0, ..Default::default() });
+        game.items.insert(3, super::super::data::ItemInfo { use_skill: 0, ..Default::default() });
+        game.skills.insert(5, super::super::data::SkillInfo { products: vec![2], ..Default::default() });
+        let act = |ty: &str, target, count| ActDef { ty: ty.into(), target, count, ..ActDef::default() };
+        let mut t = QuestTables::default();
+        t.defs.insert(30, QuestDef { components: vec![50, 51, 52], ..QuestDef::default() });
+        t.parts.insert(50, ComponentDef { id: 50, quest: 30, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 3, 1)], ..ComponentDef::default() });
+        t.parts.insert(51, ComponentDef { id: 51, quest: 30, kind: kind::PROGRESS, acts: vec![act("ObjItemGather", 2, 1)], ..ComponentDef::default() });
+        t.parts.insert(52, ComponentDef { id: 52, quest: 30, kind: kind::SUPPLY, acts: vec![act("SupplyItem", 1, 1)], ..ComponentDef::default() });
+        t.parts.get_mut(&52).unwrap().acts[0].show_action_bar = true;
+        // Item 2 has no use skill, but the gather act still feeds FUN_394a2930's relation, so the
+        // supply item that produces it is assigned to objective 2.
+        assert_eq!(t.items_by_objective(&game, 30, None, 2), vec![1]);
     }
 
     #[test]

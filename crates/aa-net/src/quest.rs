@@ -120,19 +120,20 @@ impl QuestMailSent {
     }
 }
 
-/// `SCShowQuestArea` (`0x1af`): a quest-mark area of style `type` centred on the fixed-point world
-/// position `(x, y, z)` with `radius` metres.
+/// `SCShowQuestArea` (`0x1af`): an area of `type` centred on the fixed-point Cry-space position
+/// `(x, y, z)` with `radius` metres.
 ///
 /// The 1.2 reader `FUN_397b7940` (packet vtable `399b3f48`) reads "type" as a `u32` at `+0xc`,
 /// "x" (8 bytes) at `+0x10`, "y" (8 bytes) at `+0x18`, "z" (float) at `+0x20` and "radius" (float)
-/// at `+0x28`; the packet constructor is `FUN_391b5110`. `OnShowQuestArea` (`FUN_391df7b0`) passes
-/// the type to `FUN_393840b0`, which draws the quest-mark decal: `FUN_393821f0` maps 1..15 to the
-/// `prefabs/quest_mark.xml` markers (exclamation / question / flower / hunt signs). No Lua event.
+/// at `+0x28`; the packet constructor is `FUN_391b5110`. `OnShowQuestArea` (`FUN_391df7b0`) appends
+/// `{type, position, radius}` to `DAT_3a173d80` (no Lua event). The type is not a quest-mark style:
+/// the label is `FUN_3963b590(type)`, a lookup in the `spheres` table (`+0x9db4`);
+/// `FUN_393821f0`'s quest-mark prefabs are unrelated.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct QuestArea {
-    /// The quest-mark style (`FUN_3963b590(type)` is the native's "stype" label).
+    /// The `spheres.id` the native label resolves (`FUN_3963b590`).
     pub ty: u32,
-    /// Fixed-point world X and Y; the client scales the difference to the player by `2^-44`.
+    /// Fixed-point Cry-space X and Y; the client scales the difference to the player by `2^-44`.
     pub x: i64,
     pub y: i64,
     pub z: f32,
