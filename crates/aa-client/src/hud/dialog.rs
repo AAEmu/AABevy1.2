@@ -1216,6 +1216,13 @@ fn directing_cinema(d: &HudData, game: &GameData, quest: u32, kind: u8) -> Optio
     component_cinema(game, quest, kind)
 }
 
+/// The world state the dialog reads: the units the close-up frames and the quests a hand-in checks.
+#[derive(SystemParam)]
+pub struct DialogWorld<'w> {
+    units: Res<'w, Units>,
+    quests: Res<'w, Quests>,
+}
+
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
 /// offer (`SCDoodadQuestAccept`, when the player used a notice board ...) opens the dialog on it.
 pub fn handle_dialog(
@@ -1223,8 +1230,7 @@ pub fn handle_dialog(
     bridge: NonSend<HudBridge>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
-    units: Res<Units>,
-    quests: Res<Quests>,
+    world: DialogWorld,
     mut camera: Option<ResMut<QuestTalkCamera>>,
     mut cinema: Option<ResMut<super::cinema::CinemaPlayer>>,
 ) {
@@ -1289,7 +1295,7 @@ pub fn handle_dialog(
             Req::Complete(quest_id, selected) => {
                 // `FUN_3937b860`: an in-progress let-it-done quest goes out as 0x0dd with the NPC
                 // object (0 from the journal); a ready quest as the ordinary 0x0da.
-                if d.game.get().is_some_and(|g| quests.active_quest(quest_id).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                if d.game.get().is_some_and(|g| world.quests.active_quest(quest_id).is_some_and(|q| g.quests.is_let_it_done(q))) {
                     send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id, obj_id: npc_obj_id, selected });
                     continue;
                 }
@@ -1312,7 +1318,7 @@ pub fn handle_dialog(
                     Some(CompleteSource::Doodad(id)) => (0, id),
                     None => (0, 0),
                 };
-                if d.game.get().is_some_and(|g| quests.active_quest(quest).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                if d.game.get().is_some_and(|g| world.quests.active_quest(quest).is_some_and(|q| g.quests.is_let_it_done(q))) {
                     send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id: quest, obj_id: npc_obj_id, selected });
                 } else {
                     send(&mut net, Interact::QuestComplete { quest_id: quest, npc_obj_id, doodad_obj_id, selected });
@@ -1357,7 +1363,7 @@ pub fn handle_dialog(
                 // no speaker found leaves the close-up (`quest_camera::leave`)
                 if let Some(camera) = camera.as_deref_mut() {
                     let previous = camera.frame;
-                    camera.frame = framing(&d, &units, bubble, previous.as_ref());
+                    camera.frame = framing(&d, &world.units, bubble, previous.as_ref());
                 }
             }
         }
@@ -1825,7 +1831,7 @@ mod tests {
     #[test]
     fn a_doodad_completion_fires_the_event_and_sends_the_doodad_id() {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
-        let mut rt = bare_runtime(&shared);
+        let rt = bare_runtime(&shared);
         // What the original quest_context.alb handler does with COMPLETE_QUEST_CONTEXT_DOODAD.
         rt.exec(
             "probe",
