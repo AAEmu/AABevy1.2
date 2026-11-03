@@ -58,6 +58,8 @@ pub mod code {
     pub const NEED_LABOR_POWER: u8 = 39;
     pub const HIGHER_BUFF: u8 = 42;
     pub const NOT_NOW: u8 = 44;
+    pub const PROTECTED_FACTION: u8 = 47;
+    pub const PROTECTED_LEVEL: u8 = 48;
     pub const UNIT_REQS_OR_FAIL: u8 = 49;
     pub const URK_LEVEL: u8 = 64;
     pub const URK_ABILITY: u8 = 65;
@@ -141,6 +143,12 @@ pub struct SkillRules {
     labor: i32,
     /// `SkillTargetType`: 0 self, 1 friendly, 4 hostile, 5 any unit, 16 others, 17 friendly others, ...
     target_type: u8,
+    /// `SkillTargetRelation` (`target_relation_id`): 0 any, 1 friendly, 2 party, 3 raid, 4 hostile, 5 others.
+    target_relation: u8,
+    /// One of the basic auto attacks, skills 2 (main hand), 3 (off hand) and 4 (ranged), as `GameData`'s
+    /// `SkillInfo::auto_attack`. Not `weapon_slot_for_autoattack_id > 0`: that column also marks skills
+    /// such as Shield Slam and the instrument songs (values 15-18).
+    auto_attack: bool,
     source_alive: bool,
     source_dead: bool,
     target_alive: bool,
@@ -208,7 +216,8 @@ impl Rules {
         {
             let mut q = conn.prepare(
                 "SELECT id, mana_cost, mana_level_md, ability_id, consume_lp, target_type_id, source_alive, source_dead, target_alive, target_dead, source_stun, \
-                 min_range, max_range, weapon_slot_for_range_id, damage_type_id, stop_channeling_on_start_skill, or_unit_reqs FROM skills",
+                 min_range, max_range, weapon_slot_for_range_id, damage_type_id, stop_channeling_on_start_skill, or_unit_reqs, \
+                 target_relation_id FROM skills",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -232,6 +241,8 @@ impl Rules {
                         damage_type: any_int(r, 14)?.clamp(0, 255) as u8,
                         stop_channeling: any_flag(r, 15)?,
                         or_reqs: any_flag(r, 16)?,
+                        target_relation: any_int(r, 17)?.clamp(0, 255) as u8,
+                        auto_attack: matches!(id, 2..=4),
                         reqs: reqs.remove(&id).unwrap_or_default(),
                     },
                 );
@@ -312,6 +323,10 @@ pub struct Env<'a> {
 
 /// How long a press waits for the server's answer before the next one may go out.
 const FLIGHT_MS: u64 = 500;
+
+/// `skills.id` of the basic melee attack (`DAT_39ac769c` = 2): the only skill whose request `FUN_393989e0` swallows while the
+/// auto attack latch (`X2Unit + 0x3ad5`) is set.
+const MELEE_ATTACK: u32 = 2;
 
 /// The global cooldown left under which a press goes out anyway: the client counts it from the server's answer, which is a
 /// little behind the server's own clock.
@@ -530,6 +545,23 @@ impl Env<'_> {
         let own = self.is_self(t);
         let hostile = t.relation == "hostile";
         let friendly = t.relation == "friendly";
+        // `CanAutoAttackTargetUnit` (`FUN_393be4e0`) before the auto attacks and a hostile-relation skill
+        // (`target_relation_id` 4): only a target `FUN_39838880` marks attackable (0x100) passes; the
+        // attackable bit is the non-friendly relation (`FUN_39837800`'s `+0x40` and the force-attack/
+        // bloodlust flags are not recovered). `FUN_39898e60` picks the refusal from `FUN_39838880`'s reason
+        // byte (`FUN_39837d60`): 0x2f `PROTECTED_FACTION` only for reason 1, a character (the value is
+        // `target+0x3adc`, unconfirmed); reasons 5/6 are 0x30 `PROTECTED_LEVEL` (that operand is not
+        // ported); everything else is 0x22 `INVALID_TARGET`.
+        if (r.auto_attack || r.target_relation == 4) && !t.attackable {
+            return Some(if t.unit_type == "character" {
+                Fail {
+                    result: code::PROTECTED_FACTION,
+                    value: t.faction_id.max(0) as u32,
+                }
+            } else {
+                fail(code::INVALID_TARGET)
+            });
+        }
         match r.target_type {
             1 if hostile => return Some(fail(code::INVALID_TARGET)),
             4 if friendly => return Some(fail(code::INVALID_TARGET)),
@@ -619,17 +651,30 @@ impl Env<'_> {
         super::cooldown::gcd_at(game, skills, skill, Instant::now()).0
     }
 
-    /// The skill starts the global cooldown (it is known and does not ignore it). A linked skill uses the converted one.
+    /// The skill starts the global cooldown (it is known and does not ignore it). A linked skill uses the converted one. The
+    /// 1.2 basic attacks are exempt **by inference**: the K2 cooldown-manager pair stays 0/1000 across every auto attack press,
+    /// but that capture cannot tell whether the pair is written at the request or on the server's reply (the localhost reply
+    /// lands in the same frame), so the exemption is not decompile-proven (the skill 2 path has no explicit GCD test).
     pub fn uses_gcd(&self, skill: u32) -> bool {
         let skill = self.effective_skill(skill);
-        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd)
+        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| !i.ignore_gcd && !i.auto_attack)
+    }
+
+    /// A 1.2 basic attack (skill 2 melee, 3 off-hand, 4 ranged).
+    pub fn is_auto_attack(&self, skill: u32) -> bool {
+        self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| i.auto_attack)
     }
 
     /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
-    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, or the last press has no answer yet.
+    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, the last press has no answer yet, or the auto attack
+    /// latch (`X2Unit + 0x3ad5`) is set for skill 2 (`FUN_393989e0` returns 1 only for `DAT_39ac769c` = 2; the off-hand and
+    /// ranged basics 3 and 4 are not swallowed).
     pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
         let skill = self.effective_skill(skill);
         if self.casting(skill) {
+            return true;
+        }
+        if skill == MELEE_ATTACK && self.skills.is_some_and(|s| s.auto_attack) {
             return true;
         }
         self.uses_gcd(skill) && (self.gcd_left(skill) > GCD_SLACK_MS || self.skills.is_some_and(|s| flight.pending(s, Instant::now())))
@@ -651,6 +696,21 @@ impl Env<'_> {
         }
         let skill = self.effective_skill(skill);
         self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
+    }
+
+    /// What refuses a basic attack before it is sent. The 1.2 skill 2 path (`FUN_393989e0`) checks a valid auto attack
+    /// target (`FUN_393be4e0`, `CanAutoAttackTargetUnit`: a living unit that can be attacked) and shows its own error text.
+    /// It also range-checks the target (`FUN_39397f90`, 748316, through `FUN_39397eb0`): out of range, when the setting behind
+    /// `DAT_39d1fba4->+8()` returns 1, it calls `FUN_39393920` and returns without sending (748886-748889); otherwise it falls
+    /// through to `FUN_393925c0` and sends. The K2 press at 11.2 m sent `CSStartSkill 2` (CAP), so that client's setting was not
+    /// 1 there; the setting's default is not provable from the decompile, so the send is kept. No mana, cooldown or GCD test is
+    /// applied here either.
+    pub fn precheck_auto_attack(&self, skill: u32) -> Option<Fail> {
+        let r = self.rules()?.skills.get(&skill)?;
+        if self.dead() {
+            return Some(fail(code::SOURCE_DIED));
+        }
+        self.target_rules(r)
     }
 
     /// Why an action bar slot is dark: the result that refuses it, `None` for a lit slot. An item needs to be in the bag
@@ -747,7 +807,33 @@ mod tests {
     }
 
     fn target(hp: i32, relation: &'static str) -> TargetSnap {
-        TargetSnap { obj_id: 77, hp, max_hp: 100, relation, buffs: BuffLists::default(), ..TargetSnap::default() }
+        TargetSnap {
+            obj_id: 77,
+            hp,
+            max_hp: 100,
+            relation,
+            attackable: relation != "friendly",
+            faction_id: 101,
+            unit_type: "character",
+            buffs: BuffLists::default(),
+            ..TargetSnap::default()
+        }
+    }
+
+    fn npc_target(hp: i32, relation: &'static str) -> TargetSnap {
+        TargetSnap {
+            unit_type: "npc",
+            ..target(hp, relation)
+        }
+    }
+
+    /// A neutral unit whose attackable bit is false: a flag case the decompile has not recovered. Real
+    /// neutral units stay attackable (see `panels::neutral_npcs_stay_attackable_and_friendly_npcs_are_not`).
+    fn neutral_npc() -> TargetSnap {
+        TargetSnap {
+            attackable: false,
+            ..npc_target(100, "neutral")
+        }
     }
 
     fn me() -> Snapshot {
@@ -772,7 +858,15 @@ mod tests {
 
     #[test]
     fn target_and_range() {
-        let g = game(Rules::default().with_skill(1, melee()));
+        // 1: a hostile target type with relation Any; 2: a hostile-relation skill (Triple Slash); 3: an auto attack.
+        let hostile_relation = SkillRules { target_relation: 4, ..melee() };
+        let auto = SkillRules { auto_attack: true, ..melee() };
+        let g = game(
+            Rules::default()
+                .with_skill(1, melee())
+                .with_skill(2, hostile_relation)
+                .with_skill(3, auto),
+        );
         let me = me();
         let rat = target(100, "hostile");
         // a hostile skill needs a target, a living hostile one, in reach
@@ -786,8 +880,188 @@ mod tests {
         assert_eq!(env(&g, &me, Some(&rat), 9.0).precheck(1), Some(fail(code::TOO_FAR_RANGE)));
         // the rat is dead: `combat_death` real_16, the bar goes dark
         assert_eq!(env(&g, &me, Some(&target(0, "hostile")), 3.0).why_not(1, 0.0), Some(fail(code::TARGET_DIED)));
-        // a friendly unit is no target for a hostile skill
-        assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(1, 0.0), Some(fail(code::INVALID_TARGET)));
+        // a friendly unit is no target for a hostile skill type: `INVALID_TARGET` (the 0x2f choice is not
+        // recovered for this branch)
+        assert_eq!(
+            env(&g, &me, Some(&npc_target(100, "friendly")), 3.0).why_not(1, 0.0),
+            Some(fail(code::INVALID_TARGET))
+        );
+        // `CanAutoAttackTargetUnit`/`FUN_39898e60`: a neutral NPC is attackable (tendency is not evidence);
+        // a friendly NPC is refused with 0x22 `INVALID_TARGET`, a friendly character with 0x2f
+        // `PROTECTED_FACTION` and the faction value (`FUN_39837d60` reason 1).
+        let neutral = neutral_npc();
+        assert_eq!(env(&g, &me, Some(&neutral), 3.0).why_not(2, 0.0), Some(fail(code::INVALID_TARGET)));
+        assert_eq!(env(&g, &me, Some(&neutral), 3.0).why_not(3, 0.0), Some(fail(code::INVALID_TARGET)));
+        let mut attackable_neutral = neutral_npc();
+        attackable_neutral.attackable = true;
+        assert_eq!(env(&g, &me, Some(&attackable_neutral), 3.0).why_not(2, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&attackable_neutral), 3.0).why_not(3, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&rat), 3.0).why_not(2, 0.0), None);
+        assert_eq!(env(&g, &me, Some(&rat), 3.0).why_not(3, 0.0), None);
+        assert_eq!(
+            env(&g, &me, Some(&npc_target(100, "friendly")), 3.0).why_not(3, 0.0),
+            Some(fail(code::INVALID_TARGET))
+        );
+        assert_eq!(
+            env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(3, 0.0),
+            Some(Fail { result: code::PROTECTED_FACTION, value: 101 })
+        );
+        // a friendly heal still passes: the relation gate is only for auto attacks and relation-4 skills
+        let heal = SkillRules { target_type: 1, target_relation: 1, ..SkillRules::default() };
+        let g = game(Rules::default().with_skill(1, melee()).with_skill(4, heal));
+        assert_eq!(env(&g, &me, Some(&target(100, "friendly")), 3.0).why_not(4, 0.0), None);
+    }
+
+    #[derive(Resource)]
+    struct Press {
+        skill: u32,
+        relation: &'static str,
+        attackable: bool,
+        target_type: u8,
+        unit_type: &'static str,
+    }
+
+    fn press_refused_or_sent(
+        mut net: bevy::prelude::MessageWriter<crate::ingame::ground_target::SkillPressed>,
+        mut failed: bevy::prelude::MessageWriter<super::super::alerts::UseFailed>,
+        press: bevy::prelude::Res<Press>,
+    ) {
+        use aa_net::items::{ActionKind, ActionSlot, ACTION_SLOTS};
+        use aa_net::state::{ActionBar, Target};
+        let mut data = HudData {
+            snapshot: Snapshot {
+                unit_id: "5".into(),
+                level: 1,
+                hp: 700,
+                max_hp: 700,
+                mp: 100,
+                max_mp: 100,
+                labor: 50,
+                ..Snapshot::default()
+            },
+            ..HudData::default()
+        };
+        let rules = Rules::default().with_skill(
+            press.skill,
+            SkillRules {
+                target_type: press.target_type,
+                auto_attack: press.skill == 2,
+                target_relation: if press.skill == 18132 { 4 } else { 0 },
+                source_alive: true,
+                target_alive: true,
+                max_range: 4.0,
+                damage_type: 1,
+                ..SkillRules::default()
+            },
+        );
+        let _ = data.game.0.set(GameData {
+            rules,
+            ..GameData::default()
+        });
+        data.panels.target = Some(TargetSnap {
+            obj_id: 77,
+            hp: 100,
+            max_hp: 100,
+            relation: press.relation,
+            attackable: press.attackable,
+            faction_id: 101,
+            unit_type: press.unit_type,
+            ..TargetSnap::default()
+        });
+        data.target_pos = Some(Vec3::new(2.0, 0.0, 0.0));
+        let env = Env::of(&data, None, &[], None);
+        let mut bar = ActionBar {
+            slots: vec![ActionSlot::default(); ACTION_SLOTS],
+            ..ActionBar::default()
+        };
+        bar.slots[2] = ActionSlot {
+            kind: ActionKind::Spell,
+            id: u64::from(press.skill),
+        };
+        let mut target = Target::default();
+        target.obj_id = Some(77);
+        super::super::panels::use_slot(
+            2,
+            &env,
+            &InFlight::default(),
+            &bar,
+            &Inventory::default(),
+            &target,
+            &mut net,
+            &mut failed,
+        );
+    }
+
+    fn press_app(skill: u32, relation: &'static str, attackable: bool, target_type: u8, unit_type: &'static str) -> bevy::prelude::App {
+        let mut app = bevy::prelude::App::new();
+        app.add_message::<crate::ingame::ground_target::SkillPressed>()
+            .add_message::<super::super::alerts::UseFailed>()
+            .insert_resource(Press {
+                skill,
+                relation,
+                attackable,
+                target_type,
+                unit_type,
+            })
+            .add_systems(bevy::prelude::Update, press_refused_or_sent);
+        app
+    }
+
+    fn drain_press(app: &mut bevy::prelude::App) -> (Vec<crate::ingame::ground_target::SkillPressed>, Vec<super::super::alerts::UseFailed>) {
+        let pressed = app
+            .world_mut()
+            .resource_mut::<bevy::prelude::Messages<crate::ingame::ground_target::SkillPressed>>()
+            .drain()
+            .collect();
+        let failed = app
+            .world_mut()
+            .resource_mut::<bevy::prelude::Messages<super::super::alerts::UseFailed>>()
+            .drain()
+            .collect();
+        (pressed, failed)
+    }
+
+    #[test]
+    fn an_auto_attack_or_hostile_skill_on_a_friendly_npc_is_refused_before_sending() {
+        // A friendly NPC is refused with 0x22 `INVALID_TARGET` (FUN_39837d60 reason 1 is a character only).
+        for skill in [2, 18132] {
+            let mut app = press_app(skill, "friendly", false, 4, "npc");
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(pressed.is_empty(), "skill {skill} must not be sent");
+            assert!(
+                matches!(failed.as_slice(), [f] if f.skill == skill && f.result == code::INVALID_TARGET),
+                "skill {skill}: {failed:?}"
+            );
+        }
+        // A friendly character: PROTECTED_FACTION (0x2f) with the faction value (`FUN_39898e60`).
+        let mut app = press_app(2, "friendly", false, 4, "character");
+        app.update();
+        let (pressed, failed) = drain_press(&mut app);
+        assert!(pressed.is_empty());
+        assert!(matches!(
+            failed.as_slice(),
+            [f] if f.result == code::PROTECTED_FACTION && f.value == 101
+        ));
+
+        // A neutral NPC (Amutar 3443, the lv1 rat 10661 ...) is attackable, and so is a hostile mob.
+        for (relation, unit_type) in [("neutral", "npc"), ("hostile", "npc")] {
+            let mut app = press_app(2, relation, true, 4, unit_type);
+            app.update();
+            let (pressed, failed) = drain_press(&mut app);
+            assert!(
+                matches!(pressed.as_slice(), [p] if p.skill == 2 && p.target_obj_id == 77),
+                "{relation}: {pressed:?} {failed:?}"
+            );
+            assert!(failed.is_empty(), "{relation}: {failed:?}");
+        }
+
+        // A heal (friendly target type) on a friendly unit still passes the attack gate.
+        let mut app = press_app(4, "friendly", false, 1, "character");
+        app.update();
+        let (pressed, failed) = drain_press(&mut app);
+        assert!(matches!(pressed.as_slice(), [p] if p.skill == 4), "{pressed:?}");
+        assert!(failed.is_empty(), "{failed:?}");
     }
 
     #[test]
@@ -954,6 +1228,178 @@ mod tests {
         g.skills.insert(2, crate::hud::data::SkillInfo { gcd_ms: 1000, ..Default::default() });
         g.skills.insert(3, crate::hud::data::SkillInfo { gcd_ms: 1000, ignore_gcd: true, ..Default::default() });
         g
+    }
+
+    /// Inferred, not decompile-proven: the K2 cooldown-manager pair (0/1000) is unchanged by every auto attack press, so the
+    /// basic attacks are treated as exempt from the global cooldown even though the data gives them `default_gcd` (skill 2:
+    /// 1000 ms). The capture cannot tell whether the pair is written at the request or on our server's reply.
+    #[test]
+    fn the_basic_attacks_do_not_start_the_global_cooldown() {
+        let mut g = gcd_game();
+        g.skills.insert(4, crate::hud::data::SkillInfo { gcd_ms: 1000, auto_attack: true, ..Default::default() });
+        let me = me();
+        let skills = cast_ago(Duration::from_millis(100));
+        let e = Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) };
+        assert!(!e.uses_gcd(4), "the auto attack is exempt");
+        assert_eq!(e.gcd_left(4), 0);
+        assert!(!e.held_back(4, &InFlight::default()), "a press during another skill's GCD still goes out");
+        assert!(e.uses_gcd(1) && e.uses_gcd(2), "the other skills are not");
+        // the exemption is the basic attack, not `ignore_global_cooldown`: 3 ignores the GCD and 18132's weapon slot is no flag
+        assert!(!e.uses_gcd(3));
+    }
+
+    /// The flag comes from the 1.2 basic attack ids (2..=4), not `weapon_slot_for_autoattack_id` (Triple Slash 18132 carries 15
+    /// there but is no auto attack: its damage numbers are yellow in the real capture, the auto attack's are white).
+    #[test]
+    fn the_basic_attacks_are_the_three_basic_skills_of_the_database() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
+        let game = match crate::hud::data::GameData::load(&path) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no game data: {e}");
+                return;
+            }
+        };
+        for id in [2, 3, 4] {
+            assert!(game.skills.get(&id).is_some_and(|s| s.auto_attack), "skill {id}");
+        }
+        for id in [12026, 18132] {
+            assert!(game.skills.get(&id).is_some_and(|s| !s.auto_attack), "skill {id}");
+        }
+        let me = me();
+        assert!(!Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(2));
+        assert!(Env { game: Some(&game), ..env(&game, &me, None, 0.0) }.uses_gcd(18132));
+    }
+
+    /// The K2 client's outbound packets: a press at 11.2 m still sent `CSStartSkill 2`, and a second press sent another one.
+    /// The client's only swallow is the auto attack latch (`X2Unit + 0x3ad5`, `FUN_393989e0`), and only for skill 2
+    /// (`DAT_39ac769c`): `SCSkillStarted` for skill 2 with timeline 0 sets it (`OnSkillStarted`, `FUN_3939a810` 750346) and
+    /// `SCSkillStopped` clears it (`FUN_39398410` 748541); the off-hand and ranged basics 3 and 4 are not swallowed. Our
+    /// server sends no `SCSkillStarted` for skill 2, which is why the K2 presses all went out. The range check is
+    /// `FUN_39397f90`: an out-of-range press is sent unless the `DAT_39d1fba4` setting returns 1. A press without a target
+    /// sends nothing and shows the client's own refusal.
+    #[test]
+    fn a_basic_attack_press_is_sent_unless_the_auto_attack_latch_is_set() {
+        use aa_net::state::{ActionBar, Target};
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::{App, MessageWriter, MinimalPlugins, Res, Update};
+        use crate::hud::UseFailed;
+        use crate::hud::panels::use_slot;
+        use crate::ingame::ground_target::SkillPressed;
+        #[derive(Resource)]
+        struct Press(usize, f32);
+        #[derive(Resource)]
+        struct Fixture {
+            game: GameData,
+            me: Snapshot,
+        }
+        #[allow(clippy::too_many_arguments)]
+        fn press(
+            press: Res<Press>,
+            fixture: Res<Fixture>,
+            target: Res<Target>,
+            bar: Res<ActionBar>,
+            inventory: Res<Inventory>,
+            skills: Res<Skills>,
+            mut net: MessageWriter<SkillPressed>,
+            mut failed: MessageWriter<UseFailed>,
+        ) {
+            let snap = TargetSnap { obj_id: 77, hp: 100, max_hp: 100, relation: "hostile", ..Default::default() };
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: target.obj_id.map(|_| &snap), target_pos: Some(Vec3::new(press.1, 0.0, 0.0)), skills: Some(&skills), buffs: &[], inventory: None };
+            use_slot(press.0, &env, &InFlight::default(), &bar, &inventory, &target, &mut net, &mut failed);
+        }
+        let mut g = game(Rules::default().with_skill(2, melee()));
+        for id in [2, 3, 4] {
+            g.skills.insert(id, crate::hud::data::SkillInfo { auto_attack: true, ..Default::default() });
+        }
+        let mut bar = ActionBar { slots: vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS], ..Default::default() };
+        for (slot, id) in [(1, 2), (2, 3), (3, 4)] {
+            bar.slots[slot] = aa_net::items::ActionSlot { kind: aa_net::items::ActionKind::Spell, id };
+        }
+        let mut target = Target::default();
+        target.obj_id = Some(77);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Fixture { game: g, me: me() })
+            .insert_resource(target)
+            .insert_resource(bar)
+            .insert_resource(Skills { obj_id: 5, ..Skills::default() })
+            .init_resource::<Inventory>()
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .insert_resource(Press(1, 12.0))
+            .add_systems(Update, press);
+        let sent = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<SkillPressed>>();
+            m.drain().collect::<Vec<_>>()
+        };
+        let failed = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<UseFailed>>();
+            m.drain().count()
+        };
+        let started = || {
+            aa_net::Event::SkillStarted(aa_net::skill::SkillStarted {
+                skill_id: 2,
+                tl: 0,
+                caster: aa_net::buff::BuffCaster { kind: 0, obj_id: 5 },
+                target: aa_net::skill::SkillTarget::unit(77),
+                raw_caster: aa_net::SkillCasterData::Unit(5),
+                raw_target: aa_net::skill::SkillTargetData::Unit(77),
+                cast_ms: 0,
+                base_cast_ms: 0,
+                synergy: 0,
+                result: 0,
+                result_value: 0,
+                raw_result: Default::default(),
+            })
+        };
+        app.update();
+        let far = sent(&mut app);
+        assert_eq!(far.len(), 1, "out of reach is still sent: {far:?}");
+        assert_eq!((far[0].skill, far[0].target_obj_id), (2, 77));
+        assert!(!far[0].gcd, "the auto attack starts no global cooldown (inferred)");
+        assert_eq!(failed(&mut app), 0);
+        // walking does not change the send, and a re-press is another start (no toggle, and no latch yet)
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        let first = sent(&mut app);
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].skill, 2);
+        app.update();
+        let second = sent(&mut app);
+        assert_eq!(second.len(), 1, "the second press is sent again: no toggle ({second:?})");
+        // an `SCSkillStarted` for skill 2 with timeline 0 sets the latch: the next press is swallowed without an alert
+        app.world_mut().resource_mut::<Skills>().apply(&started());
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        assert!(sent(&mut app).is_empty(), "the auto attack latch swallows the press");
+        assert_eq!(failed(&mut app), 0, "and shows no refusal");
+        // the latch swallows only skill 2: the off-hand and ranged basics 3 and 4 still go out
+        app.world_mut().insert_resource(Press(2, 2.0));
+        app.update();
+        let offhand = sent(&mut app);
+        assert_eq!(offhand.len(), 1, "skill 3 is not swallowed ({offhand:?})");
+        assert_eq!(offhand[0].skill, 3);
+        app.world_mut().insert_resource(Press(3, 2.0));
+        app.update();
+        let ranged = sent(&mut app);
+        assert_eq!(ranged.len(), 1, "skill 4 is not swallowed ({ranged:?})");
+        assert_eq!(ranged[0].skill, 4);
+        // `SCSkillStopped` clears it and the next press is sent again
+        app.world_mut().resource_mut::<Skills>().apply(&aa_net::Event::SkillStopped { obj_id: 5, skill_id: 2 });
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        let after = sent(&mut app);
+        assert_eq!(after.len(), 1, "after SCSkillStopped the press is sent again: {after:?}");
+        // the target is gone: the client's own target check refuses and says why
+        app.world_mut().resource_mut::<Target>().obj_id = None;
+        app.world_mut().insert_resource(Press(1, 2.0));
+        app.update();
+        assert!(sent(&mut app).is_empty(), "no target: nothing is sent");
+        assert_eq!(failed(&mut app), 1, "the refusal is shown");
     }
 
     /// The player cast skill 1 `ago` ago.
@@ -1196,6 +1642,8 @@ mod tests {
         assert_eq!((r.mana, r.target_type, r.max_range, r.damage_type), (30.0, 4, 4.0, 1));
         // Melee Attack reaches as far as the weapon in the main hand; Dash does not work in a fight
         assert_eq!(rules.skills[&2].range_slot, 15);
+        assert!(rules.skills[&2].auto_attack, "Melee Attack is auto attack 2");
+        assert_eq!(rules.skills[&18132].target_relation, 4, "Triple Slash is hostile-relation");
         assert!(rules.skills[&16287].reqs.iter().any(|q| q.kind == 12));
         assert!(rules.buffs.values().any(|b| b.stun) && rules.buffs.values().any(|b| b.silence));
         assert!(rules.weapons.values().any(|w| w.max_range >= 20.0));

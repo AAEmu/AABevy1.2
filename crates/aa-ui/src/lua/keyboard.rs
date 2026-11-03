@@ -84,6 +84,24 @@ pub fn begin_frame(lua: &Lua) {
     edit::ime::begin_frame(lua);
 }
 
+/// A stage is put aside while another stage owns the keyboard (a teleport's loading screen). The
+/// physical key-up edges go to the other stage, so this one would keep the keys it owns forever:
+/// `Keyboard::captured` stays true through `owned`, and the game ignores every key after the stage
+/// comes back. Release the keys and the capture, and drop the edit focus (a chat input left open
+/// would otherwise take the keyboard again).
+pub fn suspend(lua: &Lua) {
+    let owner = ui(lua).focus;
+    if let Some(owner) = owner {
+        edit::ime::release(lua, owner);
+    }
+    edit::set_focus(lua, None);
+    let mut u = ui(lua);
+    u.keyboard.capture = None;
+    u.keyboard.owned.clear();
+    u.keyboard.pressed.clear();
+    u.keyboard.consumed = false;
+}
+
 /// Losing OS focus clears held keys without inventing binding release events.
 pub fn focus_lost(lua: &Lua) {
     let owner = ui(lua).focus;
@@ -409,6 +427,30 @@ mod tests {
     use bevy::input::keyboard::{Key, KeyboardInput};
     use bevy::input::{ButtonState, InputPlugin};
     use bevy::prelude::*;
+
+    #[test]
+    fn a_suspended_stage_releases_the_keys_it_owns() {
+        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+        if !std::path::Path::new(&pak).exists() {
+            return;
+        }
+        let ui = UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
+        ui.exec(
+            "@capture",
+            r#"
+            frame = UIParent:CreateWidget('emptywidget', 'suspendFrame', 'UIParent')
+            frame:Show(true); frame:EnableKeyboard(true)
+        "#,
+        )
+        .unwrap();
+        assert!(ui.keyboard_captured());
+        // Enter goes down; its key-up arrives while the stage is put aside for a load.
+        assert!(ui.key_event(KeyCode::Enter, true, None));
+        super::suspend(&ui.lua);
+        super::begin_frame(&ui.lua);
+        assert!(!ui.keyboard_captured(), "the suspended stage must not keep owning the keyboard");
+        assert!(ui.focus().is_none(), "a focus is dropped with the stage");
+    }
 
     #[test]
     fn bevy_input_set_publishes_capture_through_the_release_frame() {

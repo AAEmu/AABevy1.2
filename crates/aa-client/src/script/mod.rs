@@ -53,6 +53,12 @@ impl ScriptPick {
         self.right.take()
     }
 
+    /// Queue a right click in a test, as `interact` does.
+    #[cfg(test)]
+    pub(crate) fn right_for_test(&mut self, obj_id: u32) {
+        self.right = Some(obj_id);
+    }
+
     /// The talk with `npc` began; `what` is what it does for the player (`None`: nothing, the talk ended at once).
     pub fn talked(&mut self, npc: u32, what: Option<&'static str>) {
         self.talk = Some((npc, what));

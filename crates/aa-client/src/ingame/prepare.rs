@@ -295,6 +295,6 @@ pub fn prepare_doodad(db: &Db, loader: &CryLoader, template_id: u32, func_group_
     let Some(path) = db.doodad_phase_visual(template_id, func_group_id) else {
         return DoodadBuild { path: String::new(), model: None, func_group_id, growth };
     };
-    let model = super::doodad_model::prepare(loader, &path);
+    let model = super::doodad_model::prepare_with_bounds(loader, &path);
     DoodadBuild { path, model, func_group_id, growth }
 }

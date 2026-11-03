@@ -46,9 +46,29 @@ impl EffectDef {
         self.root.def.continuous
     }
 
+    /// A burst: no enabled emitter is `Continuous`, so the whole effect plays once and ends. The root may be an
+    /// empty wrapper (`housing_test.housing_fire_b` has `<Params/>` with continuous children, not a burst).
+    pub fn one_shot(&self) -> bool {
+        self.emitters.iter().all(|e| !e.def.continuous)
+    }
+
     /// Number of emitters that draw.
     pub fn drawn(&self) -> usize {
         self.emitters.iter().filter(|e| e.def.draws()).count()
+    }
+
+    /// The longest particle lifetime of the effect (nested emitters included), seconds: how long the last particle
+    /// can survive after emission stops.
+    pub fn max_particle_life(&self) -> f32 {
+        fn walk(node: &Node, out: &mut f32) {
+            *out = out.max(node.def.particle_life.max());
+            for child in &node.children {
+                walk(child, out);
+            }
+        }
+        let mut out = 0.0;
+        walk(&self.root, &mut out);
+        out.max(0.0)
     }
 
     /// The first emitter that emits a mesh (`Geometry`): the model path and the `.mtl` it is drawn with (empty: the model's own).
@@ -219,6 +239,13 @@ mod tests {
         let lib = Library::load("x2_effects").unwrap();
         let torch = lib.get("fire_smoke.torchlight_b").expect("torch");
         assert!(torch.drawn() >= 2, "{}", torch.drawn());
+        // continuous children keep a fire alive even when its root wrapper has no Params; the burst has none
+        let fire = lib.get("housing_test.housing_fire_b").expect("dying fire");
+        assert!(!fire.one_shot(), "{} emitters", fire.emitters.len());
+        let smoke = lib.get("fire_smoke.burning_smoke_01").expect("dead smoke");
+        assert!(!smoke.one_shot());
+        let burst = lib.get("housing_test.small_ship_exp").expect("dead explosion");
+        assert!(burst.one_shot(), "{} emitters", burst.emitters.len());
         let lib = Library::load("abillity_skill_table_m").unwrap();
         assert!(lib.get("login_stage_effect.flow_fog_01").is_some());
     }

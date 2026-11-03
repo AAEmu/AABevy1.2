@@ -10,7 +10,7 @@ Files: `crates/aa-client/src/ingame/player.rs` (controller, packets), `swim.rs` 
 | Q / E | strafe left / right |
 | A / D | turn left / right at 90 degrees a second (the camera turns with the character); with either mouse button held, strafe instead |
 | Space | jump; swim up in the water (a tap near the surface jumps out) |
-| X | swim down |
+| X | dive (`down` in `default_binding.g`, the UI's "Dive"); W / S also follow the camera pitch underwater |
 | `.` | toggle walking (Shift held also walks, a convenience) |
 | NumLock | auto-run; once W, S and both mouse buttons were let go, the next press of any of them ends it |
 | both mouse buttons | run forward (S cancels it, Q / E and A / D strafe) |
@@ -100,15 +100,30 @@ as the player instead of waiting for cells around a different saved spawn.
   clips are authored with the body 1.3 m over the origin, `fist_mo_swim_f` lies horizontally with the pelvis at 1.34 m, `fist_ba_idle_swim` treads water
   upright with the head at 1.83 m). Stops below 1.1 m (`LEAVE_MARGIN` hysteresis). The depth threshold is the part not traced in the binary
   (`CActor::UpdateSwimStats` keeps the same `relativeWaterLevel`): change `ActorParams::swim_depth` when a capture of the real client says otherwise.
-* Speeds: 3.0 m/s forward and to the side (the `.lmg` MoveDir), x 0.8 backwards (`swim_back_speed_mul`), up x 0.7, down x 0.5 (`swim_up/down_speed_mul`),
+* Direction: the swim movement mode (`FUN_3912ce00`) rotates the request by the view quaternion at `param_2 + 0x2d0`
+  (`x2game.dll.c:230934-230966`) and takes its z as the vertical, so the vertical is part of the direction rather than buoyancy: **W / S
+  follow the camera pitch** - look down and swim forward to dive, look up to rise, and a level camera keeps the depth while moving. X
+  (`default_binding.g`: `x down`, the UI's "Dive") and Space still dive / rise on their own. Only a swimmer pressing nothing floats up,
+  at 2.0 m/s (`swim_buoy_speed`).
+* Surface hold (`x2game.dll.c:230972-230995`, `231050-231074`): `local_c = (1 - clamp((|desired_z| - 0.3) * 2.5, 0, 1)) *
+  (1 - clamp(|relWaterLevel|, 0, 1))` (`DAT_3999ccd0` / `DAT_399a323c` read from `x2game_unpacked.dll` `.rdata`). While it is positive
+  the vertical speed is blended toward the water-level offset, so a gentle course at the surface stays there and cannot lift the body
+  above the resting height; a steep dive (`|vz| >= 0.7 m/s`) or more than 1 m of depth is not held. The blend factor ramps like 1.2's
+  `param_1[0x29]` (`+= dt * local_c`, clamped to 1, reset when `local_c` reaches 0), so the hold fades in over about a second.
+* Speeds: 3.0 m/s along the swim direction (the `.lmg` MoveDir), x 0.8 backwards (`swim_back_speed_mul`), up x 0.7, down x 0.5 (`swim_up/down_speed_mul`),
   a diver floats up at 2.0 m/s (`swim_buoy_speed`); Space within 0.2 m of the surface jumps out (`swim_jump_permission_range`).
+* Sea cells at the map edge can have no terrain. A swimmer there has no floor (`support_at` is `None`), so the `floor_at` fallback that keeps a
+  standing body at its saved height must not apply: otherwise every dive step was clamped back to the height the swimmer was at. Over a
+  terrain hole in a loaded cell (no support, but `is_hole_at`) the floor stays at the body's current height minus the 5 cm swim clearance, so
+  the clamp holds it in place instead of lifting it out of the water every frame.
 * A body that falls in is stopped by the water (35 m/s^2); gravity is x 0.3 in water and a splash is no landing (no fall packet).
 * Clips: `fist_ba_idle_swim`, `fist_mo_swim_<dir>` (8 ways), `_deep` when diving (more than 0.5 m under the floating height), `fist_mo_swim_up / down`
   while only Space / X is pressed. `drive_swim` runs after `anim::drive_locomotion` (the player's `Motion` is empty in the water, so locomotion
   leaves the animator alone) and calls `Locomotion::invalidate` when the swim ends. `anim.rs` is not touched: a combat action on the whole body
   (`Acting`, not layered) takes the clip over.
 * Packets: stance `SWIM` (2), no ground flag (`MoveState::Fall`), the velocity with its vertical part, `delta_movement` `[right, forward, up]`, one packet at
-  once when swimming starts or stops, and one per 0.1 s while moving, diving or bobbing.
+  once when swimming starts or stops, and one per 0.1 s while moving, diving or bobbing. The camera pitch is applied inside the movement code, so the
+  wire `delta_movement` is the unrotated pressed direction (as on land); **capture-pending**: no pitched-swim capture yet.
 
 ## Gliders (`glide.rs`, S14)
 
@@ -145,9 +160,11 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   as the equipped item 14677 (item id 16777259). **S14-C1 settled for flight; S14-C3 settled; S14-C2 key flags partly open.**
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
   item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
-  attachment (`FUN_394e4e80`) and the graph's
+  attachment (`FUN_394e4e80`; the bone is a child of `Bip01 Spine2`, `item_assets` offsets 0) and the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
-  `start/loop/front/back/left/right/sliding/endloop`. **S14-C5 settled.**
+  `start/loop/front/back/left/right/sliding/endloop`. The model is spawned in the bone's CryEngine frame
+  (`creature::spawn_cry_space`, no second `CRY_TO_BEVY`): with the world conversion added again the wing stood on
+  edge (owner report 2026-11-01). **S14-C5 settled.**
 * Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,
   default 0) makes a second jump in the air ask for the equipped item's skill. **S14-C4 settled:** `FUN_39404d50` line
   843762 calls `FUN_39399690` on the jump edge only when the actor jump-state byte (`+0x161`) is set and the
@@ -195,7 +212,8 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
 3. **S14-C3**: settled: `CSRemoveBuff` index + reason 9, then ground stance 1 / flags 6 / actor 0x14, later packets flags 4 /
    actor 0x04; water stance 2 / flags 0 / actor 0 then the remove. The old "fold stop" (stance 2) was that water entry.
 4. **S14-C4**: settled: jump edge + actor jump-state byte + `glider_start_with_double_jump`; no height/freefall gate.
-5. **S14-C5**: settled: `item_glider` identity attachment for the opened model; `item_back_c` for the stowed one.
+5. **S14-C5**: settled: `item_glider` identity attachment for the opened model (spawned in the bone's CryEngine frame);
+   `item_back_c` for the stowed one.
 6. **S14-C6**: read the live unit's attributes 7/8/9 (base + the buff's modifiers) and compare them with buff row 1029's
    `gliding_move_speed_*`.
 7. **S14-C7**: glide up under a bridge or a ship's deck: does the rise stop before the head passes through, and where?
@@ -290,7 +308,8 @@ it is off at once when the close-up ends. aa-world draws it (`aa_world::depth_of
 * Bridge: `--pos 21055.7,10544.3 --yaw 281 --walk 2:9:W` climbs the stone arch from the quay (104.0) to the crest (113.74) at 5.4 m/s
   (`move_bridge3.png`); a quay railing at x 21060 stops the walk into the harbour (slides along it).
 * Swimming: `--pos 15630,15352 --yaw 240 --walk 2:14:W --walk 15:16.5:X --walk 18:18.2:J`: wades (depth 0.69, 4.3 m/s), swims at 3.0 m/s from 1.3 m of
-  water (`move_swim_14.png`, `move_swim_27.png`), dives (`move_swim_dive.png`), floats back up at 2 m/s, jumps out and falls back in.
+  water (`move_swim_14.png`, `move_swim_27.png`), dives (`move_swim_dive.png`), floats back up at 2 m/s, jumps out and falls back in. With the camera
+  pitched down, `moveforward` alone dives and keeps the depth when level (the `dive_tests` of `player.rs`).
 * Saved heading: a walk at 281 degrees, then `--enter-world` without `--yaw` spawns with `facing -1.37` (281 degrees) at the saved position: the
   client sends its facing in every movement packet and applies the saved one.
 * Glider: `cargo run -p aa-client --example glider_flight -- --mute --offscreen-shot shots/aa-client/glider_flight.png --shot-after 15`:

@@ -322,6 +322,15 @@ window is the script's). The wire formats are checked against the server's own b
 
 **Tab** targets the nearest living enemy (the next one when pressed again), any unit if there is no enemy.
 
+**Self target.** `F1` is `round_target` in the client's `default_binding.g` (`hotkey.g` records the same):
+the native `round_target` handler (`FUN_3942a080`) targets the local player, and pressed again while the player
+is the target it targets the own pet (`FUN_3933f5e0` on the pet manager; no packet without one). `self_target`
+(`FUN_393f8fb0`) targets the player. A left click on the player frame goes through the original script's
+`eventWindow` `OnClick` -> `X2Unit:TargetUnit("player")` (native `ChangeTargetForUI`). The own portrait's
+CSChangeTarget `0x02c` carries the player's own bc (owner session 2026-11-01 14:18: `21 5f 00`). Both paths set
+`Target` locally before the send. The player is kept in `Player`, not `Units`, so `panels::refresh` builds the
+target frame's self snapshot from the player's spawn unit with the HUD's current points.
+
 **Not done / assumptions.** The afterimage, shake and critical bursts; the plate shows no party, guild or PvP marks;
 auto-away after 300 s is a guess; the capture's side-on camera is only approximated by
 `--hud-side-cam` (the character is not exactly side-on); a unit's height has no source for models without a skeleton
@@ -386,7 +395,7 @@ End!" (`combat_death`), everything is dark while Recall is cast and only the tel
 | 2 | the skill's unit requirements (`unit_reqs`, `or_unit_reqs`): level, ability level, race, gender, a worn item in a slot (a sword in the main hand) or by template, an owned item, a learned skill, "not in combat" (Recall, Dash, the dances), a buff on me / on the target, a shield, a bow or an instrument. Quests, doodads, zones and factions count as met: the server decides | `Snapshot`, `Inventory`, `Skills`, `Buffs` |
 | 3 | buffs on the player: stun, sleep, knock down (every skill but those with `source_stun`), blank minded, silence (magic skills), crippled (melee and ranged) | `buffs` flags |
 | 4 | the player is casting (every other slot is dark, the skill being cast stays lit) or channeling; a cast whose end never came stops counting 2 s after it should have ended | `Skills.casting` |
-| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`) | `TargetSnap` |
+| 5 | the target: hostile, "others" and friendly-others skills need one (`NO_TARGET`), of the right relation (`INVALID_TARGET`: a rat for a heal, a friend for Triple Slash), alive or dead as the skill wants (`TARGET_DIED`). The auto attacks 2/3/4 and every `target_relation_id` 4 skill also need the attackable bit of `FUN_39838880` (`CanAutoAttackTargetUnit` `FUN_393be4e0`): neutral units stay attackable (the type-3 `+0x40` flag and the force-attack/bloodlust flags are not recovered), only a friendly unit is refused; `npc_tendency_id` is not evidence for the bit and is not read. The code is 0x2f `PROTECTED_FACTION` with the faction value only for a character (reason byte 1 via `FUN_39837d60`, value `target+0x3adc` unconfirmed), 0x30 `PROTECTED_LEVEL` for reasons 5/6 (operand not ported), otherwise 0x22 `INVALID_TARGET` (`FUN_39898e60`) | `TargetSnap` |
 | 6 | range: the skill's `min_range` / `max_range`, or the reach of the weapon in the equipment slot `weapon_slot_for_range_id` names (fists 3 m, a sword 4); edge to edge, so 1 m is taken off the centre distance | both positions |
 | 7 | mana `((ability level - 1) * 1.6 + 8) * 3 / 3.65 * mana_level_md + mana_cost` (the skill's own ability level), labor points | `Snapshot.mp`, the ability exp |
 
@@ -462,6 +471,25 @@ When the server says the player died (`DeathDetails`) the original window comes 
 Threshold", "Your last breath has escaped you.", the countdown, "Revive Here" / "Respawn: Temple"); `Resurrected` closes it.
 `X2Player:GetResurrectionCountdown` counts the server's wait down on the HUD clock, `X2Player:Resurrect(inPlace)` sends
 `Command::Resurrect { in_place }`, `X2Unit:GetUnitNameById` answers for the player and the target.
+
+**Where the countdown comes from.** `SCUnitDeathPacket.resurrect_wait_time` (i32 ms, the server's escalating
+15/30/60... s wait) is the only duration the server sends; `SCNotifyResurrectionPacket` carries only the caster.
+`FUN_39369c10` (`x2game.dll.c:706612-706613`) stores the packet time in `[[g_connection+0x40]+0xaf4]` and that field in
+`+0xaf8` when the dead unit is the local player. `FUN_39495c00` (`GetResurrectionCountdown`, `x2game.dll.c:955710`)
+returns `(offer flag +0xafc, 300000 - elapsed, +0xaf8 - elapsed)`, both truncated to seconds: the automatic temple
+respawn is the client's five-minute constant, not the server wait. The window's `OnUpdate` calls
+`X2Player:Resurrect(false)` when the second value reaches 0 (`death_and_resurrection_window.alb` disassembly lines
+233-235); the buttons enable when the third does. Bevy used to open the window before `track_death` had stored the
+packet, so the deadline read 0 and the window auto-respawned in the same second (owner test 15:33:18). `track_death`
+now runs before `aa_ui::UiFrame` and `alerts::show`, and it takes the local id from `Player.spawn` (which survives
+`SCUnitsRemoved`) rather than `Skills.obj_id` (which drops its id when the player's own unit is removed; the 15:32:07
+teleport sent `SCUnitsRemoved` packets before the death).
+
+`X2Player:Resurrect` itself (`FUN_39186e70`, `x2game.dll.c:290981`) sends only while `+0xaf4` is set, the wait has run
+out and (for an in-place revival) the offer flag is set; a two-second debounce follows. Bevy applies the same gate in
+`handle_requests` and latches one request per death, so the countdown and a click cannot send twice. `Resurrected`
+raises `PLAYER_RESURRECTED` (`FUN_391d3ad0`, `x2game.dll.c:363191-363192`, which clears `+0xaf4` and `+0xafc`) and the
+window hides.
 
 The offer is its own event. The original's `OnNotifyResurrection` (`FUN_391d39f0`, `x2game.dll` line 363081) sets `[[g_connection+0x40]+0xafc]`
 and raises `PLAYER_RESURRECTION` (event 92) with one argument, the caster's live-object id as a hexadecimal string. The death window
@@ -592,7 +620,11 @@ data); the icons are drawn natively from `ui/map/icon/npc_icon.dds` (24 px cells
   grey "?" in progress, the main / livelihood / repeat variants of the sheet). The capture's big map shows no "!" at
   Desireen, 170 m from where it stands, and its roadmap the two givers within 120 m (Maude and an NPC south west).
 * **Gravesite** (`corpse_pos`) while the exp lost can still be won back; **dots** (`hostile` / `friendly`) of the
-  units in view within 250 m when the roadmap's "NPC" check is on.
+  units in view within 250 m when the roadmap's "NPC" check is on. Their tooltip is the NPC template's name (like the
+  quest marks); a dot without one has no label. The 1.2 symbol table has no `MAP_TEXT` row for `M_FRIENDLY`/`M_HOSTILE`
+  (category 0x14 dots, `FUN_3904ce90`, `x2game.dll.c:73822-73823`); `LocalizeUiText` would answer
+  `"20 ?? M_FRIENDLY"` on that miss (`x2game.dll.c:942705` and `585013`). The no-label choice is inferred: 1.2's label
+  for these dots is not established.
 * **Filters.** The "Show Icons" window of the big map works: `markers.lua` keeps each check (`SetNpcFilter`) and the
   three folders (Merchants, Infrastructure, Housing Province) and leaves the filtered icons out of both maps; the
   roadmap's NPC check hides every npc-like icon until it is on, as the toolkit's `roadmap` widget does.
@@ -998,7 +1030,17 @@ Ctrl-E opens the original mailbox locally. It chooses a currently visible NaviOp
 function group within the lane's five-metre 2D send radius, when available; inbox reading also
 works without a mailbox. Native393b1040 emits numeric doodad ID plus boolean true; there is no
 invented interaction acknowledgement. The broader native interaction chooser and exact automatic
-end-distance behavior are still pending. Sending revalidates the selected mailbox against all
+end-distance behavior are still pending.
+
+The NPC talk/use reach is the common interaction reach of `FUN_393bf270` / `FUN_39093860`: a 3D
+surface gap strictly under `DAT_39ac79fc` 9.0 (3.0 m), or `DAT_39ac7a00` 12.25 (3.5 m) for a **dead
+target** (`+0x3c26` is the target's dead flag, set by `FUN_390b4df0`; `FUN_393be4e0` reports
+`TARGET_DIED`), not the old six-metre centre distance and not a mounted player. A right click beyond
+it walks to the NPC (`FUN_390a6af0`, the same scripted-forward walk the mount and doodad approaches
+use) and `CSStartInteraction` is sent only when the gap is inside the reach (2026-11-01). A target
+change, any F use (also when a doodad or loot takes the key), an in-reach doodad use or a click on
+another/hostile unit cancels the walk; a player on a slave seat, driving a cart or sitting on a seat doodad
+does not start it (the forward key would drive the vehicle or the seat blocks it). Riding a mate still walks. Sending revalidates the selected mailbox against all
 currently nearby mailboxes, rather than requiring it to remain the nearest. Hotkey consumption
 now completes before gameplay input, so Ctrl-E does not also move the character right.
 

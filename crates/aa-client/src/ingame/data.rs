@@ -50,6 +50,8 @@ struct Lookups {
     /// `(model, attach point)` -> the seat's `attach_anims.anim_action_id`.
     attach_anims: HashMap<(u32, u8), Option<u32>>,
     ships: HashMap<u32, bool>,
+    /// `slaves.id` (the template id from the unit state) -> `slaves.slave_kind_id`.
+    slave_kinds: HashMap<u32, Option<u32>>,
     ship_steer: HashMap<u32, f32>,
     /// `models.id` -> the `vehicle_models` turret block (`None` for a bad row or a non-vehicle).
     turrets: HashMap<u32, Option<super::turret::TurretLimits>>,
@@ -373,6 +375,7 @@ impl Lookups {
             attach_points: HashMap::new(),
             attach_anims: HashMap::new(),
             ships: HashMap::new(),
+            slave_kinds: HashMap::new(),
             ship_steer: HashMap::new(),
             turrets: HashMap::new(),
             cannon_skills: HashMap::new(),
@@ -667,6 +670,40 @@ impl Db {
 
     /// Whether a model is a ship (`models.sub_type` `ShipModel`): the server simulates its hull and the driver
     /// steers it with a CSMoveUnit type-4 request instead of the land-vehicle type 2.
+    /// The slave kind (`slaves.slave_kind_id`) of a slave by the template id the unit state
+    /// carries (the 1.2 client's `Unit+0x420` lookup, `x2game.dll.c:1937685`,
+    /// `FUN_39345ea0:677836`, `FUN_39696380:1427233`). Cached; `None` for an unknown row.
+    pub fn slave_kind(&self, template_id: u32) -> Option<u32> {
+        let mut l = self.lookups.lock().unwrap();
+        if let Some(kind) = l.slave_kinds.get(&template_id) {
+            return *kind;
+        }
+        let kind = l
+            .conn
+            .query_row(
+                "SELECT slave_kind_id FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| r.get::<_, Option<u32>>(0),
+            )
+            .ok()
+            .flatten();
+        l.slave_kinds.insert(template_id, kind);
+        kind
+    }
+
+    /// A synthetic deck floor for a test: the same cache entries [`Db::ship_floor`] fills from
+    /// the pak, without the hull prefab.
+    #[cfg(test)]
+    pub(crate) fn insert_ship_floor_fixture(
+        &self,
+        model_id: u32,
+        floor: Arc<super::ship::floor::ShipFloor>,
+    ) {
+        let mut l = self.lookups.lock().unwrap();
+        l.ship_bounds.insert(model_id, floor.bounds());
+        l.ship_floors.insert(model_id, Some(floor));
+    }
+
     pub fn is_ship(&self, model_id: u32) -> bool {
         let mut l = self.lookups.lock().unwrap();
         if let Some(ship) = l.ships.get(&model_id) {
@@ -986,6 +1023,34 @@ impl Db {
             .flatten()
             .filter(|time| time.is_finite())
             .map_or(0.0, |time| time.max(0.0) as f32)
+    }
+
+    /// The summon portal of a slave template (`slaves.portal_spawn_fx_id`, an `fx_groups` row, with `portal_scale`
+    /// and `portal_time` in seconds). `OnSlaveCreated` pushes the slave's object id into `SlaveManager`'s pending
+    /// list unless `SCSlaveCreatedPacket.hideSpawnEffect` is set (`FUN_3934a6c0` -> `FUN_3934a530`), and
+    /// `FUN_39349600` plays this group on the unit with those two values. 67 slaves (the vehicles and ships) have
+    /// one; the other rows, and a missing row, give `None`.
+    pub fn slave_summon_portal(&self, template_id: u32) -> Option<SummonPortal> {
+        let l = self.lookups.lock().unwrap();
+        let portal = l
+            .conn
+            .query_row(
+                "SELECT portal_spawn_fx_id, portal_scale, portal_time FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| {
+                    Ok(SummonPortal {
+                        fx_group: r.get::<_, Option<i64>>(0)?.unwrap_or(0).max(0) as u32,
+                        scale: r.get::<_, Option<f64>>(1)?.unwrap_or(1.0) as f32,
+                        time: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0) as f32,
+                    })
+                },
+            )
+            .ok()?;
+        (portal.fx_group != 0).then(|| SummonPortal {
+            scale: if portal.scale > 0.0 { portal.scale } else { 1.0 },
+            time: portal.time.max(0.0),
+            ..portal
+        })
     }
 
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
@@ -1658,6 +1723,16 @@ fn ship_steer_vel_from_conn(conn: &Connection, model_id: u32) -> f32 {
     .flatten()
     .filter(|v| v.is_finite() && *v > 0.0)
     .map_or(DEFAULT_SHIP_STEER_VEL, |v| v as f32)
+}
+
+/// The summon portal of a slave (`slaves.portal_spawn_fx_id`): an effect group of `fx_groups`, its scale and how long
+/// it lasts (`portal_time`), as `FUN_39349600` hands them to the world.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SummonPortal {
+    /// `fx_groups.id` (1263 `portal_tank_spawn` for slave 146); 0 in the row means none.
+    pub fx_group: u32,
+    pub scale: f32,
+    pub time: f32,
 }
 
 /// What a vehicle or ship is drawn from ([`Db::vehicle_look`]).
