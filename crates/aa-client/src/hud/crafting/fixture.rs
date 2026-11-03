@@ -93,7 +93,9 @@ pub(crate) fn workbench(rt: &UiRuntime, bridge: &api::Shared) -> Result<u32, Box
     }
     api::push_changes(rt, bridge);
     rt.fire_event("BAG_UPDATE", (-1, -1));
-    rt.fire_event("CRAFTING_START", ("300", 71));
+    // Native `FUN_394dc360` fires event 0x78 with two Lua numbers: the doodad object id and the
+    // unique recipe count (not a string object id).
+    rt.fire_event("CRAFTING_START", (300u32, 71usize));
     click_row(rt, 0)?;
     click_row(rt, 1)?;
     rt.lua

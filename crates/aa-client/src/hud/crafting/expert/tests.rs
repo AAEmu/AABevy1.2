@@ -81,8 +81,21 @@ fn activation_app(rt: aa_ui::UiRuntime, bridge: Shared) -> App {
     app
 }
 
+
+fn skip_without_pak() -> bool {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    if std::path::Path::new(&pak).is_file() {
+        return false;
+    }
+    eprintln!("skip: no game_pak at {pak}");
+    true
+}
+
 #[test]
 fn activation_preserves_stale_refresh_and_real_identical_snapshot_notifications() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     for stale in 0..=8 {
         let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
         let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
@@ -125,6 +138,9 @@ fn activation_preserves_stale_refresh_and_real_identical_snapshot_notifications(
 
 #[test]
 fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     for changed in [false, true] {
         let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
         let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
@@ -171,8 +187,18 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
 
 #[test]
 fn original_language_constructor_already_contains_the_received_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    if !std::path::Path::new(&pak).is_file() {
+        eprintln!("skip: no game_pak at {pak}");
+        return Ok(());
+    }
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&db).is_file() {
+        eprintln!("skip: no client database at {db}");
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
-    rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
     {
         let mut d = bridge.borrow_mut();
@@ -187,7 +213,7 @@ fn original_language_constructor_already_contains_the_received_snapshot() -> Res
         d.feature_limits = (Some(55), Some(50));
         d.panels.actions_known = true;
         d.panels.bag_slots = 50;
-        d.game.0.set(GameData::load(aa_anim::db::DEFAULT_DB)?).ok().unwrap();
+        d.game.0.set(GameData::load(&db)?).ok().unwrap();
         d.crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot { last: true, entries: vec![ActabilityValue { id: 21, point: 1337, step: 0 }] }));
         let cap = *d.game.get().unwrap().crafting.expansions.keys().max().ok_or("missing expert expansion catalog")?;
         d.crafting.actabilities.expanded_expert = Some(u8::try_from(cap)?);
@@ -237,6 +263,9 @@ fn upgrade_capacity_counts_higher_grades_and_native_special_exclusions() {
 
 #[test]
 fn original_getters_use_visible_indices_price_strings_and_consecutive_expansion_rows() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     crate::hud::api::install(&mut rt, &bridge)?;
@@ -269,6 +298,9 @@ fn original_getters_use_visible_indices_price_strings_and_consecutive_expansion_
 
 #[test]
 fn received_grade_events_expose_updated_state_and_lane_downgrade_points_before_callbacks() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     crate::hud::api::install(&mut rt, &bridge)?;
@@ -295,6 +327,9 @@ fn received_grade_events_expose_updated_state_and_lane_downgrade_points_before_c
 
 #[test]
 fn point_changes_have_four_native_arguments_and_incomplete_snapshots_do_not_refresh_ui() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     crate::hud::api::install(&mut rt, &bridge)?;
@@ -341,6 +376,9 @@ fn point_changes_have_four_native_arguments_and_incomplete_snapshots_do_not_refr
 
 #[test]
 fn actions_recheck_points_certificates_and_preserve_received_auto_aa_setting() -> Result<(), Box<dyn std::error::Error>> {
+    if skip_without_pak() {
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(data()));
     {
