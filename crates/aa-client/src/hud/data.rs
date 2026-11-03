@@ -253,6 +253,8 @@ pub struct GameData {
     /// Item grades by the number the server and the icons use (`item_grades.grade_order`): English name and
     /// colour (`FFBA976D`).
     pub grades: HashMap<i64, (String, String)>,
+    /// `item_grades.id` -> `refund_multiplier` (100 = the template refund): the fish refund at a grade.
+    pub refund_multipliers: HashMap<u32, f32>,
     /// `world_groups.id` -> map rectangle: 2 the world, 3 / 4 / 5 the western / eastern / origin continent.
     pub world_rects: HashMap<u32, [f32; 4]>,
     /// `system_factions.id` -> English name.
@@ -799,11 +801,12 @@ impl GameData {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, grade_order, color_argb FROM item_grades")?;
+            let mut q = conn.prepare("SELECT id, grade_order, color_argb, refund_multiplier FROM item_grades")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id: u32 = r.get(0)?;
                 data.grades.insert(any_int(r, 1)?, (name("item_grades", id, None), r.get::<_, Option<String>>(2)?.unwrap_or_default()));
+                data.refund_multipliers.insert(id, any_int(r, 3)? as f32);
             }
         }
         {

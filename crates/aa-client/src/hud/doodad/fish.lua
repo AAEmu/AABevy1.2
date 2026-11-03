@@ -10,7 +10,7 @@ local function clear()
   FISH_DIALOG = nil
 end
 
-HUD.fish_open = function(buy, template, grade, count, refund)
+HUD.fish_open = function(buy, template, grade, count, weight, length, refund)
   if FISH_DIALOG then
     X2DialogManager:OnCancel(FISH_DIALOG.id)
     FISH_DIALOG = nil
@@ -22,13 +22,13 @@ HUD.fish_open = function(buy, template, grade, count, refund)
   tip.itemType = tip.itemType or template
   tip.lookType = tip.lookType or template
   tip.itemGrade = tip.itemGrade or grade
-  if buy then
-    tip.refund = refund
-  else
-    tip.refund = nil
-  end
+  tip.weight = weight
+  tip.length = length
+  tip.refund = refund
   local task = buy and DLG_TASK_BUY_FISH or DLG_TASK_CONVERT_FISH
-  local info = { type = task, buttonType = DBT_OK_CANCEL, isModal = true, itemInfo = tip, itemType = template, itemCount = count }
+  -- 1.2's DBT_OK_CANCEL is 0; anything else still asks for the two-button box.
+  local buttonType = DBT_OK_CANCEL == 0 and DBT_OK_CANCEL or 0
+  local info = { type = task, buttonType = buttonType, isModal = true, itemInfo = tip }
   local wnd = X2DialogManager:RequestTaskDialog(task, info, "fishStand")
   if wnd == nil then
     return false

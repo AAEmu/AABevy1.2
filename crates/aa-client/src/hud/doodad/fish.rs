@@ -11,16 +11,20 @@
 //! * no item worn on the back -> `STORE_BACKPACK_NOGOODS` (361, 0x169);
 //! * buy: template not in `doodad_func_buy_fish_items` -> `STORE_NPC_NOT_HANDLE_THIS_ITEM` (225,
 //!   0xe1); convert: not in `doodad_func_convert_fish_items` -> the same;
-//! * buy: `item_backpacks.backpack_type_id` not 6 -> `STORE_NOT_SELLABLE_ITEM` (88, 0x58);
-//!   convert checks the item kind 6 before the list.
-//! On success the buy refund is the item's `refund` (`FUN_397cd350`), and the info table carries the
-//! item info (icon, name, refund) to the script's `confirm_buy_fish_title` / `confirm_fish_body`
-//! handler.
+//! * buy: `item_backpacks.backpack_type_id` not 6, `items.price` 0, or no `fish_details` row ->
+//!   `STORE_NOT_SELLABLE_ITEM` (88, 0x58); convert checks the item kind 6 before the list.
+//! On success the info carries the fish's weight/length from the item's detail tag 6 (f32 weight,
+//! f32 length) and the refund from `FUN_397cd350` (1726122):
+//! `trunc(floor(items.refund * item_grades.refund_multiplier * 0.01 + 0.5) * weight /
+//! fish_details.max_weight)`, for both tasks (`FUN_39421e20` category 0x16).
+//!
+//! The dialog closes natively (`FUN_393b7e40` 774405) when the doodad is gone or the player is out
+//! of the configured interaction distance, then `FUN_393b7aa0` fires `INTERACTION_END`.
 
 use std::collections::{HashMap, HashSet};
 
 use aa_net::model::slot;
-use aa_net::state::Inventory;
+use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::{Command, NetCommand};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -44,18 +48,21 @@ pub(super) struct FishFunc {
 }
 
 /// The equipped fish and what the dialog shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Sale {
     pub template: u32,
     pub grade: u8,
     pub count: i32,
-    /// The buy price; 0 for convert (native `FUN_393b8970` has no refund).
-    pub refund: i64,
+    /// `Item` detail tag 6 (f32 weight, f32 length), when the item has it.
+    pub weight: Option<f32>,
+    pub length: Option<f32>,
+    /// `FUN_397cd350`: the grade/weight-scaled refund, `None` without a fish detail or row.
+    pub refund: Option<i64>,
 }
 
 /// The fish-stand dialog that is waiting for OK/cancel.
 #[derive(Resource, Default)]
-pub(super) struct FishDialog {
+pub(crate) struct FishDialog {
     pending: Option<Pending>,
 }
 
@@ -84,7 +91,10 @@ pub(super) fn check(
             if !items.is_some_and(|items| items.contains(&template)) {
                 return Err(NOT_HANDLED);
             }
-            if !kind_6 {
+            if !kind_6
+                || game.items.get(&template).is_none_or(|info| info.price == 0)
+                || game.doodad.fish_max_weight(template).is_none()
+            {
                 return Err(NOT_SELLABLE);
             }
         }
@@ -97,16 +107,59 @@ pub(super) fn check(
             }
         }
     }
+    let (weight, length) = fish_measure(item);
+    let refund = match (
+        game.items.get(&template),
+        weight,
+        game.doodad.fish_max_weight(template),
+    ) {
+        (Some(info), Some(weight), Some(max_weight)) if max_weight > 0.0 => {
+            let multiplier = game
+                .refund_multipliers
+                .get(&u32::from(item.grade))
+                .copied()
+                .unwrap_or(0.0);
+            let base = (info.refund as f32 * multiplier * 0.01 + 0.5).floor();
+            Some((base * weight / max_weight).trunc() as i64)
+        }
+        _ => None,
+    };
     Ok(Sale {
         template,
         grade: item.grade,
         count: item.count.max(1),
-        refund: if kind == FishKind::Buy {
-            game.items.get(&template).map_or(0, |info| info.refund)
-        } else {
-            0
-        },
+        weight,
+        length,
+        refund,
     })
+}
+
+/// `Item` detail tag 6: `f32` weight, `f32` length (`FUN_39421e20` 865686-865693 reads them at
+/// payload +0 and +4).
+fn fish_measure(item: &aa_net::model::Item) -> (Option<f32>, Option<f32>) {
+    if item.detail.kind() != 6 {
+        return (None, None);
+    }
+    let Some(payload) = item
+        .detail_payload
+        .as_deref()
+        .filter(|payload| payload.len() >= 8)
+    else {
+        return (None, None);
+    };
+    let f = |at: usize| {
+        f32::from_le_bytes([
+            payload[at],
+            payload[at + 1],
+            payload[at + 2],
+            payload[at + 3],
+        ])
+    };
+    let (weight, length) = (f(0), f(4));
+    (
+        weight.is_finite().then_some(weight),
+        length.is_finite().then_some(length),
+    )
 }
 
 /// `false` when the func is not a fish stand; otherwise the request is handled (error shown or the
@@ -160,6 +213,8 @@ fn open(rt: &UiRuntime, kind: FishKind, sale: Sale) -> bool {
         sale.template,
         sale.grade,
         sale.count,
+        sale.weight,
+        sale.length,
         sale.refund,
     )) {
         Ok(opened) => opened,
@@ -185,11 +240,14 @@ fn clear(rt: &UiRuntime) {
 }
 
 /// Sends the stored doodad skill when the original dialog handler saw OK; drops it on cancel or when
-/// the interaction ended (the handler cancels on `INTERACTION_END`).
+/// the interaction ends (the doodad is gone or the player is out of `INTERACTION_DISTANCE`, the
+/// native `FUN_393b7e40`).
 pub(super) fn tick(
     rt: Option<NonSend<UiRuntime>>,
     mut dialog: ResMut<FishDialog>,
     bridge: NonSend<crate::hud::api::HudBridge>,
+    doodads: Res<Doodads>,
+    units: Res<Units>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(obj_id) = dialog.pending.as_ref().map(|p| p.obj_id) else {
@@ -213,8 +271,14 @@ pub(super) fn tick(
             clear(&rt);
         }
         _ => {
-            let focus = bridge.0.borrow().doodad.focus.as_ref().map(|f| f.obj_id);
-            if focus != Some(obj_id) {
+            let (gone, gap) = {
+                let data = bridge.0.borrow();
+                (
+                    doodads.by_id.get(&obj_id).is_none(),
+                    super::interaction_gap(&data, &doodads, &units, obj_id),
+                )
+            };
+            if gone || gap.is_none_or(|gap| gap >= super::INTERACTION_DISTANCE) {
                 info!("doodad: fish-stand interaction ended");
                 rt.fire_event("INTERACTION_END", ());
                 dialog.pending = None;
@@ -224,11 +288,50 @@ pub(super) fn tick(
     }
 }
 
+impl super::Tables {
+    /// Records the fish-stand funcs (`DoodadFuncBuyFish` / `DoodadFuncConvertFish`) of a phase.
+    pub(super) fn add_fish_func(&mut self, group: u32, skill: u32, kind: &str, func_id: u32) {
+        if skill == 0 {
+            return;
+        }
+        let kind = match kind {
+            "DoodadFuncBuyFish" => FishKind::Buy,
+            "DoodadFuncConvertFish" => FishKind::Convert,
+            _ => return,
+        };
+        self.fish_funcs
+            .insert((group, skill), FishFunc { kind, func_id });
+    }
+
+    /// The fish-stand func of a phase skill, if the bar's skill is one.
+    pub(super) fn fish_func(&self, group: u32, skill: u32) -> Option<FishFunc> {
+        self.fish_funcs.get(&(group, skill)).copied()
+    }
+
+    /// The item templates a fish-stand func accepts.
+    pub(super) fn fish_items(&self, kind: FishKind, func_id: u32) -> Option<&HashSet<u32>> {
+        match kind {
+            FishKind::Buy => self.fish_buy_items.get(&func_id),
+            FishKind::Convert => self.fish_convert_items.get(&func_id),
+        }
+    }
+
+    /// `fish_details.max_weight` of an item template.
+    pub(super) fn fish_max_weight(&self, template: u32) -> Option<f32> {
+        self.fish_max_weights.get(&template).copied()
+    }
+}
+
 /// The item templates each fish-stand func accepts (`doodad_func_buy_fish_items` /
-/// `doodad_func_convert_fish_items`); missing tables (fixtures) are empty.
+/// `doodad_func_convert_fish_items`) and the `fish_details.item_id -> max_weight` refund denominator;
+/// missing tables (fixtures) are empty.
 pub(super) fn load_items(
     conn: &Connection,
-) -> (HashMap<u32, HashSet<u32>>, HashMap<u32, HashSet<u32>>) {
+) -> (
+    HashMap<u32, HashSet<u32>>,
+    HashMap<u32, HashSet<u32>>,
+    HashMap<u32, f32>,
+) {
     let read = |table: &str, column: &str| -> HashMap<u32, HashSet<u32>> {
         let sql = format!("SELECT {column}, item_id FROM {table}");
         let Ok(mut q) = conn.prepare(&sql) else {
@@ -250,12 +353,27 @@ pub(super) fn load_items(
         }
         map
     };
+    let mut max_weights = HashMap::new();
+    if let Ok(mut q) = conn.prepare("SELECT item_id, max_weight FROM fish_details") {
+        if let Ok(mut rows) = q.query([]) {
+            while let Ok(Some(row)) = rows.next() {
+                let Ok(item) = crate::hud::data::any_int(row, 0) else {
+                    continue;
+                };
+                let Ok(max_weight) = crate::hud::data::any_int(row, 1) else {
+                    continue;
+                };
+                max_weights.insert(item as u32, max_weight as f32);
+            }
+        }
+    }
     (
         read("doodad_func_buy_fish_items", "doodad_func_buy_fish_id"),
         read(
             "doodad_func_convert_fish_items",
             "doodad_func_convert_fish_id",
         ),
+        max_weights,
     )
 }
 

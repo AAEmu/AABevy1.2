@@ -146,6 +146,8 @@ pub(super) struct Tables {
     /// `doodad_func_buy_fish_id` / `doodad_func_convert_fish_id` -> accepted item templates.
     fish_buy_items: HashMap<u32, HashSet<u32>>,
     fish_convert_items: HashMap<u32, HashSet<u32>>,
+    /// `fish_details.item_id` -> `max_weight` (the refund denominator).
+    fish_max_weights: HashMap<u32, f32>,
 }
 
 impl Tables {
@@ -167,7 +169,7 @@ impl Tables {
                 &detail,
             );
         }
-        (t.fish_buy_items, t.fish_convert_items) = fish::load_items(conn);
+        (t.fish_buy_items, t.fish_convert_items, t.fish_max_weights) = fish::load_items(conn);
         let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -231,31 +233,8 @@ impl Tables {
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
-        if skill != 0 {
-            match kind {
-                "DoodadFuncBuyFish" => {
-                    self.fish_funcs.insert((group, skill), fish::FishFunc { kind: fish::FishKind::Buy, func_id });
-                }
-                "DoodadFuncConvertFish" => {
-                    self.fish_funcs.insert((group, skill), fish::FishFunc { kind: fish::FishKind::Convert, func_id });
-                }
-                _ => {}
-            }
-        }
+        self.add_fish_func(group, skill, kind, func_id);
         self.add(group, skill, kind);
-    }
-
-    /// The fish-stand func of a phase skill, if the bar's skill is one.
-    fn fish_func(&self, group: u32, skill: u32) -> Option<fish::FishFunc> {
-        self.fish_funcs.get(&(group, skill)).copied()
-    }
-
-    /// The item templates a fish-stand func accepts.
-    fn fish_items(&self, kind: fish::FishKind, func_id: u32) -> Option<&HashSet<u32>> {
-        match kind {
-            fish::FishKind::Buy => self.fish_buy_items.get(&func_id),
-            fish::FishKind::Convert => self.fish_convert_items.get(&func_id),
-        }
     }
 
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
@@ -1536,6 +1515,7 @@ pub(super) fn execute(
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
                 continue;
             }
+            // Without the UI runtime (or the FishDialog resource) the skill is sent unconfirmed.
             let fishing = group.and_then(|group| game.and_then(|game| game.doodad.fish_func(group, *skill_id)));
             if let (Some(func), Some(rt), Some(dialog)) = (fishing, rt.as_deref(), fish.as_deref_mut()) {
                 let game = game.expect("a fish func needs the game data");
