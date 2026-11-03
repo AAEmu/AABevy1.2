@@ -534,6 +534,26 @@ NPCs within 45 m. The white beams over Maude in the capture are a particle effec
 Quests can be tried with the GM chat commands `/quest add 330` / `/quest remove 330` (`--hud-type`), which
 also exercises the live updates.
 
+### Let-it-done and over-done
+
+`X2Quest:IsLetItDoneQuest*` / `IsOverDoneQuest*` are computed by `quests.rs` from the quest's step and
+counters, not read from the raw `quest_contexts.let_it_done` column; `quest.lua` returns the row values.
+The original (`FUN_397d6320` for let-it-done, `FUN_397d71b0` for over-done, called by
+`FUN_39376930` / `FUN_39376990`) asks:
+
+* let-it-done: the quest is not main (`detail_id != 2`), is flagged `let_it_done`, is not repeatable, is
+  in progress, is not finished yet, and its objectives add up to at least half of what the step asks
+  (`DAT_3999c47c` 0.5; score quests use `score` instead);
+* over-done: every objective is at least 1.5 times its count (`DAT_3999c478` 1.5; score quests 1.5 times
+  their score).
+
+Handing one in from the quest journal (`who` 0 in `X2Quest:TryCompleteQuestContext`) now sends
+`CSTryQuestCompleteAsLetItDone` 0x0dd (`u32` quest, `bc` NPC, `i32` selected); the native picks it in
+`FUN_3937b860` when the quest is not ready but `FUN_397d6320` holds. A ready quest keeps
+`CSCompleteQuestContext` 0x0d6. The native also raises `QUEST_CHAT_LET_IT_DONE` when a report doodad is in
+view (`FUN_3937b860` -> event 245, the doodad id as a string); no 1.2 script registers that event (checked
+the `x2ui` quest scripts), so the client does not raise it.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

@@ -76,6 +76,8 @@ pub struct QuestDef {
     pub zone_id: u32,
     pub selective: bool,
     pub let_it_done: bool,
+    /// `quest_contexts.score`: the objective score a score quest needs (0 for other quests).
+    pub score: u32,
     /// `use_quest_camera`: the talk may use the close-up camera.
     pub use_quest_camera: bool,
     /// Its components, in the server's order (kind, then id).
@@ -382,7 +384,7 @@ impl QuestTables {
         }
         {
             let mut q = conn.prepare(
-                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id, use_quest_camera FROM quest_contexts",
+                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id, use_quest_camera, score FROM quest_contexts",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -403,6 +405,7 @@ impl QuestTables {
                         chapter: any_int(r, 8)? as u32,
                         zone_id: any_int(r, 9)? as u32,
                         use_quest_camera: any_flag(r, 10)?,
+                        score: any_int(r, 11)?.max(0) as u32,
                         components: Vec::new(),
                     },
                 );
@@ -629,6 +632,79 @@ impl QuestTables {
             return c.kind;
         }
         if q.status == status::READY || self.parts_of(q.template_id, kind::PROGRESS).next().is_none() { kind::READY } else { kind::PROGRESS }
+    }
+
+    /// The Progress step's objective counters as `(done, count)`, in objective order.
+    fn objective_pairs(&self, q: &Quest) -> Vec<(i32, i32)> {
+        if self.step_kind(q) != kind::PROGRESS {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for c in self.parts_of(q.template_id, kind::PROGRESS) {
+            for a in &c.acts {
+                let Some(i) = a.objective else { continue };
+                out.push((q.objectives.get(usize::from(i)).copied().unwrap_or(0).max(0), a.count));
+            }
+        }
+        out
+    }
+
+    /// The score a score quest has reached: the sum of each objective's count times its counter
+    /// (`FUN_397d5c10`).
+    fn score(&self, q: &Quest) -> i64 {
+        self.objective_pairs(q).iter().map(|&(done, count)| i64::from(done) * i64::from(count.max(0))).sum()
+    }
+
+    /// `X2Quest.IsLetItDoneQuest*`: the original's early-completion check (`FUN_397d6320`, called by
+    /// `FUN_39376930` / `FUN_39376990`). It holds while the quest is not a main quest, is not
+    /// repeatable, is worked on, has objectives, is not complete yet, and either the score or the
+    /// summed counters are at least half of what the step asks (`DAT_3999c47c` 0.5).
+    pub fn is_let_it_done(&self, q: &Quest) -> bool {
+        let Some(def) = self.defs.get(&q.template_id) else { return false };
+        if def.detail == 2 || !def.let_it_done || self.repeatable.contains(&q.template_id) {
+            return false;
+        }
+        if q.status != status::PROGRESS {
+            return false;
+        }
+        let pairs = self.objective_pairs(q);
+        if pairs.is_empty() {
+            return false;
+        }
+        if def.score > 0 {
+            let score = self.score(q);
+            return score < i64::from(def.score) && score * 2 >= i64::from(def.score);
+        }
+        let (mut done, mut count) = (0i64, 0i64);
+        let mut complete = true;
+        for (d, c) in pairs {
+            if c <= 0 {
+                continue;
+            }
+            let d = d.min(c);
+            done += i64::from(d);
+            count += i64::from(c);
+            complete &= d >= c;
+        }
+        count > 0 && !complete && done * 2 >= count
+    }
+
+    /// `X2Quest.IsOverDoneQuest*`: the original's over-done check (`FUN_397d71b0`). Every objective is
+    /// at least 1.5 times what it asks (`DAT_3999c478` 1.5), or a score quest reached 1.5 times its
+    /// score.
+    pub fn is_over_done(&self, q: &Quest) -> bool {
+        let Some(def) = self.defs.get(&q.template_id) else { return false };
+        if q.status != status::PROGRESS {
+            return false;
+        }
+        let pairs = self.objective_pairs(q);
+        if pairs.is_empty() {
+            return false;
+        }
+        if def.score > 0 {
+            return self.score(q) * 2 >= i64::from(def.score) * 3;
+        }
+        pairs.iter().all(|&(done, count)| i64::from(done) * 2 >= i64::from(count) * 3)
     }
 
     /// The quests the Start components of NPC `npc` offer this player now, lowest id first.
@@ -943,6 +1019,48 @@ mod tests {
             assert_eq!(c.quest, 2246);
             assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false }));
         }
+    }
+
+    #[test]
+    fn let_it_done_and_over_done_use_the_native_half_and_one_and_a_half() {
+        // A progress step with two objectives: 4 kills and 2 talks.
+        let act = |count, objective| ActDef { ty: "ObjMonsterHunt".into(), count, objective: Some(objective), ..ActDef::default() };
+        let mut t = QuestTables::default();
+        t.defs.insert(7, QuestDef { let_it_done: true, detail: 1, components: vec![10], ..QuestDef::default() });
+        t.parts.insert(10, ComponentDef { id: 10, quest: 7, kind: kind::PROGRESS, acts: vec![act(4, 0), act(2, 1)], ..ComponentDef::default() });
+        let quest = |a, b| Quest { template_id: 7, status: status::PROGRESS, component_id: 10, objectives: [a, b, 0, 0, 0], ..Quest::default() };
+
+        // 3 of 6 is exactly half: completable early, not complete.
+        assert!(t.is_let_it_done(&quest(2, 1)));
+        assert!(!t.is_over_done(&quest(2, 1)));
+        // Under half is not.
+        assert!(!t.is_let_it_done(&quest(1, 1)));
+        // Fully done is a report, not an early completion.
+        assert!(!t.is_let_it_done(&quest(4, 2)));
+        assert!(!t.is_over_done(&quest(4, 2)));
+        // 1.5 times every count is over-done.
+        assert!(t.is_over_done(&quest(6, 3)));
+        assert!(!t.is_let_it_done(&quest(6, 3)));
+        assert!(t.is_over_done(&quest(9, 5)));
+        // A main quest, a repeatable quest and a quest without the flag never complete early.
+        t.defs.get_mut(&7).unwrap().detail = 2;
+        assert!(!t.is_let_it_done(&quest(2, 1)));
+        t.defs.get_mut(&7).unwrap().detail = 1;
+        t.repeatable.insert(7);
+        assert!(!t.is_let_it_done(&quest(2, 1)));
+        t.repeatable.clear();
+        t.defs.get_mut(&7).unwrap().let_it_done = false;
+        assert!(!t.is_let_it_done(&quest(2, 1)));
+
+        // Score quests: objective count times its counter; 100 points are asked.
+        let mut s = QuestTables::default();
+        s.defs.insert(8, QuestDef { let_it_done: true, detail: 1, score: 100, components: vec![11], ..QuestDef::default() });
+        s.parts.insert(11, ComponentDef { id: 11, quest: 8, kind: kind::PROGRESS, acts: vec![act(10, 0)], ..ComponentDef::default() });
+        let score_quest = |v| Quest { template_id: 8, status: status::PROGRESS, component_id: 11, objectives: [v, 0, 0, 0, 0], ..Quest::default() };
+        assert!(s.is_let_it_done(&score_quest(5)));
+        assert!(!s.is_let_it_done(&score_quest(10)));
+        assert!(s.is_over_done(&score_quest(15)));
+        assert!(!s.is_over_done(&score_quest(14)));
     }
 
     #[test]

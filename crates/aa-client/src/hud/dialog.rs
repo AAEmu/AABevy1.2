@@ -70,12 +70,23 @@ const CLICK_SLOP: f32 = 6.0;
 /// The widgets the dialog leaves shown when it hides the HUD.
 const DIRECTING_WIDGETS: [&str; 2] = ["questDirecting", "QuestDirectingFadeWindow"];
 
+/// Where a hand-in happens: the NPC or doodad the script named (the original's `who` 1 or 2), or
+/// nowhere (`who` 0: the quest journal).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CompleteSource {
+    Npc(u32),
+    Doodad(u32),
+}
+
 /// What the scripts asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Req {
     Accept(u32),
     /// The quest and the chosen reward (1 based, 0 for none).
     Complete(u32, i32),
+    /// `X2Quest:TryCompleteQuestContext(who, qtype, doodadId, npcId, selected)` from a path that is not
+    /// the directing dialog (the quest journal, a doodad's `COMPLETE_QUEST_CONTEXT_DOODAD`).
+    CompleteContext { quest: u32, selected: i32, source: Option<CompleteSource> },
     /// Quest, component, act of a talk objective.
     Talk(u32, u32, u32),
     Drop(u32),
@@ -179,7 +190,9 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     row.set("livelihood", def.is_livelihood())?;
     row.set("group", def.is_group())?;
     row.set("selective", def.selective)?;
-    row.set("letItDone", def.let_it_done)?;
+    // the native getters' values (`quests.rs`), not the raw `let_it_done` column
+    row.set("letItDone", active && t.is_let_it_done(q))?;
+    row.set("overDone", active && t.is_over_done(q))?;
     row.set("chapter", def.chapter)?;
     row.set("zone", texts.zone_name(def.zone_id))?;
     // the objectives of the step the quest is at, and the paragraph above them (the step's hints, or
@@ -387,6 +400,23 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     }
     request("quest_accept", |a| Some(Req::Accept(num(&a, 0) as u32)))?;
     request("quest_complete", |a| Some(Req::Complete(num(&a, 0) as u32, num(&a, 1) as i32)))?;
+    // `X2Quest:TryCompleteQuestContext(who, qtype, doodadId, npcId, selected)` without the dialog:
+    // `who` 1 is the NPC named by `npcId`, 2 the doodad named by `doodadId`, 0 the journal.
+    request("quest_complete_context", |a| {
+        let id = |i: usize| match a.get(i) {
+            Some(mlua::Value::String(s)) => s.to_str().ok().and_then(|s| s.trim().parse().ok()),
+            Some(mlua::Value::Integer(n)) => Some(*n as u32),
+            Some(mlua::Value::Number(n)) => Some(*n as u32),
+            _ => None,
+        };
+        let quest = num(&a, 1) as u32;
+        let source = match num(&a, 0) {
+            1 => id(3).map(CompleteSource::Npc),
+            2 => id(2).map(CompleteSource::Doodad),
+            _ => None,
+        };
+        Some(Req::CompleteContext { quest, selected: num(&a, 4) as i32, source })
+    })?;
     request("quest_talk", |a| Some(Req::Talk(num(&a, 0) as u32, num(&a, 1) as u32, num(&a, 2) as u32)))?;
     request("quest_drop", |a| Some(Req::Drop(num(&a, 0) as u32)))?;
     request("quest_end", |_| Some(Req::End))?;
@@ -1194,6 +1224,7 @@ pub fn handle_dialog(
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
     units: Res<Units>,
+    quests: Res<Quests>,
     mut camera: Option<ResMut<QuestTalkCamera>>,
     mut cinema: Option<ResMut<super::cinema::CinemaPlayer>>,
 ) {
@@ -1248,6 +1279,12 @@ pub fn handle_dialog(
                 }
             }
             Req::Complete(quest_id, selected) => {
+                // `FUN_3937b860`: an in-progress let-it-done quest goes out as 0x0dd with the NPC
+                // object (0 from the journal); a ready quest as the ordinary 0x0da.
+                if d.game.get().is_some_and(|g| quests.active_quest(quest_id).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                    send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id, obj_id: npc_obj_id, selected });
+                    continue;
+                }
                 let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
                 let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::READY))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
@@ -1259,6 +1296,18 @@ pub fn handle_dialog(
                 };
                 if !started {
                     send(&mut net, then);
+                }
+            }
+            Req::CompleteContext { quest, selected, source } => {
+                let (npc_obj_id, doodad_obj_id) = match source {
+                    Some(CompleteSource::Npc(id)) => (id, 0),
+                    Some(CompleteSource::Doodad(id)) => (0, id),
+                    None => (0, 0),
+                };
+                if d.game.get().is_some_and(|g| quests.active_quest(quest).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                    send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id: quest, obj_id: npc_obj_id, selected });
+                } else {
+                    send(&mut net, Interact::QuestComplete { quest_id: quest, npc_obj_id, doodad_obj_id, selected });
                 }
             }
             Req::CinemaPermission { quest, kind } => {
@@ -1682,6 +1731,7 @@ mod tests {
         app.add_message::<NetEvent>()
             .add_message::<NetCommand>()
             .init_resource::<Units>()
+            .init_resource::<Quests>()
             .init_resource::<super::super::cinema::CinemaPlayer>()
             .insert_non_send(HudBridge(shared))
             .add_systems(Update, handle_dialog);
@@ -1700,6 +1750,107 @@ mod tests {
             ],
             "the {} movie must start after 0x0d0 at the dialog open",
             cinema.name
+        );
+    }
+
+    /// The scripts' side of a quest window with no UI stage: the HUD functions and `quest.lua`
+    /// loaded into a bare runtime.
+    fn bare_runtime(shared: &Shared) -> UiRuntime {
+        let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        rt.lua
+            .load("X2Quest = {}; X2Decal = {}; X2 = {}; X2Util = {}; X2Interaction = {}")
+            .set_name("@quest-native-stubs")
+            .exec()
+            .unwrap();
+        let hud = rt.lua.create_table().unwrap();
+        super::install(&rt.lua, &hud, shared).unwrap();
+        rt.lua.globals().set("HUD", hud).unwrap();
+        super::load_script(&rt.lua).unwrap();
+        rt
+    }
+
+    fn handle_dialog_app(shared: Shared, rt: UiRuntime) -> App {
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .init_resource::<Units>()
+            .init_resource::<Quests>()
+            .init_resource::<super::super::cinema::CinemaPlayer>()
+            .insert_non_send(HudBridge(shared))
+            .insert_non_send(rt)
+            .add_systems(Update, handle_dialog);
+        app
+    }
+
+    fn sent_requests(app: &mut App) -> Vec<Interact> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter_map(|NetCommand(command)| if let Command::Interact(packet) = command { Some(packet) } else { None })
+            .collect()
+    }
+
+    #[test]
+    fn the_quest_getters_read_the_computed_rows() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                HUD.quest_version = function() return 1 end
+                HUD.quest_list = function() return {
+                    { type = 11, letItDone = true, overDone = false, objectives = {} },
+                    { type = 12, letItDone = false, overDone = true, objectives = {} },
+                } end
+                assert(X2Quest:IsLetItDoneQuest(1))
+                assert(not X2Quest:IsOverDoneQuest(1))
+                assert(not X2Quest:IsLetItDoneQuestByType(12))
+                assert(X2Quest:IsOverDoneQuestByType(12))
+                assert(not X2Quest:IsLetItDoneQuestByType(13))
+                "#,
+            )
+            .set_name("@quest-getters-test")
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_let_it_done_quest_completes_from_the_journal_without_an_npc() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
+        let Some(def) = game.quests.def(1025) else { return };
+        assert!(def.let_it_done && !def.is_main(), "quest 1025 is a let-it-done side quest");
+        let mut q = Quest { template_id: 1025, status: status::PROGRESS, ..Quest::default() };
+        let Some(progress) = game.quests.parts_of(1025, kind::PROGRESS).next() else { return };
+        q.component_id = progress.id;
+        for a in &progress.acts {
+            if let Some(i) = a.objective {
+                q.objectives[usize::from(i)] = a.count / 2;
+            }
+        }
+        assert!(game.quests.is_let_it_done(&q), "half the objectives are enough for the original");
+
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        {
+            let mut d = shared.borrow_mut();
+            d.game = super::super::SharedGameData::default();
+            let _ = d.game.0.set(game);
+        }
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load("X2Quest:TryCompleteQuestContext(0, 1025, '', '', 0)")
+            .set_name("@quest-journal-complete-test")
+            .exec()
+            .unwrap();
+        let mut app = handle_dialog_app(shared, rt);
+        app.insert_resource(Quests { active: vec![q], ..Quests::default() });
+        app.update();
+        assert_eq!(
+            sent_requests(&mut app),
+            [Interact::TryQuestCompleteAsLetItDone { quest_id: 1025, obj_id: 0, selected: 0 }]
         );
     }
 

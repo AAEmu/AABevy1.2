@@ -83,10 +83,14 @@ X2Quest.IsSelectiveQuest = field("selective", false)
 X2Quest.IsLivelihoodQuest = field("livelihood", false)
 X2Quest.IsScoreQuest = function(self, qtype) return false end
 X2Quest.IsDailyQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.daily == true, nil end
-X2Quest.IsLetItDoneQuest = function(self, idx) return false end
-X2Quest.IsOverDoneQuest = function(self, idx) return false end
-X2Quest.IsLetItDoneQuestByType = function(self, qtype) return false end
-X2Quest.IsOverDoneQuestByType = function(self, qtype) return false end
+-- The early-completion state of an active quest (`quests.rs`, x2game FUN_397d6320 / FUN_397d71b0);
+-- an inactive quest (the dialog's info row) has neither.
+local function letItDone(q) return q ~= nil and q.letItDone == true end
+local function overDone(q) return q ~= nil and q.overDone == true end
+X2Quest.IsLetItDoneQuest = function(self, idx) return letItDone(byIndex(idx)) end
+X2Quest.IsOverDoneQuest = function(self, idx) return overDone(byIndex(idx)) end
+X2Quest.IsLetItDoneQuestByType = function(self, qtype) return letItDone(byType(qtype)) end
+X2Quest.IsOverDoneQuestByType = function(self, qtype) return overDone(byType(qtype)) end
 X2Quest.IsReadyForCompleteQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
 X2Quest.IsProgressQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 1 end
 X2Quest.IsReadyQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
@@ -362,8 +366,15 @@ X2Quest.CompleteDirectingQuest = function(self, selected) HUD.quest_complete(pla
 X2Quest.TryStartQuestContext = function(self, who, qtype, stype, doodadId, npcId)
   if directing then playLines("start", qtype) else HUD.quest_accept(qtype) end
 end
+-- The native `CompleteQuestContext` (`FUN_3949b5c0`): 0x0dd for an in-progress let-it-done quest,
+-- 0x0da otherwise (hud/dialog.rs, `CompleteContext`). The directing dialog plays the step first and
+-- sends from its last button instead.
 X2Quest.TryCompleteQuestContext = function(self, who, qtype, doodadId, npcId, selected)
-  if directing then playLines("complete", qtype) else HUD.quest_complete(qtype, selected or 0) end
+  if directing then
+    playLines("complete", qtype)
+  else
+    HUD.quest_complete_context(who or 0, qtype, doodadId or "", npcId or "", selected or 0)
+  end
 end
 X2Quest.TryProgressTalkQuestComponent = function(self, qtype, ctype, atype, npcId)
   if directing then
