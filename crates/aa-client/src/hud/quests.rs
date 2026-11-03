@@ -674,7 +674,9 @@ impl QuestTables {
     /// `X2Quest.IsLetItDoneQuest*`: the original's early-completion check (`FUN_397d6320`, called by
     /// `FUN_39376930` / `FUN_39376990`). It holds while the quest is not a main quest, is not
     /// repeatable, is worked on, has objectives, is not complete yet, and either the score or the
-    /// summed counters are at least half of what the step asks (`DAT_3999c47c` 0.5).
+    /// summed counters are at least half of what the step asks (`DAT_3999c47c` 0.5). Native passes the
+    /// player's level (`player+0x4b4`, set by `FUN_390b4930`) as a third argument; the recovered
+    /// `FUN_397d6320` body does not read it.
     pub fn is_let_it_done(&self, q: &Quest) -> bool {
         let Some(def) = self.defs.get(&q.template_id) else { return false };
         if def.detail == 2 || !def.let_it_done || self.repeatable.contains(&q.template_id) {
@@ -705,12 +707,14 @@ impl QuestTables {
         count > 0 && !complete && done * 2 >= count
     }
 
-    /// `X2Quest.IsOverDoneQuest*`: the original's over-done check (`FUN_397d71b0`). Every objective
-    /// must be complete (`FUN_397d7070`) and each `min(done, 2 * count)` must reach
-    /// `ceil(1.5 * count)` (`DAT_3999c478`); score quests use their score.
+    /// `X2Quest.IsOverDoneQuest*`: the original's over-done check (`FUN_397d71b0`). It does not look
+    /// at the quest status: a quest the server already marked ready is still over-done. The quest must
+    /// be a non-main let-it-done quest, every objective must be complete (`FUN_397d7070`), and each
+    /// `min(done, 2 * count)` must reach `ceil(1.5 * count)` (`DAT_3999c478`); score quests use their
+    /// score.
     pub fn is_over_done(&self, q: &Quest) -> bool {
         let Some(def) = self.defs.get(&q.template_id) else { return false };
-        if q.status != status::PROGRESS {
+        if def.detail == 2 || !def.let_it_done {
             return false;
         }
         let pairs = self.objective_pairs(q, def.score > 0);
@@ -1068,18 +1072,22 @@ mod tests {
         assert!(!t.is_over_done(&quest(status::PROGRESS, 4, 2)));
         // 1.5 times every count is over-done, including when the server already marked it ready.
         assert!(t.is_over_done(&quest(status::PROGRESS, 6, 3)));
-        assert!(!t.is_over_done(&quest(status::PROGRESS, 5, 3)));
-        assert!(!t.is_over_done(&quest(status::PROGRESS, 6, 2)));
+        assert!(t.is_over_done(&quest(status::READY, 6, 3)));
+        assert!(!t.is_let_it_done(&quest(status::READY, 6, 3)));
+        assert!(!t.is_over_done(&quest(status::READY, 5, 3)));
+        assert!(!t.is_over_done(&quest(status::READY, 6, 2)));
         // A main quest, a repeatable quest and a quest without the flag never complete early or
         // count as over-done.
         t.defs.get_mut(&7).unwrap().detail = 2;
         assert!(!t.is_let_it_done(&quest(status::PROGRESS, 2, 1)));
+        assert!(!t.is_over_done(&quest(status::READY, 6, 3)));
         t.defs.get_mut(&7).unwrap().detail = 1;
         t.repeatable.insert(7);
         assert!(!t.is_let_it_done(&quest(status::PROGRESS, 2, 1)));
         t.repeatable.clear();
         t.defs.get_mut(&7).unwrap().let_it_done = false;
         assert!(!t.is_let_it_done(&quest(status::PROGRESS, 2, 1)));
+        assert!(!t.is_over_done(&quest(status::READY, 6, 3)));
 
         // Score quests: objective count times its counter; 100 points are asked.
         let mut s = QuestTables::default();
@@ -1088,8 +1096,8 @@ mod tests {
         let score_quest = |status, v| Quest { template_id: 8, status, component_id: 12, objectives: [v, 0, 0, 0, 0], ..Quest::default() };
         assert!(s.is_let_it_done(&score_quest(status::PROGRESS, 5)));
         assert!(!s.is_let_it_done(&score_quest(status::PROGRESS, 10)));
-        assert!(s.is_over_done(&score_quest(status::PROGRESS, 15)));
-        assert!(!s.is_over_done(&score_quest(status::PROGRESS, 14)));
+        assert!(s.is_over_done(&score_quest(status::READY, 15)));
+        assert!(!s.is_over_done(&score_quest(status::READY, 14)));
     }
 
     #[test]
@@ -1099,7 +1107,7 @@ mod tests {
         t.defs.insert(9, QuestDef { let_it_done: true, detail: 1, components: vec![20, 21], ..QuestDef::default() });
         t.parts.insert(20, ComponentDef { id: 20, quest: 9, kind: kind::PROGRESS, acts: vec![act("ObjTalk", 3)], ..ComponentDef::default() });
         t.parts.insert(21, ComponentDef { id: 21, quest: 9, kind: kind::PROGRESS, acts: vec![act("ObjMonsterHunt", 0)], ..ComponentDef::default() });
-        let q = Quest { template_id: 9, status: status::PROGRESS, component_id: 20, objectives: [3, 9, 0, 0, 0], ..Quest::default() };
+        let q = Quest { template_id: 9, status: status::READY, component_id: 20, objectives: [3, 9, 0, 0, 0], ..Quest::default() };
         assert!(!t.is_over_done(&q), "ObjTalk is not counted and a 0-count act is not over-done");
         assert!(!t.is_let_it_done(&q), "a 0-count act stays 0, it is not promoted to 1");
     }
