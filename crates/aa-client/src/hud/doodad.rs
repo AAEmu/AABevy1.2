@@ -295,7 +295,7 @@ impl Tables {
             // has no `func_skill_id`.
             local::MAILBOX_ACTION
         } else if kind == "DoodadFuncEvidenceItemLoot" {
-            // Native FUN_393b7eb0 case 0x34: the action id is the detail's crime kind id.
+            // Native FUN_393b7eb0 case 0x34 reads detail+8, the row's `skill_id`.
             local.evidence_action(func_id).unwrap_or(0)
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
@@ -446,6 +446,16 @@ struct Focus {
     dist: f32,
 }
 
+/// The context `FUN_393bb090` stores at `DAT_39aff990+0x140..0x14c` for `X2Trial.ReportCrime`:
+/// doodad object id, the action/skill id, the func's next phase and the func row id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CrimeReport {
+    pub obj_id: u32,
+    pub skill_id: u32,
+    pub next_phase: i32,
+    pub func_id: u32,
+}
+
 /// One row of the interaction list.
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
@@ -491,6 +501,13 @@ pub(super) struct View {
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
     coffer_close: bool,
+    /// The `DoodadFuncEvidenceItemLoot` context for `X2Trial.ReportCrime`.
+    pub(super) crime_report: Option<CrimeReport>,
+    /// `X2Trial.ReportCrime` calls since the last `execute`: context and report text.
+    pub(super) crime_reports: Vec<(CrimeReport, String)>,
+    /// The interaction state (`DAT_3a17e6a0`) of an open local window (1, 2, 7, 8, 0xd, 0xe);
+    /// the next `end_interaction` (`FUN_393b7aa0`) ends it.
+    pub(super) local_state: Option<u8>,
     /// Purchase dialogs confirmed since the last `execute`; each sends its native packet.
     pub(super) purchases: Vec<local::PurchaseOrder>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
@@ -852,9 +869,12 @@ pub(super) fn end_interaction(
     bridge: &Shared,
     inventory: &Inventory,
 ) -> bool {
-    let (bench, menu, coffer) = {
+    let (bench, menu, coffer, state) = {
         let mut data = bridge.borrow_mut();
         let bench = super::crafting::close_bench(&mut data);
+        // The local window states FUN_393b7b10 ends (`DAT_3a17e6a0`: open paper 1, renew 2,
+        // stamp 7, purchase 8, coffer permission 0xd, auction 0xe).
+        let state = data.doodad.local_state.take().is_some();
         // Only a list that was shown (`other_interaction`) is an active interaction; a single
         // action kept in `menu` for the immediate-use path is not.
         let menu = std::mem::take(&mut data.doodad.menu_shown);
@@ -866,10 +886,10 @@ pub(super) fn end_interaction(
             // execute sends `CSCofferInteraction` for the flag.
             data.doodad.coffer_close = true;
         }
-        (bench, menu, coffer)
+        (bench, menu, coffer, state)
     };
     let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
-    let ended = bench || menu || coffer || store;
+    let ended = bench || menu || coffer || state || store;
     if ended && let Some(rt) = rt {
         rt.fire_event("INTERACTION_END", ());
     }
@@ -2089,19 +2109,47 @@ pub(super) fn execute(
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
     let target_id = env_res.target.as_ref().and_then(|t| t.obj_id).unwrap_or(0);
     let mut d = bridge.0.borrow_mut();
-    // A purchase dialog's OK (`FUN_393bc4e0` / `FUN_393bac20`): the native sends the buy directly.
+    // Dialog confirmations queued by the scripts: a purchase OK (`FUN_393bc4e0` /
+    // `FUN_393bac20`) and `X2Trial.ReportCrime` both send here.
+    let mut coin_notices: Vec<(String, i32)> = Vec::new();
+    for (context, msg) in std::mem::take(&mut d.doodad.crime_reports) {
+        out.write(NetCommand(Command::ReportCrime {
+            obj_id: context.obj_id,
+            skill_id: context.skill_id,
+            next_phase: context.next_phase,
+            func_id: context.func_id,
+            msg,
+        }));
+    }
     for order in std::mem::take(&mut d.doodad.purchases) {
-        let coin = matches!(order, local::PurchaseOrder::Coin { .. });
-        match local::purchase_command(order, &inventory) {
-            Some(command) => {
+        match local::purchase_command(order, &inventory, d.game.get(), d.snapshot.money) {
+            Ok(command) => {
                 out.write(NetCommand(command));
             }
-            None if coin => {
+            Err(local::PurchaseRefusal::InvalidItem) => {
+                if let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::STORE_INVALID_ITEM));
+                }
+            }
+            Err(local::PurchaseRefusal::NotEnoughMoney) => {
+                if let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_MONEY));
+                }
+            }
+            Err(local::PurchaseRefusal::UnknownCoin) => {
                 if let Some(errors) = errors.as_mut() {
                     errors.write(crate::hud::ShowError(local::NOT_ENOUGH_ITEM));
                 }
             }
-            None => {}
+            Err(local::PurchaseRefusal::NotEnoughCoin { coin_item, count }) => {
+                let name = d
+                    .game
+                    .get()
+                    .and_then(|g| g.items.get(&coin_item))
+                    .map(|i| i.named.name.clone())
+                    .unwrap_or_default();
+                coin_notices.push((name, count));
+            }
         }
     }
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
@@ -2262,6 +2310,18 @@ pub(super) fn execute(
     let game_slot = d.game.clone();
     let labor = d.snapshot.labor;
     drop(d);
+    if let Some(rt) = rt.as_deref() {
+        for (coin, count) in coin_notices {
+            let text = super::alerts::localized_args(
+                rt,
+                "ERROR_MSG",
+                "not_enough_coin",
+                &[coin, count.to_string()],
+            )
+            .unwrap_or_else(|| "not_enough_coin".to_owned());
+            rt.fire_event("SYSMSG", text);
+        }
+    }
     let game = game_slot.get();
     let env = PermEnv {
         houses: env_res.houses.as_deref(),

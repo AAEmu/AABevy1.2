@@ -317,6 +317,17 @@ mod tests {
             .unwrap()
             .flatten()
             .collect();
+        // `DoodadFuncEvidenceItemLoot` gives the bar its detail+8 `skill_id` (`FUN_393b7eb0` case
+        // 0x34); that is a local-func action, not the Use/FakeUse detail fallback this pins.
+        let evidence_skills: Vec<u32> = conn
+            .prepare(
+                "SELECT DISTINCT skill_id FROM doodad_func_evidence_item_loots WHERE skill_id > 0",
+            )
+            .and_then(|mut q| {
+                q.query_map([], |r| Ok(crate::hud::data::any_int(r, 0).unwrap() as u32))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
         let (mut gained_detail, mut gained_total) = (0, 0);
         for group in groups {
             let before: Vec<u32> = old
@@ -329,10 +340,11 @@ mod tests {
             {
                 gained_detail += 1;
             }
-            if new
-                .uses(group)
-                .is_some_and(|u| u.skills.iter().any(|skill| !before.contains(skill)))
-            {
+            if new.uses(group).is_some_and(|u| {
+                u.skills
+                    .iter()
+                    .any(|skill| !before.contains(skill) && !evidence_skills.contains(skill))
+            }) {
                 gained_total += 1;
             }
         }
@@ -340,11 +352,9 @@ mod tests {
             (1929..=1951).contains(&gained_detail),
             "the detail fallback changed {gained_detail} func groups"
         );
-        // 2024: the three phases whose only action is a `DoodadFuncEvidenceItemLoot` crime kind
-        // (`FUN_393b7eb0` case 0x34) joined the 1999-2021 detail/legacy range.
         assert!(
-            (1999..=2024).contains(&gained_total),
-            "the detail, legacy and evidence fallbacks changed {gained_total} func groups"
+            (1999..=2021).contains(&gained_total),
+            "the detail and legacy fallbacks changed {gained_total} func groups"
         );
     }
 

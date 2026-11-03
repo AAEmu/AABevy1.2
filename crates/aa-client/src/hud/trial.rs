@@ -147,6 +147,22 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             })?,
         )?;
     }
+    // `X2Trial.ReportCrime(msg)` (`FUN_3907bfd0`): the evidence doodad context FUN_393bb090
+    // stored plus the report text, sent as CSReportCrimePacket 0x076.
+    let s = state.clone();
+    api.raw_set(
+        "ReportCrime",
+        lua.create_function(move |_, (_this, msg): (Value, String)| {
+            let mut data = s.borrow_mut();
+            if data.disconnected {
+                return Ok(());
+            }
+            if let Some(context) = data.doodad.crime_report.take() {
+                data.doodad.crime_reports.push((context, msg));
+            }
+            Ok(())
+        })?,
+    )?;
     tasks::install(lua, state)?;
     bounty::install(lua, state, texts)
 }

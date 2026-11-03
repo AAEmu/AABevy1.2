@@ -51,6 +51,7 @@ fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Invent
         let mut d = bridge.borrow_mut();
         assert!(d.game.0.set(game).is_ok());
         d.snapshot.labor = 100;
+        d.snapshot.money = 100_000_000;
         d.pos = Vec3::new(10.0, 10.0, 100.0);
         d.character_id = 42;
         d.doodad.focus = Some(Focus {
@@ -886,7 +887,7 @@ fn event_probe(app: &App) {
         "EVENTS={}; local w=UIParent:CreateWidget('emptywidget','doodadFuncProbe','UIParent');\
          w:SetHandler('OnEvent',function(self,event,...) EVENTS[#EVENTS+1]={event,...} end);\
          for _,e in ipairs({'OPEN_PAPER','CHAT_MSG_QUEST','RENEW_ITEM_WND_SHOW','OPEN_EMBLEM_UPLOAD_UI',\
-         'COFFER_INTERACTION_START','REPORT_CRIME','NPC_INTERACTION_START'}) do w:RegisterEvent(e) end",
+         'COFFER_INTERACTION_START','REPORT_CRIME','NPC_INTERACTION_START','SYSMSG'}) do w:RegisterEvent(e) end",
     )
     .unwrap();
 }
@@ -1227,14 +1228,14 @@ fn the_parent_info_opens_the_parent_house() {
 }
 
 /// `DoodadFuncEvidenceItemLoot` (`FUN_393bb090`): the report text and `REPORT_CRIME`; the action
-/// id the native shows is the row's crime kind (`FUN_393b7eb0` case 0x34).
+/// id the native shows is the row's `skill_id` (`FUN_393b7eb0` case 0x34).
 #[test]
 fn the_evidence_loot_opens_the_crime_report() {
     if !aa_cry::pak_available() {
         return;
     }
     let Some(game) = game() else { return };
-    let mut app = app(game, 15_249, 5911, 3, Inventory::default());
+    let mut app = app(game, 15_249, 5911, 11_672, Inventory::default());
     event_probe(&app);
     tick(&app);
     app.update();
@@ -1266,6 +1267,21 @@ fn the_evidence_loot_opens_the_crime_report() {
         "the crime report window did not open"
     );
     assert!(sent(&mut app).is_empty(), "the report use sends nothing");
+
+    // The report button (`report_crime.alb`) calls X2Trial.ReportCrime(text); FUN_3907bfd0 sends
+    // the context FUN_393bb090 stored with opcode 0x76.
+    lua(&app, "X2Trial:ReportCrime('blood on the ground')").unwrap();
+    app.update();
+    assert!(matches!(
+        sent(&mut app).as_slice(),
+        [Command::ReportCrime {
+            obj_id: 2075,
+            skill_id: 11_672,
+            next_phase: 15_251,
+            func_id: 12_578,
+            msg,
+        }] if msg == "blood on the ground"
+    ));
 }
 
 /// `DoodadFuncPurchase` (`FUN_393b80d0`): task 10 for a money row, task 11 for a coin row; the
@@ -1309,13 +1325,14 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
     let sent_buy = sent(&mut money);
     assert!(matches!(
         sent_buy.as_slice(),
-        [Command::Shop(ShopCommand::Buy { npc_obj_id: 0, doodad_obj_id: 2075, buy, buy_back, use_aa_point: false })]
+        [Command::Shop(ShopCommand::Buy { npc_obj_id: 0, doodad_obj_id: 2075, func_id: 10_117, buy, buy_back, use_aa_point: false })]
             if buy.as_slice() == [BuyEntry { item_id: 23_614, grade: 0, count: 1, currency: 0 }]
                 && buy_back.is_empty()
     ));
 
     let Some(game2) = game() else { return };
     let mut coin = app(game2, 11_691, 4729, 14_569, Inventory::default());
+    event_probe(&coin);
     lua(
         &coin,
         "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
@@ -1341,10 +1358,20 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
             .as_boolean()
             .unwrap_or(false)
     );
-    // without the coins the native does not send the buy
+    // without the coins the native does not send the buy; FUN_393bac20 shows message 0x1e3
+    // (`not_enough_coin`) with the coin name and count.
     lua(&coin, "PURCHASE.wnd.OkProc()").unwrap();
     coin.update();
     assert!(sent(&mut coin).is_empty(), "sent without the coin item");
+    assert_eq!(
+        event_arg(&coin, "SYSMSG", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("not_enough_coin")
+    );
 
     let Some(game3) = game() else { return };
     let mut paid = app(game3, 11_691, 4729, 14_569, bag_count(23_633, 15));
@@ -1367,4 +1394,134 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
             func_id: 10_262
         })]
     ));
+}
+
+/// `FUN_393bc4e0`: a missing item template refuses with 0x57 and sends nothing; a money total
+/// below the price refuses with `NOT_ENOUGH_MONEY` (0x1a).
+#[test]
+fn the_money_purchase_checks_the_item_and_the_price() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(mut game1) = game() else { return };
+    game1.items.remove(&23_614);
+    let mut missing = app(game1, 11_355, 4601, 17_537, Inventory::default());
+    lua(
+        &missing,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)           PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&missing);
+    missing.update();
+    tick(&missing);
+    lua(&missing, "PURCHASE.OkProc()").unwrap();
+    missing.update();
+    let refused: Vec<_> = missing
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect();
+    assert_eq!(refused, [STORE_INVALID_ITEM]);
+    assert!(sent(&mut missing).is_empty());
+
+    let Some(game2) = game() else { return };
+    let mut poor = app(game2, 11_355, 4601, 17_537, Inventory::default());
+    lua(
+        &poor,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)           PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&poor);
+    poor.update();
+    tick(&poor);
+    poor.world()
+        .get_non_send::<HudBridge>()
+        .unwrap()
+        .0
+        .borrow_mut()
+        .snapshot
+        .money = 0;
+    lua(&poor, "PURCHASE.OkProc()").unwrap();
+    poor.update();
+    let refused: Vec<_> = poor
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect();
+    assert_eq!(refused, [NOT_ENOUGH_MONEY]);
+    assert!(sent(&mut poor).is_empty());
+}
+
+/// A purchase dialog closes when the next local interaction starts (`FUN_393b7b10` ->
+/// `FUN_393b7aa0` -> `INTERACTION_END`); its old OK must not send.
+#[test]
+fn a_purchase_dialog_cannot_confirm_after_the_next_interaction() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 11_355, 4601, 17_537, Inventory::default());
+    lua(
+        &app,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)           PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return PURCHASE ~= nil and PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(true)
+    );
+
+    // The doodad becomes a mailbox; opening it ends the purchase interaction.
+    app.world_mut().resource_mut::<Doodads>().by_id.insert(
+        2075,
+        world_doodad(
+            2075,
+            MAILBOX_TEMPLATE,
+            MAILBOX_GROUP,
+            Vec3::new(10.0, 10.0, 100.0),
+        ),
+    );
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.doodad.focus = Some(Focus {
+            obj_id: 2075,
+            skills: vec![MAILBOX_ACTION],
+            craft_icon: None,
+            key: -3.0,
+            dist: 3.0,
+        });
+        let generation = d.dynamic_actions.shown().and_then(|s| match s.source {
+            Source::Doodad { generation, .. } => Some(generation),
+            _ => None,
+        });
+        d.dynamic_actions.replace(Some(Shown {
+            source: Source::Doodad {
+                obj_id: 2075,
+                phase: MAILBOX_GROUP,
+                generation: generation.unwrap_or_default(),
+            },
+            skills: vec![MAILBOX_ACTION],
+        }));
+        d.dynamic_actions.request(1);
+    }
+    app.update();
+    assert_eq!(
+        lua(&app, "return PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the purchase dialog stayed open"
+    );
+    // The closed dialog's OK is inert.
+    lua(&app, "PURCHASE.OkProc()").unwrap();
+    app.update();
+    assert!(sent(&mut app).is_empty(), "the old purchase still sent");
 }

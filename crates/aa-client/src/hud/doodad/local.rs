@@ -74,6 +74,14 @@ pub(super) struct Purchase {
     pub currency: u8,
 }
 
+/// A `doodad_func_evidence_item_loots` row: the action id is its `skill_id` (`FUN_393b7eb0`
+/// case 0x34 reads detail+8), the window text uses the crime kind.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Evidence {
+    pub crime_kind: u32,
+    pub skill: u32,
+}
+
 /// The `doodad_func_open_papers` row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Paper {
@@ -137,8 +145,13 @@ pub(in crate::hud) enum LocalAction {
     CofferPerm,
     /// The parent house's info (`FUN_393b8400` -> `FUN_393befd0`).
     ParentInfo,
-    /// `REPORT_CRIME`; the action id is `doodad_func_evidence_item_loots.crime_kind_id`.
-    Evidence { crime_kind: u32 },
+    /// `REPORT_CRIME`; the action id is `doodad_func_evidence_item_loots.skill_id`, the text uses
+    /// the crime kind.
+    Evidence {
+        crime_kind: u32,
+        next_phase: i32,
+        func_id: u32,
+    },
 }
 
 /// The confirmation of a purchase dialog (`FUN_393bc4e0` / `FUN_393bac20`).
@@ -188,9 +201,9 @@ pub(super) struct LocalFuncs {
     /// `doodad_func_coffer_perms` func ids whose template has a positive `DoodadFuncCoffer`
     /// (`FUN_3983b3b0` checks the whole template, not the current phase).
     coffer_perms: HashSet<u32>,
-    /// func id -> `doodad_func_evidence_item_loots.crime_kind_id`, the action id the bar shows
-    /// (`FUN_393b7eb0` case 0x34) and the report kind.
-    evidence: HashMap<u32, u32>,
+    /// func id -> `doodad_func_evidence_item_loots` (the action id is its `skill_id`, `FUN_393b7eb0`
+    /// case 0x34 reads detail+8; the text uses the crime kind at detail+0).
+    evidence: HashMap<u32, Evidence>,
 }
 
 impl LocalFuncs {
@@ -256,10 +269,16 @@ impl LocalFuncs {
         );
         read_pairs(
             conn,
-            "SELECT id, crime_kind_id, 0 FROM doodad_func_evidence_item_loots",
-            |id, a, _| {
-                if a > 0 {
-                    out.evidence.insert(id, a as u32);
+            "SELECT id, crime_kind_id, skill_id FROM doodad_func_evidence_item_loots",
+            |id, a, b| {
+                if b > 0 {
+                    out.evidence.insert(
+                        id,
+                        Evidence {
+                            crime_kind: a.max(0) as u32,
+                            skill: b as u32,
+                        },
+                    );
                 }
             },
         );
@@ -330,10 +349,15 @@ impl LocalFuncs {
                 .contains(&row_id)
                 .then_some(LocalAction::CofferPerm),
             "DoodadFuncParentInfo" => Some(LocalAction::ParentInfo),
-            "DoodadFuncEvidenceItemLoot" => self
-                .evidence
-                .get(&func_id)
-                .map(|crime| LocalAction::Evidence { crime_kind: *crime }),
+            "DoodadFuncEvidenceItemLoot" => {
+                self.evidence
+                    .get(&func_id)
+                    .map(|detail| LocalAction::Evidence {
+                        crime_kind: detail.crime_kind,
+                        next_phase,
+                        func_id: row_id,
+                    })
+            }
             _ => None,
         }
     }
@@ -343,10 +367,10 @@ impl LocalFuncs {
         self.insert_counters.get(&func_id).copied()
     }
 
-    /// The action id of `DoodadFuncEvidenceItemLoot` (`FUN_393b7eb0` case 0x34: the detail's
-    /// crime kind id), `None` when the native would return 0 (no bar entry).
+    /// The action id of `DoodadFuncEvidenceItemLoot`: `FUN_393b7eb0` case 0x34 reads detail+8,
+    /// the row's `skill_id` (11672 on all shipped rows). `None` when it is 0 (no bar entry).
     pub(super) fn evidence_action(&self, func_id: u32) -> Option<u32> {
-        self.evidence.get(&func_id).copied()
+        self.evidence.get(&func_id).map(|detail| detail.skill)
     }
 }
 
@@ -434,6 +458,20 @@ pub(super) fn run(
             super::end_interaction(Some(rt), bridge, inventory);
         }
     }
+    // The states `FUN_393b7b10` remembers in `DAT_3a17e6a0`; the next local interaction ends the
+    // window through `FUN_393b7aa0` (`end_interaction`).
+    let state = match local {
+        LocalAction::OpenPaper { .. } => 1,
+        LocalAction::RenewItem { .. } => 2,
+        LocalAction::StampMaker => 7,
+        LocalAction::Purchase { .. } => 8,
+        LocalAction::CofferPerm => 0xd,
+        LocalAction::Auction => 0xe,
+        _ => 0,
+    };
+    if state != 0 {
+        bridge.borrow_mut().doodad.local_state = Some(state);
+    }
     match local {
         LocalAction::Mailbox => super::super::mail::open_at(rt, obj_id),
         LocalAction::FarmInfo(farm) => {
@@ -492,7 +530,17 @@ pub(super) fn run(
                 super::super::housing::open_interaction(rt, house.obj_id);
             }
         }
-        LocalAction::Evidence { crime_kind } => {
+        LocalAction::Evidence {
+            crime_kind,
+            next_phase,
+            func_id,
+        } => {
+            bridge.borrow_mut().doodad.crime_report = Some(super::CrimeReport {
+                obj_id,
+                skill_id,
+                next_phase,
+                func_id,
+            });
             let (name, target) = {
                 let d = bridge.borrow();
                 let game = d.game.get();
@@ -608,12 +656,21 @@ fn open_purchase(rt: &UiRuntime, bridge: &Shared, obj_id: u32, func_id: u32, ord
         let _ = info.set("coinName", coin_name);
         let _ = info.set("coinCount", order.coin_count);
     }
+    // `FUN_3902db50(10/11)` clears the previous task dialogs before the new one is created.
+    let _ = manager.call_method::<()>("Delete", (TASK_PURCHASE,));
+    let _ = manager.call_method::<()>("Delete", (TASK_PURCHASE_COIN,));
     let wnd: Option<mlua::Table> = manager
         .call_method("RequestTaskDialog", (task, info, obj_id))
         .ok();
     let Some(wnd) = wnd else { return };
     let state = bridge.clone();
-    let done = lua.create_function(move |_, ()| {
+    let dialog = wnd.clone();
+    let done = lua.create_function(move |_, _: mlua::MultiValue| {
+        // A dialog cancelled by `INTERACTION_END` (or replaced by the next interaction) must not
+        // send the old doodad's purchase.
+        if dialog.raw_get::<bool>("__dialog_closed").unwrap_or(false) {
+            return Ok(());
+        }
         let order = if task == TASK_PURCHASE {
             PurchaseOrder::Buy {
                 obj_id,
@@ -640,13 +697,36 @@ fn open_purchase(rt: &UiRuntime, bridge: &Shared, obj_id: u32, func_id: u32, ord
 
 /// The `ErrorMessageType` of the refusal (`error_names.txt`: 27 `NOT_ENOUGH_ITEM`).
 pub(super) const NOT_ENOUGH_ITEM: i16 = 27;
+/// `ErrorMessageType` 26 `NOT_ENOUGH_MONEY` (`FUN_394f0eb0`'s money branch).
+pub(super) const NOT_ENOUGH_MONEY: i16 = 26;
+/// `ErrorMessageType` 87 `STORE_INVALID_ITEM` (`FUN_393bc4e0` when the item template is missing).
+pub(super) const STORE_INVALID_ITEM: i16 = 87;
 
 /// `FUN_393bc260` shows `NO_PERM` (error 2) when `FUN_393b3300` refuses the func.
 pub(super) const NO_PERM: i16 = 2;
 
-/// The packet a pending purchase confirmation sends (`FUN_393bc4e0` / `FUN_393bac20`). The coin
-/// path checks the bag and equipment for the coin item first (`FUN_397cce20`), like the native.
-pub(super) fn purchase_command(order: PurchaseOrder, inventory: &Inventory) -> Option<Command> {
+/// Why a purchase confirmation does not send (`FUN_393bc4e0` / `FUN_393bac20`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PurchaseRefusal {
+    /// The item template is missing (`FUN_393bc4e0`: error 0x57).
+    InvalidItem,
+    /// The money is below price * count (`FUN_394f0eb0`).
+    NotEnoughMoney,
+    /// The coin template is missing (`FUN_393bac20`: error 0x1b).
+    UnknownCoin,
+    /// The bag and equipment together hold fewer coins (`FUN_397cce20` + message 0x1e3).
+    NotEnoughCoin { coin_item: u32, count: i32 },
+}
+
+/// The packet a pending purchase confirmation sends (`FUN_393bc4e0` / `FUN_393bac20`). The money
+/// path needs the item's price and the player's money; the coin path checks the item template and
+/// then the bag plus equipment count (`FUN_397cce20`), like the native.
+pub(super) fn purchase_command(
+    order: PurchaseOrder,
+    inventory: &Inventory,
+    game: Option<&crate::hud::data::GameData>,
+    money: i64,
+) -> Result<Command, PurchaseRefusal> {
     match order {
         PurchaseOrder::Buy {
             obj_id,
@@ -655,13 +735,21 @@ pub(super) fn purchase_command(order: PurchaseOrder, inventory: &Inventory) -> O
             count,
             currency,
         } => {
-            if item == 0 || count <= 0 {
-                return None;
+            let Some(info) = game.and_then(|g| g.items.get(&item)) else {
+                return Err(PurchaseRefusal::InvalidItem);
+            };
+            if count <= 0 {
+                return Err(PurchaseRefusal::InvalidItem);
             }
-            let _ = func_id;
-            Some(Command::Shop(ShopCommand::Buy {
+            if currency == aa_net::shop::currency::MONEY
+                && money < info.price.saturating_mul(i64::from(count))
+            {
+                return Err(PurchaseRefusal::NotEnoughMoney);
+            }
+            Ok(Command::Shop(ShopCommand::Buy {
                 npc_obj_id: 0,
                 doodad_obj_id: obj_id,
+                func_id,
                 buy: vec![aa_net::shop::BuyEntry {
                     item_id: item,
                     grade: 0,
@@ -678,6 +766,9 @@ pub(super) fn purchase_command(order: PurchaseOrder, inventory: &Inventory) -> O
             coin_item,
             coin_count,
         } => {
+            if game.is_none_or(|g| !g.items.contains_key(&coin_item)) {
+                return Err(PurchaseRefusal::UnknownCoin);
+            }
             let bag: i32 = inventory
                 .bag
                 .iter()
@@ -693,10 +784,13 @@ pub(super) fn purchase_command(order: PurchaseOrder, inventory: &Inventory) -> O
                 .filter(|i| i.template_id == coin_item)
                 .map(|i| i.count.max(0))
                 .sum();
-            if bag.max(equipped) < coin_count {
-                return None;
+            if bag + equipped < coin_count {
+                return Err(PurchaseRefusal::NotEnoughCoin {
+                    coin_item,
+                    count: coin_count,
+                });
             }
-            Some(Command::Shop(ShopCommand::BuyCoin { obj_id, func_id }))
+            Ok(Command::Shop(ShopCommand::BuyCoin { obj_id, func_id }))
         }
     }
 }
