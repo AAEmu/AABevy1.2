@@ -98,11 +98,16 @@ the player's expedition id); 4 owner or the same five-person party group; 5 owne
 party/raid member; 6 the owner, or the doodad's house is the player's account (native
 `FUN_393b32c0`: `owner == me`, or the house's `+0xa8` is my account; an alt of the login
 character list is *not* enough);
-7 the doodad's zone group is the player's ("this zone is my nation"); 8 the account has a
-house in the doodad's zone group; unknown values are refused. The owner is the house owner
-for a housing doodad. The client cannot resolve a character's account outside the login
-list or a zone before the terrain loads it; those are inferred as allowed and the server's
-`bench_denial` stays authoritative. The send carries the live bench object id
+7 the zone group's received Dominion owner expedition belongs to the player's nation
+(native `FUN_393b3300` case 7 -> `FUN_39053360(zoneGroup, DAT_39d44b94, 0)`: the owner
+resolved through the received expedition records and the static `system_factions`
+`mother_id` chain, as `FUN_392f8180` does, must be the player's CharacterState faction); an unknown zone, Dominion row, owner or faction
+record is refused (native has no record to compare); 8 the account has a house in the
+doodad's zone group (native `FUN_3932aaf0` walks the own house list `DAT_3a167ec4`, kept
+here from `SCMyHouse`/`SCLoginCharInfoHouse` so it survives the house leaving view); unknown
+values are refused. The owner is the house owner for a housing doodad. A house zone the
+client cannot resolve yet is inferred as allowed and the server's `bench_denial` stays
+authoritative. The send carries the live bench object id
 (`CSExecuteCraft` 0x0f8: recipe, doodad, count).
 
 ## Natural gathering

@@ -506,7 +506,15 @@ struct PlayerFacts<'a> {
     character_id: u32,
     account_id: u32,
     expedition_id: u32,
-    zone_group: u32,
+    /// The player's nation (native `DAT_39d44b94`, the CharacterState faction).
+    nation: u32,
+    /// The received Dominion rows, owner expedition per zone group.
+    dominion: &'a aa_net::Dominion,
+    /// The received faction records, for the expedition -> nation lookup (`FUN_392f8180`).
+    expeditions: &'a aa_net::Expeditions,
+    /// `system_factions.id` -> `mother_id` from the game data: the static nation rows the
+    /// received faction list does not carry.
+    faction_mother: Option<&'a HashMap<u32, u32>>,
     party: &'a aa_net::Party,
     friends: &'a aa_net::Friends,
     /// Zone groups of the account's houses; `None` when the client cannot know them.
@@ -574,7 +582,10 @@ fn player_facts<'a>(data: &'a HudData, env: PermEnv<'a>) -> PlayerFacts<'a> {
         character_id: data.character_id,
         account_id: data.account_id,
         expedition_id: data.expedition.own_id(),
-        zone_group: data.snapshot.zone_group,
+        nation: data.expedition.received().current_faction_id,
+        dominion: data.expedition.dominion(),
+        expeditions: data.expedition.received(),
+        faction_mother: data.game.get().map(|game| &game.faction_mother),
         party: &data.party,
         friends: &data.friends,
         house_zone_groups,
@@ -590,6 +601,31 @@ fn doodad_facts(data: &HudData, o: &aa_net::model::Doodad, pos: Vec3, env: PermE
         faction: data.doodad.factions.get(&o.obj_id).copied().unwrap_or(0),
         zone_group: zone_group(data, env.world, pos),
     }
+}
+
+/// The nation a faction belongs to, the native `FUN_392f8180` lookup: the top of its `mother_id`
+/// chain, from the received expedition records or the static `system_factions` rows. `None` when
+/// neither source knows the faction.
+fn nation_of(player: &PlayerFacts, faction: u32) -> Option<u32> {
+    let mut id = faction;
+    let mut budget =
+        player.expeditions.factions.len() + player.faction_mother.map_or(0, HashMap::len) + 1;
+    while budget > 0 {
+        budget -= 1;
+        let mother = match (
+            player.expeditions.factions.get(&id),
+            player.faction_mother.and_then(|rows| rows.get(&id)),
+        ) {
+            (Some(row), _) => row.mother_id,
+            (None, Some(&mother)) => mother,
+            (None, None) => return None,
+        };
+        if mother == 0 {
+            return Some(id);
+        }
+        id = mother;
+    }
+    None
 }
 
 /// Whether the owner is in the same five-person party group as `me` (native `FUN_39308e40`: it
@@ -627,11 +663,17 @@ fn craft_permitted(perm: u8, player: &PlayerFacts, doodad: &DoodadFacts) -> bool
             owner == me
                 || (doodad.house_account_id != 0 && doodad.house_account_id == player.account_id)
         }
-        // "This zone is my nation": the doodad's zone group is the player's. Unknown terrain zone
-        // data is inferred as allowed.
-        SAME_NATION => match doodad.zone_group {
-            Some(zone) if player.zone_group != 0 => zone == player.zone_group,
-            _ => true,
+        // Native `FUN_393b3300` case 7 -> `FUN_39053360(zoneGroup, player nation, 0)`: the zone
+        // group's Dominion owner expedition must belong to the player's nation. A zone, owner or
+        // faction the client has not received is refused (the native record/lookup is missing).
+        SAME_NATION => {
+            let Some(zone) = doodad.zone_group.and_then(|zone| u16::try_from(zone).ok()) else {
+                return false;
+            };
+            let Some(owner) = player.dominion.rows.get(&zone).map(|row| row.expedition_id) else {
+                return false;
+            };
+            player.nation != 0 && owner != 0 && nation_of(player, owner) == Some(player.nation)
         },
         // "My house in this zone": the account has a house in the doodad's zone group. Unknown
         // house zones are inferred as allowed.
@@ -3567,12 +3609,21 @@ mod tests {
         }
     }
 
-    fn test_player<'a>(party: &'a aa_net::Party, friends: &'a aa_net::Friends, _chars: &'a [u32]) -> PlayerFacts<'a> {
+    fn test_player<'a>(
+        party: &'a aa_net::Party,
+        friends: &'a aa_net::Friends,
+        dominion: &'a aa_net::Dominion,
+        expeditions: &'a aa_net::Expeditions,
+        faction_mother: &'a HashMap<u32, u32>,
+    ) -> PlayerFacts<'a> {
         PlayerFacts {
             character_id: 47,
             account_id: 7,
             expedition_id: 900,
-            zone_group: 5,
+            nation: 148,
+            dominion,
+            expeditions,
+            faction_mother: Some(faction_mother),
             party,
             friends,
             house_zone_groups: Some(vec![5]),
@@ -3620,9 +3671,39 @@ mod tests {
     fn craft_permissions_follow_native_393b3300() {
         let mut friends = aa_net::Friends::default();
         friends.friends.push(aa_net::FriendInfo { id: 99, ..Default::default() });
-        let chars = [47u32, 48];
         let party = aa_net::Party::default();
-        let player = test_player(&party, &friends, &chars);
+        // Zone 5's Dominion owner is expedition 900 (Nuia, 148); zone 6's is 901 (Haranya, 149).
+        let mut expeditions = aa_net::Expeditions::default();
+        expeditions.current_faction_id = 148;
+        for (id, mother) in [(900, 148), (901, 149)] {
+            expeditions.factions.insert(
+                id,
+                aa_net::ExpeditionFaction {
+                    id,
+                    mother_id: mother,
+                    ..Default::default()
+                },
+            );
+        }
+        let faction_mother = HashMap::from([(148, 0), (149, 0)]);
+        let mut dominion = aa_net::Dominion::default();
+        dominion.rows.insert(
+            5,
+            aa_net::DominionData {
+                zone_group_id: 5,
+                expedition_id: 900,
+                ..Default::default()
+            },
+        );
+        dominion.rows.insert(
+            6,
+            aa_net::DominionData {
+                zone_group_id: 6,
+                expedition_id: 901,
+                ..Default::default()
+            },
+        );
+        let player = test_player(&party, &friends, &dominion, &expeditions, &faction_mother);
         assert!(craft_permitted(craft_perm::ANY, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
         assert!(!craft_permitted(craft_perm::OWNER, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
         assert!(craft_permitted(craft_perm::OWNER, &player, &perm_doodad(47, 0, 0, 0, Some(5))));
@@ -3638,7 +3719,8 @@ mod tests {
         );
         assert!(craft_permitted(craft_perm::EXPEDITION, &player, &perm_doodad(5, 0, 0, 900, Some(5))));
         assert!(!craft_permitted(craft_perm::EXPEDITION, &player, &perm_doodad(5, 0, 0, 901, Some(5))));
-        let mut no_expedition = test_player(&party, &friends, &chars);
+        let mut no_expedition =
+            test_player(&party, &friends, &dominion, &expeditions, &faction_mother);
         no_expedition.expedition_id = 0;
         assert!(!craft_permitted(craft_perm::EXPEDITION, &no_expedition, &perm_doodad(5, 0, 0, 0, Some(5))));
         assert!(
@@ -3658,15 +3740,85 @@ mod tests {
             "the house's account"
         );
         assert!(!craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(5, 0, 8, 0, Some(5))));
-        assert!(craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
-        assert!(!craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
         assert!(
-            craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, None)),
-            "unknown terrain zone data is inferred as allowed"
+            craft_permitted(
+                craft_perm::SAME_NATION,
+                &player,
+                &perm_doodad(5, 0, 0, 0, Some(5))
+            ),
+            "the zone's Dominion owner (expedition 900) is of the player's nation (148)"
+        );
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_NATION,
+                &player,
+                &perm_doodad(5, 0, 0, 0, Some(6))
+            ),
+            "the zone's Dominion owner (expedition 901) is of nation 149"
+        );
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_NATION,
+                &player,
+                &perm_doodad(5, 0, 0, 0, Some(7))
+            ),
+            "a zone with no received Dominion row is refused"
+        );
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_NATION,
+                &player,
+                &perm_doodad(5, 0, 0, 0, None)
+            ),
+            "an unknown zone is refused"
+        );
+        let mut no_nation = test_player(&party, &friends, &dominion, &expeditions, &faction_mother);
+        no_nation.nation = 0;
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_NATION,
+                &no_nation,
+                &perm_doodad(5, 0, 0, 0, Some(5))
+            ),
+            "a player with no nation is refused"
+        );
+        let mut foreign_faction = aa_net::Expeditions::default();
+        foreign_faction.current_faction_id = 148;
+        foreign_faction.factions.insert(
+            902,
+            aa_net::ExpeditionFaction {
+                id: 902,
+                mother_id: 148,
+                ..Default::default()
+            },
+        );
+        let mut unknown_owner = aa_net::Dominion::default();
+        unknown_owner.rows.insert(
+            5,
+            aa_net::DominionData {
+                zone_group_id: 5,
+                expedition_id: 999,
+                ..Default::default()
+            },
+        );
+        let unknown = test_player(
+            &party,
+            &friends,
+            &unknown_owner,
+            &foreign_faction,
+            &faction_mother,
+        );
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_NATION,
+                &unknown,
+                &perm_doodad(5, 0, 0, 0, Some(5))
+            ),
+            "an owner the client has no faction record for is refused"
         );
         assert!(craft_permitted(craft_perm::ZONE_RESIDENTS, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
         assert!(!craft_permitted(craft_perm::ZONE_RESIDENTS, &player, &perm_doodad(5, 0, 0, 0, Some(6))));
-        let mut no_houses = test_player(&party, &friends, &chars);
+        let mut no_houses = test_player(&party, &friends, &dominion, &expeditions, &faction_mother);
         no_houses.house_zone_groups = Some(Vec::new());
         assert!(!craft_permitted(craft_perm::ZONE_RESIDENTS, &no_houses, &perm_doodad(5, 0, 0, 0, Some(5))));
         no_houses.house_zone_groups = None;
@@ -3680,7 +3832,7 @@ mod tests {
         raid.members.push(aa_net::PartyMember { id: 47, slot: 0, ..Default::default() });
         raid.members.push(aa_net::PartyMember { id: 50, slot: 4, ..Default::default() });
         raid.members.push(aa_net::PartyMember { id: 51, slot: 5, ..Default::default() });
-        let raider = test_player(&raid, &friends, &chars);
+        let raider = test_player(&raid, &friends, &dominion, &expeditions, &faction_mother);
         assert!(craft_permitted(craft_perm::OWNER_OR_PARTY, &raider, &perm_doodad(50, 0, 0, 0, Some(5))));
         assert!(!craft_permitted(craft_perm::OWNER_OR_PARTY, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
         assert!(craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(51, 0, 0, 0, Some(5))));
