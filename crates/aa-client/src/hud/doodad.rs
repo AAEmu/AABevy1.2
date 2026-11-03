@@ -1749,6 +1749,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
 /// Starts the walk to `obj_id` for `action` and keeps it as the pending use (native
 /// `FUN_393b3ec0`: `FUN_39093800` out of range installs `FUN_390a6af0`'s pending action). The
 /// phase and view generation are stored so a use that changed on the way is dropped.
+#[allow(clippy::too_many_arguments)]
 fn defer_action(
     d: &mut HudData,
     doodads: &Doodads,
@@ -1888,10 +1889,8 @@ pub(super) fn execute(
         let chosen_differs = menu_obj.is_some_and(|obj_id| {
             obj_id != pending.obj_id || chosen.iter().any(|id| *id != pending.action)
         });
-        if bar_differs || chosen_differs {
-            if d.doodad.cancel_walk() {
-                dev.script_keys.retain(|c| c != 'W');
-            }
+        if (bar_differs || chosen_differs) && d.doodad.cancel_walk() {
+            dev.script_keys.retain(|c| c != 'W');
         }
     }
     let mut commands = Vec::new();
