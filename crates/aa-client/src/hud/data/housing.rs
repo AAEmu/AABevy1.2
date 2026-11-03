@@ -159,6 +159,9 @@ pub struct Tables {
     /// `deco_actability_groups.id` -> localized name.
     pub deco_actability_groups: HashMap<u32, String>,
     pub farm_groups: HashMap<u32, FarmGroup>,
+    /// `farm_groups` ids in the database's row order: `X2.GetFarmGroups` answers them as the
+    /// native's descriptor vector does (`FUN_394447C0`).
+    pub farm_group_ids: Vec<u32>,
     pub farm_group_doodads: Vec<FarmGroupDoodad>,
     pub common_farms: Vec<CommonFarm>,
 }
@@ -391,6 +394,9 @@ impl Tables {
                     count: any_int(r, 2)?.max(0) as u32,
                     description: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 };
+                if !t.farm_groups.contains_key(&row.id) {
+                    t.farm_group_ids.push(row.id);
+                }
                 t.farm_groups.insert(row.id, row);
             }
         }
@@ -436,6 +442,14 @@ impl Tables {
             .iter()
             .filter(move |d| d.farm_group_id == kind)
             .map(|d| d.doodad_id)
+    }
+
+    /// The item a farm of `kind` plants with `doodad` (`farm_group_doodads`), in row order.
+    pub fn farm_doodad_item(&self, kind: u32, doodad: u32) -> u32 {
+        self.farm_group_doodads
+            .iter()
+            .find(|d| d.farm_group_id == kind && d.doodad_id == doodad)
+            .map_or(0, |d| d.item_id)
     }
 
     /// The guard time (ms) of the first farm of `kind` whose comment mentions
@@ -577,8 +591,10 @@ mod tests {
         assert_eq!(t.item_spawn_doodads.len(), 2);
         assert_eq!(t.housing_areas[&100].housing_group_id, 5);
         assert!(t.housing_groups[&5].can_extend && !t.housing_groups[&5].houseless);
+        assert_eq!(t.farm_group_ids, vec![1, 2], "X2.GetFarmGroups order");
         assert_eq!(t.farm_group_max_count(1), 10);
         assert_eq!(t.allowed_farm_doodads(1).collect::<Vec<_>>(), vec![380, 381]);
+        assert_eq!(t.farm_doodad_item(1, 381), 13726);
         assert_eq!(t.farm_guard_time(1, 33), 86400000);
         assert_eq!(t.farm_guard_time(1, 7), 86400000);
         assert_eq!(t.farm_guard_time(2, 7), 0);
