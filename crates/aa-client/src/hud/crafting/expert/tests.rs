@@ -171,8 +171,18 @@ fn first_activation_notifies_real_receipts_without_reapplying_copied_deltas() ->
 
 #[test]
 fn original_language_constructor_already_contains_the_received_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    if !std::path::Path::new(&pak).is_file() {
+        eprintln!("skip: no game_pak at {pak}");
+        return Ok(());
+    }
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&db).is_file() {
+        eprintln!("skip: no client database at {db}");
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
-    rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
     {
         let mut d = bridge.borrow_mut();
@@ -187,7 +197,7 @@ fn original_language_constructor_already_contains_the_received_snapshot() -> Res
         d.feature_limits = (Some(55), Some(50));
         d.panels.actions_known = true;
         d.panels.bag_slots = 50;
-        d.game.0.set(GameData::load(aa_anim::db::DEFAULT_DB)?).ok().unwrap();
+        d.game.0.set(GameData::load(&db)?).ok().unwrap();
         d.crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot { last: true, entries: vec![ActabilityValue { id: 21, point: 1337, step: 0 }] }));
         let cap = *d.game.get().unwrap().crafting.expansions.keys().max().ok_or("missing expert expansion catalog")?;
         d.crafting.actabilities.expanded_expert = Some(u8::try_from(cap)?);
