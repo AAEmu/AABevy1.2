@@ -231,8 +231,14 @@ fn action_point_gain_fires_the_four_native_arguments() -> Result<(), Box<dyn std
 
 #[test]
 fn original_language_constructor_already_contains_the_received_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+    let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !std::path::Path::new(&pak).exists() || !std::path::Path::new(&db).exists() {
+        eprintln!("original language constructor: needs game_pak (AA_PAK) and compact.sqlite3 (AA_DB); skipped");
+        return Ok(());
+    }
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
-    rt.load_ui_texts(std::path::Path::new(aa_anim::db::DEFAULT_DB))?;
+    rt.load_ui_texts(std::path::Path::new(&db))?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
     {
         let mut d = bridge.borrow_mut();
@@ -247,7 +253,7 @@ fn original_language_constructor_already_contains_the_received_snapshot() -> Res
         d.feature_limits = (Some(55), Some(50));
         d.panels.actions_known = true;
         d.panels.bag_slots = 50;
-        d.game.0.set(GameData::load(aa_anim::db::DEFAULT_DB)?).ok().unwrap();
+        d.game.0.set(GameData::load(&db)?).ok().unwrap();
         d.crafting.actabilities.apply(&Event::Actability(ActabilityEvent::Snapshot { last: true, entries: vec![ActabilityValue { id: 21, point: 1337, step: 0 }] }));
         let cap = *d.game.get().unwrap().crafting.expansions.keys().max().ok_or("missing expert expansion catalog")?;
         d.crafting.actabilities.expanded_expert = Some(u8::try_from(cap)?);
@@ -664,32 +670,53 @@ fn a_grade_change_prints_the_native_grade_notice() -> Result<(), Box<dyn std::er
 
 fn modifier_data() -> HudData {
     let mut game = GameData::default();
-    for id in [1, 2] {
-        game.crafting.groups.insert(
-            id,
-            super::super::data::Group {
-                name: format!("Group{id}"),
-                visible: true,
-                skill_page_visible: true,
-                unit_attr: 99,
-                ..default()
-            },
-        );
-    }
-    let data = HudData { character_id: 47, ..default() };
+    game.crafting.groups.insert(
+        1,
+        super::super::data::Group {
+            name: "Group1".into(),
+            visible: true,
+            skill_page_visible: true,
+            unit_attr: 99,
+            ..default()
+        },
+    );
+    game.tips.set_buff_mods(
+        700,
+        vec![crate::hud::tipcalc::Mod { attr: 99, percent: false, value: 25, per_level: 0 }],
+    );
+    game.tips.set_buff_mods(
+        701,
+        vec![crate::hud::tipcalc::Mod { attr: 3, percent: false, value: 5, per_level: 0 }],
+    );
+    let mut data = HudData { character_id: 47, ..default() };
     data.game.0.set(game).ok().unwrap();
+    data.snapshot.unit_id = "100".into();
     data
 }
 
+fn buff(index: u32, buff_id: u32) -> aa_net::buff::Buff {
+    aa_net::buff::Buff { index, buff_id, duration_ms: 10_000, stacks: 1, ..Default::default() }
+}
+
+fn modifier_app(rt: aa_ui::UiRuntime, bridge: Shared) -> App {
+    let mut app = App::new();
+    app.add_message::<NetEvent>()
+        .insert_non_send(rt)
+        .insert_non_send(crate::hud::api::HudBridge(bridge))
+        .init_resource::<aa_net::state::Buffs>()
+        .add_systems(Update, modifier_update);
+    app
+}
+
 #[test]
-fn actability_modifier_update_fires_only_for_proficiency_attribute_changes() -> Result<(), Box<dyn std::error::Error>> {
+fn actability_modifier_update_follows_the_native_buff_hooks() -> Result<(), Box<dyn std::error::Error>> {
     let mut rt = aa_ui::UiRuntime::new("en_us", 1280., 720.)?;
     let bridge = std::rc::Rc::new(std::cell::RefCell::new(modifier_data()));
     crate::hud::api::install(&mut rt, &bridge)?;
     rt.lua
-        .load("modifierUpdates=0;actabilityTab={expandBtn={Update=function()end}};UIParent:SetEventHandler('ACTABILITY_MODIFIER_UPDATE',function(...)assert(select('#',...)==0);modifierUpdates=modifierUpdates+1 end)")
+        .load("modifierUpdates=0;UIParent:SetEventHandler('ACTABILITY_MODIFIER_UPDATE',function(...)assert(select('#',...)==0);modifierUpdates=modifierUpdates+1 end)")
         .exec()?;
-    let mut app = activation_app(rt, bridge.clone());
+    let mut app = modifier_app(rt, bridge.clone());
     let updates = |app: &App| {
         app.world()
             .get_non_send::<aa_ui::UiRuntime>()
@@ -700,15 +727,53 @@ fn actability_modifier_update_fires_only_for_proficiency_attribute_changes() -> 
             .unwrap()
     };
     app.update();
-    assert_eq!(updates(&app), 0, "the first computed modifier set is the constructor baseline");
+    assert_eq!(updates(&app), 0, "the first run only seeds the tracker");
+    // Equipment is not a buff: the native 0x54 is a buff-manager event.
     bridge.borrow_mut().tips.attrs.modifiers.push((99, false, 25));
     app.update();
-    assert_eq!(updates(&app), 1, "a proficiency attribute modifier refresh raises the event");
-    bridge.borrow_mut().tips.attrs.modifiers.push((3, false, 5));
+    assert_eq!(updates(&app), 0, "equipment does not raise the buff event");
+    // A buff whose template has no actability-attribute modifier does nothing.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 100, buff: buff(7, 701) }));
     app.update();
-    assert_eq!(updates(&app), 1, "an unrelated stat modifier must not refresh the proficiency pages");
-    bridge.borrow_mut().tips.attrs.modifiers[0] = (99, false, 30);
+    assert_eq!(updates(&app), 0, "an unrelated buff does not refresh proficiency");
+    // Another unit's actability buff is outside the player/mate gate.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 999, buff: buff(8, 700) }));
     app.update();
-    assert_eq!(updates(&app), 2, "a changed proficiency modifier raises the event again");
+    assert_eq!(updates(&app), 0, "another unit's buff does not refresh the player's pages");
+    // Add on the player.
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 100, buff: buff(9, 700) }));
+    app.update();
+    assert_eq!(updates(&app), 1, "a player actability buff raises the event");
+    // A same-value refresh still raises it (native OnBuffUpdated has no value gate).
+    app.world_mut().write_message(NetEvent(Event::BuffUpdated { obj_id: 100, index: 9, stacks: 1, charged: 1 }));
+    app.update();
+    assert_eq!(updates(&app), 2, "a same-value refresh raises the event");
+    // Remove raises it.
+    app.world_mut().write_message(NetEvent(Event::BuffRemoved { obj_id: 100, index: 9 }));
+    app.update();
+    assert_eq!(updates(&app), 3, "removing an actability buff raises the event");
+    // The player's own mate is gated like the player.
+    let mut mates = aa_net::state::Mates::default();
+    mates.own = Some(aa_net::mate::OwnedMate { spawn: Default::default(), obj_id: Some(77), dynamic: None });
+    app.insert_resource(mates);
+    app.world_mut().write_message(NetEvent(Event::BuffCreated { obj_id: 77, buff: buff(10, 700) }));
+    app.update();
+    assert_eq!(updates(&app), 4, "an own-mate actability buff raises the event");
+    // Native `FUN_393888b0` tick: an actability buff crossing a tick boundary refreshes.
+    let mut buffs = aa_net::state::Buffs::default();
+    buffs.by_unit.insert(
+        100,
+        vec![aa_net::state::BuffEntry {
+            buff: aa_net::buff::Buff { index: 11, buff_id: 700, tick_ms: 1000, elapsed_ms: 0, stacks: 1, ..Default::default() },
+            received: std::time::Instant::now(),
+        }],
+    );
+    app.insert_resource(buffs);
+    app.update();
+    assert_eq!(updates(&app), 4, "the first observed tick is the baseline");
+    app.world_mut().resource_mut::<aa_net::state::Buffs>().by_unit.get_mut(&100).unwrap()[0].received =
+        std::time::Instant::now() - std::time::Duration::from_secs(2);
+    app.update();
+    assert_eq!(updates(&app), 5, "a tick boundary raises the event");
     Ok(())
 }

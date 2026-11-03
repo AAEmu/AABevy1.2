@@ -250,6 +250,13 @@ mod attr {
 }
 
 /// `CalculateWithBonuses`: the flat bonuses, then each percent bonus on the running value.
+/// `FUN_398a8fe0`: the fixed unit-attribute set whose modifiers the proficiency pages include
+/// (99..0x76, 0x8a, 0x9e..0xa3). The native buff manager raises `ACTABILITY_MODIFIER_UPDATE`
+/// only when a buff template has a modifier on one of these attributes.
+pub fn is_actability_attr(attr: u8) -> bool {
+    matches!(attr, 99..=118 | 138 | 158..=163)
+}
+
 pub fn with_bonuses(value: f64, attr: u8, mods: &[(u8, bool, i32)]) -> f64 {
     let mut v = value;
     for (_, _, value) in mods.iter().filter(|m| m.0 == attr && !m.1) {
@@ -310,6 +317,17 @@ fn level_range(lvl_md: f32, rank: i32, va_start: i32, va_end: i32) -> (f32, f32)
 }
 
 impl TipTables {
+    /// `FUN_39388400` / `FUN_398a8fe0`: does the buff template have a modifier on an actability
+    /// attribute? The check is on the template, not the current modifier value.
+    pub fn buff_has_actability_modifier(&self, buff_id: u32) -> bool {
+        self.mods.get(&buff_id).is_some_and(|mods| mods.iter().any(|m| is_actability_attr(m.attr)))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_buff_mods(&mut self, buff_id: u32, mods: Vec<Mod>) {
+        self.mods.insert(buff_id, mods);
+    }
+
     pub fn load(conn: &Connection, text: &HashMap<(&'static str, u32), String>) -> rusqlite::Result<TipTables> {
         let mut t = TipTables { items: ItemTables::default(), ..TipTables::default() };
         for (i, d) in UI_DEFAULTS.iter().enumerate() {
