@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest import mock
 
 import _setup  # noqa: F401
 import common
@@ -92,9 +93,11 @@ class BuildScript(unittest.TestCase):
         self.assertNotIn("trace ", text)
         text, _ = script_for(video_grace=3.0)
         lines = self.lines(text)
-        i = lines.index("trace " + rb.RECORD_START)
+        i = lines.index("trace " + rb.VIDEO_START)
         self.assertEqual(lines[i + 1], "wait 3")
-        self.assertNotIn(rb.RECORD_START, script_for()[0])
+        self.assertNotIn(rb.VIDEO_START, script_for()[0])
+        text, _ = script_for(mark_command="echo", video_grace=1.0)
+        self.assertIn("echo video-start", text)                           # the client opens its video gate on this label too
 
     def test_script_has_no_machine_paths(self):
         text, _ = script_for(move="1 2 3")
@@ -103,34 +106,31 @@ class BuildScript(unittest.TestCase):
 
 
 class Helpers(unittest.TestCase):
-    def test_ffmpeg_args_grab_one_window_with_wallclock_timestamps(self):
-        args = rb.ffmpeg_args("ffmpeg", "AAEMU 1.2", Path("out.mp4"), 30)
-        self.assertEqual(args[0], "ffmpeg")
-        self.assertIn("-use_wallclock_as_timestamps", args)
-        self.assertIn("-debug_ts", args)
-        self.assertEqual(args[args.index("-i") + 1], "title=AAEMU 1.2")
-        self.assertEqual(args[args.index("-fps_mode") + 1], "cfr")
-        self.assertEqual(args[-1], "out.mp4")
-        with self.assertRaises(ValueError):
-            rb.ffmpeg_args("ffmpeg", "x", Path("o.mp4"), 30, grab="x11")
+    def test_video_client_args_make_the_client_film_itself_from_the_script_mark(self):
+        args = rb.video_client_args(Path("bevy/video.mp4"), 30, "ffmpeg")
+        self.assertEqual(args[args.index("--video") + 1], str(Path("bevy/video.mp4")))
+        self.assertEqual(args[args.index("--video-fps") + 1], "30")
+        self.assertEqual(args[args.index("--ffmpeg") + 1], "ffmpeg")
+        self.assertIn("--video-gate", args)
+        self.assertEqual(rb.VIDEO_START, "video-start")
 
-    def test_pts_regex_reads_the_wall_clock_of_the_first_video_packet(self):
-        line = ("demuxer -> ist_index:0 type:video next_dts:NOPTS next_dts_time:NOPTS next_pts:NOPTS next_pts_time:NOPTS "
-                "pkt_pts:1762171234567890 pkt_pts_time:1762171234.56789 pkt_dts:1762171234567890 off:0 off_time:0")
-        self.assertEqual(rb.PTS_RE.search(line).group(1), "1762171234567890")
-        self.assertIsNone(rb.PTS_RE.search(line.replace("type:video", "type:audio")))
-        m = rb.SIZE_RE.search("  Stream #0:0: Video: bmp, bgra, 1280x720, 30 fps, 30 tbr, 1000k tbn")
-        self.assertEqual((m.group(1), m.group(2)), ("1280", "720"))
-
-    def test_trace_has_mark(self):
+    def test_read_video_info_and_what_makes_a_video_unusable(self):
+        good = {"t0_wall_us": 1762171234567890, "fps": 30, "width": 1920, "height": 1080, "frames": 300, "repeated": 20, "skipped": 0,
+                "dropped": 0, "ffmpeg_exit": 0, "method": "aa-dev --video"}
+        self.assertIsNone(rb.video_problem(good))
+        self.assertIn("no frames", rb.video_problem({**good, "frames": 0}))
+        self.assertIn("ffmpeg exited with 1", rb.video_problem({**good, "ffmpeg_exit": 1}))
+        self.assertIn("exited with None", rb.video_problem({**good, "ffmpeg_exit": None}))
+        self.assertIn("resized", rb.video_problem({**good, "stopped": "the window was resized"}))
+        self.assertIn("boom", rb.video_problem({**good, "error": "boom"}))
+        self.assertIn("start time", rb.video_problem({**good, "t0_wall_us": None}))
         with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "t.jsonl"
-            self.assertFalse(rb.trace_has_mark(path, "x"))
-            path.write_text('{"kind":"press","key":"1"}\n{"kind":"mark","label":"skillparity:record-start"}\n', encoding="utf-8")
-            self.assertTrue(rb.trace_has_mark(path, rb.RECORD_START))
-            self.assertFalse(rb.trace_has_mark(path, "skill:1:start"))
-            path.write_text('{"kind":"echo","text":"skillparity:record-start"}\n', encoding="utf-8")
-            self.assertFalse(rb.trace_has_mark(path, rb.RECORD_START))
+            out = Path(d)
+            self.assertIn("no usable video sidecar", rb.read_video_info(out)["error"])
+            (out / "video.mp4.json").write_text("{not json", encoding="utf-8")
+            self.assertIn("no usable video sidecar", rb.read_video_info(out)["error"])
+            (out / "video.mp4.json").write_text(json.dumps(good), encoding="utf-8")
+            self.assertEqual(rb.read_video_info(out), good)
 
     def test_client_command(self):
         args = Namespace(exe=Path("aa-client"), account="acc", login="h:1", password_file=Path("pw"), character="Ch", headless=True,
@@ -140,57 +140,11 @@ class Helpers(unittest.TestCase):
         self.assertIn("--require-wall-clock", cmd)
         self.assertEqual(cmd[cmd.index("--script") + 1], "plan.txt")
         self.assertEqual(cmd[-2:], ["--headless", "--x"])
+        self.assertNotIn("--video", cmd)
+        cmd = rb.client_command(args, Path("plan.txt"), ["--video", "v.mp4", "--video-gate"])
+        self.assertEqual(cmd[-4:], ["--video", "v.mp4", "--video-gate", "--x"])          # before the user's own extras
         self.assertEqual(rb.parse_pair("960, 540"), (960, 540))
         self.assertIsNone(rb.parse_pair(""))
-
-    def test_window_recorder_reads_the_first_frame_time_and_size(self):
-        class Err:
-            def __iter__(self):
-                yield "Input #0, gdigrab, from 'title=AAEMU 1.2':\n"
-                yield "  Stream #0:0: Video: bmp, bgra, 1280x720, 30 fps, 30 tbr, 1000k tbn\n"
-                yield "demuxer -> ist_index:0 type:video next_dts:NOPTS pkt_pts:5 pkt_pts_time:0\n"          # not wall clock: ignored
-                yield "demuxer -> ist_index:0 type:video next_dts:NOPTS pkt_pts:1762171234567890 pkt_pts_time:1\n"
-                yield "demuxer -> ist_index:0 type:video next_dts:NOPTS pkt_pts:1762171234600000 pkt_pts_time:1\n"
-                yield "frame=  3 fps=0.0 q=-1.0 Lsize=      1kB\n"
-
-        class Stdin:
-            data = ""
-
-            def write(self, text):
-                self.data += text
-
-            def flush(self):
-                pass
-
-        class Proc:
-            stderr = Err()
-            stdin = Stdin()
-            returncode = 0
-
-            def poll(self):
-                return None
-
-            def wait(self, timeout=None):
-                return 0
-
-        rec = rb.WindowRecorder("ffmpeg", "AAEMU 1.2", Path("v.mp4"), 30)
-        rec.process = Proc()
-        rec.spawned_us = 7
-        rec._read()
-        self.assertTrue(rec.wait_first_frame(0.1))
-        self.assertEqual((rec.first_us, rec.size), (1762171234567890, (1280, 720)))
-        info = rec.stop()
-        self.assertEqual((info["t0_wall_us"], info["width"], info["height"], info["ffmpeg_exit"]), (1762171234567890, 1280, 720, 0))
-        self.assertIn("gdigrab", info["method"])
-        self.assertEqual(rec.process.stdin.data, "q\n")
-        self.assertTrue(rec.tail)                                      # short tail of non-frame lines
-
-        rec2 = rb.WindowRecorder("ffmpeg", "t", Path("v.mp4"), 30)
-        rec2.process = Proc()
-        rec2.spawned_us = 99
-        info = rec2.stop()                                             # no frame time read: falls back to the spawn time
-        self.assertEqual((info["t0_wall_us"], info["method"]), (99, "spawn"))
-        self.assertIn("warning", info)
 
 
 def make_launcher(directory: Path) -> Path:
@@ -201,6 +155,34 @@ def make_launcher(directory: Path) -> Path:
     else:
         path = directory / "fake-aa-client.sh"
         path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE}" "$@"\n', encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+def make_video_launcher(directory: Path, write_sidecar: bool, fields: dict) -> Path:
+    """The fake client plus what `aa-client --video OUT` leaves behind: OUT.json and video.json next to it."""
+    wrapper = directory / "fake_video_client.py"
+    wrapper.write_text(
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(HERE)!r})\n"
+        "import fake_client\n"
+        "argv = sys.argv[1:]\n"
+        "code = fake_client.main(argv)\n"
+        f"if {write_sidecar!r} and '--video' in argv:\n"
+        "    out = argv[argv.index('--video') + 1]\n"
+        "    fps = int(argv[argv.index('--video-fps') + 1])\n"
+        "    info = {'t0_wall_us': 1762171234567890, 'fps': fps, 'width': 1920, 'height': 1080, 'frames': 300, 'repeated': 20,\n"
+        "            'skipped': 0, 'dropped': 0, 'ffmpeg_exit': 0, 'method': 'aa-dev --video'}\n"
+        f"    info.update({fields!r})\n"
+        "    for name in (out + '.json', out.rsplit('video.mp4', 1)[0] + 'video.json'):\n"
+        "        open(name, 'w').write(json.dumps(info))\n"
+        "sys.exit(code)\n", encoding="utf-8")
+    if os.name == "nt":
+        path = directory / "fake-video-client.cmd"
+        path.write_text(f'@"{sys.executable}" "{wrapper}" %*\r\n', encoding="utf-8")
+    else:
+        path = directory / "fake-video-client.sh"
+        path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{wrapper}" "$@"\n', encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
 
@@ -265,6 +247,60 @@ class Cli(unittest.TestCase):
         self.assertEqual(quiet(rb.main, argv + ["--force"])[0], 0)
         rows2, _ = common.read_jsonl(bevy / "trace.jsonl")
         self.assertEqual(len(rows2), len(rows))
+
+    def run_video(self, run_id, *extra, sidecar=True, **sidecar_fields):
+        """run_bevy --video against a fake client that writes the sidecar the way `aa-client --video` does."""
+        launcher = make_video_launcher(self.root, sidecar, sidecar_fields)
+        argv = ["--plan", str(self.plan), "--capture-root", str(self.root), "--run-id", run_id, "--exe", str(launcher), "--account", "acc",
+                "--timeout", "60", "--video", "--ffmpeg", "my-ffmpeg", "--fps", "25", *extra]
+        code, out, err = quiet(rb.main, argv)
+        bevy = self.root / run_id / "bevy"
+        return code, out + err, bevy, json.loads((bevy / "meta.json").read_text(encoding="utf-8"))
+
+    def test_video_run_passes_the_client_its_flags_and_keeps_its_sidecar(self):
+        code, text, bevy, meta = self.run_video("v1")
+        self.assertEqual(code, 0, text)
+        cmd = meta["command"]
+        self.assertEqual(cmd[cmd.index("--video") + 1], str(bevy / "video.mp4"))
+        self.assertEqual((cmd[cmd.index("--video-fps") + 1], cmd[cmd.index("--ffmpeg") + 1]), ("25", "my-ffmpeg"))
+        self.assertIn("--video-gate", cmd)
+        self.assertIn("--require-wall-clock", cmd)
+        self.assertEqual((meta["video"]["t0_wall_us"], meta["video"]["fps"], meta["video"]["frames"]), (1762171234567890, 25, 300))
+        self.assertTrue(meta["ok"])
+        self.assertNotIn("video_problem", meta)
+        self.assertIn("video-start", (bevy / "plan.txt").read_text(encoding="utf-8"))
+
+    def test_video_run_fails_when_the_video_is_missing_or_broken(self):
+        code, text, bevy, meta = self.run_video("v2", sidecar=False)
+        self.assertEqual(code, 1)
+        self.assertFalse(meta["ok"])
+        self.assertIn("no usable video sidecar", meta["video_problem"])
+        self.assertIn("warning: video", text)
+        code, _, bevy, meta = self.run_video("v3", ffmpeg_exit=1, frames=12)
+        self.assertEqual(code, 1)
+        self.assertIn("ffmpeg exited with 1", meta["video_problem"])
+        code, _, bevy, meta = self.run_video("v4", stopped="the window changed from 1920x1080 to 800x600: capture stopped")
+        self.assertEqual(code, 1)
+        self.assertIn("stopped early", meta["video_problem"])
+
+    def test_video_run_does_not_read_the_last_runs_sidecar(self):
+        self.assertEqual(self.run_video("v5")[0], 0)
+        # same directory again with --force and a client that writes nothing: the old sidecar must not count
+        code, _, bevy, meta = self.run_video("v5", "--force", sidecar=False)
+        self.assertEqual(code, 1)
+        self.assertIn("no usable video sidecar", meta["video_problem"])
+
+    def test_video_needs_ffmpeg(self):
+        saved = os.environ.pop("FFMPEG", None)
+        try:
+            with mock.patch.object(rb.shutil, "which", return_value=None):
+                code, _, err = quiet(rb.main, ["--plan", str(self.plan), "--capture-root", str(self.root), "--run-id", "nf", "--account", "a",
+                                               "--exe", str(make_launcher(self.root)), "--video"])
+        finally:
+            if saved is not None:
+                os.environ["FFMPEG"] = saved
+        self.assertEqual(code, 2)
+        self.assertIn("needs ffmpeg", err)
 
     def test_a_client_without_trace_support_is_reported(self):
         # a launcher that does nothing: no AA_SKILL_TRACE rows

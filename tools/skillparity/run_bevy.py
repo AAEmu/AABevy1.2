@@ -3,7 +3,7 @@
 
     python tools/skillparity/run_bevy.py --plan plan.json --exe <aa-client.exe> --account NAME --login HOST:PORT \\
         --password-file P --character C --capture-root <capture-root> --run-id 2026-11-03-a \\
-        [--trees 1,2] [--move "15530 15323 131"] [--video --ffmpeg FFMPEG] [--ground-click 960,540] [--dry-run]
+        [--trees 1,2] [--move "15530 15323 131"] [--video --ffmpeg FFMPEG --fps 30] [--ground-click 960,540] [--dry-run]
 
 Writes `<capture-root>/<run-id>/bevy/{plan.txt, client.log, trace.jsonl (the client's), meta.json, video.mp4, video.json}` and
 runs `aa-client.exe --account A --login L --password-file P --character C --script plan.txt --require-wall-clock`
@@ -17,13 +17,15 @@ press rows). Each skill is: select the doll (or yourself), `trace skill:<id>:sta
 (stop a channel past its cap), `trace skill:<id>:end`. The action bar of each batch is set with the Lua API the original UI
 uses (`X2Action:SetActionSpell`), assumed to exist in aa-client's Lua like the rest of the X2 API.
 
-Video (`--video`): ffmpeg `gdigrab` of the aa-client window (`--window-title`, default `AAEMU 1.2`), started when the script's
-`skillparity:record-start` mark appears (the script waits `--video-grace` seconds after it), stopped when the client exits.
-The video's wall-clock origin `t0_wall_us` (video.json) is measured, not assumed: ffmpeg runs with
-`-use_wallclock_as_timestamps 1 -debug_ts` and the first captured frame's timestamp is read from its log (the OS clock at the moment
-gdigrab delivered the frame, in us). The uncertainty is about one frame period plus the GDI grab time (tens of ms); when the
-timestamp cannot be read, t0 falls back to the time the recorder started and `video.json` says so (`method: "spawn"`, 700 ms
-uncertainty). Needs ffmpeg 5.1 or newer (`-fps_mode cfr`: frame k = t0 + k / fps) and a windowed client (not `--headless`).
+Video (`--video`): aa-client films itself, `aa-client --video <run>/bevy/video.mp4 --video-fps FPS --ffmpeg FFMPEG --video-gate`
+(docs/aa-dev.md, "Video"). The frames are screenshots taken inside the client, so a locked desktop does not matter, and they sit
+on a fixed grid of the wall clock: frame k of the file shows wall time `t0_wall_us + k / fps`, `t0_wall_us` being the Unix time
+the client read at the first frame of the capture (a measurement, not an assumption; what a frame shows is a few app frames older
+than its tick, `image_age_ms_mean` in the sidecar says how much). The capture starts at the script's `video-start` mark (`trace
+video-start`, `echo video-start` with `--mark-command echo`; the script then waits `--video-grace` seconds for ffmpeg to start) and
+ends when the client exits. The client writes `video.mp4.json` and `video.json` (`t0_wall_us`, `fps`, `width`, `height`, `frames`,
+`repeated`, `skipped`, `dropped`, `ffmpeg_exit`, ...); `video.json` goes into meta.json, and a video with no frames, an ffmpeg
+that failed or a capture that stopped early makes the run not ok. Needs a windowed client (not `--headless`) built with `--video`.
 """
 from __future__ import annotations
 
@@ -34,7 +36,6 @@ import re
 import shutil
 import subprocess
 import sys
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,12 +46,11 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import plan as planlib  # noqa: E402
 
-DEFAULT_TITLE = "AAEMU 1.2"
 GRACE_AFTER_START = 0.3          # seconds of `wait` after selecting a target, before the press
 SETTLE = 0.6                     # between skills
 RETICLE_S = 1.2                  # a ground skill's reticle shows this long before the click
 PRE_PICK_WAIT = 2.0              # after spawning the doll
-RECORD_START = "skillparity:record-start"   # the mark the video recorder waits for
+VIDEO_START = "video-start"      # the script mark that starts the client's `--video-gate` capture (aa_dev::GATE_MARK)
 
 
 # ---- the script ---------------------------------------------------------------------------------------------------------
@@ -95,7 +95,7 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
         lines += [f"gm despawn npc {template} 30", "wait 0.8", f"gm spawn npc {template}", f"wait {PRE_PICK_WAIT:g}"]
     lines += list(camera or [])
     if video_grace > 0:
-        lines += [mark_line(mark_command, RECORD_START), f"wait {video_grace:g}"]
+        lines += [mark_line(mark_command, VIDEO_START), f"wait {video_grace:g}"]
     for batch in batches:
         lines += ["", f"# batch {batch['batch']}: {batch['tree_name']} ({batch['weapon'].get('name')})",
                   lua_set_bar(batch, slots), "wait 0.5"]
@@ -130,116 +130,41 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
     return "\n".join(lines) + "\n", skipped
 
 
-# ---- the window video ---------------------------------------------------------------------------------------------------
+# ---- the video ----------------------------------------------------------------------------------------------------------
 
-def window_exists(title: str) -> bool:
-    """Is there a top-level window with exactly this title (Windows only; elsewhere True so nothing waits for it)?"""
-    if os.name != "nt":
-        return True
+def video_client_args(video: Path, fps: int, ffmpeg: str) -> list[str]:
+    """The aa-client flags that make it film itself from the script's `video-start` mark (aa-dev's `--video`)."""
+    return ["--video", str(video), "--video-fps", str(fps), "--ffmpeg", ffmpeg, "--video-gate"]
+
+
+def read_video_info(out: Path) -> dict:
+    """The sidecar aa-client wrote next to the video (`video.mp4.json`; `video.json` is the same), or why there is none."""
+    path = out / "video.mp4.json"
     try:
-        import ctypes
-        return bool(ctypes.windll.user32.FindWindowW(None, title))
-    except Exception:
-        return True
+        info = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return {"error": f"no usable video sidecar {path.name}: {error}"}
+    return info if isinstance(info, dict) else {"error": f"{path.name} is not a JSON object"}
 
 
-PTS_RE = re.compile(r"type:video\b.*?\bpkt_pts:(\d+)")
-SIZE_RE = re.compile(r"Stream #0:0.*?Video:.*?,\s*(\d{2,5})x(\d{2,5})")
-
-
-def ffmpeg_args(ffmpeg: str, title: str, out: Path, fps: int, grab: str = "gdigrab") -> list[str]:
-    """ffmpeg grabbing one window; wall-clock timestamps so the first frame's time can be read; constant frame rate output."""
-    if grab == "gdigrab":
-        source = ["-f", "gdigrab", "-framerate", str(fps), "-use_wallclock_as_timestamps", "1", "-draw_mouse", "0", "-i", f"title={title}"]
-    else:
-        raise ValueError(f"unknown grab method {grab!r}")
-    return [ffmpeg, "-hide_banner", "-y", "-debug_ts", *source, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            "-fps_mode", "cfr", "-r", str(fps), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", str(out)]
-
-
-class WindowRecorder:
-    """ffmpeg process capturing the client's window; measures when its first frame was taken (see the module doc)."""
-
-    def __init__(self, ffmpeg: str, title: str, out: Path, fps: int = 30):
-        self.ffmpeg, self.title, self.out, self.fps = ffmpeg, title, out, fps
-        self.process: subprocess.Popen | None = None
-        self.spawned_us = 0
-        self.first_us: int | None = None
-        self.size: tuple[int, int] | None = None
-        self.tail: list[str] = []
-        self.first_event = threading.Event()
-
-    def start(self) -> None:
-        self.spawned_us = common.now_us()
-        self.process = subprocess.Popen(ffmpeg_args(self.ffmpeg, self.title, self.out, self.fps), stdin=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True, errors="replace")
-        threading.Thread(target=self._read, daemon=True).start()
-
-    def _read(self) -> None:
-        assert self.process and self.process.stderr
-        for line in self.process.stderr:             # -debug_ts is chatty: keep only the first frame time and a short tail
-            if self.first_us is None:
-                m = PTS_RE.search(line)
-                if m and int(m.group(1)) > 10 ** 15:  # epoch microseconds (use_wallclock_as_timestamps)
-                    self.first_us = int(m.group(1))
-                    self.first_event.set()
-            if self.size is None:
-                m = SIZE_RE.search(line)
-                if m:
-                    self.size = (int(m.group(1)), int(m.group(2)))
-            if "pkt_pts" not in line and "next_dts" not in line:
-                self.tail = (self.tail + [line.rstrip()])[-12:]
-
-    def wait_first_frame(self, timeout: float = 15.0) -> bool:
-        return self.first_event.wait(timeout)
-
-    def alive(self) -> bool:
-        return self.process is not None and self.process.poll() is None
-
-    def stop(self) -> dict:
-        info: dict[str, Any] = {"fps": self.fps, "title": self.title}
-        proc = self.process
-        if proc is None:
-            return info
-        try:
-            if proc.poll() is None and proc.stdin:
-                proc.stdin.write("q\n")
-                proc.stdin.flush()
-            proc.wait(timeout=30)
-        except Exception:
-            proc.kill()
-        if self.first_us is not None:
-            info.update(t0_wall_us=self.first_us, method="gdigrab -use_wallclock_as_timestamps -debug_ts: pkt_pts of the first frame",
-                        t0_uncertainty_ms=round(1000.0 / self.fps + 20.0, 1))
-        else:
-            info.update(t0_wall_us=self.spawned_us, method="spawn", t0_uncertainty_ms=700,
-                        warning="the first frame time could not be read from ffmpeg: t0 is the time ffmpeg was started")
-        if self.size:
-            info["width"], info["height"] = self.size
-        info["ffmpeg_exit"] = proc.returncode
-        if proc.returncode not in (0, None):
-            info["ffmpeg_tail"] = self.tail
-        return info
-
-
-def trace_has_mark(trace: Path, text: str) -> bool:
-    """Does the client's trace file hold a mark row whose label is `text` (read from the end of the file it is being written to)?"""
-    try:
-        with trace.open("rb") as handle:
-            size = trace.stat().st_size
-            handle.seek(max(0, size - 65536))
-            tail = handle.read().decode("utf-8", "replace")
-    except OSError:
-        return False
-    for line in tail.splitlines():
-        if text in line and '"mark"' in line:
-            return True
-    return False
+def video_problem(info: dict) -> str | None:
+    """Why this video cannot be used for an aligned comparison (None when it can)."""
+    if info.get("error"):
+        return str(info["error"])
+    if info.get("stopped"):
+        return f"the capture stopped early: {info['stopped']}"
+    if not info.get("frames"):
+        return "the video has no frames"
+    if info.get("ffmpeg_exit") != 0:
+        return f"ffmpeg exited with {info.get('ffmpeg_exit')}"
+    if not info.get("t0_wall_us"):
+        return "the video has no start time"
+    return None
 
 
 # ---- running the client -------------------------------------------------------------------------------------------------
 
-def client_command(args: argparse.Namespace, script: Path) -> list[str]:
+def client_command(args: argparse.Namespace, script: Path, video: list[str] | None = None) -> list[str]:
     cmd = [str(args.exe), "--account", args.account, "--login", args.login]
     if args.password_file:
         cmd += ["--password-file", str(args.password_file)]
@@ -248,7 +173,7 @@ def client_command(args: argparse.Namespace, script: Path) -> list[str]:
     cmd += ["--script", str(script), "--require-wall-clock"]
     if args.headless:
         cmd += ["--headless"]
-    return cmd + list(args.client_arg or [])
+    return cmd + list(video or []) + list(args.client_arg or [])
 
 
 def parse_pair(text: str | None) -> tuple[int, int] | None:
@@ -286,11 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--headless", action="store_true", help="no window (no video possible)")
     ap.add_argument("--client-arg", action="append", default=[], help="an extra aa-client argument (repeatable)")
     ap.add_argument("--timeout", type=float, default=0.0, help="seconds before the client is stopped (default: the plan's length + 10 min)")
-    ap.add_argument("--video", action="store_true")
-    ap.add_argument("--ffmpeg", default=None)
-    ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--window-title", default=DEFAULT_TITLE)
-    ap.add_argument("--video-grace", type=float, default=3.0, help="seconds the script waits after record-start (ffmpeg's start-up)")
+    ap.add_argument("--video", action="store_true", help="aa-client films itself (video.mp4, video.json) from the script's video-start mark")
+    ap.add_argument("--ffmpeg", default=None, help="ffmpeg for the client's video (default: FFMPEG, then PATH)")
+    ap.add_argument("--fps", type=int, default=30, help="frame rate of the video")
+    ap.add_argument("--video-grace", type=float, default=1.0, help="seconds the script waits after the video-start mark (ffmpeg's start-up)")
     ap.add_argument("--dry-run", action="store_true", help="write the script and meta, run nothing")
     args = ap.parse_args(argv)
 
@@ -346,14 +270,16 @@ def main(argv: list[str] | None = None) -> int:
     for name, value in (("AA_PAK", args.pak), ("AA_DB", args.db)):
         if value:
             env[name] = str(value)
-    cmd = client_command(args, script)
-    recorder: WindowRecorder | None = None
+    video_args: list[str] = []
     if args.video:
-        ffmpeg = args.ffmpeg or shutil.which("ffmpeg")
+        ffmpeg = args.ffmpeg or os.environ.get("FFMPEG") or shutil.which("ffmpeg")
         if not ffmpeg:
-            print("run_bevy: --video needs ffmpeg: pass --ffmpeg or put it on PATH", file=sys.stderr)
+            print("run_bevy: --video needs ffmpeg: pass --ffmpeg, set FFMPEG or put it on PATH", file=sys.stderr)
             return 2
-        recorder = WindowRecorder(ffmpeg, args.window_title, out / "video.mp4", args.fps)
+        video_args = video_client_args(out / "video.mp4", args.fps, ffmpeg)
+        for stale in ("video.mp4", "video.mp4.json", "video.json"):     # a --force run must not read the last run's sidecar
+            (out / stale).unlink(missing_ok=True)
+    cmd = client_command(args, script, video_args)
 
     started = common.now_us()
     log_path = out / "client.log"
@@ -365,17 +291,6 @@ def main(argv: list[str] | None = None) -> int:
         meta["pid"] = proc.pid
         deadline = time.monotonic() + timeout
         try:
-            if recorder:
-                begun = False
-                while proc.poll() is None and time.monotonic() < deadline and not begun:
-                    ready = trace_has_mark(trace, RECORD_START) if args.mark_command == "trace" else window_exists(args.window_title)
-                    if ready and window_exists(args.window_title):
-                        recorder.start()
-                        begun = True
-                        if not recorder.wait_first_frame():
-                            print("run_bevy: warning: no first frame time from ffmpeg (see video.json)")
-                    else:
-                        time.sleep(0.05)
             while proc.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.25)
             if proc.poll() is None:
@@ -387,13 +302,18 @@ def main(argv: list[str] | None = None) -> int:
                     proc.kill()
         finally:
             code = proc.poll()
-            if recorder:
-                video_info = recorder.stop()
-                (out / "video.json").write_text(json.dumps(video_info, indent=1) + "\n", encoding="utf-8")
     rows, bad = common.read_jsonl(trace)
+    video_ok = True
+    if args.video:
+        video_info = read_video_info(out)           # written by the client at its exit (docs/aa-dev.md, "Video")
+        problem = video_problem(video_info)
+        if problem:
+            video_ok = False
+            meta["video_problem"] = problem
+            print(f"run_bevy: warning: video: {problem}")
     meta.update(started_wall_us=started, ended_wall_us=common.now_us(), exit_code=code, command=[c for c in cmd],
                 trace_rows=len(rows), trace_kinds=common.kinds_in(rows), video=video_info,
-                env={"AA_SKILL_TRACE": str(trace)}, ok=code == 0 and bool(rows))
+                env={"AA_SKILL_TRACE": str(trace)}, ok=code == 0 and bool(rows) and video_ok)
     if not rows:
         meta["warning"] = "the client wrote no trace rows: does this build support AA_SKILL_TRACE?"
     (out / "meta.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")

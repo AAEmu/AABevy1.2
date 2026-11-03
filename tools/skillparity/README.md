@@ -67,7 +67,8 @@ Rules:
 3. The GM character is prepared once (level 50, the tree learned, `/ignoreskillcds`, the weapon of the tree, the action bar, the
    training doll at a fixed spot in a quiet place).
 4. `run_original.py` casts the plan in the original client with the driver's trace and video; `run_bevy.py` casts the same plan in
-   aa-client with `AA_SKILL_TRACE` (wall clock, `--require-wall-clock`) and its own video.
+   aa-client with `AA_SKILL_TRACE` (wall clock, `--require-wall-clock`) and its own video (aa-dev's `--video`: screenshots taken
+   inside the client on a wall-clock tick grid, so frame `k` is at `t0 + k / fps` like the original's; `docs/aa-dev.md`).
 5. `diff.py` aligns both on each skill's `press` and reports, per skill: time from press to `CSStartSkill`, to the first player clip,
    to each effect and sound, to the server's answer and the cast bar; clip names, layers, speeds and blends; the effect and sound sets;
    cast bar and cooldown durations; movement (dashes, leaps, knock-backs); and anything one client did that the other did not.
