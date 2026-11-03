@@ -505,7 +505,6 @@ pub(super) struct PermEnv<'a> {
 struct PlayerFacts<'a> {
     character_id: u32,
     account_id: u32,
-    account_characters: &'a [u32],
     expedition_id: u32,
     zone_group: u32,
     party: &'a aa_net::Party,
@@ -574,7 +573,6 @@ fn player_facts<'a>(data: &'a HudData, env: PermEnv<'a>) -> PlayerFacts<'a> {
     PlayerFacts {
         character_id: data.character_id,
         account_id: data.account_id,
-        account_characters: &data.account_characters,
         expedition_id: data.expedition.own_id(),
         zone_group: data.snapshot.zone_group,
         party: &data.party,
@@ -609,9 +607,8 @@ fn same_party_group(party: &aa_net::Party, me: u32, owner: u32) -> bool {
     }
 }
 
-/// `FUN_393b3300`: each craft func's `perm_id` is checked on its own. Cases the client cannot
-/// resolve (a character's account outside the login list, the doodad's zone when the terrain has
-/// not loaded it) are inferred as allowed; the server rechecks them on `CSExecuteCraft`.
+/// `FUN_393b3300`: each craft func's `perm_id` is checked on its own. A house zone the client
+/// cannot resolve yet is inferred as allowed; the server rechecks it on `CSExecuteCraft`.
 fn craft_permitted(perm: u8, player: &PlayerFacts, doodad: &DoodadFacts) -> bool {
     use craft_perm::*;
     let owner = if doodad.owner_id != 0 { doodad.owner_id } else { doodad.house_owner_id };
@@ -625,10 +622,10 @@ fn craft_permitted(perm: u8, player: &PlayerFacts, doodad: &DoodadFacts) -> bool
         EXPEDITION => player.expedition_id != 0 && (doodad.faction == 0 || doodad.faction == player.expedition_id),
         OWNER_OR_PARTY => owner == me || same_party_group(player.party, me, owner),
         OWNER_OR_RAID => owner == me || player.party.member(owner).is_some(),
+        // Native `FUN_393b32c0`: the owner is me, or the doodad's house is my account's.
         SAME_ACCOUNT => {
             owner == me
                 || (doodad.house_account_id != 0 && doodad.house_account_id == player.account_id)
-                || (owner != 0 && player.account_characters.contains(&owner))
         }
         // "This zone is my nation": the doodad's zone group is the player's. Unknown terrain zone
         // data is inferred as allowed.
@@ -3570,11 +3567,10 @@ mod tests {
         }
     }
 
-    fn test_player<'a>(party: &'a aa_net::Party, friends: &'a aa_net::Friends, chars: &'a [u32]) -> PlayerFacts<'a> {
+    fn test_player<'a>(party: &'a aa_net::Party, friends: &'a aa_net::Friends, _chars: &'a [u32]) -> PlayerFacts<'a> {
         PlayerFacts {
             character_id: 47,
             account_id: 7,
-            account_characters: chars,
             expedition_id: 900,
             zone_group: 5,
             party,
@@ -3645,8 +3641,22 @@ mod tests {
         let mut no_expedition = test_player(&party, &friends, &chars);
         no_expedition.expedition_id = 0;
         assert!(!craft_permitted(craft_perm::EXPEDITION, &no_expedition, &perm_doodad(5, 0, 0, 0, Some(5))));
-        assert!(craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(48, 0, 0, 0, Some(5))), "an alt from the login list");
-        assert!(craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(5, 0, 7, 0, Some(5))), "the house's account");
+        assert!(
+            !craft_permitted(
+                craft_perm::SAME_ACCOUNT,
+                &player,
+                &perm_doodad(48, 0, 0, 0, Some(5))
+            ),
+            "an alt of the login list is not the owner: native FUN_393b32c0 only takes the house account"
+        );
+        assert!(
+            craft_permitted(
+                craft_perm::SAME_ACCOUNT,
+                &player,
+                &perm_doodad(5, 0, 7, 0, Some(5))
+            ),
+            "the house's account"
+        );
         assert!(!craft_permitted(craft_perm::SAME_ACCOUNT, &player, &perm_doodad(5, 0, 8, 0, Some(5))));
         assert!(craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(5))));
         assert!(!craft_permitted(craft_perm::SAME_NATION, &player, &perm_doodad(5, 0, 0, 0, Some(6))));

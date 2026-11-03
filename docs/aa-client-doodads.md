@@ -95,7 +95,9 @@ Permission is `FUN_393b3300`, checked per craft func (`doodad_funcs.perm_id`):
 0 any; 1 owner; 2 owner or friend; 3 expedition (the player must be in one; a doodad with
 faction 0 is open to it, else `SCDoodadOriginator.new_faction`, native doodad+0x350, must be
 the player's expedition id); 4 owner or the same five-person party group; 5 owner or any
-party/raid member; 6 owner, an alt in the login character list, or the house's account;
+party/raid member; 6 the owner, or the doodad's house is the player's account (native
+`FUN_393b32c0`: `owner == me`, or the house's `+0xa8` is my account; an alt of the login
+character list is *not* enough);
 7 the doodad's zone group is the player's ("this zone is my nation"); 8 the account has a
 house in the doodad's zone group; unknown values are refused. The owner is the house owner
 for a housing doodad. The client cannot resolve a character's account outside the login
