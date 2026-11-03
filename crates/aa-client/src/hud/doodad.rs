@@ -401,8 +401,8 @@ pub(super) struct View {
     preferred: Option<u32>,
     /// The walk to a doodad that was right clicked out of reach.
     approach: Option<Approach>,
-    /// The use that is waiting for that walk to arrive (`(obj_id, action id)`).
-    pending: Option<(u32, i64)>,
+    /// The use that is waiting for that walk to arrive.
+    pending: Option<Pending>,
     /// `obj_id` -> the faction from `SCDoodadOriginator` (native doodad+0x350; `FUN_393b3300` case 3).
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
@@ -438,6 +438,17 @@ fn plate(obj_id: u32, name: String, owner: Option<String>, remaining_ms: f32) ->
         owner,
         secs: ((remaining_ms / 1000.0).max(0.0)).ceil() as u32,
     }
+}
+
+/// A doodad use that waits for the walk to arrive (native `FUN_393b3ec0` keeps the action through
+/// `FUN_390a6af0`). The phase and view generation it was picked from are stored with it: a changed
+/// phase or a recreated doodad on arrival must not run the old action.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Pending {
+    obj_id: u32,
+    action: i64,
+    phase: u32,
+    generation: Option<u64>,
 }
 
 /// The character walks to a doodad that was right clicked out of reach and uses it there (the 1.2 client's move to the
@@ -1458,18 +1469,27 @@ fn pointer_use(
         .then_some(clicked)
         .flatten();
     let arrived = data.doodad.arrived.take();
-    // A use that started the walk (a workbench out of the 2.1 m range) opens on arrival instead
-    // of rebuilding the right-click decision.
-    let pending = data.doodad.pending.take().filter(|(id, _)| Some(*id) == arrived);
-    let menu = if let Some((id, action)) = pending {
-        data.doodad.menu = Some((id, Vec::new()));
-        data.doodad.chosen.push(action);
+    let env = PermEnv {
+        houses: houses.as_deref(),
+        world: world_info.as_deref().map(|w| w.0.as_ref()),
+    };
+    // A use that started the walk (an action out of the 2.1 m range) runs on arrival instead of
+    // rebuilding the right-click decision (`FUN_390a6af0`'s pending action). The phase, the view
+    // generation and the permission are re-checked: a doodad that changed on the way drops it.
+    let pending = if data
+        .doodad
+        .pending
+        .is_some_and(|pending| Some(pending.obj_id) == arrived)
+    {
+        data.doodad.pending.take()
+    } else {
+        None
+    };
+    let menu = if let Some(pending) = pending {
+        data.doodad.menu = Some((pending.obj_id, Vec::new()));
+        data.doodad.chosen.push(pending.action);
         false
     } else {
-        let env = PermEnv {
-            houses: houses.as_deref(),
-            world: world_info.as_deref().map(|w| w.0.as_ref()),
-        };
         clicked
             .or(arrived)
             .is_some_and(|id| right_click(&mut data, &doodads, &units, id, time.elapsed_secs(), &mut dev, env))
@@ -1656,6 +1676,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
     let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
+    let dist = d.pos.distance(pos);
     d.doodad.preferred = Some(obj_id);
     // a doodad use is a new target action: a mount walk to the pet or a talk walk must not keep steering
     super::pets::cancel_mount_walk(d);
@@ -1688,9 +1709,12 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     if entries.is_empty() {
         return false;
     }
-    // A craft action is listed out to the bar's distance and its use walks on its own (`FUN_393b3ec0`
-    // checks 2.1 m); other uses still walk before the list, as before.
-    if gap >= INTERACTION_DISTANCE && (!craft || gap >= DOODAD_REACH) {
+    // Native `FUN_393b3ec0` checks `FUN_39093800` for every action it is asked to run, so a phase
+    // that offers a skill or a navi use walks to the doodad first when it is out of the 2.1 m
+    // surface gap. A craft-only phase is listed out to the bar's centre distance (`DOODAD_REACH`)
+    // and its use walks on its own; the two distances are not compared with each other.
+    let only_craft = uses.skills.is_empty() && uses.navi.is_empty();
+    if gap >= INTERACTION_DISTANCE && (!only_craft || dist >= DOODAD_REACH) {
         info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
         start_walk(d, obj_id, gap, now);
         return false;
@@ -1705,14 +1729,52 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     true
 }
 
+/// Starts the walk to `obj_id` for `action` and keeps it as the pending use (native
+/// `FUN_393b3ec0`: `FUN_39093800` out of range installs `FUN_390a6af0`'s pending action). The
+/// phase and view generation are stored so a use that changed on the way is dropped.
+fn defer_action(
+    d: &mut HudData,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+    action: i64,
+    phase: u32,
+    generation: Option<u64>,
+    now: f32,
+) {
+    let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
+    info!("doodad: use {obj_id} ({action}) is {gap:.1} m away: walking there");
+    start_walk(d, obj_id, gap, now);
+    d.doodad.pending = Some(Pending {
+        obj_id,
+        action,
+        phase,
+        generation,
+    });
+}
+
 /// Uses a workbench: opens it inside the 2.1 m range, else walks there and opens on arrival
 /// (native `FUN_393b3ec0` checks `FUN_39093800`, then `FUN_390a6af0` keeps the pending action).
-fn use_bench(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, now: f32) -> Option<(u32, usize, bool)> {
+fn use_bench(
+    d: &mut HudData,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+    now: f32,
+    generation: Option<u64>,
+) -> Option<(u32, usize, bool)> {
     let o = doodads.by_id.get(&obj_id)?;
     if !in_interaction_reach(d, doodads, units, obj_id) {
-        let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
-        start_walk(d, obj_id, gap, now);
-        d.doodad.pending = Some((obj_id, i64::from(CRAFT_ACTION)));
+        defer_action(
+            d,
+            doodads,
+            units,
+            obj_id,
+            i64::from(CRAFT_ACTION),
+            o.func_group_id,
+            generation,
+            now,
+        );
         return None;
     }
     super::crafting::open_bench(d, obj_id, o.template_id).map(|(count, replaced)| (obj_id, count, replaced))
@@ -1767,17 +1829,34 @@ pub(super) fn execute(
                         f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
                     });
                 if current && pick.skill == CRAFT_ACTION {
-                    if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now) {
+                    if let Some(open) =
+                        use_bench(&mut d, &doodads, &units, obj_id, now, Some(generation))
+                    {
                         opens.push(open);
                     }
                 } else if current {
-                    commands.push((
-                        obj_id,
-                        Command::UseDoodadSkill {
-                            skill_id: pick.skill,
-                            doodad_obj_id: obj_id,
-                        },
-                    ));
+                    // Native `FUN_393b3ec0` walks for every action: a skill picked out of the
+                    // 2.1 m surface gap waits for the walk (the pending path) and runs on arrival.
+                    if in_interaction_reach(&d, &doodads, &units, obj_id) {
+                        commands.push((
+                            obj_id,
+                            Command::UseDoodadSkill {
+                                skill_id: pick.skill,
+                                doodad_obj_id: obj_id,
+                            },
+                        ));
+                    } else {
+                        defer_action(
+                            &mut d,
+                            &doodads,
+                            &units,
+                            obj_id,
+                            i64::from(pick.skill),
+                            phase,
+                            Some(generation),
+                            now,
+                        );
+                    }
                 }
             }
             super::dynamic_actions::Source::Npc { obj_id, .. } => {
@@ -1804,18 +1883,45 @@ pub(super) fn execute(
     {
         for id in chosen {
             if id == i64::from(CRAFT_ACTION) {
-                if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now) {
+                let generation = views.doodad_generation(obj_id);
+                if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now, generation) {
                     opens.push(open);
                 }
                 continue;
             }
-            let command = match id - NAVI_ID {
-                x if x == Navi::Teleport as i64 => Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id }),
-                x if x == Navi::OpenPortal as i64 => Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id }),
-                x if x == Navi::Coffer as i64 => Command::Coffer(CofferCommand::Interact { obj_id, open: true }),
-                _ => Command::UseDoodadSkill { skill_id: id as u32, doodad_obj_id: obj_id },
+            let navi = match id - NAVI_ID {
+                x if x == Navi::Teleport as i64 => Some(Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id })),
+                x if x == Navi::OpenPortal as i64 => Some(Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id })),
+                x if x == Navi::Coffer as i64 => Some(Command::Coffer(CofferCommand::Interact { obj_id, open: true })),
+                _ => None,
             };
-            commands.push((obj_id, command));
+            if let Some(command) = navi {
+                commands.push((obj_id, command));
+                continue;
+            }
+            // An entry picked from the list is an action like any other: out of the 2.1 m
+            // surface gap it walks first (`FUN_393b3ec0`) and runs through the pending path.
+            if u32::try_from(id).is_ok() && !in_interaction_reach(&d, &doodads, &units, obj_id) {
+                let Some(o) = doodads.by_id.get(&obj_id) else { continue };
+                defer_action(
+                    &mut d,
+                    &doodads,
+                    &units,
+                    obj_id,
+                    id,
+                    o.func_group_id,
+                    views.doodad_generation(obj_id),
+                    now,
+                );
+                continue;
+            }
+            commands.push((
+                obj_id,
+                Command::UseDoodadSkill {
+                    skill_id: id as u32,
+                    doodad_obj_id: obj_id,
+                },
+            ));
         }
     }
     // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
@@ -2193,6 +2299,8 @@ mod tests {
         {
             let mut d = bridge.borrow_mut();
             assert!(d.game.0.set(game).is_ok());
+            // inside the 2.1 m use gap (the bar entry itself reaches 4 m)
+            d.pos = Vec3::new(10990.0, 10121.5, 102.5);
             d.snapshot.labor = labor;
             d.doodad.focus = Some(Focus {
                 obj_id: 2075,
@@ -2227,6 +2335,7 @@ mod tests {
             .insert_resource(Units::default())
             .insert_resource(inventory)
             .insert_resource(views)
+            .insert_resource(crate::ingame::DevOptions::default())
             .add_message::<NetCommand>()
             .add_message::<UseFailed>()
             .add_systems(Update, execute);
@@ -2970,6 +3079,7 @@ mod tests {
             .insert_resource(units)
             .insert_resource(Doodads::default())
             .insert_resource(Views::default())
+            .insert_resource(crate::ingame::DevOptions::default())
             .insert_resource(Inventory::default())
             .init_resource::<NextState<crate::Screen>>()
             .init_resource::<aa_net::state::ActionBar>()
@@ -3566,6 +3676,7 @@ mod tests {
             .insert_resource(units)
             .insert_resource(doodads)
             .insert_resource(Views::default())
+            .insert_resource(crate::ingame::DevOptions::default())
             .insert_resource(Inventory::default())
             .init_resource::<NextState<crate::Screen>>()
             .init_resource::<aa_net::state::ActionBar>()
@@ -3839,6 +3950,150 @@ mod tests {
         assert!(!craft_permitted(craft_perm::OWNER_OR_RAID, &raider, &perm_doodad(52, 0, 0, 0, Some(5))));
     }
 
+    fn pending_app(bridge: Shared, doodads: Doodads, units: Units, views: Views) -> App {
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge))
+            .insert_resource(doodads)
+            .insert_resource(units)
+            .insert_resource(views)
+            .insert_resource(Inventory::default())
+            .insert_resource(Time::<()>::default())
+            .insert_resource(crate::ingame::DevOptions::default())
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, (pointer_use, execute).chain());
+        app
+    }
+
+    fn sent_commands(app: &mut App) -> Vec<Command> {
+        app.world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .map(|message| message.0)
+            .collect()
+    }
+
+    fn mixed_tables(group: u32, skill: u32, perm: u8) -> GameData {
+        let mut game = craft_tables(group, perm);
+        game.doodad.add_full(group, skill, "DoodadFuncUse", 0);
+        game
+    }
+
+    /// Native `FUN_393b3ec0` runs `FUN_39093800` for every action, so a phase that offers a skill
+    /// and a craft walks first at 2.1-4 m; only a craft-only phase is listed from the bar distance.
+    #[test]
+    fn a_mixed_skill_and_craft_phase_walks_before_listing_at_3_m() {
+        let mut data = HudData {
+            character_id: 47,
+            pos: Vec3::ZERO,
+            player_radius: 0.0,
+            ..HudData::default()
+        };
+        assert!(
+            data.game
+                .0
+                .set(mixed_tables(1088, 14602, craft_perm::ANY))
+                .is_ok()
+        );
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(300, world_doodad(300, 568, 1088, Vec3::new(0.0, 3.0, 0.0)));
+        let mut dev = crate::ingame::DevOptions::default();
+        assert!(!right_click(
+            &mut data,
+            &doodads,
+            &Units::default(),
+            300,
+            0.0,
+            &mut dev,
+            PermEnv::default()
+        ));
+        assert!(
+            data.doodad.approach.is_some(),
+            "the skill entry is out of the 2.1 m surface gap: walk before the list"
+        );
+        assert!(data.doodad.menu.is_none(), "no list before the walk");
+        assert!(data.doodad.chosen.is_empty(), "no use before the walk");
+    }
+
+    /// A skill picked from the bar out of the 2.1 m surface gap walks and keeps the pending use
+    /// (native `FUN_393b3ec0` -> `FUN_390a6af0`), then sends it on arrival.
+    #[test]
+    fn a_bar_skill_picked_out_of_reach_walks_and_runs_on_arrival() {
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            let mut game = GameData::default();
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0);
+            assert!(d.game.0.set(game).is_ok());
+            d.doodad.focus = Some(Focus {
+                obj_id: 300,
+                skills: vec![14602],
+                craft_icon: None,
+                key: -3.0,
+                dist: 3.0,
+            });
+            d.dynamic_actions.replace(Some(Shown {
+                source: Source::Doodad {
+                    obj_id: 300,
+                    phase: 1,
+                    generation: 1,
+                },
+                skills: vec![14602],
+            }));
+            d.dynamic_actions.request(1);
+        }
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(300, world_doodad(300, 850, 1, Vec3::new(0.0, 3.0, 0.0)));
+        let mut views = Views::default();
+        views.fixture_doodad(300, Entity::PLACEHOLDER);
+        let mut app = pending_app(bridge.clone(), doodads, Units::default(), views);
+        app.update();
+        {
+            let d = bridge.borrow();
+            assert!(d.doodad.approach.is_some());
+            assert_eq!(
+                d.doodad.pending,
+                Some(Pending {
+                    obj_id: 300,
+                    action: 14602,
+                    phase: 1,
+                    generation: Some(1),
+                })
+            );
+        }
+        assert!(
+            sent_commands(&mut app).is_empty(),
+            "no skill before the walk"
+        );
+
+        // arrive: pointer_use takes the pending action, execute sends it once
+        {
+            let mut d = bridge.borrow_mut();
+            d.pos = Vec3::new(0.0, 1.0, 0.0);
+            d.doodad.arrived = Some(300);
+        }
+        app.update();
+        let sent = sent_commands(&mut app);
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [Command::UseDoodadSkill {
+                    skill_id: 14602,
+                    doodad_obj_id: 300,
+                }]
+            ),
+            "{sent:?}"
+        );
+        assert!(bridge.borrow().doodad.pending.is_none());
+    }
+
     /// Native `FUN_3932aaf0` walks the player's own house list (`DAT_3a167ec4`); the port used
     /// `Houses::by_tl_id`, which `UnitsRemoved` empties when a house leaves view. The house's zone
     /// group is kept per own house, so permission 8 still matches out of view.
@@ -3908,12 +4163,20 @@ mod tests {
         assert!(!right_click(&mut data, &doodads, &units, 300, 0.0, &mut dev, PermEnv::default()));
         assert_eq!(data.doodad.chosen, vec![i64::from(CRAFT_ACTION)]);
         assert!(data.doodad.approach.is_none(), "the list is offered before the walk");
-        assert!(use_bench(&mut data, &doodads, &units, 300, 1.0).is_none());
+        assert!(use_bench(&mut data, &doodads, &units, 300, 1.0, None).is_none());
         assert!(data.doodad.approach.is_some(), "the out-of-range use walks");
-        assert_eq!(data.doodad.pending, Some((300, i64::from(CRAFT_ACTION))));
+        assert_eq!(
+            data.doodad.pending,
+            Some(Pending {
+                obj_id: 300,
+                action: i64::from(CRAFT_ACTION),
+                phase: 1088,
+                generation: None,
+            })
+        );
         assert!(crate::hud::crafting::active_bench(&data).is_none(), "the bench opens on arrival");
         data.pos = Vec3::new(0.0, 1.0, 0.0);
-        assert!(use_bench(&mut data, &doodads, &units, 300, 2.0).is_some());
+        assert!(use_bench(&mut data, &doodads, &units, 300, 2.0, None).is_some());
         assert_eq!(crate::hud::crafting::active_bench(&data), Some((300, 568)));
     }
 
@@ -3990,6 +4253,7 @@ mod tests {
             .insert_resource(units)
             .insert_resource(doodads)
             .insert_resource(Views::default())
+            .insert_resource(crate::ingame::DevOptions::default())
             .insert_resource(Inventory::default())
             .init_resource::<NextState<crate::Screen>>()
             .init_resource::<aa_net::state::ActionBar>()
