@@ -682,7 +682,8 @@ The getters these windows read that were still stubs now follow the natives:
 * `GetScoreQuestDoneScore` (`FUN_3949cc10`) is that `score` (0 without one).
 * `GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`) multiplies each Progress
   component's counter by its first counted act's amount for act types 0, 1, 2, 4, 5 and 0x2b; an
-  inactive or unknown quest answers 0. A non-score quest answers 0.
+  inactive or unknown quest answers 0. The native does not test `score`, so a quest with those acts
+  can answer above 0 without being a score quest (the scripts only ask after `IsScoreQuest`).
 * `GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`) is the `quest_names` row with
   `quest_name_kind_id` 2, else the empty string. `quest_contexts.name` is not used.
 * `GetLinkedQuestSummary` (`FUN_394a4dc0`) is the first Progress component's

@@ -797,12 +797,10 @@ impl QuestTables {
     }
 
     /// `X2Quest.GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`): the counters of the
-    /// active quest multiplied by each Progress component's first counted act's amount. An inactive
-    /// or unknown quest has no counter, so the caller passes the active row and this returns 0 there.
+    /// active quest multiplied by each Progress component's first counted act's amount. The native
+    /// does not test the score, so a quest with those act types can answer above 0 without being a
+    /// score quest; an inactive or unknown quest has no counter and the caller answers 0.
     pub fn score_current(&self, q: &Quest) -> i64 {
-        if !self.is_score(q.template_id) {
-            return 0;
-        }
         self.score(q)
     }
 

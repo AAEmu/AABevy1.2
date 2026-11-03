@@ -3306,13 +3306,18 @@ mod tests {
             return;
         }
         // Quest 92 is a score quest with three Progress components; its counters are [3, 1, 1].
-        shared.borrow_mut().dialog.quests = vec![Quest {
-            template_id: 92,
-            status: status::READY,
-            component_id: 7524,
-            objectives: [3, 1, 1, 0, 0],
-            ..Quest::default()
-        }];
+        shared.borrow_mut().dialog.quests = vec![
+            Quest {
+                template_id: 92,
+                status: status::READY,
+                component_id: 7524,
+                objectives: [3, 1, 1, 0, 0],
+                ..Quest::default()
+            },
+            // A non-score quest with a Progress counter: the native's current-score getter does not
+            // test the score, so it still reports the counter sum.
+            Quest { template_id: 1057, status: status::PROGRESS, component_id: 8129, objectives: [2, 0, 0, 0, 0], ..Quest::default() },
+        ];
         let rt = bare_runtime(&shared);
         let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         rt.load_ui_texts(std::path::Path::new(&db)).unwrap();
@@ -3334,6 +3339,9 @@ mod tests {
                 assert(not X2Quest:IsScoreQuest(330))
                 assert(X2Quest:GetScoreQuestDoneScore(330) == 0)
                 assert(X2Quest:GetScoreQuestCurrentScore(330) == 0)
+                -- 1057 is hidden (not a score quest) with a 64-kill Progress act.
+                assert(not X2Quest:IsScoreQuest(1057))
+                assert(X2Quest:GetScoreQuestCurrentScore(1057) == 128)
                 assert(X2Quest:GetScoreQuestObjective(330) == '')
                 -- 2438 has a quest_names kind 2 row but no score: FUN_397d4660 does not search it.
                 assert(X2Quest:GetScoreQuestObjective(2438) == '')
