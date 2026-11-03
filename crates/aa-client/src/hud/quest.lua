@@ -86,7 +86,6 @@ X2Quest.IsHiddenQuest = field("hidden", false)
 X2Quest.IsGroupQuest = field("group", false)
 X2Quest.IsSelectiveQuest = field("selective", false)
 X2Quest.IsLivelihoodQuest = field("livelihood", false)
-X2Quest.IsScoreQuest = function(self, qtype) return false end
 X2Quest.IsDailyQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.daily == true, nil end
 -- The early-completion state of an active quest (`quests.rs`, x2game FUN_397d6320 / FUN_397d71b0);
 -- an inactive quest (the dialog's info row) has neither.
@@ -106,9 +105,14 @@ X2Quest.NowIsAggroComponent = function(self, qtype)
   if q == nil or (tonumber(q.status) or 0) == 0 then return nil end
   return q.aggro == true
 end
+-- `FUN_394a4ae0`: the template's Progress components.
 X2Quest.GetObjectiveComponentCount = function(self, qtype)
-  local q = byType(qtype)
-  return q and #q.objectives or 0
+  return HUD.quest_objective_components(tonumber(qtype) or 0)
+end
+-- `FUN_394a4c30`: the amount of the first Progress component's first counted act (`FUN_397d5b90`
+-- -> `FUN_397d3440`); 0 when the quest, its first Progress component or its counted act is missing.
+X2Quest.GetFirstObjectiveCount = function(self, qtype)
+  return HUD.quest_first_objective(tonumber(qtype) or 0)
 end
 X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
 X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
@@ -175,7 +179,6 @@ X2Quest.QuestContextDrop = function(self, idx)
   local q = byIndex(idx)
   if q ~= nil then HUD.quest_drop(q.type) end
 end
-
 -- Titles, categories ---------------------------------------------------------------------------------------
 X2Quest.GetQuestContextMainTitle = function(self, qtype) local q = byType(qtype); return q and q.name or "" end
 X2Quest.GetQuestContextSummary = field("summary", "")

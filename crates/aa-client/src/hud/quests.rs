@@ -378,7 +378,7 @@ impl QuestTables {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, tbl_column_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties','quest_mails') AND tbl_column_name = 'name') OR \
+                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties', AND tbl_column_name = 'name') OR \
                  (tbl_name = 'quest_component_texts' AND tbl_column_name = 'text') OR \
                  (tbl_name = 'quest_chat_bubbles' AND tbl_column_name IN ('speech','change_speaker_name')))",
             )?;
@@ -765,6 +765,19 @@ impl QuestTables {
             })
     }
 
+    /// `X2Quest.GetFirstObjectiveCount` (`FUN_394a4c30`): the amount of the first Progress
+    /// component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). The act types
+    /// `FUN_397d3440` does not handle count 0.
+    pub fn first_objective_count(&self, quest: u32) -> i32 {
+        let Some(c) = self.parts_of(quest, kind::PROGRESS).next() else { return 0 };
+        self.counted_act(c).map_or(0, Self::native_act_count)
+    }
+
+    /// `X2Quest.GetObjectiveComponentCount` (`FUN_394a4ae0`): the Progress components of the quest.
+    pub fn objective_component_count(&self, quest: u32) -> u32 {
+        self.parts_of(quest, kind::PROGRESS).count() as u32
+    }
+
     /// `FUN_397d42d0` of a quest's Ready component: whether it has a `QuestActConReportNpc` (0x14) or
     /// `QuestActConReportDoodad` (0x15) act. This is the flag of a `COMPLETE_QUEST_CONTEXT_DOODAD`
     /// event.
@@ -997,6 +1010,16 @@ impl QuestTables {
     /// The first act in `FUN_397d5b90`'s counted set (inferred from `FUN_397d3370`).
     fn counted_act<'a>(&self, c: &'a ComponentDef) -> Option<&'a ActDef> {
         c.acts.iter().find(|a| Self::native_counted(&a.ty))
+    }
+
+    /// `FUN_397d3440`: the act's amount. Only the act types in its switch have one; the rest answer
+    /// 0, and `ObjZoneKill` (0x31) already stores `count_pk + count_npc`.
+    fn native_act_count(a: &ActDef) -> i32 {
+        match a.ty.as_str() {
+            "ObjMonsterHunt" | "ObjMonsterGroupHunt" | "ObjItemGather" | "ObjItemUse" | "ObjInteraction"
+            | "ObjZoneKill" | "ObjZoneMonsterHunt" => a.count.max(0),
+            _ => 0,
+        }
     }
 
     /// The component's slot among the template's kind-4 components (`FUN_397d4360`); only the first

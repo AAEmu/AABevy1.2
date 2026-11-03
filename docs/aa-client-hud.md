@@ -646,6 +646,36 @@ kind-3 `SupplyItem` counts it hands out again (error 5; a missing/non-main templ
 through `QUEST_ERROR_INFO`). The server answers with a normal Started / Updated, so the journal and
 tracker follow through `sync_quests`.
 
+### Hidden-report and task quests
+
+The server does not send these windows: the client raises the events from the quest packet handlers.
+`sync_quests` now matches them:
+
+* a Started packet whose quest is hidden (`quest_contexts.detail_id` 5) and already ready (status 3)
+  raises `QUEST_HIDDEN_READY`, and every started task quest (6) raises `QUEST_TASK_STARTED`
+  (`FUN_3937b5b0`; no 1.2 script registers the task-started event, but the native raises it);
+* an Updated packet that leaves a hidden or task quest ready raises `QUEST_HIDDEN_READY` /
+  `QUEST_TASK_READY` (`FUN_3937bdf0`);
+* a Completed packet for a hidden quest raises `QUEST_HIDDEN_COMPLETE` (`FUN_3937bb60`);
+* at world entry, and after every completion, the first active hidden quest that is ready raises
+  `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).
+
+All four carry the quest id as the only argument. The original scripts then drive the windows:
+`quest_context_hidden_report.alb` calls `ShowHiddenQuestReport(qtype)` on the ready event and
+`HideHiddenQuestReport()` on the complete event, and `quest_context_task.alb` opens its report from
+`QUEST_TASK_READY` (its report registers that handler on the first open; the task marker's OnClick
+opens the journal or the report). The module test loads the World stage and checks the real
+`hiddenQuestReport` / `taskQuest.report` widgets: they are hidden before the event and shown after,
+and the hidden one hides again on completion.
+
+The getters these windows read that were still stubs now follow the natives:
+
+* `X2Quest:GetFirstObjectiveCount(qtype)` (`FUN_394a4c30`): the amount of the first Progress
+  component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). The act types `FUN_397d3440`
+  does not handle count 0, and a missing quest/Progress component/counted act answers 0.
+* `X2Quest:GetObjectiveComponentCount(qtype)` (`FUN_394a4ae0`): the template's Progress components
+  (not the objectives of the step the quest is at).
+
 ### Server-shown quest areas
 
 `SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /
