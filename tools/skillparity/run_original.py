@@ -836,6 +836,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 log("skill", skill["id"], skill.get("name"), "slot", skill["slot"], "wait", skill["wait_ms"], "ms")
                 try:
                     if args.stage:                      # every skill from the same spot, as run_bevy.py --stage does
+                        record_original().self_target(session.mcp, session.pid)   # ends the auto-attack on the doll
                         gm(session, "/clearcombat")         # no auto-attack or combat state carried into the next skill
                         gm(session, "/move " + args.stage.replace(",", " "), wait=args.stage_settle)
                     if args.camera:
@@ -917,7 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true", help="append to an existing trace.jsonl")
     p.add_argument("--video", action="store_true", help="record orig/video.mp4 with the driver's client_video")
     p.add_argument("--stage", default=None, help='"x y z": /move here before every skill (the same spot as run_bevy.py --stage)')
-    p.add_argument("--stage-settle", type=float, default=1.5, help="seconds to wait after the --stage move")
+    p.add_argument("--stage-settle", type=float, default=2.0, help="seconds to wait after the --stage move")
     p.add_argument("--camera", type=lambda v: tuple(float(x) for x in v.split(",")), default=None,
                    help="YAW_DEG,DISTANCE: the follow camera's yaw offset from the heading and wanted distance, e.g. 90,6.0835 "
                         "(aa-client: orbit 90, zoom -3)")

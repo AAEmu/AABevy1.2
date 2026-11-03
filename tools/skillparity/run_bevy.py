@@ -108,7 +108,8 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
             lines.append(f"# skill {sid} {skill.get('name')} (slot {n}, {skill['target']})")
             if stage:                                   # every skill from the same spot, as run_original.py --stage does
                 sx, sy, sz = re.split(r"[ ,]+", stage.strip())[:3]
-                lines += ["gm clearcombat", "wait 0.8", f"tp {sx} {sy} {sz}", f"wait {stage_settle:g}"]   # as run_original.py
+                # as run_original.py: targeting oneself ends the auto-attack on the doll, then no combat state, then the spot
+                lines += ["target self", "gm clearcombat", "wait 0.8", f"tp {sx} {sy} {sz}", f"wait {stage_settle:g}"]
                 lines += [c for c in camera or [] if not c.split()[0] == "zoom"]   # a teleport can turn the camera; zoom is relative
             lines.append("target self" if skill.get("select") == "self" else f"target template:{template}")
             lines.append(f"wait {GRACE_AFTER_START:g}")
@@ -277,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gm", action="append", default=[], help="an extra GM command line (repeatable), e.g. '/ignoreskillcds true'")
     ap.add_argument("--move", default=None, help='"x y z": a `tp` line before the doll is spawned')
     ap.add_argument("--stage", default=None, help='"x y z": a `tp` line before every skill (the same spot as run_original.py --stage)')
-    ap.add_argument("--stage-settle", type=float, default=1.5, help="seconds to wait after the --stage teleport")
+    ap.add_argument("--stage-settle", type=float, default=2.0, help="seconds to wait after the --stage teleport")
     ap.add_argument("--no-spawn-doll", action="store_true", help="the doll is already there")
     ap.add_argument("--camera-line", action="append", default=[], help="a script line (orbit/zoom/pitch) before the skills, repeatable")
     ap.add_argument("--mark-command", choices=("trace", "echo"), default="trace")

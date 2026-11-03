@@ -26,7 +26,9 @@ import mcp_driver  # noqa: E402
 
 MUTE = ("for _, n in ipairs({'s_GameMasterVolume','s_GameSFXVolume','s_GameMusicVolume','s_GameDialogVolume',"
         "'s_MasterVolume','s_SFXVolume','s_MusicVolume','s_DialogVolume'}) do "
-        "pcall(function() if System.GetCVar(n) ~= nil then System.SetCVar(n, 0) end end) end return 1")
+        "pcall(function() if System.GetCVar(n) ~= nil then System.SetCVar(n, 0) end end) end "
+        # a hidden or background client sleeps this many ms every frame (40 by default: 22 fps); timings need full speed
+        "System.SetCVar('sys_sleep_background', 0) return 1")
 
 
 def log(*a: object) -> None:
@@ -82,6 +84,15 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:  # the script system is not up yet
                 time.sleep(1)
         log("volume muted" if muted else "could not mute the volume")
+        # The server list arrives a moment after the server-select stage (3) shows; EnterWorld before it is ignored.
+        stage = parity.current_stage(mcp, pid, args.timeout)
+        if stage == "3":
+            time.sleep(5)
+        for _ in range(3):
+            if parity.current_stage(mcp, pid, args.timeout) != "3":
+                break
+            mcp.text("client_lua", pid=pid, target="ui", code="X2World:EnterWorld(1,0) return 1")
+            time.sleep(8)
         player = parity.ensure_world(mcp, pid, args.character, ability=1, create=False, timeout_s=args.timeout)
         mcp.text("client_lua", pid=pid, target="system", code=MUTE)
         log("in the world:", player)
