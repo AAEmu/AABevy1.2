@@ -60,6 +60,7 @@ use rusqlite::Connection;
 use super::api::{HudBridge, HudData, Shared};
 use super::{HudKeyboardFocus, HudPointerOverUi};
 
+mod fish;
 mod gather;
 
 /// Skills the dynamic action bar leaves out (`dynamic_action_bar.lua`, `ShoulPassShow`).
@@ -168,6 +169,13 @@ pub(super) struct Tables {
     zone_messages: HashSet<u32>,
     /// Attachment funcs require a known-free doodad bond and the separate mount gate.
     attachment_skills: HashSet<(u32, u32)>,
+    /// `(doodad_func_group_id, skill)` -> the fish-stand func and its `actual_func_id`.
+    fish_funcs: HashMap<(u32, u32), fish::FishFunc>,
+    /// `doodad_func_buy_fish_id` / `doodad_func_convert_fish_id` -> accepted item templates.
+    fish_buy_items: HashMap<u32, HashSet<u32>>,
+    fish_convert_items: HashMap<u32, HashSet<u32>>,
+    /// `fish_details.item_id` -> `max_weight` (the refund denominator).
+    fish_max_weights: HashMap<u32, f32>,
 }
 
 impl Tables {
@@ -191,6 +199,7 @@ impl Tables {
                 &detail,
             );
         }
+        (t.fish_buy_items, t.fish_convert_items, t.fish_max_weights) = fish::load_items(conn);
         let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -255,6 +264,7 @@ impl Tables {
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
+        self.add_fish_func(group, skill, kind, func_id);
         self.add_full(group, skill, kind, perm);
     }
 
@@ -927,7 +937,8 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             Ok(())
         })?,
     )?;
-    lua.load(include_str!("coffer.lua")).set_name("@coffer.lua").exec()
+    lua.load(include_str!("coffer.lua")).set_name("@coffer.lua").exec()?;
+    fish::install(lua)
 }
 
 /// `--doodad-key N T` and `--doodad-rclick T`.
@@ -1906,6 +1917,8 @@ pub(super) fn execute(
     mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
     time: Option<Res<Time>>,
+    mut fish: Option<ResMut<fish::FishDialog>>,
+    mut errors: Option<MessageWriter<crate::hud::ShowError>>,
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
     let mut d = bridge.0.borrow_mut();
@@ -2064,14 +2077,14 @@ pub(super) fn execute(
         }
         d.doodad.menu_shown = false;
     }
-    let game = d.game.get();
+    let game_slot = d.game.clone();
+    let labor = d.snapshot.labor;
+    drop(d);
+    let game = game_slot.get();
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
-            if lacks_labor(game.map(|g| &g.rules), *skill_id, d.snapshot.labor) {
-                debug!(
-                    "doodad: skill {skill_id} needs more labor than {}",
-                    d.snapshot.labor
-                );
+            if lacks_labor(game.map(|g| &g.rules), *skill_id, labor) {
+                debug!("doodad: skill {skill_id} needs more labor than {labor}");
                 failed.write(super::alerts::UseFailed {
                     skill: *skill_id,
                     result: super::usable::code::NEED_LABOR_POWER,
@@ -2089,12 +2102,19 @@ pub(super) fn execute(
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
                 continue;
             }
+            // Without the UI runtime (or the FishDialog resource) the skill is sent unconfirmed.
+            let fishing = group.and_then(|group| game.and_then(|game| game.doodad.fish_func(group, *skill_id)));
+            if let (Some(func), Some(rt), Some(dialog)) = (fishing, rt.as_deref(), fish.as_deref_mut()) {
+                let game = game.expect("a fish func needs the game data");
+                let items = game.doodad.fish_items(func.kind, func.func_id);
+                fish::request(Some(rt), game, items, &inventory, func, *skill_id, obj_id, dialog, errors.as_mut());
+                continue;
+            }
         }
         let name = doodads.by_id.get(&obj_id).and_then(|o| game.and_then(|g| g.doodad.name(o.template_id))).unwrap_or("?");
         info!("doodad: use {name} ({obj_id}): {command:?}");
         out.write(NetCommand(command));
     }
-    drop(d);
     if let Some(rt) = rt {
         // Native `FUN_393b7b10` runs `FUN_393b7aa0` first when an interaction is already active,
         // so opening a second bench fires `INTERACTION_END` before the new `CRAFTING_START`.
@@ -2213,6 +2233,7 @@ fn reset(bridge: NonSend<HudBridge>) {
 
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Scripted::from_args())
+        .init_resource::<fish::FishDialog>()
         .add_systems(
             Update,
             (
@@ -2232,7 +2253,7 @@ pub(super) fn plugin(app: &mut App) {
                 .run_if(super::hud_up)
                 .run_if(in_state(crate::Screen::InGame)),
         )
-        .add_systems(Update, (pointer_use, execute).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
+        .add_systems(Update, (pointer_use, execute, fish::tick).chain().after(super::PointerFinished).after(track).before(super::dialog::talk_pointer).run_if(super::hud_up).run_if(in_state(crate::Screen::InGame)))
         .add_systems(OnExit(crate::Screen::InGame), reset);
 }
 
@@ -2744,6 +2765,20 @@ mod tests {
         let t = Tables::load(&conn).unwrap();
         assert_eq!(t.uses(13066).map(|u| u.skills.clone()), Some(vec![14602]));
         assert_eq!(t.name(850), Some("Desireen Memory Tome"));
+    }
+
+    /// The fish stands (`tool.fish_scale_a`: 6507, the Mirage Isle contest 7133, the test 6668) sell a fish with
+    /// `DoodadFuncBuyFish` skill 21904 and convert it with `DoodadFuncConvertFish` 22201. Both are ordinary phase
+    /// skills on the dynamic bar (`UseDoodadSkill` at the doodad), not a window of their own.
+    #[test]
+    fn the_fish_stands_offer_their_sell_and_convert_skills() {
+        let Some(conn) = real_db() else { return };
+        let t = Tables::load(&conn).unwrap();
+        for (group, skills) in [(17262, vec![21_904, 22_201]), (19948, vec![21_904, 22_201]), (17729, vec![22_201])] {
+            let uses = t.uses(group).unwrap_or_else(|| panic!("fish stand group {group}"));
+            assert_eq!(uses.skills, skills, "fish stand group {group}");
+            assert!(uses.navi.is_empty(), "the fish stand has no window");
+        }
     }
 
     /// `find_focus` for a player at `player` among `doodads`; `skills` are (id, `max_range`) rows.

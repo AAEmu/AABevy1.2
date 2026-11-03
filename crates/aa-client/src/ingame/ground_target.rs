@@ -70,6 +70,10 @@ const BODY: f32 = 0.5;
 const SEND_SLACK: f32 = 1.0;
 /// The longest cursor ray, metres.
 const REACH: f32 = 400.0;
+/// `FUN_390b43b0`: the water level is asked at `z - 0.1` (`DAT_3999ccf0`).
+const WATER_Z_TOLERANCE: f32 = 0.1;
+/// `FUN_390b43b0`: the floor must be at least this far under the surface (`_DAT_3999c488`).
+const WATER_MIN_DEPTH: f32 = 1.0;
 
 /// How a skill uses a spot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +92,10 @@ pub struct GroundSkill {
     pub radius: f32,
     pub min_range: f32,
     pub max_range: f32,
+    /// `skills.target_only_water`: the spot must be in water (fishing 18711/21571/22106).
+    pub water_only: bool,
+    /// `skills.target_water`: the cursor ray answers the water surface (fishing, big-fish fishing).
+    pub water: bool,
 }
 
 /// Which mode a `(target_type_id, target_selection_id)` pair is, if any.
@@ -108,7 +116,7 @@ fn load_skills() -> Option<HashMap<u32, GroundSkill>> {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI).ok()?;
     let mut q = conn
-        .prepare("SELECT id, target_type_id, target_selection_id, target_area_radius, target_decal_radius, min_range, max_range FROM skills WHERE target_type_id IN (6, 11, 13, 15)")
+        .prepare("SELECT id, target_type_id, target_selection_id, target_area_radius, target_decal_radius, min_range, max_range, target_only_water, target_water FROM skills WHERE target_type_id IN (6, 11, 13, 15)")
         .ok()?;
     let num = |r: &rusqlite::Row, i: usize| -> f32 {
         match r.get_ref(i) {
@@ -118,12 +126,32 @@ fn load_skills() -> Option<HashMap<u32, GroundSkill>> {
             _ => 0.0,
         }
     };
+    let flag = |r: &rusqlite::Row, i: usize| -> bool {
+        match r.get_ref(i) {
+            Ok(ValueRef::Integer(v)) => v != 0,
+            Ok(ValueRef::Real(v)) => v != 0.0,
+            Ok(ValueRef::Text(t)) => t.first().is_some_and(|c| matches!(c, b't' | b'T' | b'1')),
+            _ => false,
+        }
+    };
     let rows = q
         .query_map([], |r| {
             let id = num(r, 0) as u32;
             let (ty, sel) = (num(r, 1) as i64, num(r, 2) as i64);
             let (area, decal) = (num(r, 3), num(r, 4));
-            Ok(classify(ty, sel).map(|mode| (id, GroundSkill { mode, radius: if decal > 0.0 { decal } else { area }, min_range: num(r, 5), max_range: num(r, 6) })))
+            Ok(classify(ty, sel).map(|mode| {
+                (
+                    id,
+                    GroundSkill {
+                        mode,
+                        radius: if decal > 0.0 { decal } else { area },
+                        min_range: num(r, 5),
+                        max_range: num(r, 6),
+                        water_only: flag(r, 7),
+                        water: flag(r, 8),
+                    },
+                )
+            }))
         })
         .ok()?;
     Some(rows.flatten().flatten().collect())
@@ -198,6 +226,18 @@ impl Aiming {
     #[allow(dead_code)]
     pub(crate) fn plant(&self) -> Option<&plant::Plant> {
         self.0.as_ref().and_then(|a| a.plant.as_ref())
+    }
+
+    /// Aims `skill` at `spot` directly (the cursor ray is replaced), for the examples and tests.
+    #[allow(dead_code)]
+    pub(crate) fn set_preview(&mut self, press: SkillPressed, skill: GroundSkill, spot: Option<(Vec3, bool)>) {
+        self.0 = Some(Aim {
+            press,
+            skill,
+            spot,
+            plant: None,
+            fixed_spot: true,
+        });
     }
 
     /// Aims a plant at `spot` directly (the cursor ray is replaced), keeping the press and skill of `begin`.
@@ -335,14 +375,44 @@ fn cursor_of(window: Option<&Window>, script: &Script) -> Option<Vec2> {
 }
 
 /// The first spot of the ground (or of an object) under the view ray through `cursor`, in game coordinates.
-fn spot_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, collision: Option<&WorldCollision>, terrain: Option<&TerrainQuery>) -> Option<Vec3> {
+///
+/// For a skill with `target_water` or `target_only_water` (`surface`) the water surface is a hit too:
+/// `FUN_3942b060` / `FUN_394322f0` pick the water volume when `+0x1b8 || +0x1a0` is set. Other ground
+/// skills keep the lakebed: the planting water rule compares the spot with the surface.
+fn spot_under(
+    camera: &Camera,
+    transform: &GlobalTransform,
+    cursor: Vec2,
+    collision: Option<&WorldCollision>,
+    terrain: Option<&TerrainQuery>,
+    water: Option<&WaterQuery>,
+    surface: bool,
+) -> Option<Vec3> {
     let ray = camera.viewport_to_world(transform, cursor).ok()?;
-    let origin = bevy_to_cry(ray.origin);
-    let dir = bevy_to_cry(*ray.direction);
-    if let Some(hit) = collision.and_then(|c| c.raycast(origin, dir, REACH)) {
-        return Some(hit.point);
+    pick_hit(bevy_to_cry(ray.origin), bevy_to_cry(*ray.direction), collision, terrain, water, surface)
+}
+
+/// [`spot_under`] from a game-space ray (the tests drive the picking without a camera).
+fn pick_hit(
+    origin: Vec3,
+    dir: Vec3,
+    collision: Option<&WorldCollision>,
+    terrain: Option<&TerrainQuery>,
+    water: Option<&WaterQuery>,
+    surface: bool,
+) -> Option<Vec3> {
+    let dist = |p: Vec3| (p - origin).length();
+    let solid = collision.and_then(|c| c.raycast(origin, dir, REACH)).map(|hit| hit.point).or_else(|| terrain_hit(origin, dir, terrain));
+    let wet = surface.then(|| water_hit(origin, dir, water)).flatten();
+    match (solid, wet) {
+        (Some(s), Some(w)) => Some(if dist(w) < dist(s) { w } else { s }),
+        (Some(s), None) => Some(s),
+        (None, w) => w,
     }
-    // no brushes loaded: march over the terrain heights
+}
+
+/// The first point under the ray that lies on or below the terrain heights.
+fn terrain_hit(origin: Vec3, dir: Vec3, terrain: Option<&TerrainQuery>) -> Option<Vec3> {
     let terrain = terrain?;
     let (mut prev, mut t) = (0.0f32, 0.0f32);
     while t < REACH {
@@ -365,6 +435,63 @@ fn spot_under(camera: &Camera, transform: &GlobalTransform, cursor: Vec2, collis
         }
         prev = t;
     }
+    None
+}
+
+/// The point where the ray crosses a water volume's surface (`WaterQuery` answers the surface even from above it).
+fn water_hit(origin: Vec3, dir: Vec3, water: Option<&WaterQuery>) -> Option<Vec3> {
+    let water = water?;
+    let below = |p: Vec3| water.water_at(p).is_some_and(|(h, _)| p.z <= h);
+    // a camera already under the surface does not cross it in front of itself
+    if below(origin) {
+        return None;
+    }
+    let (mut prev, mut t) = (0.0f32, 0.0f32);
+    while t < REACH {
+        t += 2.0;
+        let p = origin + dir * t;
+        if below(p) {
+            let (mut lo, mut hi) = (prev, t);
+            for _ in 0..12 {
+                let mid = 0.5 * (lo + hi);
+                if below(origin + dir * mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            let q = origin + dir * hi;
+            let h = water.water_at(q).map_or(q.z, |(h, _)| h);
+            return Some(Vec3::new(q.x, q.y, h));
+        }
+        prev = t;
+    }
+    None
+}
+
+/// The native water rule of a `target_only_water` skill (`FUN_390b43b0`, called from `FUN_390b5790`
+/// only when `target_only_water` and flag 0x400 are set): the level at `(x, y, z - 0.1)` must exist
+/// and be at or above `z - 0.1`; the floor must be at least 1 m under the level; and a `target_fishing`
+/// skill needs a water volume without the `NoFishing` property. `None` means the spot may be cast;
+/// otherwise the refusal is `INVALID_LOCATION` (0x23).
+fn fishing_refusal(water: Option<&WaterQuery>, terrain: Option<&TerrainQuery>, skill: &GroundSkill, spot: Vec3) -> Option<u8> {
+    if !skill.water_only {
+        return None;
+    }
+    let water = water?;
+    let probe = Vec3::new(spot.x, spot.y, spot.z - WATER_Z_TOLERANCE);
+    let Some((level, _)) = water.water_at(probe) else {
+        return Some(crate::hud::usable::code::INVALID_LOCATION);
+    };
+    if probe.z > level {
+        return Some(crate::hud::usable::code::INVALID_LOCATION);
+    }
+    if terrain.and_then(|t| t.height_at(spot.x, spot.y)).is_some_and(|floor| floor > level - WATER_MIN_DEPTH) {
+        return Some(crate::hud::usable::code::INVALID_LOCATION);
+    }
+    // `NoFishing` (`FUN_3910cd10` +0x78, volume flag `vtbl+0x150` bit 0): the shipped 1.2 prefab
+    // water volumes all set `NoFishing="0"` and aa-world does not load prefab volumes, so there is
+    // no data to refuse. A future source must add the flag to `WaterQuery` here.
     None
 }
 
@@ -675,7 +802,7 @@ pub(crate) fn route(
         let cursor = cursor_of(windows.single().ok(), &script);
         let spot_at_cursor = || {
             let (camera, transform) = cameras.iter().find(|(c, _)| c.is_active)?;
-            spot_under(camera, transform, cursor?, collision.as_deref(), terrain.as_deref())
+            spot_under(camera, transform, cursor?, collision.as_deref(), terrain.as_deref(), water.as_deref(), skill.water || skill.water_only)
         };
         // the same key again while aiming: cast where the cursor is
         let again = aiming.0.as_ref().is_some_and(|a| a.press.skill == press.skill && a.press.item == press.item);
@@ -689,7 +816,15 @@ pub(crate) fn route(
                     .map(|(pos, _)| pos)
             });
             if let Some(spot) = spot {
-                if in_range(&skill, mover.pos, spot, SEND_SLACK) {
+                if let Some(result) = fishing_refusal(water.as_deref(), terrain.as_deref(), &skill, spot) {
+                    info!("ground: skill {} needs fishable water at ({:.1}, {:.1}, {:.1}): error {result}, not sent", press.skill, spot.x, spot.y, spot.z);
+                    failed.write(crate::hud::UseFailed {
+                        skill: press.skill,
+                        result,
+                        value: 0,
+                        server: false,
+                    });
+                } else if in_range(&skill, mover.pos, spot, SEND_SLACK) {
                     cast_at(press, spot, &mut mover, &mut net, &mut flight);
                 } else {
                     info!("ground: skill {} is out of range of ({:.1}, {:.1}, {:.1}): not sent", press.skill, spot.x, spot.y, spot.z);
@@ -709,6 +844,7 @@ pub(crate) fn route(
 }
 
 /// Keeps the spot under the cursor and whether it is in range.
+#[allow(clippy::too_many_arguments)]
 fn track_cursor(
     mut aiming: ResMut<Aiming>,
     over_ui: Res<HudPointerOverUi>,
@@ -717,6 +853,7 @@ fn track_cursor(
     cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
     collision: Option<Res<WorldCollision>>,
     terrain: Option<Res<TerrainQuery>>,
+    water: Option<Res<WaterQuery>>,
     player: Query<&Mover, With<LocalPlayer>>,
     mut last: Local<Option<Vec3>>,
 ) {
@@ -730,8 +867,12 @@ fn track_cursor(
     let (Ok(mover), Some((camera, transform))) = (player.single(), cameras.iter().find(|(c, _)| c.is_active)) else { return };
     let cursor = if over_ui.0 && script.cursor.is_none() { None } else { cursor_of(windows.single().ok(), &script) };
     aim.spot = cursor
-        .and_then(|c| spot_under(camera, transform, c, collision.as_deref(), terrain.as_deref()))
-        .map(|spot| (spot, in_range(&aim.skill, mover.pos, spot, 0.0)));
+        .and_then(|c| spot_under(camera, transform, c, collision.as_deref(), terrain.as_deref(), water.as_deref(), aim.skill.water || aim.skill.water_only))
+        .map(|spot| {
+            let ok = in_range(&aim.skill, mover.pos, spot, 0.0)
+                && fishing_refusal(water.as_deref(), terrain.as_deref(), &aim.skill, spot).is_none();
+            (spot, ok)
+        });
     if let Some((spot, ok)) = aim.spot
         && last.is_none_or(|l| l.distance(spot) > 0.5)
     {
@@ -746,7 +887,7 @@ fn track_cursor(
             mover.pos.x,
             mover.pos.y,
             mover.pos.z,
-            if ok { "in range" } else { "out of range" }
+            if ok { "usable" } else { "out of range or not water" }
         );
     }
 }
@@ -765,6 +906,9 @@ fn aim_input(
     mut flight: ResMut<InFlight>,
     mut lock: Option<ResMut<plant::PlantLock>>,
     time: Option<Res<Time>>,
+    water: Option<Res<WaterQuery>>,
+    terrain: Option<Res<TerrainQuery>>,
+    mut failed: MessageWriter<crate::hud::UseFailed>,
     mut pressed_at: Local<[Option<Vec2>; 2]>,
 ) {
     let (clicked, cancelled) = (std::mem::take(&mut script.clicked), std::mem::take(&mut script.cancelled));
@@ -827,12 +971,23 @@ fn aim_input(
         return;
     }
     match aim.spot {
-        Some((spot, ok)) if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) => {
-            let press = aim.press;
-            cast_at(&press, spot, &mut mover, &mut net, &mut flight);
-            aiming.0 = None;
+        Some((spot, ok)) => {
+            if let Some(result) = fishing_refusal(water.as_deref(), terrain.as_deref(), &aim.skill, spot) {
+                info!("ground: skill {} needs fishable water at ({:.1}, {:.1}, {:.1}): error {result}, not cast, still aiming", aim.press.skill, spot.x, spot.y, spot.z);
+                failed.write(crate::hud::UseFailed {
+                    skill: aim.press.skill,
+                    result,
+                    value: 0,
+                    server: false,
+                });
+            } else if ok || in_range(&aim.skill, mover.pos, spot, SEND_SLACK) {
+                let press = aim.press;
+                cast_at(&press, spot, &mut mover, &mut net, &mut flight);
+                aiming.0 = None;
+            } else {
+                info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill);
+            }
         }
-        Some((spot, _)) => info!("ground: ({:.1}, {:.1}, {:.1}) is out of range of skill {}: not cast, still aiming", spot.x, spot.y, spot.z, aim.press.skill),
         None => info!("ground: no ground under the cursor: not cast"),
     }
 }
@@ -990,7 +1145,7 @@ mod tests {
 
     #[test]
     fn range_is_measured_in_3d_from_the_body() {
-        let s = GroundSkill { mode: Mode::Ground, radius: 5.0, min_range: 0.0, max_range: 25.0 };
+        let s = GroundSkill { mode: Mode::Ground, radius: 5.0, min_range: 0.0, max_range: 25.0, water_only: false, water: false };
         let from = Vec3::new(100.0, 100.0, 10.0);
         assert!(in_range(&s, from, Vec3::new(125.0, 100.0, 10.0), 0.0));
         assert!(!in_range(&s, from, Vec3::new(126.0, 100.0, 10.0), 0.0));
@@ -1373,6 +1528,9 @@ mod tests {
 
     #[test]
     fn appearance_powders_route_full_ids_before_any_cast_or_in_flight_state() {
+        if !aa_cry::pak_available() {
+            return;
+        }
         let (shared, rt) = crate::hud::look_test_runtime();
         let mut app = App::new();
         app.add_message::<SkillPressed>()
@@ -1457,6 +1615,8 @@ mod tests {
                 radius: 5.0,
                 min_range: 0.0,
                 max_range: 25.0,
+                water_only: false,
+                water: false,
             },
         );
         let ground = SkillPressed {
@@ -1532,6 +1692,9 @@ mod tests {
     #[test]
     fn remapped_open_config_cancels_modal_targets_before_menu_and_preserves_focus_and_held_cursor()
     -> Result<(), Box<dyn std::error::Error>> {
+        if !aa_cry::pak_available() {
+            return Ok(());
+        }
         use bevy::input::{
             ButtonState, InputPlugin,
             keyboard::{Key, KeyboardInput},
@@ -1625,6 +1788,8 @@ mod tests {
                 radius: 5.0,
                 min_range: 0.0,
                 max_range: 25.0,
+                water_only: false,
+                water: false,
             },
             spot: None,
             plant: None,
@@ -1893,6 +2058,187 @@ mod tests {
             app.world().resource::<Errors>().0,
             vec![312],
             "Too far away to cancel summoning."
+        );
+    }
+
+    /// `skills.target_only_water` / `target_water` of the 1.2 fishing skills (18711, 21571, 22106:
+    /// `Pos`/location, range 8..30). The net skills 11104/11105 target a doodad instead.
+    #[test]
+    fn fishing_skills_are_water_ground_skills() {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).exists() {
+            return;
+        }
+        let skills = load_skills().expect("the skills table");
+        for id in [18_711, 21_571, 22_106, 21_578, 21_750, 22_092] {
+            let skill = skills.get(&id).expect("a fishing skill");
+            assert_eq!(skill.mode, Mode::Ground, "{id}");
+            assert!(skill.water_only, "{id}");
+            assert!(skill.water, "{id}");
+        }
+        assert!(!skills.contains_key(&11_104), "net fishing targets a doodad");
+        assert!(!skills.contains_key(&11_105), "net fishing targets a doodad");
+    }
+
+    /// `FUN_3942b060` / `FUN_394322f0` answer the water surface only for a `target_water ||
+    /// target_only_water` skill; every other ground skill keeps the lakebed (the planting water rule).
+    #[test]
+    fn pick_hit_answers_the_water_surface_only_when_asked() {
+        let terrain = TerrainQuery::fixture_flat("test", 0.0);
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        let pick = |surface| {
+            pick_hit(
+                Vec3::new(10.0, 10.0, 110.0),
+                Vec3::NEG_Z,
+                None,
+                Some(&terrain),
+                Some(&water),
+                surface,
+            )
+            .map(|p| p.z)
+        };
+        assert_eq!(pick(false), Some(0.0), "the lakebed");
+        assert_eq!(pick(true), Some(100.0), "the sea surface");
+    }
+
+    /// `FUN_390b43b0` (via `FUN_390b5790`): the level at `(x, y, z - 0.1)` must exist and be at or above
+    /// `z - 0.1`, the floor at least 1 m below it; a `target_water`-only skill is not refused here.
+    #[test]
+    fn the_fishing_water_rule_matches_the_native_depth_and_z_tolerance() {
+        let terrain = TerrainQuery::fixture_flat("flat", 0.0);
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        let skill = fishing_skill();
+        let spot = |z: f32| Vec3::new(10.0, 10.0, z);
+        assert_eq!(fishing_refusal(Some(&water), Some(&terrain), &skill, spot(100.0)), None);
+        assert_eq!(
+            fishing_refusal(Some(&water), Some(&terrain), &skill, spot(100.05)),
+            None,
+            "z - 0.1 = 99.95 is at or under the level"
+        );
+        assert_eq!(
+            fishing_refusal(Some(&water), Some(&terrain), &skill, spot(100.2)),
+            Some(crate::hud::usable::code::INVALID_LOCATION),
+            "z - 0.1 = 100.1 is above the level"
+        );
+        for (height, allowed, what) in [(99.5, false, "0.5 m deep"), (99.0, true, "exactly 1 m"), (98.5, true, "1.5 m")] {
+            let floor = TerrainQuery::fixture_flat("floor", height);
+            assert_eq!(
+                fishing_refusal(Some(&water), Some(&floor), &skill, spot(100.0)).is_none(),
+                allowed,
+                "{what}"
+            );
+        }
+        // no water data: the server has the last word
+        assert_eq!(fishing_refusal(None, Some(&terrain), &skill, spot(100.0)), None);
+        // target_water alone picks the surface but has no water/depth refusal of its own
+        let mut net = fishing_skill();
+        net.water_only = false;
+        net.water = true;
+        let shallow = TerrainQuery::fixture_flat("shallow", 99.5);
+        assert_eq!(fishing_refusal(Some(&water), Some(&shallow), &net, spot(100.0)), None);
+    }
+
+    fn fishing_skill() -> GroundSkill {
+        GroundSkill {
+            mode: Mode::Ground,
+            radius: 1.0,
+            min_range: 8.0,
+            max_range: 30.0,
+            water_only: true,
+            water: true,
+        }
+    }
+
+    fn water_app() -> App {
+        let mut app = App::new();
+        app.add_message::<SkillPressed>()
+            .add_message::<crate::hud::UseFailed>()
+            .add_message::<NetCommand>()
+            .init_resource::<Aiming>()
+            .init_resource::<HudPointerOverUi>()
+            .init_resource::<InFlight>()
+            .init_resource::<Script>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<Sent>()
+            .insert_resource(WaterQuery::fixture_sea("test", 100.0, TerrainQuery::fixture_flat("test", 0.0)))
+            .insert_resource(TerrainQuery::fixture_flat("test", 0.0))
+            .add_systems(PreUpdate, aim_input.after(bevy::input::InputSystems))
+            .add_systems(Update, collect);
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 1 },
+            Mover {
+                pos: Vec3::new(0.0, 0.0, 100.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: true,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        app
+    }
+
+    /// The client never reads `skills.source_not_swim` (+0x14f): a fishing cast from inside the water is
+    /// sent, and the server refuses it with 0x15 `CANNOT_CAST_IN_SWIMMING`.
+    #[test]
+    fn a_fishing_cast_from_water_is_sent_for_the_server_to_refuse() {
+        let mut app = water_app();
+        {
+            let mut movers = app.world_mut().query::<&mut Mover>();
+            movers.single_mut(app.world_mut()).unwrap().pos.z = 99.5;
+        }
+        app.world_mut().resource_mut::<Aiming>().set_preview(
+            SkillPressed { skill: 21_571, item: None, target_obj_id: 0, gcd: true },
+            fishing_skill(),
+            Some((Vec3::new(10.0, 10.0, 100.0), true)),
+        );
+        app.world_mut().resource_mut::<Script>().click();
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(
+            matches!(&sent[..], [Command::Move(_), Command::UseSkillAt { skill_id: 21_571, .. }]),
+            "{sent:?}"
+        );
+        let failed: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::UseFailed>>().drain().collect();
+        assert!(failed.is_empty(), "{failed:?}");
+    }
+
+    /// A click outside fishable water raises `INVALID_LOCATION` (0x23, `skill_invalid_location`) and sends
+    /// nothing; a click on the water sends the picked surface point unchanged (`FUN_393594c0` clamps only
+    /// horizontally; the native bobber is not sunk).
+    #[test]
+    fn a_water_only_skill_refuses_a_dry_spot() {
+        let press = SkillPressed {
+            skill: 21_571,
+            item: None,
+            target_obj_id: 0,
+            gcd: true,
+        };
+        let mut app = water_app();
+        app.world_mut().resource_mut::<Aiming>().set_preview(
+            press,
+            fishing_skill(),
+            Some((Vec3::new(10.0, 10.0, 101.2), true)),
+        );
+        app.world_mut().resource_mut::<Script>().click();
+        app.update();
+        let failed: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::UseFailed>>().drain().collect();
+        assert!(matches!(&failed[..], [f] if f.result == crate::hud::usable::code::INVALID_LOCATION && !f.server), "{failed:?}");
+        assert!(app.world().resource::<Sent>().0.is_empty(), "a dry cast went out");
+
+        let mut app = water_app();
+        app.world_mut().resource_mut::<Aiming>().set_preview(
+            press,
+            fishing_skill(),
+            Some((Vec3::new(10.0, 10.0, 100.0), true)),
+        );
+        app.world_mut().resource_mut::<Script>().click();
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(
+            matches!(&sent[..], [Command::Move(_), Command::UseSkillAt { skill_id: 21_571, pos }] if (pos.z - 100.0).abs() < 0.01),
+            "{sent:?}"
         );
     }
 }

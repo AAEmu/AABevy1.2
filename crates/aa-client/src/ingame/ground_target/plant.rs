@@ -240,6 +240,8 @@ pub(crate) fn begin(press: &SkillPressed, db: &Db) -> Option<(GroundSkill, Plant
         radius: radius.max(0.5),
         min_range: 0.0,
         max_range: MAX_RANGE,
+        water_only: false,
+        water: false,
     };
     info!(
         "plant: item {template} places doodad {doodad} (group {group}, {model:?}, room {radius:.1} m)"

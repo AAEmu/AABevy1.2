@@ -561,7 +561,8 @@ mod tests {
         // a save counts for the systems that apply the options
         let before = saves();
         rt.lua.load("X2Option:Save()").exec()?;
-        assert_eq!(saves(), before + 1);
+        // Other UI tests save independent stores in parallel; the counter is process-wide.
+        assert!(saves() > before, "Save must advance the settings change counter");
         // Exercise the original lazy Options frame: Reset re-Init changes control.originalValue,
         // but the frame's Cancel must restore the values from when it opened.
         rt.load_base_libs();
