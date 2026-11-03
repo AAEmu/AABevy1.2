@@ -1595,3 +1595,6 @@ Capture-pending (case ids; every one has a capture step):
 TODO(#58 child units): when the `child-units` branch lands, `turret::local_aim` should read
 `units::current_transform` instead of the drawn `GlobalTransform`, so a cannon aboard a moving
 ship aims from its parent's transform (S12-C3). Until then it uses the replicated transform.
+
+The vehicle death example pauses its simulation while render pipelines compile, so cold shader
+compilation cannot consume the short animation before `--shot` captures it.

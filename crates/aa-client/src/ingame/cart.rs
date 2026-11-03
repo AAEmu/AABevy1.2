@@ -199,8 +199,16 @@ impl CartController {
         .ok()
     }
 
+    /// The wire `angVel` body keeps the captured `0.4 * steering` rad/s even below the
+    /// stand-in's turn-in-place fade.
     pub fn angular_velocity(&self) -> [f32; 3] {
         [0.0, 0.0, YAW_RATE_PER_STEER * self.steering]
+    }
+
+    /// The yaw rate the controller actually integrates, rad/s: the wire value faded out below
+    /// [`TURN_FULL_SPEED`] and mirrored in reverse (see [`Self::step_grounded`]).
+    pub fn effective_yaw_rate(&self) -> f32 {
+        YAW_RATE_PER_STEER * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
     }
 
     /// One frame of the kinematic stand-in without ground under it: `throttle`
@@ -221,10 +229,7 @@ impl CartController {
         self.steering = approach(self.steering, steer.clamp(-1.0, 1.0), STEER_RATE * dt);
         let target = throttle.clamp(-1.0, 1.0) * TOP_SPEED;
         self.speed = approach(self.speed, target, ACCEL * dt);
-        let turn = YAW_RATE_PER_STEER
-            * self.steering
-            * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
-            * dt;
+        let turn = self.effective_yaw_rate() * dt;
         let old_rotation = self.rotation;
         self.yaw = wrap_angle(self.yaw + turn);
         let (xs, xc) = self.yaw.sin_cos();
@@ -402,9 +407,15 @@ pub struct CartDrive {
 }
 
 impl CartDrive {
-    /// The driven cart and the controller's forward speed (m/s), while driving.
-    pub fn speed(&self) -> Option<(u32, f32)> {
-        Some((self.obj_id, self.controller?.speed))
+    /// The driven cart, the controller's forward speed (m/s) and its yaw rate (rad/s), while
+    /// driving. `X2SiegeWeapon:GetSiegeWeaponSpeed` / `GetSiegeWeaponTurnSpeed` read these.
+    pub fn motion(&self) -> Option<(u32, f32, f32)> {
+        let controller = self.controller.as_ref()?;
+        Some((
+            self.obj_id,
+            controller.speed,
+            controller.effective_yaw_rate(),
+        ))
     }
 
     /// Stops driving (dead driver, left the seat, no cart): no controller, no sends.

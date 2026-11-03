@@ -3323,12 +3323,34 @@ order.
   added when the model has `model_bindings` point 2 (`FUN_390c9f70(2)`) and no unit is attached
   there. F / `ExecuteDynamicAction` sends `CSBindSlave` 0x031 for 12076 (`FUN_393b1de0` ->
   `FUN_393be280`), or the plain 13863 `CSStartSkill`.
-* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window, which shows the received name, class,
-  slave kind, lowercase hex unit id and any received slave equipment (`GetMountedSiegeWeaponInfo`,
-  `GetSlaveEquipSlotInfo`). `X2SiegeWeapon:GetVehicleInfo`, `GetSiegeWeaponSpeed` and
-  `GetSiegeWeaponTurnSpeed` are still stubs, so the window has no gear/handbrake/traction-control
-  block and no speed/turn-speed rows. It guards the nil values and logs no script error (the ignored
-  `original_summon_info_window_opens_on_show_slave_info` test opens it against the real UI/pak/DB).
+* **Summon Info**: `SHOW_SLAVE_INFO` opens the stock window (`scriptsbin/x2ui/slave/slave_info.alb`;
+  the 15:05 capture is "Summon Info" from the vehicle ring's "?" slot). Its rows come from
+  `X2SiegeWeapon:GetMountedSiegeWeaponInfo` (`FUN_394ab0d0`): the received slave name (`+0xc`),
+  `desc_name` from the slave template's localized name (`FUN_39696380(+0x420)` -> `+0x28`), `kind`
+  from that row's kind id (`+0x68`) through `FUN_39571630`, which the stock locale maps
+  `SLAVE_KIND` 100 ("machine" -> "Production Equipment"), and the lowercase hex unit id
+  (`FUN_39424820`). `slave_info_view.alb` labels the rows Type/Classification/Move Speed/Turn
+  Speed and calls `Update` each frame, so the motion rows are live.
+  `GetSiegeWeaponSpeed` (`FUN_394aabd0`) returns the velocity's length signed by its component
+  along the body's forward axis in m/s; `GetSiegeWeaponTurnSpeed` (`FUN_394aae90`) returns the
+  angular velocity's z times 57.29578 in degrees/s. Both inline only the first `FUN_39345f10`
+  branch (the player's `+0x3af0` attachment, unit type 2); the native second branch (`this+0x18`)
+  is not ported. Outside that branch they return the native fall-through number 0, never nil,
+  because `slave_info.alb` multiplies the value. A driven cart uses its controller speed and
+  effective yaw rate (`CartDrive::motion`; the rate is the wire `0.4 * steering` faded by
+  `(speed / 0.5).clamp(-1, 1)`, so a parked cart reads 0); a remote slave uses its last type-2/3
+  movement, reading 0 after `SPEED_STALE_AFTER` of silence. Ships (slave kinds 1..=4 and 9) read
+  0: the native gates on physics class 3 (living) or 4 (wheeled), and this port has no ship case
+  for those getters. The unit text is the database's `ui_texts` category 31 (`m/s`, `degree/s`;
+  the 15:05 capture's client data says `degrees/s`). Leaving the seat raises
+  `SIEGEWEAPON_UNBOUND` (event 98, `FUN_393628a0` / `FUN_39345dc0`), which `mode_action.alb` F5
+  uses to hide the window. `GetVehicleInfo` stays nil: `FUN_394ab270` needs the native
+  vehicle object's `+0x2a0` state, which this port has no source for, and the captured hauler
+  shows no gear/brake/traction block. A mate's bar is only `command_unmount`
+  (`FUN_392045f0`), so it has no "?" entry. The window's stock X closes it. The ignored
+  `original_summon_info_window_opens_on_show_slave_info` and
+  `original_summon_info_rows_follow_the_seated_hauler` tests open it against the real UI/pak/DB,
+  and `examples/summon_info.rs` draws it (slave 146, parked and at 5 m/s).
 * **Seat bar deviation**: 1.2 composes the seat bar and then appends the buff skills
   (`FUN_392044a0` runs after `FUN_39204500`), so its bar is the seat skills, the functions and the
   buffs. This port replaces the buff skills with the seat bar instead. Left as a documented gap.

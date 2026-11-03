@@ -4,9 +4,11 @@
 //! effect is spawned and that the hull lowers and lists over `vehicle::WRECK_SINK_TIME`. It exits
 //! non-zero on a mismatch. `--shot` keeps it open for the picture.
 //!
-//! `cargo run -p aa-client --example vehicle_ship_death -- --mute --offscreen-shot shots/aa-client/vehicle_ship_death.png --shot-after 8`
+//! `cargo run -p aa-client --example vehicle_ship_death -- --mute --offscreen-shot shots/aa-client/vehicle_ship_death.png --shot-after 4`
 
 #![allow(dead_code)]
+#[path = "support/vehicle_preview.rs"]
+mod vehicle_preview;
 #[path = "../src/graphics.rs"]
 mod graphics;
 #[path = "../src/hud/mod.rs"]
@@ -150,6 +152,7 @@ fn main() -> AppExit {
         .init_resource::<aa_net::state::Units>()
         .init_resource::<ingame::vehicle::VehicleSwaps>()
         .add_systems(Startup, (stage, scene).chain())
+        .add_systems(Update, vehicle_preview::wait_for_pipelines)
         .add_systems(
             Update,
             (
