@@ -152,9 +152,8 @@ end
 -- found (and the use requested), false otherwise.
 X2Bag.UseItemByType = function(self, itemType)
   local slot = X2Bag:FindFirstBagSlotItemByItemType(itemType)
-  if slot == nil then return false end
-  if AAUI.UseSlot ~= nil then AAUI.UseSlot(ISLOT_BAG, slot, "RightButton") end
-  return true
+  if slot == nil or AAUI.UseSlot == nil then return false end
+  return AAUI.UseSlot(ISLOT_BAG, slot, "RightButton") == true
 end
 
 -- Wear the bag item (the candidates listed under an equipment slot).

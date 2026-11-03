@@ -81,6 +81,8 @@ pub struct QuestDef {
     pub let_it_done: bool,
     /// `quest_contexts.score`: the objective score a score quest needs (0 for other quests).
     pub score: u32,
+    /// `quest_contexts.repeatable`: `FUN_394a55a0`'s completed check ignores a repeatable quest.
+    pub repeatable: bool,
     /// `use_quest_camera`: the talk may use the close-up camera.
     pub use_quest_camera: bool,
     /// Its components, in the server's order (kind, then id).
@@ -428,6 +430,7 @@ impl QuestTables {
                         zone_id: any_int(r, 9)? as u32,
                         use_quest_camera: any_flag(r, 10)?,
                         score: any_int(r, 11)?.max(0) as u32,
+                        repeatable: t.repeatable.contains(&id),
                         components: Vec::new(),
                     },
                 );
@@ -834,6 +837,7 @@ impl QuestTables {
             r.exp += exp;
             r.copper += copper;
         }
+        let mut aa_seen = false;
         for c in self.parts_of(quest, kind::REWARD) {
             for a in &c.acts {
                 match a.ty.as_str() {
@@ -845,7 +849,10 @@ impl QuestTables {
                     "SupplyHonorPoint" => r.honor += a.value,
                     "SupplyCrimePoint" => r.crime += a.value,
                     "SupplyLivingPoint" => r.living += a.value,
-                    "SupplyAaPoint" => r.aa_point += a.value,
+                    "SupplyAaPoint" if !aa_seen => {
+                        r.aa_point = a.value;
+                        aa_seen = true;
+                    }
                     "SupplyAppellation" => r.appellation = a.target,
                     _ => {}
                 }
@@ -856,11 +863,12 @@ impl QuestTables {
 
     /// The items a quest supplies (`SupplyItem` acts of its kind-3 components): what
     /// `X2Quest.GetUseTypeQuestItems` reads. `action_bar_only` keeps the acts the native shows on the
-    /// tracker (`show_action_bar`); the restart check reads them all.
-    pub fn supply_item_targets(&self, quest: u32, action_bar_only: bool) -> Vec<u32> {
+    /// tracker (`show_action_bar`); the restart check reads them all. `FUN_394a55a0` drops an item
+    /// without a usable use skill (`FUN_39695dc0` + `FUN_396f6390`).
+    pub fn supply_item_targets(&self, game: &GameData, quest: u32, action_bar_only: bool) -> Vec<u32> {
         self.parts_of(quest, kind::SUPPLY)
             .flat_map(|c| &c.acts)
-            .filter(|a| a.ty == "SupplyItem" && a.target != 0 && (!action_bar_only || a.show_action_bar))
+            .filter(|a| a.ty == "SupplyItem" && a.target != 0 && (!action_bar_only || a.show_action_bar) && game.item_usable(a.target))
             .map(|a| a.target)
             .collect()
     }
@@ -876,43 +884,81 @@ impl QuestTables {
     }
 
     /// The items a quest asks the player to use: the `ObjItemUse` targets of its Progress steps
-    /// (`X2Quest.GetUseTypeQuestItems` and `IsUseItemInActiveQuest`, `FUN_394a55a0` / `FUN_3949e280`).
-    pub fn use_item_targets(&self, quest: u32) -> Vec<u32> {
+    /// (`X2Quest.GetUseTypeQuestItems` and `IsUseItemInActiveQuest`, `FUN_394a55a0` / `FUN_3949e280`),
+    /// with the same usable-skill filter.
+    pub fn use_item_targets(&self, game: &GameData, quest: u32) -> Vec<u32> {
         self.parts_of(quest, kind::PROGRESS)
             .flat_map(|c| &c.acts)
-            .filter(|a| a.ty == "ObjItemUse" && a.target != 0)
+            .filter(|a| a.ty == "ObjItemUse" && a.target != 0 && game.item_usable(a.target))
             .map(|a| a.target)
             .collect()
     }
 
-    /// The item targets of objective `index`: `ObjItemUse` / `ObjItemGather` acts of that objective
-    /// plus the component's `EtcItemObtain` items (the native `GetUseTypeQuestItemsByObjIndex`
-    /// collects act types 4, 2 and 0x30).
-    pub fn objective_item_targets(&self, quest: u32, index: u8) -> Vec<u32> {
-        let mut out = Vec::new();
-        for c in self.parts_of(quest, kind::PROGRESS) {
-            let component_objective = c.acts.iter().find_map(|a| a.objective);
+    /// `X2Quest.GetUseTypeQuestItemsByObjIndex` (`FUN_394a58d0`): the supply items assigned to
+    /// objective `index` (1 based, counted over the not-done Progress components) plus that
+    /// objective's `ObjItemUse` items. A supply item is assigned by `FUN_394a2930`'s relation
+    /// (`GameData::skill_relates_to`); objective 1 gets the ones unrelated to any other objective.
+    /// `ObjItemGather` / `EtcItemObtain` only feed the relation, they are never returned.
+    pub fn items_by_objective(&self, game: &GameData, quest: u32, active: Option<&Quest>, index: u32) -> Vec<u32> {
+        let mut supplies = Vec::new();
+        let mut selected_use = Vec::new();
+        let mut other_use = Vec::new();
+        let mut selected_aux = Vec::new();
+        let mut other_aux = Vec::new();
+        let mut current = 0u32;
+        for (slot, c) in self.parts_of(quest, kind::PROGRESS).enumerate() {
+            let count = c.acts.first().map_or(0, |a| a.count);
+            let done = active.is_some_and(|q| count > 0 && q.objectives.get(slot).copied().unwrap_or(0) >= count);
+            if !done {
+                current = current.wrapping_add(1);
+            }
             for a in &c.acts {
-                if a.target == 0 {
+                if a.target == 0 || !game.item_usable(a.target) {
                     continue;
                 }
-                let objective = match a.ty.as_str() {
-                    "ObjItemUse" | "ObjItemGather" => a.objective,
-                    "EtcItemObtain" => component_objective,
-                    _ => None,
-                };
-                if objective == Some(index) {
-                    out.push(a.target);
+                match a.ty.as_str() {
+                    "ObjItemUse" => {
+                        if !done && current == index { selected_use.push(a.target) } else { other_use.push(a.target) }
+                    }
+                    "ObjItemGather" | "EtcItemObtain" => {
+                        if !done && current == index { selected_aux.push(a.target) } else { other_aux.push(a.target) }
+                    }
+                    _ => {}
                 }
+            }
+        }
+        supplies.extend(self.supply_item_targets(game, quest, true));
+        let other_use: HashSet<u32> = other_use.into_iter().collect();
+        let selected_use_set: HashSet<u32> = selected_use.iter().copied().collect();
+        let selected_aux: HashSet<u32> = selected_aux.into_iter().collect();
+        let other_aux: HashSet<u32> = other_aux.into_iter().collect();
+        let mut out = Vec::new();
+        for item in supplies {
+            if other_use.contains(&item) || selected_use_set.contains(&item) {
+                continue;
+            }
+            let assigned = if index == 1 {
+                !game.skill_relates_to(item, &other_aux) && !game.skill_relates_to(item, &other_use)
+            } else {
+                game.skill_relates_to(item, &selected_aux) || game.skill_relates_to(item, &selected_use_set)
+            };
+            if assigned && !out.contains(&item) {
+                out.push(item);
+            }
+        }
+        for item in selected_use {
+            if !out.contains(&item) {
+                out.push(item);
             }
         }
         out
     }
 
-    /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): a Progress component's first act is
-    /// `ObjAggro` (0x39).
+    /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): `FUN_397d5b90` returns the first act whose
+    /// type is in its counted set (here [`counts_as_objective`]), and that act is `ObjAggro` (0x39).
     pub fn is_aggro(&self, quest: u32) -> bool {
-        self.parts_of(quest, kind::PROGRESS).any(|c| c.acts.first().is_some_and(|a| a.ty == "ObjAggro"))
+        self.parts_of(quest, kind::PROGRESS)
+            .any(|c| c.acts.iter().find(|a| counts_as_objective(&a.ty)).is_some_and(|a| a.ty == "ObjAggro"))
     }
 
     /// The bubbles of a component's talk, from its start bubble along `next_bubble`.
@@ -1227,29 +1273,47 @@ mod tests {
     #[test]
     fn quest_item_aggro_and_aa_point_getters_read_the_native_rows() {
         let Some(t) = tables() else { return };
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return };
         // A real ObjAggro quest (1408) and the held item acts of quest 1222's kind-3 Supply step.
         assert!(t.is_aggro(1408));
-        let supply = t.supply_item_targets(1222, true);
+        let supply = t.supply_item_targets(&game, 1222, true);
         assert!(!supply.is_empty(), "quest 1222 has an action-bar supply item");
-        assert!(t.supply_item_targets(1222, false).len() >= supply.len());
+        assert!(supply.iter().all(|id| game.item_usable(*id)));
+        assert!(t.supply_item_targets(&game, 1222, false).len() >= supply.len());
         assert!(t.supply_item_count(1222) > 0);
-        // A real ObjItemUse act is in the item lists and on its objective.
-        let (quest, act) = t
-            .parts
-            .values()
-            .filter(|c| c.kind == kind::PROGRESS)
-            .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
-            .find(|(_, a)| a.ty == "ObjItemUse" && a.target != 0)
-            .map(|(q, a)| (q, a.clone()))
-            .unwrap();
-        assert!(t.use_item_targets(quest).contains(&act.target));
-        assert!(t.objective_item_targets(quest, act.objective.unwrap()).contains(&act.target));
-        // `SupplyAaPoint` (the reward panel's AA points).
-        let act = |ty: &str, value| ActDef { ty: ty.into(), value, ..ActDef::default() };
+        // Quest 26 supplies the item it asks to use (14633), so objective 1 (1 based) holds it and
+        // another index does not.
+        assert!(t.items_by_objective(&game, 26, None, 1).contains(&14633));
+        assert!(!t.items_by_objective(&game, 26, None, 2).contains(&14633));
+        assert!(t.items_by_objective(&game, 999_999, None, 1).is_empty());
+        // Quest 6370's supply item 34067 has a use skill that produces the objective's item 34282
+        // (`FUN_394a2930`'s relation), so both are on objective 1 (supply first).
+        let list = t.items_by_objective(&game, 6370, None, 1);
+        assert_eq!(list, vec![34067, 34282]);
+        // The filter drops an item without a usable use skill.
+        let act = |ty: &str, target| ActDef { ty: ty.into(), target, count: 1, ..ActDef::default() };
         let mut s = QuestTables::default();
-        s.defs.insert(9, QuestDef { components: vec![30], ..QuestDef::default() });
-        s.parts.insert(30, ComponentDef { id: 30, quest: 9, kind: kind::REWARD, acts: vec![act("SupplyAaPoint", 50)], ..ComponentDef::default() });
-        assert_eq!(s.rewards(9).aa_point, 50);
+        s.defs.insert(9, QuestDef { components: vec![30, 31], ..QuestDef::default() });
+        // Item 100 exists but has no use skill; 0 does not exist.
+        assert!(!game.item_usable(100) && !game.item_usable(0));
+        s.parts.insert(30, ComponentDef { id: 30, quest: 9, kind: kind::SUPPLY, acts: vec![act("SupplyItem", 100), act("SupplyItem", 0)], ..ComponentDef::default() });
+        s.parts.insert(31, ComponentDef { id: 31, quest: 9, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 100), act("ObjItemUse", 0)], ..ComponentDef::default() });
+        assert!(s.supply_item_targets(&game, 9, true).is_empty());
+        assert!(s.use_item_targets(&game, 9).is_empty());
+        // `FUN_397d5b90` takes the first act in the counted set, not the first act.
+        let mut a = QuestTables::default();
+        a.defs.insert(11, QuestDef { components: vec![41], ..QuestDef::default() });
+        a.parts.insert(41, ComponentDef { id: 41, quest: 11, kind: kind::PROGRESS, acts: vec![act("ObjMonsterHunt", 1), act("ObjAggro", 1)], ..ComponentDef::default() });
+        assert!(!a.is_aggro(11));
+        a.parts.get_mut(&41).unwrap().acts.remove(0);
+        assert!(a.is_aggro(11));
+        // `SupplyAaPoint` takes the first act, not the sum.
+        let point = |value| ActDef { ty: "SupplyAaPoint".into(), value, ..ActDef::default() };
+        let mut p = QuestTables::default();
+        p.defs.insert(10, QuestDef { components: vec![40], ..QuestDef::default() });
+        p.parts.insert(40, ComponentDef { id: 40, quest: 10, kind: kind::REWARD, acts: vec![point(50), point(70)], ..ComponentDef::default() });
+        assert_eq!(p.rewards(10).aa_point, 50);
     }
 
     #[test]

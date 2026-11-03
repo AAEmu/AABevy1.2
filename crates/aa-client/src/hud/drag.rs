@@ -448,7 +448,8 @@ mod tests {
                 X2Cursor = { GetHeld = function() return nil end }
                 ISLOT_BAG = 2
                 USED = nil
-                AAUI = { UseSlot = function(kind, slot, button) USED = { kind, slot, button } end }
+                USE_OK = true
+                AAUI = { UseSlot = function(kind, slot, button) USED = { kind, slot, button }; return USE_OK end }
                 HUD = { bag_slots = 4, bag = { [2] = { id = 777, count = 1 } }, equipment = { [4] = { id = 777 } },
                         requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot } end }
                 "#,
@@ -464,6 +465,8 @@ mod tests {
                 assert(X2Bag:UseItemByType(777) == true)
                 assert(USED[1] == ISLOT_BAG and USED[2] == 2 and USED[3] == "RightButton")
                 assert(X2Bag:UseItemByType(9) == false)
+                USE_OK = false
+                assert(X2Bag:UseItemByType(777) == false, 'a use that cannot be issued is false')
                 assert(X2Equipment:FindEquippedItemByType(777) == 4)
                 assert(X2Equipment:UseEquippedItemByType(777) == true)
                 assert(HUD.requests[1][1] == "use_equip" and HUD.requests[1][2] == 4)

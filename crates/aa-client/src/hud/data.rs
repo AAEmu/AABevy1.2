@@ -6,7 +6,7 @@
 //! icons of skills, items, buffs, NPC templates, zones, factions, the exp table) is read once by a
 //! background thread at start-up ([`GameData::load_in_background`]) and queried from memory.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bevy::prelude::*;
@@ -86,6 +86,10 @@ pub struct SkillInfo {
     /// `skills.target_type_id`: 11 is `BallisticPos` (a cannon's fire skill), the only type that
     /// needs a `Position` target instead of a unit.
     pub target_type: u8,
+    /// `skill_products.item_id`: the items the skill makes.
+    pub products: Vec<u32>,
+    /// `skill_reagents.item_id`: the items the skill consumes.
+    pub reagents: Vec<u32>,
 }
 
 /// A buff: name, icon, description and its list (`buffs.kind_id`: 1 good, 2 bad, 3 hidden).
@@ -551,6 +555,20 @@ fn load_vehicle_looks(
 pub const DEFAULT_GCD_MS: u32 = 1000;
 
 impl GameData {
+    /// `FUN_394a55a0`'s item filter: the item exists, has a `use_skill_id`, and that skill exists
+    /// (`FUN_39695dc0` item + `FUN_396f6390` skill both resolve).
+    pub fn item_usable(&self, id: u32) -> bool {
+        self.items.get(&id).is_some_and(|i| i.use_skill != 0 && self.skills.contains_key(&i.use_skill))
+    }
+
+    /// The relation test of `FUN_394a2930`, as far as the data proves it: the item's use skill
+    /// produces (`skill_products`) or consumes (`skill_reagents`) one of `ids`.
+    pub fn skill_relates_to(&self, item: u32, ids: &HashSet<u32>) -> bool {
+        let Some(skill) = self.items.get(&item).map(|i| i.use_skill).filter(|s| *s != 0) else { return false };
+        let Some(s) = self.skills.get(&skill) else { return false };
+        s.products.iter().chain(&s.reagents).any(|id| ids.contains(id))
+    }
+
     pub fn load(path: &str) -> rusqlite::Result<GameData> {
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         // English texts: (table, column) -> id -> text
@@ -640,8 +658,26 @@ impl GameData {
                         auto_attack: matches!(id, 2..=4),
                         target_type: any_int(r, 15)?.clamp(0, 255) as u8,
                         desc: fill_placeholders(&name("skills_desc", id, None), |key| if key == "damage_multiplier" { multipliers.get(&id).map(|m| m.to_string()) } else { None }),
+                        products: Vec::new(),
+                        reagents: Vec::new(),
                     },
                 );
+            }
+        }
+        if let Ok(mut q) = conn.prepare("SELECT skill_id, item_id FROM skill_products ORDER BY id") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if let Some(s) = data.skills.get_mut(&(any_int(r, 0)?.max(0) as u32)) {
+                    s.products.push(any_int(r, 1)?.max(0) as u32);
+                }
+            }
+        }
+        if let Ok(mut q) = conn.prepare("SELECT skill_id, item_id FROM skill_reagents ORDER BY id") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if let Some(s) = data.skills.get_mut(&(any_int(r, 0)?.max(0) as u32)) {
+                    s.reagents.push(any_int(r, 1)?.max(0) as u32);
+                }
             }
         }
         {

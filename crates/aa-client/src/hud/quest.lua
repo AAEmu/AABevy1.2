@@ -66,10 +66,10 @@ X2Quest.GetActiveQuestType = function(self, idx)
 end
 X2Quest.GetActiveQuestTitle = function(self, qtype) local q = byType(qtype); return q and q.name or false end
 X2Quest.GetActiveQuestLevel = function(self, idx) local q = byIndex(idx); return q and q.level or 1 end
--- The player's level less the quest's (`FUN_3949d050`).
+-- The player's level less the quest's (`FUN_3949d050`); a bad index reads 0.
 X2Quest.GetActiveQuestComparedLevel = function(self, idx)
   local q = byIndex(idx)
-  if q == nil then return nil end
+  if q == nil then return 0 end
   return (HUD.state and HUD.state.level or 0) - (q.level or 0)
 end
 -- 1 = in progress, 3 = ready to be reported.
@@ -99,10 +99,12 @@ X2Quest.IsOverDoneQuestByType = function(self, qtype) return overDone(byType(qty
 X2Quest.IsReadyForCompleteQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
 X2Quest.IsProgressQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 1 end
 X2Quest.IsReadyQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
--- `FUN_394a53c0`: a Progress component's first act is `ObjAggro`.
+-- `FUN_394a53c0`: a Progress component's first counted act is `ObjAggro`; a quest that is not
+-- active answers nil.
 X2Quest.NowIsAggroComponent = function(self, qtype)
   local q = byType(qtype)
-  return q ~= nil and q.aggro == true
+  if q == nil or (tonumber(q.status) or 0) == 0 then return nil end
+  return q.aggro == true
 end
 X2Quest.GetObjectiveComponentCount = function(self, qtype)
   local q = byType(qtype)
@@ -124,23 +126,20 @@ X2Quest.GetUseTypeQuestItems = function(self, qtype, checkState)
   if q == nil then return nil end
   if checkState then
     local status = tonumber(q.status) or 0
-    if status == 2 or status == 3 or status == 4 or q.completed then return nil end
+    if status == 2 or status == 3 or status == 4 then return nil end
+    -- the completed bit only rejects a non-repeatable quest (`FUN_397d5200` guarded by +0x28).
+    if q.completed and not q.repeatable then return nil end
   end
   local out, seen = {}, {}
   pushUnique(out, seen, q.actionBarItems)
   pushUnique(out, seen, q.useItems)
   return out
 end
--- The items of one objective (`FUN_394a58d0`): the supplied items plus the objective's own item
--- acts (use, gather, obtain). The index is the native one, 0 based.
+-- The items of one objective (`FUN_394a58d0`): the supplied items assigned to it plus its
+-- `ObjItemUse` items. The index is the native one, 1 based over the not-done Progress components;
+-- an unknown template answers an empty table.
 X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, qtype, index)
-  local q = byType(qtype)
-  if q == nil then return nil end
-  local out, seen = {}, {}
-  pushUnique(out, seen, q.actionBarItems)
-  local o = q.objectives[(tonumber(index) or 0) + 1]
-  pushUnique(out, seen, o and o.items)
-  return out
+  return HUD.quest_items_by_obj_index(tonumber(qtype) or 0, tonumber(index) or 0)
 end
 -- `FUN_3949c880`: an item impl 10 (`ItemImplEnum`) starts a quest.
 X2Quest.IsQuestStartItem = function(self, itemType)
@@ -232,13 +231,11 @@ end
 -- Rewards -------------------------------------------------------------------------------------------------------
 X2Quest.GetQuestContextRewardExp = field("exp", "0")
 X2Quest.GetQuestContextRewardCopper = field("copper", 0)
--- `FUN_394a11a0`: the `SupplyAaPoint` reward act's point value (nil without one).
+-- `FUN_394a11a0`: the first `SupplyAaPoint` reward act's point value (0 without one).
 X2Quest.GetQuestContextRewardAAPoint = function(self, qtype)
   local q = byType(qtype)
-  if q == nil then return nil end
-  local v = tonumber(q.aaPoint) or 0
-  if v == 0 then return nil end
-  return v
+  if q == nil then return 0 end
+  return tonumber(q.aaPoint) or 0
 end
 X2Quest.RewardLaborPower = field("labor", nil)
 X2Quest.RewardHonorPoint = field("honor", nil)
@@ -269,7 +266,8 @@ X2Quest.GetQuestContextRewardAppellation = function(self, qtype)
   local q = byType(qtype)
   local id = q and tonumber(q.appellation) or nil
   if id == nil or id == 0 then return nil end
-  return appellationInfo(HUD.appellation_row(id))
+  -- a missing appellation row leaves the native table empty, not nil.
+  return appellationInfo(HUD.appellation_row(id)) or {}
 end
 local function items(qtype, key)
   local q = byType(qtype)

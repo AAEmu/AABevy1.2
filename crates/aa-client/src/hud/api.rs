@@ -537,18 +537,18 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                     let npc_token = if old == super::skillbook::NO_ABILITY {
                         None
                     } else {
-                        let Some(scope) = super::store::services::allows(&b.borrow(), super::store::services::ABILITY) else { return Ok(()) };
+                        let Some(scope) = super::store::services::allows(&b.borrow(), super::store::services::ABILITY) else { return Ok(false) };
                         Some(scope.token())
                     };
                     Request::SwapAbility { old, ability: num(2).clamp(0, 255) as u8, npc_token }
                 },
                 other => {
                     warn!("hud: unknown request {other:?}");
-                    return Ok(());
+                    return Ok(false);
                 }
             };
             b.borrow_mut().requests.push(request);
-            Ok(())
+            Ok(true)
         })?,
     )?;
     // `X2Action:GetActionBarPage` / `SetActionBarPage`: the scripts' page API is 1 based, the
