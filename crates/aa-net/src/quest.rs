@@ -3,7 +3,8 @@
 //!
 //! Layouts follow the server's `Quest.Write` (`ActiveQuest::write`) and `CompletedQuest`.
 
-use crate::wire::{Pos, Reader, Result};
+use crate::skill::SkillResult;
+use crate::wire::{Reader, Result};
 
 /// `QuestStatus` of an active quest.
 pub mod status {
@@ -80,23 +81,25 @@ impl QuestContextFailed {
     }
 }
 
-/// `SCQuestUnitReqFailed` (`0x148`): the unit `unit_obj_id` a step needs failed (died or left) at `pos`.
+/// `SCQuestUnitReqFailed` (`0x148`): the unit `unit_obj_id` a step needs failed, with the skill
+/// result that says why.
 ///
 /// The 1.2 reader `FUN_397b5d00` (packet vtable `399b3a68`) reads the field `"type"` as a `u32`, the
-/// field `"bc"` as a 3-byte object id, then the packed 9-byte position through `FUN_397b1ef0`.
-/// `OnQuestUnitReqFailed` (`FUN_391dbdd0`) passes the first two values and the position to
+/// field `"bc"` as a 3-byte object id, then a `SkillResult` through `FUN_397b1ef0` (the native
+/// `397b1ef0` result framing: a flag byte and the selected `u8` code / `u16` extra / `u32` value).
+/// `OnQuestUnitReqFailed` (`FUN_391dbdd0`) passes the id, the unit and the first two result words to
 /// `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` (`0xf4`) when the failed unit is the
 /// current target. The server has only the opcode constant (no writer).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct QuestUnitReqFailed {
     pub quest_id: u32,
     pub unit_obj_id: u32,
-    pub pos: Pos,
+    pub result: SkillResult,
 }
 
 impl QuestUnitReqFailed {
     pub fn read(r: &mut Reader) -> Result<Self> {
-        Ok(Self { quest_id: r.u32()?, unit_obj_id: r.bc()?, pos: r.position()? })
+        Ok(Self { quest_id: r.u32()?, unit_obj_id: r.bc()?, result: SkillResult::read(r)? })
     }
 }
 
@@ -236,12 +239,16 @@ mod tests {
         for cut in 0..bytes.len() {
             assert!(QuestContextFailed::read(&mut Reader::new(&bytes[..cut])).is_err());
         }
-        // SCQuestUnitReqFailed: reader FUN_397b5d00 u32 "type", bc "bc", packed position
-        // (FUN_397b1ef0); zero position bytes decode to (0, 0, -100).
-        let bytes = [4, 3, 2, 1, 7, 6, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        // SCQuestUnitReqFailed: reader FUN_397b5d00 u32 "type", bc "bc", then FUN_397b1ef0's
+        // result framing (flags 7: u8 code, u16 extra, u32 value).
+        let bytes = [4, 3, 2, 1, 7, 6, 5, 7, 9, 2, 3, 4, 5, 6, 7];
         assert_eq!(
             QuestUnitReqFailed::read(&mut Reader::new(&bytes)).unwrap(),
-            QuestUnitReqFailed { quest_id: 0x0102_0304, unit_obj_id: 0x05_0607, pos: Pos::new(0.0, 0.0, -100.0) }
+            QuestUnitReqFailed {
+                quest_id: 0x0102_0304,
+                unit_obj_id: 0x05_0607,
+                result: SkillResult { raw_flags: 7, code: 9, extra: 0x0302, value: 0x0706_0504 },
+            }
         );
         for cut in 0..bytes.len() {
             assert!(QuestUnitReqFailed::read(&mut Reader::new(&bytes[..cut])).is_err());

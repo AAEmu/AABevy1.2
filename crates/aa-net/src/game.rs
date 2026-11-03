@@ -1999,13 +1999,13 @@ mod tests {
             decode(sc::SCQuestContextFailedPacket, &[0xad, 0x12, 0, 0, 12]),
             ServerMsg::QuestContextFailed(quest::QuestContextFailed { quest_id: 4781, err: 12 })
         );
-        // SCQuestUnitReqFailed: u32 id + bc unit + packed position (client reader FUN_397b5d00).
+        // SCQuestUnitReqFailed: u32 id + bc unit + skill result (client reader FUN_397b5d00).
         assert_eq!(
-            decode(sc::SCQuestUnitReqFailedPacket, &[4, 3, 2, 1, 7, 6, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            decode(sc::SCQuestUnitReqFailedPacket, &[4, 3, 2, 1, 7, 6, 5, 7, 9, 2, 3, 4, 5, 6, 7]),
             ServerMsg::QuestUnitReqFailed(quest::QuestUnitReqFailed {
                 quest_id: 0x0102_0304,
                 unit_obj_id: 0x05_0607,
-                pos: crate::Pos::new(0.0, 0.0, -100.0),
+                result: crate::skill::SkillResult { raw_flags: 7, code: 9, extra: 0x0302, value: 0x0706_0504 },
             })
         );
         // SCQuestMailSent: u32 id (client reader FUN_397b5f00).

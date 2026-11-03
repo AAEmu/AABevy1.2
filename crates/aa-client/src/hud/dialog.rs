@@ -1320,7 +1320,7 @@ pub fn route_quest_notices(
                         d.dialog.quest = None;
                     }
                 }
-                info!("hud: quest {} needs unit {} ({:?})", failed.quest_id, failed.unit_obj_id, failed.pos);
+                info!("hud: quest {} needs unit {} (result {:?})", failed.quest_id, failed.unit_obj_id, failed.result);
                 rt.fire_event("QUEST_QUICK_CLOSE_EVENT", failed.quest_id);
             }
             Event::QuestMailSent(sent) => {
@@ -2360,7 +2360,7 @@ mod tests {
             NetEvent(Event::QuestUnitReqFailed(aa_net::quest::QuestUnitReqFailed {
                 quest_id: 1065,
                 unit_obj_id,
-                pos: aa_net::Pos::new(1.0, 2.0, 3.0),
+                result: aa_net::skill::SkillResult::default(),
             }))
         };
         app.world_mut().write_message(failed(43));

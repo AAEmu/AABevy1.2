@@ -655,7 +655,7 @@ The quest notices are their own `Event` variants (`aa_net::quest`), not interact
 | `Event` | packet | 1.2 reader / handler |
 |---|---|---|
 | `QuestContextFailed { quest_id, err }` | `SCQuestContextFailed` 0x146: `u32` quest id, `u8` error | `FUN_397b5c90` (fields `"type"` u32, `"err"` u8) -> `OnQuestContextFailed` `FUN_391dbcd0` -> `FUN_3937a130`, which raises `QUEST_ERROR_INFO` |
-| `QuestUnitReqFailed { quest_id, unit_obj_id, pos }` | `SCQuestUnitReqFailed` 0x148: `u32` id, `bc` unit, packed 9-byte position | `FUN_397b5d00` (`"type"`, `"bc"`, position through `FUN_397b1ef0`) -> `OnQuestUnitReqFailed` `FUN_391dbdd0` -> `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` when it is the current target |
+| `QuestUnitReqFailed { quest_id, unit_obj_id, result }` | `SCQuestUnitReqFailed` 0x148: `u32` id, `bc` unit, `SkillResult` | `FUN_397b5d00` (`"type"`, `"bc"`, `SkillResult` through `FUN_397b1ef0`) -> `OnQuestUnitReqFailed` `FUN_391dbdd0` -> `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` when it is the current target |
 | `QuestMailSent { id }` | `SCQuestMailSent` 0x150: one `u32` | `FUN_397b5f00` (`"type"`) -> `OnQuestMailSent` `FUN_391dc1d0` -> `FUN_3937a650`, the `QUEST_MAIL_SENT` system text |
 
 `SCQuestContextFailed` matches the server's writer (`systems/quests/packets.rs`). The other two have no
