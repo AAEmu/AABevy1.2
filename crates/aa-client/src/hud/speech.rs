@@ -66,7 +66,7 @@ impl Tables {
         Ok(Self { effects })
     }
 
-    fn text(&self, id: u32) -> Option<&str> {
+    pub(super) fn text(&self, id: u32) -> Option<&str> {
         self.effects.get(&id).map(String::as_str)
     }
 }
@@ -151,7 +151,7 @@ fn timing(text: &str) -> (f32, f32) {
     (n.wrapping_mul(MS_PER_CODEPOINT).max(500) as f32, fade)
 }
 
-fn say(rt: &UiRuntime, obj_id: u32, author: &str, text: &str, kind: u8) {
+pub(super) fn say(rt: &UiRuntime, obj_id: u32, author: &str, text: &str, kind: u8) {
     let text = cstr(text);
     if text.is_empty() { return; }
     if kind == 4 {

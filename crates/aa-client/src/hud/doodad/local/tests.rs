@@ -3,6 +3,7 @@ use super::*;
 use bevy::prelude::*;
 
 use aa_net::model::{Item, slot};
+use aa_net::shop::{BuyEntry, ShopCommand};
 use aa_net::state::{Doodads, Inventory, Player, Units};
 use aa_net::{Command, Event, NetCommand};
 
@@ -340,7 +341,7 @@ fn the_insert_counter_checks_the_item_before_sending() {
 fn fixture_tables() -> Tables {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch(
-        "CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
+        "CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER, next_phase INTEGER);
          CREATE TABLE doodad_func_groups (id INTEGER, phase_msg TEXT, is_msg_to_zone INTEGER);
          CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight INTEGER, use_target_silhouette INTEGER, use_target_decal INTEGER, target_decal_size REAL, sim_radius REAL);
          CREATE TABLE localized_texts (tbl_name TEXT, tbl_column_name TEXT, idx INTEGER, en_us TEXT);
@@ -350,8 +351,8 @@ fn fixture_tables() -> Tables {
          CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
          CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
          CREATE TABLE skills (id INTEGER);
-         INSERT INTO doodad_funcs VALUES (1, 1, 12087, 'DoodadFuncStoreUi', 1, 6);
-         INSERT INTO doodad_funcs VALUES (2, 2, 23780, 'DoodadFuncInsertCounter', 2, 0);
+         INSERT INTO doodad_funcs VALUES (1, 1, 12087, 'DoodadFuncStoreUi', 1, 6, -1);
+         INSERT INTO doodad_funcs VALUES (2, 2, 23780, 'DoodadFuncInsertCounter', 2, 0, -1);
          INSERT INTO doodad_func_groups VALUES (1, '', 0), (2, '', 0);
          INSERT INTO doodad_almighties VALUES (100, 1, 0, 0, 0, 0), (101, 1, 0, 0, 0, 0);
          INSERT INTO localized_texts VALUES ('doodad_almighties', 'name', 100, 'Store Doodad');
@@ -877,4 +878,493 @@ fn dispatch_app(
         app.insert_resource(player);
     }
     app
+}
+
+fn event_probe(app: &App) {
+    lua(
+        app,
+        "EVENTS={}; local w=UIParent:CreateWidget('emptywidget','doodadFuncProbe','UIParent');\
+         w:SetHandler('OnEvent',function(self,event,...) EVENTS[#EVENTS+1]={event,...} end);\
+         for _,e in ipairs({'OPEN_PAPER','CHAT_MSG_QUEST','RENEW_ITEM_WND_SHOW','OPEN_EMBLEM_UPLOAD_UI',\
+         'COFFER_INTERACTION_START','REPORT_CRIME','NPC_INTERACTION_START'}) do w:RegisterEvent(e) end",
+    )
+    .unwrap();
+}
+
+fn event_arg(app: &App, event: &str, n: usize) -> Option<mlua::Value> {
+    lua(
+        app,
+        &format!("for _,e in ipairs(EVENTS) do if e[1]=='{event}' then return e[{n}] end end"),
+    )
+    .ok()
+    .filter(|v| !v.is_nil())
+}
+
+fn bag_count(template: u32, count: i32) -> Inventory {
+    let mut inventory = Inventory::default();
+    inventory.bag = vec![None; 50];
+    inventory.bag[0] = Some(Item {
+        template_id: template,
+        count,
+        ..Default::default()
+    });
+    inventory
+}
+
+/// `DoodadFuncBubble` (`FUN_393b8240`): the bubble's speech and the native phase change.
+#[test]
+fn the_bubble_plays_its_speech_and_changes_the_phase() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 18_327, 6807, 22_584, Inventory::default());
+    event_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        event_arg(&app, "CHAT_MSG_QUEST", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("What's this? How strange! You are so lucky and blessed!")
+    );
+    assert!(matches!(
+        sent(&mut app).as_slice(),
+        [Command::ChangeDoodadPhase {
+            obj_id: 2075,
+            skill_id: 22_584,
+            next_phase: 18_328,
+            func_id: 14_751
+        }]
+    ));
+}
+
+/// `DoodadFuncOpenPaper` (`FUN_393b8450`): a page opens the page window; a book opens the book
+/// window through `X2Book.GetBookInfo`; both send the phase change when the row names one.
+#[test]
+fn the_open_paper_opens_its_page_or_book() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game1) = game() else { return };
+    let mut page = app(game1, 16_297, 6167, 20_743, Inventory::default());
+    event_probe(&page);
+    tick(&page);
+    page.update();
+    tick(&page);
+    assert_eq!(
+        event_arg(&page, "OPEN_PAPER", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("page")
+    );
+    assert_eq!(
+        event_arg(&page, "OPEN_PAPER", 3).and_then(|v| v.as_u32()),
+        Some(453)
+    );
+    assert!(matches!(
+        sent(&mut page).as_slice(),
+        [Command::ChangeDoodadPhase {
+            obj_id: 2075,
+            skill_id: 20_743,
+            next_phase: 16_295,
+            func_id: 13_413
+        }]
+    ));
+
+    let Some(game2) = game() else { return };
+    let mut book = app(game2, 17_230, 6497, 21_814, Inventory::default());
+    event_probe(&book);
+    tick(&book);
+    book.update();
+    tick(&book);
+    assert_eq!(
+        event_arg(&book, "OPEN_PAPER", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("book")
+    );
+    assert_eq!(
+        event_arg(&book, "OPEN_PAPER", 3).and_then(|v| v.as_u32()),
+        Some(8)
+    );
+    let rt = book.world().get_non_send::<UiRuntime>().unwrap();
+    let info = rt
+        .lua
+        .load("return X2Book:GetBookInfo(8)")
+        .eval::<Option<mlua::Table>>()
+        .ok()
+        .flatten()
+        .expect("X2Book.GetBookInfo(8)");
+    assert!(info.get::<String>("name").is_ok());
+    assert!(
+        info.get::<mlua::Table>("pages")
+            .map(|p| p.raw_len() > 0)
+            .unwrap_or(false)
+    );
+    assert!(sent(&mut book).is_empty(), "no phase when next_phase < 0");
+}
+
+/// `DoodadFuncStampMaker` (`FUN_393b82a0`): the object id goes to `ucc.alb` as a string.
+#[test]
+fn the_stamp_maker_opens_the_ucc_window() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 2260, 1470, 14_435, Inventory::default());
+    event_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        event_arg(&app, "OPEN_EMBLEM_UPLOAD_UI", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("2075")
+    );
+    assert_eq!(
+        lua(
+            &app,
+            "return ucc ~= nil and ucc.window ~= nil and ucc.window:IsVisible()"
+        )
+        .unwrap()
+        .as_boolean(),
+        Some(true),
+        "the UCC window did not open"
+    );
+    assert!(sent(&mut app).is_empty());
+}
+
+/// `DoodadFuncAuctionUi` (`FUN_393b8b80`): `NPC_INTERACTION_START("auction")` opens the original
+/// auction window.
+#[test]
+fn the_auction_doodad_opens_the_auction_window() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 22_065, 7983, 12_083, Inventory::default());
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the auction window did not open"
+    );
+    assert!(sent(&mut app).is_empty());
+}
+
+/// `DoodadFuncCofferPerm` (`FUN_393bc260` case 0x51): `FUN_3983b3b0` finds the template's
+/// positive `DoodadFuncCoffer`, then `COFFER_INTERACTION_START`. Without one the skill is sent.
+#[test]
+fn the_coffer_permission_needs_a_coffer_on_the_template() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 17_762, 6692, 22_691, Inventory::default());
+    app.world_mut()
+        .resource_mut::<Doodads>()
+        .by_id
+        .get_mut(&2075)
+        .unwrap()
+        .owner_id = 42;
+    event_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        event_arg(&app, "COFFER_INTERACTION_START", 1)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .as_deref(),
+        Some("COFFER_INTERACTION_START")
+    );
+    assert!(sent(&mut app).is_empty());
+
+    // A fixture phase with the same action id but a template without a coffer func: the native
+    // returns 0 and the skill is sent.
+    let game = GameData {
+        doodad: {
+            let mut tables = Tables::default();
+            tables.add_full(
+                1,
+                22_691,
+                "DoodadFuncCofferPerm",
+                0,
+                1,
+                1,
+                -1,
+                &LocalFuncs::default(),
+            );
+            tables
+        },
+        ..Default::default()
+    };
+    let mut plain = dispatch_app(game, 1, 101, 22_691, 0, Inventory::default(), None);
+    plain.update();
+    assert!(matches!(
+        sent(&mut plain).as_slice(),
+        [Command::UseDoodadSkill {
+            skill_id: 22_691,
+            ..
+        }]
+    ));
+}
+
+/// `DoodadFuncRenewItem` (`FUN_393b8610`): `RENEW_ITEM_WND_SHOW(skill, objId)`. The shipped row
+/// has no `func_skill_id` (the native does not map type 0x47 either), so the bar never offers it;
+/// the fixture names the action so the dispatch path is still driven.
+#[test]
+fn the_renew_item_raises_its_window_event() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE doodad_func_renew_items (id INTEGER, skill_id INTEGER);
+         INSERT INTO doodad_func_renew_items VALUES (2, 15446);",
+    )
+    .unwrap();
+    let funcs = LocalFuncs::load(&conn);
+    let Some(mut game) = game() else { return };
+    game.doodad = {
+        let mut tables = Tables::default();
+        tables.add_full(1, 99, "DoodadFuncRenewItem", 0, 2, 2, -1, &funcs);
+        tables
+    };
+    let mut app = app(game, 1, 101, 99, Inventory::default());
+    event_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        event_arg(&app, "RENEW_ITEM_WND_SHOW", 2).and_then(|v| v.as_u32()),
+        Some(15_446)
+    );
+    assert_eq!(
+        event_arg(&app, "RENEW_ITEM_WND_SHOW", 3).and_then(|v| v.as_u32()),
+        Some(2075)
+    );
+    assert!(sent(&mut app).is_empty(), "a local renew sends nothing");
+}
+
+/// `DoodadFuncParentInfo` (`FUN_393b8400`): the parent house's info opens (`FUN_393befd0`).
+#[test]
+fn the_parent_info_opens_the_parent_house() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 11_179, 4570, 15_212, Inventory::default());
+    app.world_mut()
+        .resource_mut::<Doodads>()
+        .by_id
+        .get_mut(&2075)
+        .unwrap()
+        .owner_db_id = 99;
+    let mut houses = aa_net::Houses::default();
+    houses.by_tl_id.insert(
+        1,
+        aa_net::House {
+            snapshot: aa_net::HouseSnapshot {
+                tl_id: 1,
+                db_id: 99,
+                obj_id: 55,
+                template_id: 0,
+                model_id: 0,
+                co_owner_id: 0,
+                owner_id: 0,
+                owner_name: String::new(),
+                account_id: 0,
+                permission: 0,
+                all_actions: 0,
+                current_actions: 0,
+                tax: 0,
+                x: 0,
+                y: 0,
+                z: 0.0,
+                name: String::new(),
+                allow_recover: false,
+                sell_price: 0,
+                sell_to_player_id: 0,
+                sell_to_name: String::new(),
+            },
+            demolished: false,
+            build_pay: None,
+            tax: None,
+            sale: None,
+        },
+    );
+    app.insert_resource(houses);
+    app.update();
+    let rt = app.world().get_non_send::<UiRuntime>().unwrap();
+    assert_eq!(
+        crate::hud::housing::interaction_target(rt),
+        Some(55),
+        "the parent house was not opened"
+    );
+    assert!(sent(&mut app).is_empty());
+}
+
+/// `DoodadFuncEvidenceItemLoot` (`FUN_393bb090`): the report text and `REPORT_CRIME`; the action
+/// id the native shows is the row's crime kind (`FUN_393b7eb0` case 0x34).
+#[test]
+fn the_evidence_loot_opens_the_crime_report() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 15_249, 5911, 3, Inventory::default());
+    event_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert!(
+        event_arg(&app, "REPORT_CRIME", 2)
+            .and_then(|v| v
+                .as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string()))
+            .is_some()
+    );
+    let text = event_arg(&app, "REPORT_CRIME", 3)
+        .and_then(|v| {
+            v.as_string()
+                .and_then(|s| s.to_str().ok())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+    assert!(text.contains("crime 3"), "{text}");
+    assert_eq!(
+        lua(
+            &app,
+            "return userTrial ~= nil and userTrial.reportCrimeWnd ~= nil and userTrial.reportCrimeWnd:IsVisible()"
+        )
+        .unwrap()
+        .as_boolean(),
+        Some(true),
+        "the crime report window did not open"
+    );
+    assert!(sent(&mut app).is_empty(), "the report use sends nothing");
+}
+
+/// `DoodadFuncPurchase` (`FUN_393b80d0`): task 10 for a money row, task 11 for a coin row; the
+/// confirmation sends `CSBuyItemsPacket` / `CSBuyCoinItemPacket`.
+#[test]
+fn the_purchase_dialog_confirms_with_the_native_packets() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game1) = game() else { return };
+    let mut money = app(game1, 11_355, 4601, 17_537, Inventory::default());
+    lua(
+        &money,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
+         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
+           local wnd=original(self,task,info,owner);\
+           PURCHASE={task=task,itemCount=info.itemCount,money=info.moneyString,wnd=wnd}; return wnd end",
+    )
+    .unwrap();
+    tick(&money);
+    money.update();
+    tick(&money);
+    assert_eq!(
+        lua(&money, "return PURCHASE.task").unwrap().as_integer(),
+        Some(10)
+    );
+    assert_eq!(
+        lua(&money, "return PURCHASE.itemCount")
+            .unwrap()
+            .as_integer(),
+        Some(1)
+    );
+    assert!(
+        lua(&money, "return PURCHASE.money ~= nil")
+            .unwrap()
+            .as_boolean()
+            .unwrap_or(false)
+    );
+    lua(&money, "PURCHASE.wnd.OkProc()").unwrap();
+    money.update();
+    let sent_buy = sent(&mut money);
+    assert!(matches!(
+        sent_buy.as_slice(),
+        [Command::Shop(ShopCommand::Buy { npc_obj_id: 0, doodad_obj_id: 2075, buy, buy_back, use_aa_point: false })]
+            if buy.as_slice() == [BuyEntry { item_id: 23_614, grade: 0, count: 1, currency: 0 }]
+                && buy_back.is_empty()
+    ));
+
+    let Some(game2) = game() else { return };
+    let mut coin = app(game2, 11_691, 4729, 14_569, Inventory::default());
+    lua(
+        &coin,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
+         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
+           local wnd=original(self,task,info,owner);\
+           PURCHASE={task=task,itemCount=info.itemCount,coin=info.coinCount,coinName=info.coinName,wnd=wnd}; return wnd end",
+    )
+    .unwrap();
+    tick(&coin);
+    coin.update();
+    tick(&coin);
+    assert_eq!(
+        lua(&coin, "return PURCHASE.task").unwrap().as_integer(),
+        Some(11)
+    );
+    assert_eq!(
+        lua(&coin, "return PURCHASE.coin").unwrap().as_integer(),
+        Some(15)
+    );
+    assert!(
+        lua(&coin, "return PURCHASE.coinName ~= nil")
+            .unwrap()
+            .as_boolean()
+            .unwrap_or(false)
+    );
+    // without the coins the native does not send the buy
+    lua(&coin, "PURCHASE.wnd.OkProc()").unwrap();
+    coin.update();
+    assert!(sent(&mut coin).is_empty(), "sent without the coin item");
+
+    let Some(game3) = game() else { return };
+    let mut paid = app(game3, 11_691, 4729, 14_569, bag_count(23_633, 15));
+    lua(
+        &paid,
+        "PURCHASE=true; local original=X2DialogManager.RequestTaskDialog;\
+         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
+           local wnd=original(self,task,info,owner); PURCHASE=wnd; return wnd end",
+    )
+    .unwrap();
+    tick(&paid);
+    paid.update();
+    tick(&paid);
+    lua(&paid, "PURCHASE.OkProc()").unwrap();
+    paid.update();
+    assert!(matches!(
+        sent(&mut paid).as_slice(),
+        [Command::Shop(ShopCommand::BuyCoin {
+            obj_id: 2075,
+            func_id: 10_262
+        })]
+    ));
 }

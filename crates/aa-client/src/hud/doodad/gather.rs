@@ -340,9 +340,11 @@ mod tests {
             (1929..=1951).contains(&gained_detail),
             "the detail fallback changed {gained_detail} func groups"
         );
+        // 2024: the three phases whose only action is a `DoodadFuncEvidenceItemLoot` crime kind
+        // (`FUN_393b7eb0` case 0x34) joined the 1999-2021 detail/legacy range.
         assert!(
-            (1999..=2021).contains(&gained_total),
-            "the detail and legacy fallbacks changed {gained_total} func groups"
+            (1999..=2024).contains(&gained_total),
+            "the detail, legacy and evidence fallbacks changed {gained_total} func groups"
         );
     }
 

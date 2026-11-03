@@ -314,6 +314,8 @@ pub struct GameData {
     pub(super) specialties: super::specialty::Tables,
     /// The conversations of the `bubbles` rows (`speech.rs`).
     pub(super) speech: super::speech::Tables,
+    /// `books` / `book_elems` behind `X2Book.GetBookInfo` (`books.rs`).
+    pub(super) books: super::books::Tables,
     /// Static housing and public-farm templates (`data/housing.rs`).
     pub(super) housing: housing::Tables,
 }
@@ -916,6 +918,7 @@ impl GameData {
         data.look_conversion = super::look_conversion::Tables::load(&conn)?;
         data.specialties = super::specialty::Tables::load(&conn)?;
         data.speech = super::speech::Tables::load(&conn).unwrap_or_default();
+        data.books = super::books::Tables::load(&conn).unwrap_or_default();
         data.summon_slaves = load_summon_slaves(&conn).unwrap_or_else(|err| {
             warn!("hud: cannot load summon slaves: {err}");
             HashMap::new()

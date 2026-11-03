@@ -189,20 +189,24 @@ impl Tables {
         let mut t = Tables::default();
         let detail = gather::DetailSkills::load(conn)?;
         let local = local::LocalFuncs::load(conn);
-        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
+        let mut q = conn.prepare("SELECT id, doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id, next_phase FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
-            let group = super::data::any_int(r, 0)? as u32;
-            let skill = super::data::any_int(r, 1)? as u32;
-            let kind: Option<String> = r.get(2)?;
-            let func_id = super::data::any_int(r, 3)? as u32;
-            let perm = super::data::any_int(r, 4)? as u8;
+            let row_id = super::data::any_int(r, 0)? as u32;
+            let group = super::data::any_int(r, 1)? as u32;
+            let skill = super::data::any_int(r, 2)? as u32;
+            let kind: Option<String> = r.get(3)?;
+            let func_id = super::data::any_int(r, 4)? as u32;
+            let perm = super::data::any_int(r, 5)? as u8;
+            let next_phase = super::data::any_int(r, 6)? as i32;
             t.add_resolved_local(
                 group,
                 skill,
                 kind.as_deref().unwrap_or(""),
                 func_id,
+                row_id,
                 perm,
+                next_phase,
                 &detail,
                 &local,
             );
@@ -268,7 +272,7 @@ impl Tables {
         perm: u8,
         detail: &gather::DetailSkills,
     ) {
-        self.add_resolved_local(group, skill, kind, func_id, perm, detail, &local::LocalFuncs::default());
+        self.add_resolved_local(group, skill, kind, func_id, func_id, perm, 0, detail, &local::LocalFuncs::default());
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -278,7 +282,9 @@ impl Tables {
         skill: u32,
         kind: &str,
         func_id: u32,
+        row_id: u32,
         perm: u8,
+        next_phase: i32,
         detail: &gather::DetailSkills,
         local: &local::LocalFuncs,
     ) {
@@ -288,19 +294,23 @@ impl Tables {
             // Native FUN_397aa970 maps the func type to 11400 "Open Mailbox"; the func row itself
             // has no `func_skill_id`.
             local::MAILBOX_ACTION
+        } else if kind == "DoodadFuncEvidenceItemLoot" {
+            // Native FUN_393b7eb0 case 0x34: the action id is the detail's crime kind id.
+            local.evidence_action(func_id).unwrap_or(0)
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
         self.add_fish_func(group, skill, kind, func_id);
-        self.add_full(group, skill, kind, perm, func_id, local);
+        self.add_full(group, skill, kind, perm, func_id, row_id, next_phase, local);
     }
 
     #[cfg(test)]
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
-        self.add_full(group, skill, kind, 0, 0, &local::LocalFuncs::default());
+        self.add_full(group, skill, kind, 0, 0, 0, 0, &local::LocalFuncs::default());
     }
 
-    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8, func_id: u32, local_funcs: &local::LocalFuncs) {
+    #[allow(clippy::too_many_arguments)]
+    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8, func_id: u32, row_id: u32, next_phase: i32, local_funcs: &local::LocalFuncs) {
         if skill != 0 && kind == "DoodadFuncAttachment" {
             self.attachment_skills.insert((group, skill));
         }
@@ -330,7 +340,7 @@ impl Tables {
             uses.craft.push(perm);
         }
         if skill != 0 {
-            if let Some(action) = local_funcs.local(kind, func_id) {
+            if let Some(action) = local_funcs.local(kind, func_id, row_id, next_phase) {
                 self.locals
                     .insert((group, skill), local::LocalUse { action, perm });
             }
@@ -481,6 +491,8 @@ pub(super) struct View {
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
     coffer_close: bool,
+    /// Purchase dialogs confirmed since the last `execute`; each sends its native packet.
+    pub(super) purchases: Vec<local::PurchaseOrder>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
     /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
     bounds: HashMap<u32, (Vec3, Vec3)>,
@@ -2051,6 +2063,7 @@ pub(super) struct InteractionEnv<'w> {
     houses: Option<Res<'w, aa_net::Houses>>,
     world_info: Option<Res<'w, aa_world::stream::WorldInfo>>,
     seats: Option<Res<'w, crate::ingame::seating::Seats>>,
+    target: Option<Res<'w, aa_net::state::Target>>,
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
@@ -2074,7 +2087,23 @@ pub(super) fn execute(
     mut errors: Option<MessageWriter<crate::hud::ShowError>>,
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
+    let target_id = env_res.target.as_ref().and_then(|t| t.obj_id).unwrap_or(0);
     let mut d = bridge.0.borrow_mut();
+    // A purchase dialog's OK (`FUN_393bc4e0` / `FUN_393bac20`): the native sends the buy directly.
+    for order in std::mem::take(&mut d.doodad.purchases) {
+        let coin = matches!(order, local::PurchaseOrder::Coin { .. });
+        match local::purchase_command(order, &inventory) {
+            Some(command) => {
+                out.write(NetCommand(command));
+            }
+            None if coin => {
+                if let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_ITEM));
+                }
+            }
+            None => {}
+        }
+    }
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
         let obj_id = inventory.coffer.obj_id;
         info!("doodad: coffer {obj_id} closed");
@@ -2269,15 +2298,21 @@ pub(super) fn execute(
                     }
                     None => continue,
                 }
-                local::run(
+                let phase = local::run(
                     rt.as_deref(),
                     &bridge.0,
                     &doodads,
                     &units,
                     &inventory,
+                    env_res.houses.as_deref(),
+                    target_id,
                     obj_id,
+                    *skill_id,
                     local.action,
                 );
+                if let Some(command) = phase {
+                    out.write(NetCommand(command));
+                }
                 continue;
             }
             if let Some(counter) = group
@@ -2780,7 +2815,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL, sim_radius REAL);
-             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
+             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER, next_phase INTEGER);
              CREATE TABLE skills (id INTEGER);
              CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
              CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
@@ -4117,7 +4152,7 @@ mod tests {
     }
     fn craft_tables(group: u32, perm: u8) -> GameData {
         let mut tables = Tables::default();
-        tables.add_full(group, 0, "DoodadFuncCraftPack", perm, 0, &local::LocalFuncs::default());
+        tables.add_full(group, 0, "DoodadFuncCraftPack", perm, 0, 0, 0, &local::LocalFuncs::default());
         GameData {
             doodad: tables,
             crafting: crate::hud::crafting::fixture_tables([(568, vec![5557]), (2241, vec![6666])]),
@@ -4381,7 +4416,7 @@ mod tests {
 
     fn mixed_tables(group: u32, skill: u32, perm: u8) -> GameData {
         let mut game = craft_tables(group, perm);
-        game.doodad.add_full(group, skill, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+        game.doodad.add_full(group, skill, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
         game
     }
 
@@ -4437,7 +4472,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4515,7 +4550,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4812,7 +4847,7 @@ mod tests {
             d.character_id = 47;
             d.pos = Vec3::ZERO;
             let mut game = craft_tables(1088, craft_perm::ANY);
-            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.pending = Some(Pending {
                 obj_id: 300,
