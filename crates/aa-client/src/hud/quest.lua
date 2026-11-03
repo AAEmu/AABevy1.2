@@ -96,7 +96,7 @@ X2Quest.GetObjectiveComponentCount = function(self, qtype)
   return q and #q.objectives or 0
 end
 X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
-X2Quest.GetQuestContextLeftTime = function(self, qtype) return 0 end
+X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
 X2Quest.GetUseTypeQuestItems = function(self, qtype, all) return {} end
 X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, qtype, index) return {} end
 X2Quest.IsQuestStartItem = function(self, itemType) return false end

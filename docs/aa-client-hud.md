@@ -548,12 +548,16 @@ raises `DOODAD_PHASE_MSG(text)` (`FUN_3937a650`, `FUN_3937a520`) with the `QUEST
 a failed reward mail (`success` 0) raises `QUEST_ERROR_INFO(0xb, qtype)` instead. A name the client
 cannot look up shows nothing.
 
-Timed quests count down from the server's `time_left_ms` and `accept_time`: `FUN_39379e30` returns
-`end - (now - start) * 1000`. `HUD.quest_left_time(qtype)` feeds `X2Quest.GetQuestContextLeftTime`
-(`quest.lua`). Once a second (`FUN_3937cd80`'s 1.0 s constant) the tick publishes
-`QUEST_LEFT_TIME_UPDATED(qtype, remaining_ms)`; under 1000 ms it publishes 0 once and removes the clock
-(`FUN_39379ea0`), and a quest leaving the list clears the same way. A refusal latches the quest instance
-so the next tick does not bring the clock back.
+Timed quests count down from the local receipt time: on every `SCQuestContextStarted` / `Updated`
+`FUN_3937b240` stores the packet's `time_left_ms` as the end and the local timer as the start, and
+`FUN_39379e30` returns `end - (now - start) * 1000` (the server's `accept_time` is not used). An
+`Updated` whose status is not in progress (1) stores -1, so the next tick removes the clock and
+publishes `(qtype, 0)` (723452). `HUD.quest_left_time(qtype)` feeds
+`X2Quest.GetQuestContextLeftTime` (`quest.lua`) and reads -1 when there is no entry. Once a second
+(`FUN_3937cd80`'s 1.0 s constant) the tick publishes `QUEST_LEFT_TIME_UPDATED(qtype, remaining_ms)`;
+under 1000 ms it publishes 0 once and removes the clock (`FUN_39379ea0`), and a quest leaving the list
+clears the same way. A refusal latches the quest instance so the next tick does not bring the clock
+back; the next Started / Updated of that instance releases the latch and starts the clock anew.
 
 ### Quest cinemas
 

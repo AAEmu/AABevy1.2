@@ -33,9 +33,9 @@ pub(super) use npc::candidates::Catalog as NpcCandidateCatalog;
 pub(super) mod fixture;
 pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
-use web_time::{Instant, SystemTime, UNIX_EPOCH};
+use web_time::Instant;
 
 use aa_net::interaction::Interact;
 use aa_net::model::{Unit, UnitKind};
@@ -119,6 +119,14 @@ pub struct Approach {
     best_at: f32,
 }
 
+/// A timed quest's clock (`FUN_3937b240`): the server's remaining milliseconds at receipt and the
+/// local receipt time. `left = end - (now - start) * 1000` (`FUN_39379e30`).
+#[derive(Clone, Copy, Debug)]
+pub struct QuestClock {
+    pub end_ms: i32,
+    pub started: Instant,
+}
+
 /// The talk under way and the quest data the scripts read.
 #[derive(Debug, Default)]
 pub struct DialogView {
@@ -146,9 +154,10 @@ pub struct DialogView {
     cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
-    /// Milliseconds left of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
-    /// the server's `time_left_ms` counts down from the quest's `accept_time` (`FUN_39379e30`).
-    pub left_times: HashMap<u32, i32>,
+    /// The clock of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
+    /// `FUN_3937b240` stores the server's `time_left_ms` as its end and the local receipt time as
+    /// its start; `FUN_39379e30` returns `end - (now - start) * 1000`.
+    pub left_times: BTreeMap<u32, QuestClock>,
     /// Quest instances whose clock a refusal cleared: `FUN_3937a130` removes the timer entry and
     /// the tick must not add it again while the same quest is active.
     cleared_left: HashSet<(u32, i64)>,
@@ -284,7 +293,10 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     let b = bridge.clone();
     hud.raw_set(
         "quest_left_time",
-        lua.create_function(move |_, qtype: u32| Ok(b.borrow().dialog.left_times.get(&qtype).copied().unwrap_or(0)))?,
+        lua.create_function(move |_, qtype: u32| {
+            let b = b.borrow();
+            Ok(b.dialog.left_times.get(&qtype).map_or(-1, |clock| clock_left_ms(clock, Instant::now())))
+        })?,
     )?;
     let b = bridge.clone();
     hud.raw_set(
@@ -595,49 +607,51 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
     }
 }
 
-/// Milliseconds left of timed quest `q` at `now` (Unix seconds): the server's `time_left_ms` counts
-/// down from the quest's `accept_time` (`FUN_39379e30`: `end - (now - start) * 1000`, start and end
-/// in seconds / milliseconds). The server's accept stamp can be ahead of the local clock; that does
-/// not make the clock gain time. 0 when the quest has no limit.
-pub fn left_time_ms(q: &Quest, now: i64) -> i32 {
-    if q.time_left_ms <= 0 {
-        return 0;
-    }
-    let elapsed = now.saturating_sub(q.accept_time).max(0).saturating_mul(1000);
-    let left = i64::from(q.time_left_ms).saturating_sub(elapsed);
-    left.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+/// Milliseconds left of `clock` at `now` (`FUN_39379e30`): `end - (now - start) * 1000`, with the
+/// start the local time the Started / Updated packet was received (`FUN_3937b240`). The server's
+/// own accept stamp is not used.
+pub fn clock_left_ms(clock: &QuestClock, now: Instant) -> i32 {
+    let elapsed_ms = i64::try_from(now.saturating_duration_since(clock.started).as_millis()).unwrap_or(i64::MAX);
+    (i64::from(clock.end_ms) - elapsed_ms).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-/// One tick of the quest clock (`X2::GameClient::UpdateQuestLeftTime`, `FUN_3937cd80`): the timed
-/// active quests get their remaining time and one with at least 1000 ms left is published as
-/// `(qtype, remaining_ms)`. A quest under that takes the native timeout path (`FUN_39379ea0`): its
-/// clock is removed and `QUEST_LEFT_TIME_UPDATED(qtype, 0)` is published once, so the notifier
-/// hides it (`quest_context_notifier.alb` F81). A timed quest that leaves the list is cleared the
-/// same way.
-pub fn tick_left_times(left: &mut HashMap<u32, i32>, quests: &[Quest], now: i64) -> Vec<(u32, i32)> {
+/// One tick of the quest clock (`X2::GameClient::UpdateQuestLeftTime`, `FUN_3937cd80`): every clock
+/// with at least 1000 ms left is published as `(qtype, remaining_ms)`. A clock under that, or one
+/// whose quest is no longer timed, takes the native timeout path (`FUN_39379ea0`): it is removed
+/// and `QUEST_LEFT_TIME_UPDATED(qtype, 0)` is published once, so the notifier hides it
+/// (`quest_context_notifier.alb` F81).
+pub fn tick_left_times(left: &mut BTreeMap<u32, QuestClock>, quests: &[Quest], now: Instant) -> Vec<(u32, i32)> {
     let mut events = Vec::new();
-    left.retain(|qtype, remaining| {
-        if quests.iter().any(|q| q.template_id == *qtype && q.time_left_ms > 0) {
-            return true;
-        }
-        if *remaining >= 1000 {
+    left.retain(|qtype, clock| {
+        let timed = quests.iter().any(|q| q.template_id == *qtype && q.time_left_ms > 0);
+        if !timed || clock_left_ms(clock, now) < 1000 {
             events.push((*qtype, 0));
+            return false;
         }
-        false
+        true
     });
-    for q in quests.iter().filter(|q| q.time_left_ms > 0) {
-        let remaining = left_time_ms(q, now);
-        let before = left.get(&q.template_id).copied();
-        if remaining < 1000 {
-            if before.is_none_or(|before| before >= 1000) {
-                events.push((q.template_id, 0));
-            }
-        } else {
-            events.push((q.template_id, remaining));
-        }
-        left.insert(q.template_id, remaining);
+    for (qtype, clock) in left.iter() {
+        events.push((*qtype, clock_left_ms(clock, now)));
     }
     events
+}
+
+/// One tick over the dialog's clocks: drop latches of quests no longer active, start the clock of
+/// a timed active quest seen for the first time at `now` (the login list has no Started packet),
+/// then [`tick_left_times`]. A refused instance stays latched until a Started / Updated releases it.
+fn tick_quest_clocks(dialog: &mut DialogView, quests: &[Quest], now: Instant) -> Vec<(u32, i32)> {
+    let active: HashSet<(u32, i64)> = quests.iter().map(|q| (q.template_id, q.id)).collect();
+    dialog.cleared_left.retain(|key| active.contains(key));
+    let timed: Vec<Quest> = quests
+        .iter()
+        .filter(|q| q.status == status::PROGRESS && q.time_left_ms > 0)
+        .filter(|q| !dialog.cleared_left.contains(&(q.template_id, q.id)))
+        .cloned()
+        .collect();
+    for q in &timed {
+        dialog.left_times.entry(q.template_id).or_insert(QuestClock { end_ms: q.time_left_ms, started: now });
+    }
+    tick_left_times(&mut dialog.left_times, &timed, now)
 }
 
 /// The quest clock runs at most once a second (the native's 1.0 s constant `0x3999c488`) and tells
@@ -653,21 +667,12 @@ pub fn tick_quest_left_time(
         return;
     }
     *last = Some(now);
-    let now_unix = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     let events = {
         let mut d = bridge.0.borrow_mut();
         if d.game.get().is_none() {
             return;
         }
-        let active: HashSet<(u32, i64)> = quests.active.iter().map(|q| (q.template_id, q.id)).collect();
-        d.dialog.cleared_left.retain(|key| active.contains(key));
-        let timed: Vec<Quest> = quests
-            .active
-            .iter()
-            .filter(|q| !d.dialog.cleared_left.contains(&(q.template_id, q.id)))
-            .cloned()
-            .collect();
-        tick_left_times(&mut d.dialog.left_times, &timed, now_unix)
+        tick_quest_clocks(&mut d.dialog, &quests.active, now)
     };
     let Some(rt) = rt else { return };
     for (qtype, left) in events {
@@ -1269,18 +1274,15 @@ pub(super) fn talk_pointer(
     }
 }
 
-/// The quest packets that are notices rather than quest state: a refused request
-/// (`SCQuestContextFailed`), a needed unit gone (`SCQuestUnitReqFailed`) and quest mail
-/// (`SCQuestMailSent`, `SCQuestRewardedByMail`).
-///
-/// `FUN_391dbcd0` raises `QUEST_ERROR_INFO(err, qtype)` and `FUN_3937a130` first clears the quest's
-/// timer (`FUN_39379ea0` publishes `QUEST_LEFT_TIME_UPDATED(qtype, 0)`); the directing script ends
-/// its window when the event's quest is the one it shows (`quest_context_directing.alb` F37).
-/// `FUN_391dbdd0` raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when the failed unit is the current
-/// target (`FUN_39376590`); the directing script closes the same window (F36). The mail packets
-/// show the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` texts through `DOODAD_PHASE_MSG`
-/// (`FUN_3937a650`, `FUN_3937a520`), with the `quest_mails` name / the quest title as `$1`; a
-/// failed reward mail (`success` 0) is `FUN_3937a130(qtype, 0xb)` instead.
+/// `FUN_3937b240` from `SCQuestContextStarted` / `SCQuestContextUpdated`: the clock's end is the
+/// server's `time_left_ms` at local receipt, and a later Started / Updated releases the refusal
+/// latch so the tick may keep it.
+fn start_quest_clock(bridge: &Shared, q: &Quest, end_ms: i32, now: Instant) {
+    let mut d = bridge.borrow_mut();
+    d.dialog.cleared_left.remove(&(q.template_id, q.id));
+    d.dialog.left_times.insert(q.template_id, QuestClock { end_ms, started: now });
+}
+
 /// `FUN_3937a130`'s refusal path: end the window showing `quest_id`, clear its clock, latch the
 /// instance so the tick does not restore it, and say whether a clock was cleared.
 fn refuse_quest(rt: &UiRuntime, bridge: &Shared, quest_id: u32) -> bool {
@@ -1296,6 +1298,18 @@ fn refuse_quest(rt: &UiRuntime, bridge: &Shared, quest_id: u32) -> bool {
     d.dialog.left_times.remove(&quest_id).is_some()
 }
 
+/// The quest packets that are notices rather than quest state: a refused request
+/// (`SCQuestContextFailed`), a needed unit gone (`SCQuestUnitReqFailed`) and quest mail
+/// (`SCQuestMailSent`, `SCQuestRewardedByMail`).
+///
+/// `FUN_391dbcd0` raises `QUEST_ERROR_INFO(err, qtype)` and `FUN_3937a130` first clears the quest's
+/// timer (`FUN_39379ea0` publishes `QUEST_LEFT_TIME_UPDATED(qtype, 0)`); the directing script ends
+/// its window when the event's quest is the one it shows (`quest_context_directing.alb` F37).
+/// `FUN_391dbdd0` raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when the failed unit is the current
+/// target (`FUN_39376590`); the directing script closes the same window (F36). The mail packets
+/// show the `QUEST_MAIL_SENT` / `QUEST_REWARDED_BY_MAIL` texts through `DOODAD_PHASE_MSG`
+/// (`FUN_3937a650`, `FUN_3937a520`), with the `quest_mails` name / the quest title as `$1`; a
+/// failed reward mail (`success` 0) is `FUN_3937a130(qtype, 0xb)` instead.
 pub fn route_quest_notices(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
@@ -1306,6 +1320,13 @@ pub fn route_quest_notices(
     let Some(rt) = rt else { return };
     for NetEvent(e) in events.read() {
         match e {
+            Event::QuestStarted(q) => start_quest_clock(&bridge.0, q, q.time_left_ms, Instant::now()),
+            Event::QuestUpdated(q) => {
+                // 723452: a status other than in progress calls FUN_3937b240(qtype, -1), which the
+                // next tick removes and publishes as (qtype, 0).
+                let end_ms = if q.status == status::PROGRESS { q.time_left_ms } else { -1 };
+                start_quest_clock(&bridge.0, q, end_ms, Instant::now());
+            }
             Event::QuestContextFailed(failed) => {
                 let had_timer = refuse_quest(&rt, &bridge.0, failed.quest_id);
                 info!("hud: quest {} failed ({})", failed.quest_id, failed.err);
@@ -2366,7 +2387,7 @@ mod tests {
     #[test]
     fn a_refused_quest_ends_directing_only_for_that_quest_and_raises_error_info() {
         let Some((mut app, shared)) = quest_notice_app() else { return };
-        shared.borrow_mut().dialog.left_times.insert(1065, 5_000);
+        shared.borrow_mut().dialog.left_times.insert(1065, QuestClock { end_ms: 5_000, started: Instant::now() });
         // The failed quest is not the one the window is directing: it stays up.
         app.world_mut()
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1066, err: 6 })));
@@ -2480,42 +2501,47 @@ mod tests {
         app.world().non_send::<UiRuntime>().lua.load("assert(#OBSERVED==2)").exec().unwrap();
     }
 
-    fn timed(left_ms: i32, accept_time: i64) -> Quest {
-        Quest { template_id: 330, status: status::PROGRESS, time_left_ms: left_ms, accept_time, ..Quest::default() }
+    fn timed(left_ms: i32) -> Quest {
+        Quest { template_id: 330, status: status::PROGRESS, time_left_ms: left_ms, accept_time: 0, ..Quest::default() }
     }
 
     #[test]
-    fn the_quest_clock_counts_down_from_accept_time() {
-        let q = timed(60_000, 1_000);
-        assert_eq!(left_time_ms(&q, 1_000), 60_000);
-        assert_eq!(left_time_ms(&q, 1_030), 30_000);
-        // the server's own clock may be ahead of the acceptance stamp
-        assert_eq!(left_time_ms(&q, 900), 60_000);
-        assert_eq!(left_time_ms(&q, 1_061), -1_000);
-        assert_eq!(left_time_ms(&Quest { time_left_ms: -1, ..q }, 1_030), 0);
+    fn the_quest_clock_counts_down_from_its_local_receipt_time() {
+        let start = Instant::now();
+        let clock = QuestClock { end_ms: 60_000, started: start };
+        assert_eq!(clock_left_ms(&clock, start), 60_000);
+        assert_eq!(clock_left_ms(&clock, start + Duration::from_secs(30)), 30_000);
+        assert_eq!(clock_left_ms(&clock, start + Duration::from_millis(59_500)), 500);
+        assert_eq!(clock_left_ms(&clock, start + Duration::from_secs(61)), -1_000);
+        // a clock seen before its start never gains time
+        let future = QuestClock { end_ms: 5_000, started: start + Duration::from_secs(1) };
+        assert_eq!(clock_left_ms(&future, start), 5_000);
     }
 
     #[test]
     fn the_quest_clock_publishes_seconds_and_clears_the_clock_at_one() {
-        let q = timed(60_000, 1_000);
-        let mut left = HashMap::from([(331, 5_000), (330, 0)]);
-        // the stale timed quest is cleared, then the new one is published
-        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_000), vec![(331, 0), (330, 60_000)]);
-        assert_eq!(left.get(&330), Some(&60_000));
+        let start = Instant::now();
+        let q = timed(60_000);
+        let mut left = BTreeMap::from([
+            (331, QuestClock { end_ms: 5_000, started: start }),
+            (330, QuestClock { end_ms: 60_000, started: start }),
+        ]);
+        // the stale timed quest is cleared, then the live one is published
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), start), vec![(331, 0), (330, 60_000)]);
         assert!(!left.contains_key(&331));
         // the last published second, then FUN_39379ea0's timeout path publishes 0 once
-        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_059), vec![(330, 1_000)]);
-        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_060), vec![(330, 0)]);
-        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), 1_061), Vec::new());
-        assert_eq!(left.get(&330), Some(&-1_000));
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), start + Duration::from_secs(59)), vec![(330, 1_000)]);
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), start + Duration::from_secs(60)), vec![(330, 0)]);
+        assert_eq!(tick_left_times(&mut left, std::slice::from_ref(&q), start + Duration::from_secs(61)), Vec::new());
+        assert!(left.is_empty());
         // leaving the list before its last second also hides the clock
-        let mut left = HashMap::from([(330, 5_000)]);
-        assert_eq!(tick_left_times(&mut left, &[], 1_000), vec![(330, 0)]);
+        let mut left = BTreeMap::from([(330, QuestClock { end_ms: 5_000, started: start })]);
+        assert_eq!(tick_left_times(&mut left, &[], start), vec![(330, 0)]);
         assert!(left.is_empty());
     }
 
     #[test]
-    fn the_quest_clock_system_publishes_the_live_time_the_scripts_read() {
+    fn the_quest_clock_system_uses_the_local_receipt_time_and_the_script_getter() {
         if !aa_world::pak_available() { return; }
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
         let Ok(game) = GameData::load(&path) else { return };
@@ -2536,9 +2562,15 @@ mod tests {
         let shared: Shared = Rc::new(RefCell::new(data));
         let hud = rt.lua.create_table().unwrap();
         super::install(&rt.lua, &hud, &shared).unwrap();
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        rt.lua.globals().set("HUD", hud.clone()).unwrap();
+        rt.lua.load("X2Quest = X2Quest or {}; X2Decal = X2Decal or {}; X2Interaction = X2Interaction or {}; X2Util = X2Util or {}; X2 = X2 or {}").exec().unwrap();
+        super::load_script(&rt.lua).unwrap();
+        // an accept stamp half a minute old and a full 60 s left: only the receipt time counts
+        let now = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let mut quest = timed(60_000);
+        quest.accept_time = now - 30;
         let mut quests = Quests::default();
-        quests.active.push(timed(60_000, now - 30));
+        quests.active.push(quest);
         let mut app = App::new();
         app.insert_resource(quests)
             .insert_non_send(HudBridge(shared.clone()))
@@ -2547,11 +2579,69 @@ mod tests {
         app.update();
         let rt = app.world().non_send::<UiRuntime>();
         rt.lua
-            .load("assert(#LEFT==1 and LEFT[1][1]==330 and LEFT[1][2]>0 and LEFT[1][2]<=60000)")
+            .load("assert(#LEFT==1 and LEFT[1][1]==330 and LEFT[1][2]>59000 and LEFT[1][2]<=60000)")
             .exec()
             .unwrap();
-        let left: i32 = hud.get::<mlua::Function>("quest_left_time").unwrap().call(330).unwrap();
-        assert!(left > 0 && left <= 60_000, "the getter reads the live clock: {left}");
+        let left: i32 = rt.lua.load("return X2Quest:GetQuestContextLeftTime(330)").eval().unwrap();
+        assert!(left > 59_000 && left <= 60_000, "the getter reads the live clock, not accept_time: {left}");
+        let none: i32 = rt.lua.load("return X2Quest:GetQuestContextLeftTime(331)").eval().unwrap();
+        assert_eq!(none, -1, "no entry reads -1 (FUN_39379e30)");
+    }
+
+    #[test]
+    fn started_and_updated_start_the_clock_at_local_receipt() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let before = Instant::now();
+        let q = Quest { id: 77, accept_time: 1_000, ..timed(60_000) };
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        let clock = shared.borrow().dialog.left_times.get(&330).copied().expect("Started starts the clock");
+        assert_eq!(clock.end_ms, 60_000);
+        assert!(clock.started.saturating_duration_since(before) < Duration::from_secs(2));
+        // FUN_3937b240 replaces both values on every Started / Updated
+        let later = before + Duration::from_secs(10);
+        start_quest_clock(&shared, &q, 30_000, later);
+        let clock = shared.borrow().dialog.left_times.get(&330).copied().unwrap();
+        assert_eq!(clock.end_ms, 30_000);
+        assert_eq!(clock.started, later);
+    }
+
+    #[test]
+    fn an_updated_status_change_hides_the_clock_on_the_next_tick() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let q = Quest { id: 77, ..timed(60_000) };
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        assert!(shared.borrow().dialog.left_times.contains_key(&330));
+        let ready = Quest { status: status::READY, ..q };
+        app.world_mut().write_message(NetEvent(Event::QuestUpdated(ready.clone())));
+        app.update();
+        assert_eq!(shared.borrow().dialog.left_times.get(&330).unwrap().end_ms, -1, "FUN_3937b240(qtype, -1)");
+        let events = tick_quest_clocks(&mut shared.borrow_mut().dialog, &[ready], Instant::now());
+        assert_eq!(events, vec![(330, 0)], "the next tick removes it and publishes 0");
+        assert!(!shared.borrow().dialog.left_times.contains_key(&330));
+    }
+
+    #[test]
+    fn a_later_started_or_updated_releases_the_refusal_latch() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let q = Quest { id: 77, ..timed(60_000) };
+        shared.borrow_mut().dialog.quests.push(q.clone());
+        app.world_mut()
+            .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 330, err: 5 })));
+        app.update();
+        assert!(shared.borrow().dialog.left_times.is_empty());
+        // the tick does not restore the refused instance
+        let events = tick_quest_clocks(&mut shared.borrow_mut().dialog, std::slice::from_ref(&q), Instant::now());
+        assert!(events.is_empty());
+        assert!(shared.borrow().dialog.left_times.is_empty(), "the refusal latch holds");
+        // a later Updated of the same instance releases it and restarts the clock
+        let updated = Quest { time_left_ms: 5_000, ..q };
+        app.world_mut().write_message(NetEvent(Event::QuestUpdated(updated.clone())));
+        app.update();
+        assert_eq!(shared.borrow().dialog.left_times.get(&330).unwrap().end_ms, 5_000);
+        let events = tick_quest_clocks(&mut shared.borrow_mut().dialog, &[updated], Instant::now());
+        assert!(events.len() == 1 && events[0].0 == 330 && events[0].1 > 0, "the released clock is published: {events:?}");
     }
 
     #[test]
