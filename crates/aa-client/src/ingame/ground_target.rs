@@ -2179,7 +2179,7 @@ mod tests {
         let mut app = water_app();
         {
             let mut movers = app.world_mut().query::<&mut Mover>();
-            movers.single_mut(&mut app.world_mut()).unwrap().pos.z = 99.5;
+            movers.single_mut(app.world_mut()).unwrap().pos.z = 99.5;
         }
         app.world_mut().resource_mut::<Aiming>().set_preview(
             SkillPressed { skill: 21_571, item: None, target_obj_id: 0, gcd: true },
