@@ -49,7 +49,6 @@ pub mod code {
     pub const TOO_CLOSE_RANGE: u8 = 14;
     pub const TOO_FAR_RANGE: u8 = 15;
     pub const CANNOT_CAST_IN_STUN: u8 = 19;
-    pub const CANNOT_CAST_IN_SWIMMING: u8 = 21;
     pub const BLANK_MINDED: u8 = 22;
     pub const SILENCE: u8 = 23;
     pub const CRIPPLED: u8 = 24;
