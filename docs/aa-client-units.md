@@ -335,6 +335,16 @@ Shininess 5.9, textures `transfers_trailer_a01_df/_sp/_ddn`. The copper boiler's
 vehicle parts are prepared with `Shading::Full` (native Illum, `aa-cry/src/shade/illum.rs`) instead of the default Basic
 world-prop path.
 
+A rigged prefab part also starts the animation its `AnimObject` names (`Part::animation`, `PrefabAnimation`):
+`FUN_39109d20` (x2game.dll.c:207499-207501) opens the Animation child node and reads `bPlaying`; the clip name
+(`Animation`) and `bLoop` playback are engine AnimObject behaviour. The dying Red Farm Hauler is the first case in the data: prefab
+`vehicle_tractor.tractor_body_dying` uses `transfers_trailer_a_body_dead.cdf` with `Animation="dead_01" bPlaying="1"`,
+and `dead_01.caf` is 3.33 s with 22 tracks (21 bound; `Bip01`, `Bone_Center*`, `Bone_Front*`, the wheels). The
+2026-11-02 capture shows exactly that: the cart burns, then tips and rolls onto its side between video 41 and 43.5 s,
+before the dead-prefab explosion at 43.6 (dying_time 3.3, death 39.4). The galleon's flag
+(`objects/env/06_unit/01_ship/galleon/galleon_flag0.chr`, `Animation="spreaded" bLoop="1" bPlaying="1"`) uses the same
+path. A one-shot authored animation keeps `VehicleIdle` stopped so the idle cannot replace its last frame.
+
 ### Engine idle and engine sound (`VehicleIdle`, `start_vehicle_idle`, `VehicleSound`)
 
 1.2 starts the prefab body's loop in `X2::PrefabUnitModel::UpdateIdleAnim` (`FUN_390d6690`) on model init and refresh
@@ -542,8 +552,16 @@ poller never returns 5: dying is entered by the death path below.
 * **Dying prefabs.** 19 of the 24 `vehicle_models.dying` prefabs are built on a `.cdf` AnimObject
   (`transfers_trailer_a_body_dead.cdf`, the trebuchets, the speedcars), 2 on a `.chr` and 2 on a `.cgf`
   brush. `vehicle::prepare` treats a `.cdf` part as a rigged creature model (like `.chr`), so the dying
-  body is drawn. The prefab's own `Animation="dead_01"` attribute is not selected by the part reader; the
-  `.cdf` is spawned with its default pose, which is the remaining approximation of the dying look.
+  body is drawn, and the part's authored `Animation="dead_01" bPlaying="1"` now plays as soon as the
+  prefab is spawned (`Part::animation`; `FUN_39109d20`), with or without a `Dead` marker. On the Red Farm
+  Hauler this is the captured tip/roll (video 41-43.5, `dead_01` 3.33 s); the dying-prefab unit test
+  checks the authored clip is the one the body plays (`examples/vehicle_ship_death` covers only the ship).
+* **Wreck lifetime.** There is no client wreck/corpse timer for a slave. `SCSlaveRemoved` only clears the
+  owned-slave timeline (`FUN_391d4660` -> `FUN_39345cb0` -> `FUN_39345780`); the drawn unit stays in the
+  world. `SCUnitsRemoved` removes it (`FUN_391d4cd0` -> `FUN_39366480`). The 2026-11-02 frames show the
+  Red Farm Hauler wreck still drawn at video 60 s (the nameplate and red cargo are visible; the earlier
+  "gone at ~55.3 s" reading was a camera pan), i.e. until the server's packet at log 12:36:02, 21 s after
+  death. The Bevy path does the same (`units::receive_moves`: only `UnitsRemoved` despawns a unit root).
 * **Dead look.** The `dead` prefab is a wreck model (rowboat/galleon `*_dead.cgf`). Those files put
   their meshes under a plain-named helper container; `aa-cry`'s LOD 0 rule accepts that (the mesh is
   still drawn, `mesh::tests::a_dead_vehicle_hull_is_drawn_under_its_helper_container`). A sweep of every
@@ -552,6 +570,37 @@ poller never returns 5: dying is entered by the death path below.
   hulls) and no model has both a compiled `Merged` node and its source meshes drawn. The ship entity,
   motion and float behaviour stay; the server owns the 20 s despawn. The engine sound and idle gate at
   states 5/6 belongs to `vehicle-idle-anim` and is not duplicated here.
+
+### Ship damage and death (Eznan Cutter)
+
+The 2026-11-02 capture (`<capture-root>/handoff/2026-11-02-vehicle-visuals-capture.md`, "Eznan Cutter damage and
+death") is the evidence for the ship half of S15; the prefabs are the game's own.
+
+* **HP stages.** `slave_healing_point_doodads` rows for template 21 are doodads 2510/2511/2512/2513 at attach points
+  36-39 (`galleon.galleon_repair01/04/03/02`). The server's `UpdateSlaveRepairPoints` spawns them as parented
+  `SCDoodadCreated` doodads when the HP crosses 75/50/25 %; Bevy announces them through `Event::DoodadsSpawned` and
+  draws each under the ship root (`units::sync_views` / `doodad_model`). Their prefabs carry the `repair_doodad`
+  particle. The state prefabs are `galleon.damaged25` (state 2/3) and `galleon.damaged75` (state 4); the latter's
+  `effect_fire` emitter is `X2_EFFECTS.e_effect.ship_damage_fireflame` (the captured aft-deck fire at 25 %).
+  `the_eznan_cutters_damage_effects_and_doodads_are_readable` checks the four hp doodads, the 16 drop doodads and
+  both effects against the real data.
+* **Death has no explosion.** `models.dying_time` is 0 and `ship_models` has no dying column; state 6 is
+  `galleon.dead`, which names only the active `X2_EFFECTS.e_effect.caraval_water_destroy` burst and no `_dead_effect`.
+  The old damage prefab's smoke is dropped with the swap (the capture's smoke clears within 1 s), while its fire is
+  re-spawned at the same authored anchors (`carry_ship_fire`) so the wreck keeps burning, as in the capture
+  (`ship_sinking_t358.66`, `ship_sunk_burning_t365`).
+* **Debris.** The server's `DistributeSlaveDropDoodads` (`slave_drop_doodads`: 1327, 1322, 1323, 1324 and 12 x 1330)
+  creates 16 doodads around the hull; Bevy draws them like any `SCDoodadsCreated` doodad.
+* **List and sink.** The original client's sink is not in the decompiled ship update (no damage-state gate) and the
+  server removes the ship from its physics at death, so `WreckSink` reproduces the captured motion client side: a
+  smoothstep over 12 s, 14 m down, with a bow-up pitch and a heel (`WRECK_SINK_*`). The mechanism is **inferred**
+  from the capture (the engine physics that produced it was not recovered); the hull is still visible at 365 s
+  (~12.6 s after death). The offset is applied by `units::move_units`, which writes the root only while the pose
+  changes; once fully sunk the fixed offset is reused, so a stationary wreck is not rewritten every frame. A heal
+  removes the sink and restores the server pose. A ship that is already dead when it enters view (streamed corpse,
+  reconnect within the ~20 s window) has no death swap to start the sink: `start_dead_ship_sinks` places it at the
+  end pose and carries the 25 % prefab's fire (**inferred**; the client has no death timestamp for it).
+  `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
 
 Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed
@@ -1546,3 +1595,6 @@ Capture-pending (case ids; every one has a capture step):
 TODO(#58 child units): when the `child-units` branch lands, `turret::local_aim` should read
 `units::current_transform` instead of the drawn `GlobalTransform`, so a cannon aboard a moving
 ship aims from its parent's transform (S12-C3). Until then it uses the replicated transform.
+
+The vehicle death example pauses its simulation while render pipelines compile, so cold shader
+compilation cannot consume the short animation before `--shot` captures it.
