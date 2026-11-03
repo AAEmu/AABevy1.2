@@ -66,10 +66,13 @@ doodad names (`localized_texts` of `doodad_almighties`).
 
 A doodad's quest function can also take a quest in: the server sends `SCDoodadCompleteQuest` 0x14d (`bc`
 doodad, `u32` quest; x2game `FUN_391dc050` -> `FUN_393773a0`). `hud/dialog.rs` raises the original's
-`COMPLETE_QUEST_CONTEXT_DOODAD(quest, true, doodadId)`; its script handler calls
-`TryCompleteQuestContext(2, quest, doodadId, "", selected)`, and the `CSCompleteQuestContext` request
-then carries that doodad object id (or 0x0dd for an in-progress let-it-done quest). The lane server does
-not send 0x14d yet, so the path is tested from the decoded packet, not live.
+`COMPLETE_QUEST_CONTEXT_DOODAD(quest, flag, doodadId)`, where the flag is `FUN_397d42d0` of the Ready
+component (act type 0x14 `QuestActConReportNpc` or 0x15 `QuestActConReportDoodad`). With the flag the
+directing window opens and its confirm button sends from the doodad id kept in `d.dialog`; without it the
+quest context script calls `TryCompleteQuestContext(2, quest, doodadId, "", selected)` immediately. The
+`CSCompleteQuestContext` request then carries that doodad object id (or 0x0dd for an in-progress
+let-it-done quest). The lane server does not send 0x14d yet, so the path is tested against the real World
+scripts from the decoded packet, not live.
 
 ## Natural gathering
 

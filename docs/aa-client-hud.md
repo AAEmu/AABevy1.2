@@ -543,9 +543,16 @@ The original (`FUN_397d6320` for let-it-done, `FUN_397d71b0` for over-done, call
 
 * let-it-done: the quest is not main (`detail_id != 2`), is flagged `let_it_done`, is not repeatable, is
   in progress, is not finished yet, and its objectives add up to at least half of what the step asks
-  (`DAT_3999c47c` 0.5; score quests use `score` instead);
-* over-done: every objective is at least 1.5 times its count (`DAT_3999c478` 1.5; score quests 1.5 times
-  their score).
+  (`DAT_3999c47c` 0.5; score quests use `score` instead). The native passes the player's level
+  (`player+0x4b4`, set by `FUN_390b4930`) as a third argument; the recovered `FUN_397d6320` body does not
+  read it;
+* over-done: a non-main let-it-done quest, every objective complete (`FUN_397d7070`) and each
+  `min(done, 2 * count)` at least `ceil(1.5 * count)` (`DAT_3999c478` 1.5; score quests 1.5 times their
+  score). It does not test the quest status, so a quest the server already marked ready still counts.
+
+The objectives use the native set: one slot per Progress component from that component's first act, and
+only `FUN_397d3440` / `FUN_397d7070`'s act types 0, 1, 2, 4, 5, 0x31 and 0x32 (`QuestActObjZoneKill` sums
+`count_pk + count_npc`); score quests use 0, 1, 2, 4, 5 and 0x2b. A 0 count is not promoted to 1.
 
 Handing one in from the quest journal (`who` 0 in `X2Quest:TryCompleteQuestContext`) now sends
 `CSTryQuestCompleteAsLetItDone` 0x0dd (`u32` quest, `bc` NPC, `i32` selected); the native picks it in
@@ -555,9 +562,12 @@ view (`FUN_3937b860` -> event 245, the doodad id as a string); no 1.2 script reg
 the `x2ui` quest scripts), so the client does not raise it.
 
 A doodad that hands a quest in (`SCDoodadCompleteQuest` 0x14d, handled by x2game `FUN_391dc050` ->
-`FUN_393773a0`) raises `COMPLETE_QUEST_CONTEXT_DOODAD(quest, true, doodadId)`; the original handler
-(`quest_context.alb`) calls `TryCompleteQuestContext(2, quest, doodadId, "", selected)`, and the request
-carries the doodad object id. `hud/dialog.rs` handles the packet and `InteractEvent::DoodadCompleteQuest`.
+`FUN_393773a0`) raises `COMPLETE_QUEST_CONTEXT_DOODAD(quest, flag, doodadId)`. The flag is
+`FUN_397d42d0` of the quest's Ready component (an act type 0x14 `QuestActConReportNpc` or 0x15
+`QuestActConReportDoodad`): true opens the directing dialog (`quest_context_directing.alb` proto 33) and
+its confirm button sends from `d.dialog`; false goes through `quest_context.alb` proto 19 to
+`TryCompleteQuestContext(2, quest, doodadId, "", selected)`. `hud/dialog.rs` sets `d.dialog.doodad` and
+clears the NPC before raising the event, and skips a second event while directing.
 
 ### Quest cinemas
 

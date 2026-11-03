@@ -1253,10 +1253,22 @@ pub fn handle_dialog(
         if let Event::Interaction(InteractEvent::DoodadCompleteQuest { doodad_obj_id, quest_id }) = e
             && let Some(rt) = rt.as_deref()
         {
-            info!("hud: doodad {doodad_obj_id} completes quest {quest_id}");
-            // `FUN_393773a0` raises event 241 with (quest, can-complete, doodad id as a string); the
-            // scripts' handler calls `TryCompleteQuestContext(2, quest, doodad, "", selected)`.
-            rt.fire_event("COMPLETE_QUEST_CONTEXT_DOODAD", (*quest_id, true, doodad_obj_id.to_string()));
+            // The event flag is `FUN_397d42d0` of the quest's Ready component: true when it has a
+            // report act (QuestActConReportNpc 0x14 / QuestActConReportDoodad 0x15), which opens the
+            // directing dialog; false completes directly through quest_context.alb.
+            let can_complete = bridge.0.borrow().game.get().is_some_and(|g| g.quests.ready_has_report(*quest_id));
+            let directing = {
+                let mut d = bridge.0.borrow_mut();
+                if !d.dialog.directing {
+                    d.dialog.doodad = Some(*doodad_obj_id);
+                    d.dialog.npc = None;
+                }
+                d.dialog.directing
+            };
+            if !directing {
+                info!("hud: doodad {doodad_obj_id} completes quest {quest_id}");
+                rt.fire_event("COMPLETE_QUEST_CONTEXT_DOODAD", (*quest_id, can_complete, doodad_obj_id.to_string()));
+            }
         }
     }
     let mut d = bridge.0.borrow_mut();
@@ -1294,7 +1306,7 @@ pub fn handle_dialog(
             }
             Req::Complete(quest_id, selected) => {
                 // `FUN_3937b860`: an in-progress let-it-done quest goes out as 0x0dd with the NPC
-                // object (0 from the journal); a ready quest as the ordinary 0x0da.
+                // object (0 from the journal); a ready quest as the ordinary 0x0d6.
                 if d.game.get().is_some_and(|g| world.quests.active_quest(quest_id).is_some_and(|q| g.quests.is_let_it_done(q))) {
                     send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id, obj_id: npc_obj_id, selected });
                     continue;
@@ -1746,6 +1758,7 @@ mod tests {
             .add_message::<NetCommand>()
             .init_resource::<Units>()
             .init_resource::<Quests>()
+            .init_resource::<Doodads>()
             .init_resource::<super::super::cinema::CinemaPlayer>()
             .insert_non_send(HudBridge(shared))
             .add_systems(Update, handle_dialog);
@@ -1789,6 +1802,7 @@ mod tests {
             .add_message::<NetCommand>()
             .init_resource::<Units>()
             .init_resource::<Quests>()
+            .init_resource::<Doodads>()
             .init_resource::<super::super::cinema::CinemaPlayer>()
             .insert_non_send(HudBridge(shared))
             .insert_non_send(rt)
@@ -1828,32 +1842,96 @@ mod tests {
             .unwrap();
     }
 
+    /// The real World-stage scripts (`quest_context.alb`, `quest_context_directing.alb`) over the
+    /// HUD API. Needs the pak and the game database.
+    fn world_runtime(shared: &Shared) -> Option<UiRuntime> {
+        if !aa_world::pak_available() {
+            return None;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let game = GameData::load(&path).ok()?;
+        {
+            let mut d = shared.borrow_mut();
+            d.game = super::super::SharedGameData::default();
+            d.game.0.set(game).ok()?;
+        }
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).ok()?;
+        rt.load_ui_texts(std::path::Path::new(&path)).ok()?;
+        super::super::api::install(&mut rt, shared).ok()?;
+        rt.run_stage(aa_ui::Stage::World);
+        super::super::api::enter_world(&rt, shared, &aa_net::state::Chat::default());
+        Some(rt)
+    }
+
     #[test]
     fn a_doodad_completion_fires_the_event_and_sends_the_doodad_id() {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
-        let rt = bare_runtime(&shared);
-        // What the original quest_context.alb handler does with COMPLETE_QUEST_CONTEXT_DOODAD.
-        rt.exec(
-            "probe",
-            r#"
-            local w = UIParent:CreateWidget('emptywidget', 'questDoodadProbe', 'UIParent')
-            w:RegisterEvent('COMPLETE_QUEST_CONTEXT_DOODAD')
-            w:SetHandler('OnEvent', function(_, _, q, canComplete, doodadId)
-                assert(canComplete == true)
-                X2Quest:TryCompleteQuestContext(2, q, doodadId, '', 0)
-            end)
-            "#,
-        )
-        .unwrap();
-        let mut app = handle_dialog_app(shared, rt);
+        let Some(rt) = world_runtime(&shared) else { return };
+        // Adventure quest 2563 is handed in at doodad 3020 (a QuestActConReportDoodad Ready act).
+        let (q, doodad) = {
+            let d = shared.borrow();
+            let g = d.game.get().expect("the World runtime loaded the game data");
+            let ready = g.quests.parts_of(2563, kind::READY).next().expect("quest 2563 has a Ready step");
+            assert!(g.quests.ready_has_report(2563), "2563's Ready act is a report act");
+            let q = Quest { template_id: 2563, status: status::READY, component_id: ready.id, ..Quest::default() };
+            let doodad = aa_net::model::Doodad {
+                obj_id: 0x201,
+                template_id: 3020,
+                owner_obj_id: 0,
+                parent_obj_id: 0,
+                attach_point: 0,
+                pos: aa_net::Pos::new(0.0, 0.0, 0.0),
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: 1.0,
+                has_loot_item: false,
+                func_group_id: 0,
+                owner_id: 0,
+                ucc_id: 0,
+                item_template_id: 0,
+                type2: 0,
+                time_left: 0,
+                plant_time: 0,
+                quest_glow: 0,
+                family: 0,
+                puzzle_group: 0,
+                owner_type: 0,
+                owner_db_id: 0,
+                data: 0,
+            };
+            (q, doodad)
+        };
+        shared.borrow_mut().dialog.quests = vec![q.clone()];
+        let mut app = handle_dialog_app(shared.clone(), rt);
+        app.insert_resource(Quests { active: vec![q], ..Quests::default() });
+        let mut doodads = Doodads::default();
+        doodads.by_id.insert(0x201, doodad);
+        app.insert_resource(doodads);
+
         app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::DoodadCompleteQuest {
             doodad_obj_id: 0x201,
-            quest_id: 330,
+            quest_id: 2563,
         })));
+        app.update();
+        assert!(shared.borrow().dialog.directing, "the report act opens the directing dialog");
+        assert!(sent_requests(&mut app).is_empty(), "the report act does not complete at once");
+
+        // End the directing window's fade so its fade-end callback runs TryCompleteQuestContext,
+        // then click the original window's confirm button (quest_context_directing.alb F16).
+        for _ in 0..2 {
+            aa_ui::lua::tick(&app.world().non_send::<UiRuntime>().lua, 10_000.0);
+        }
+        app.update();
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("local w = ADDON:GetContent(UIC_QUEST_CINEMA_WND); assert(w ~= nil); local b = w.journal.button; assert(b and b.OnClick ~= nil); b.OnClick(b, 'LeftButton')")
+            .set_name("@quest-doodad-confirm-test")
+            .exec()
+            .unwrap();
         app.update();
         assert_eq!(
             sent_requests(&mut app),
-            [Interact::QuestComplete { quest_id: 330, npc_obj_id: 0, doodad_obj_id: 0x201, selected: 0 }]
+            [Interact::QuestComplete { quest_id: 2563, npc_obj_id: 0, doodad_obj_id: 0x201, selected: 0 }]
         );
     }
 

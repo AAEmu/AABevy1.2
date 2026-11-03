@@ -357,10 +357,22 @@ X2Quest.UseQuestCamera = function(self) return useOption == QUEST_CAMERA_ON end
 X2Quest.SetUseQuestCamera = function(self, use)
   useOption = (use == true or (type(use) == "number" and use ~= 0)) and QUEST_CAMERA_ON or 0
 end
+-- The quest the directing window is showing: the script stores it on the window (`questType`), which
+-- is set both by TryCompleteQuestContext's lines and by the doodad hand-in's show path before the
+-- confirm button first reaches TryCompleteQuestContext.
+local function directingQuest()
+  if ADDON ~= nil and ADDON.GetContent ~= nil then
+    local w = ADDON:GetContent(UIC_QUEST_CINEMA_WND)
+    local q = w and tonumber(w.questType)
+    if q ~= nil and q ~= 0 then return q end
+  end
+  return play.qtype
+end
+
 X2Quest.DeclineDirectingQuest = function(self) end
-X2Quest.AcceptDirectingQuest = function(self) HUD.quest_accept(play.qtype) end
-X2Quest.ProgressTalkDirectingQuest = function(self) HUD.quest_talk(play.qtype, play.ctype, play.atype) end
-X2Quest.CompleteDirectingQuest = function(self, selected) HUD.quest_complete(play.qtype, selected or 0) end
+X2Quest.AcceptDirectingQuest = function(self) HUD.quest_accept(directingQuest()) end
+X2Quest.ProgressTalkDirectingQuest = function(self) HUD.quest_talk(directingQuest(), play.ctype, play.atype) end
+X2Quest.CompleteDirectingQuest = function(self, selected) HUD.quest_complete(directingQuest(), selected or 0) end
 
 -- In the dialog these play the step's lines; without it (a quest from an item, a sphere) they send at once.
 X2Quest.TryStartQuestContext = function(self, who, qtype, stype, doodadId, npcId)
