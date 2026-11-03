@@ -1221,6 +1221,35 @@ fn directing_cinema(d: &HudData, game: &GameData, quest: u32, kind: u8) -> Optio
 pub struct DialogWorld<'w> {
     units: Res<'w, Units>,
     quests: Res<'w, Quests>,
+    doodads: Res<'w, Doodads>,
+}
+
+/// `FUN_3937a130`: the original reports a refused quest request as `QUEST_ERROR_INFO(error, quest)`;
+/// the quest scripts turn the code into their localized line.
+fn quest_error(rt: Option<&UiRuntime>, quest: u32, error: u32) {
+    warn!("hud: quest {quest} refused with error {error}");
+    if let Some(rt) = rt {
+        rt.fire_event("QUEST_ERROR_INFO", (error, quest));
+    }
+}
+
+/// `FUN_393761f0`: a hand-in at an object needs that NPC or doodad in the interaction reach.
+fn hand_in_target_ok(d: &HudData, world: &DialogWorld, npc_obj_id: u32, doodad_obj_id: u32) -> bool {
+    if npc_obj_id != 0 {
+        let Some(unit) = world.units.get(npc_obj_id) else { return false };
+        let at = Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z);
+        if !npc_in_reach(d, d.pos, at, unit) {
+            return false;
+        }
+    }
+    if doodad_obj_id != 0 {
+        let Some(doodad) = world.doodads.by_id.get(&doodad_obj_id) else { return false };
+        let Some(at) = doodad_world(doodad, &world.units) else { return false };
+        if d.pos.distance(at) > INTERACT_REACH {
+            return false;
+        }
+    }
+    true
 }
 
 /// The scripts' requests become packets; the dialog hides the HUD and brings it back. A doodad's quest
@@ -1305,10 +1334,31 @@ pub fn handle_dialog(
                 }
             }
             Req::Complete(quest_id, selected) => {
-                // `FUN_3937b860`: an in-progress let-it-done quest goes out as 0x0dd with the NPC
-                // object (0 from the journal); a ready quest as the ordinary 0x0d6.
-                if d.game.get().is_some_and(|g| world.quests.active_quest(quest_id).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                // `FUN_3937b860`: a Reward step with a selective item needs the chosen reward; a
+                // ready quest needs its NPC/doodad in reach; an in-progress let-it-done quest goes
+                // out as 0x0dd with the NPC object; anything else is refused with error 0xc.
+                let Some(game) = d.game.get() else {
+                    quest_error(rt.as_deref(), quest_id, 2);
+                    continue;
+                };
+                let Some(q) = world.quests.active_quest(quest_id) else {
+                    quest_error(rt.as_deref(), quest_id, 2);
+                    continue;
+                };
+                if selected == 0 && game.quests.parts_of(quest_id, kind::REWARD).flat_map(|c| &c.acts).any(|a| a.ty == "SupplySelectiveItem") {
+                    quest_error(rt.as_deref(), quest_id, 10);
+                    continue;
+                }
+                if q.status == status::READY {
+                    if !hand_in_target_ok(&d, &world, npc_obj_id, doodad_obj_id) {
+                        quest_error(rt.as_deref(), quest_id, 2);
+                        continue;
+                    }
+                } else if game.quests.is_let_it_done(q) {
                     send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id, obj_id: npc_obj_id, selected });
+                    continue;
+                } else {
+                    quest_error(rt.as_deref(), quest_id, 12);
                     continue;
                 }
                 let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
@@ -1330,10 +1380,28 @@ pub fn handle_dialog(
                     Some(CompleteSource::Doodad(id)) => (0, id),
                     None => (0, 0),
                 };
-                if d.game.get().is_some_and(|g| world.quests.active_quest(quest).is_some_and(|q| g.quests.is_let_it_done(q))) {
+                let Some(game) = d.game.get() else {
+                    quest_error(rt.as_deref(), quest, 2);
+                    continue;
+                };
+                let Some(q) = world.quests.active_quest(quest) else {
+                    quest_error(rt.as_deref(), quest, 2);
+                    continue;
+                };
+                if selected == 0 && game.quests.parts_of(quest, kind::REWARD).flat_map(|c| &c.acts).any(|a| a.ty == "SupplySelectiveItem") {
+                    quest_error(rt.as_deref(), quest, 10);
+                    continue;
+                }
+                if q.status == status::READY {
+                    if !hand_in_target_ok(&d, &world, npc_obj_id, doodad_obj_id) {
+                        quest_error(rt.as_deref(), quest, 2);
+                        continue;
+                    }
+                    send(&mut net, Interact::QuestComplete { quest_id: quest, npc_obj_id, doodad_obj_id, selected });
+                } else if game.quests.is_let_it_done(q) {
                     send(&mut net, Interact::TryQuestCompleteAsLetItDone { quest_id: quest, obj_id: npc_obj_id, selected });
                 } else {
-                    send(&mut net, Interact::QuestComplete { quest_id: quest, npc_obj_id, doodad_obj_id, selected });
+                    quest_error(rt.as_deref(), quest, 12);
                 }
             }
             Req::CinemaPermission { quest, kind } => {
@@ -1933,6 +2001,122 @@ mod tests {
             sent_requests(&mut app),
             [Interact::QuestComplete { quest_id: 2563, npc_obj_id: 0, doodad_obj_id: 0x201, selected: 0 }]
         );
+    }
+
+    /// Loads the game database into `shared` (the bare runtime's `HUD.quest_info`, rewards and the
+    /// hand-in checks need it). Skips when the database is not there.
+    fn with_game(shared: &Shared) -> bool {
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = GameData::load(&path) else { return false };
+        let mut d = shared.borrow_mut();
+        d.game = super::super::SharedGameData::default();
+        d.game.0.set(game).is_ok()
+    }
+
+    fn error_probe(rt: &UiRuntime) {
+        rt.exec(
+            "probe",
+            r#"
+            ERRORS = {}
+            local w = UIParent:CreateWidget('emptywidget', 'questErrorProbe', 'UIParent')
+            w:RegisterEvent('QUEST_ERROR_INFO')
+            w:SetHandler('OnEvent', function(_, _, code, quest) ERRORS = { code, quest } end)
+            "#,
+        )
+        .unwrap();
+    }
+
+    fn assert_error(app: &App, expected: u32) {
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load(format!("assert(ERRORS[1] == {expected} and ERRORS[2] ~= nil, tostring(ERRORS[1]))"))
+            .set_name("@quest-error-test")
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn an_in_progress_quest_that_is_not_let_it_done_is_refused() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) { return; }
+        assert!(!shared.borrow().game.get().unwrap().quests.def(330).unwrap().let_it_done);
+        let rt = bare_runtime(&shared);
+        error_probe(&rt);
+        let mut app = handle_dialog_app(shared, rt);
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 330, status: status::PROGRESS, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("X2Quest:TryCompleteQuestContext(0, 330, '', '', 0)")
+            .exec()
+            .unwrap();
+        app.update();
+        assert!(sent_requests(&mut app).is_empty(), "error 0xc sends nothing");
+        assert_error(&app, 12);
+    }
+
+    #[test]
+    fn a_ready_hand_in_needs_its_doodad_in_reach() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) { return; }
+        let ready = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            g.quests.parts_of(2563, kind::READY).next().unwrap().id
+        };
+        let rt = bare_runtime(&shared);
+        error_probe(&rt);
+        let mut app = handle_dialog_app(shared, rt);
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 2563, status: status::READY, component_id: ready, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("X2Quest:TryCompleteQuestContext(2, 2563, '513', '', 0)")
+            .exec()
+            .unwrap();
+        app.update();
+        assert!(sent_requests(&mut app).is_empty(), "error 2 sends nothing");
+        assert_error(&app, 2);
+    }
+
+    #[test]
+    fn a_selective_reward_must_be_chosen() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) { return; }
+        assert!(
+            shared
+                .borrow()
+                .game
+                .get()
+                .unwrap()
+                .quests
+                .parts_of(13, kind::REWARD)
+                .flat_map(|c| &c.acts)
+                .any(|a| a.ty == "SupplySelectiveItem")
+        );
+        let rt = bare_runtime(&shared);
+        error_probe(&rt);
+        let mut app = handle_dialog_app(shared, rt);
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 13, status: status::READY, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.world()
+            .non_send::<UiRuntime>()
+            .lua
+            .load("X2Quest:TryCompleteQuestContext(0, 13, '', '', 0)")
+            .exec()
+            .unwrap();
+        app.update();
+        assert!(sent_requests(&mut app).is_empty(), "error 10 sends nothing");
+        assert_error(&app, 10);
     }
 
     #[test]

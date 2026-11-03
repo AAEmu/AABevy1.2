@@ -569,6 +569,11 @@ its confirm button sends from `d.dialog`; false goes through `quest_context.alb`
 `TryCompleteQuestContext(2, quest, doodadId, "", selected)`. `hud/dialog.rs` sets `d.dialog.doodad` and
 clears the NPC before raising the event, and skips a second event while directing.
 
+`FUN_3937b860` also refuses locally and raises `QUEST_ERROR_INFO(error, quest)` through the scripts
+(`FUN_3937a130`): error 2 when the ready quest's NPC/doodad is not in reach (`FUN_393761f0`), error 10 when
+a Reward step has `QuestActSupplySelectiveItem` and no reward is selected, and error 12 when the quest is
+in progress and not let-it-done. Nothing is sent for those.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it
