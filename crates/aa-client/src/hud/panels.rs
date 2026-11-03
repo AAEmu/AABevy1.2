@@ -236,15 +236,24 @@ fn action_skill_slot(
     skill: u32,
     start: Instant,
 ) -> SlotSnap {
+    let cooldown = cooldown_slot(action_skill_cooldown(game, skills, inventory, skill, Instant::now()), start);
+    skill_slot_of(game, skill, cooldown)
+}
+
+/// `(left, total)` ms of the cooldown an action-bar skill slot shows (before [`cooldown_slot`] puts it on the HUD clock): the
+/// converted skill's for a linked skill. The skill trace reads it every frame.
+pub(crate) fn action_skill_cooldown(
+    game: Option<&GameData>,
+    skills: Option<&Skills>,
+    inventory: Option<&Inventory>,
+    skill: u32,
+    now: Instant,
+) -> Option<(u32, u32)> {
     let effective = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
         crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => skill,
         _ => skill,
     };
-    let cooldown = game.and_then(|g| {
-        let skills = skills?;
-        cooldown_slot(super::cooldown::display_at(g, skills, effective, Instant::now()), start)
-    });
-    skill_slot_of(game, skill, cooldown)
+    super::cooldown::display_at(game?, skills?, effective, now)
 }
 
 pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
@@ -809,6 +818,7 @@ pub fn action_keys(
     if let Some(slot) = script.take_slot() {
         // `take_slot` is the 0-based display cell (`slotN` in the script is 1 based).
         let page = bridge.0.borrow().action_page;
+        crate::skilltrace::press(slot + 1);
         if let Some(slot) = ActionBar::display_slot_on(page, slot) {
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
@@ -844,6 +854,7 @@ pub fn action_keys(
         }
         if action == "action_bar_button" && (1..=58).contains(&slot) {
             let page = bridge.0.borrow().action_page;
+            crate::skilltrace::press(slot as usize);
             let Some(slot) = ActionBar::display_slot_on(page, slot as usize - 1) else { continue };
             let data = bridge.0.borrow();
             let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));

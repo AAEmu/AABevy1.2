@@ -22,6 +22,7 @@ use bevy::prelude::*;
 use crate::caf::Clip;
 use crate::pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
 use crate::rope::RopeSim;
+use crate::trace::{self, ClipStart};
 
 /// One clip being played.
 #[derive(Clone, Debug)]
@@ -162,6 +163,8 @@ pub struct Animator {
     base_idle: Option<Playing>,
     pose: Pose,
     scratch: Pose,
+    /// Clip starts not yet drained (only while [`crate::trace`] is on).
+    started: Vec<ClipStart>,
 }
 
 #[derive(Clone, Debug)]
@@ -199,7 +202,18 @@ impl Animator {
             base_idle: None,
             pose,
             scratch,
+            started: Vec::new(),
         }
+    }
+
+    /// Whether [`Animator::take_starts`] has anything (a read, so the animator is not marked changed).
+    pub fn has_starts(&self) -> bool {
+        !self.started.is_empty()
+    }
+
+    /// The clips started since the last call, oldest first. Always empty unless [`crate::trace::enable`] was called.
+    pub fn take_starts(&mut self) -> Vec<ClipStart> {
+        std::mem::take(&mut self.started)
     }
 
     /// Sets the gameplay framehold: stops clip/transition clocks and rejects new starts.
@@ -225,6 +239,9 @@ impl Animator {
             self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: fade });
         } else {
             self.fade = None;
+        }
+        if trace::enabled() {
+            self.started.push(ClipStart::of(&clip, trace::BASE, looping, fade));
         }
         let p = Playing::new(clip, looping);
         if looping {
@@ -252,6 +269,9 @@ impl Animator {
     pub fn play_layer(&mut self, mask: BoneMask, clip: BoundClip, looping: bool, fade: f32) {
         if !self.starts_enabled() {
             return;
+        }
+        if trace::enabled() {
+            self.started.push(ClipStart::of(&clip, trace::UPPER, looping, fade));
         }
         let weight = self.layer.as_ref().map_or(0.0, |l| l.weight);
         self.layer = Some(Layer { mask, playing: Playing::new(clip, looping), fade, age: weight * fade, stopping: None, weight });
@@ -288,6 +308,9 @@ impl Animator {
             let mut start_variant = None;
             if cur.finished() {
                 if let Some(next) = self.then.take() {
+                    if trace::enabled() {
+                        self.started.push(ClipStart::of(&next.clip, trace::BASE, next.looping, 0.2));
+                    }
                     self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.2 });
                     *cur = next;
                 }
@@ -301,6 +324,9 @@ impl Animator {
                 }
             }
             if let (Some(v), Some(idle)) = (start_variant, self.base_idle.clone()) {
+                if trace::enabled() {
+                    self.started.push(ClipStart::of(&v, trace::BASE, false, 0.25));
+                }
                 self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.25 });
                 *cur = Playing::new(v, false);
                 self.then = Some(Playing::new(idle.clip, true));
@@ -450,7 +476,7 @@ impl ClipLibrary {
                 b
             }
         };
-        Ok(BoundClip { source: Some(key.1.into()), clip, binding, options })
+        Ok(BoundClip { source: Some(key.1.into()), name: None, clip, binding, options })
     }
 }
 
@@ -461,6 +487,10 @@ mod clock_tests;
 #[cfg(test)]
 #[path = "animator/framehold_tests.rs"]
 mod framehold_tests;
+
+#[cfg(test)]
+#[path = "animator/trace_tests.rs"]
+mod trace_tests;
 
 #[cfg(test)]
 mod tests {

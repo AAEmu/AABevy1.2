@@ -641,6 +641,11 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
         Cmd::Enter => None,
         Cmd::Echo(t) => {
             say(r, t);
+            crate::skilltrace::mark(t);
+            None
+        }
+        Cmd::Trace(t) => {
+            crate::skilltrace::mark(t);
             None
         }
         Cmd::Mark => {

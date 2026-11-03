@@ -165,9 +165,10 @@ struct FaceTarget {
 /// A particle effect of a skill in the world. It rides its bone as a child of it; only a hit effect with a fixed orientation is
 /// moved by hand (`follow`), and every effect has a time to live.
 #[derive(Component)]
-struct Fx {
-    /// The unit and the bone entity a fixed orientation effect follows, with the offset in the unit's frame.
-    follow: Option<(Entity, Entity, Vec3)>,
+pub(crate) struct Fx {
+    /// The unit and the bone entity a fixed orientation effect follows, with the offset in the unit's frame (the skill trace
+    /// names the bone).
+    pub(crate) follow: Option<(Entity, Entity, Vec3)>,
     /// Keep the orientation it was spawned with (a hit effect turned towards the attacker).
     fixed_rotation: bool,
     /// Seconds it may still live: a safety net for effects that never finish.

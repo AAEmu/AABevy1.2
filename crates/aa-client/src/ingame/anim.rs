@@ -64,8 +64,12 @@ fn root_reach(rig: &Rig, clip: &BoundClip) -> f32 {
 pub fn bind_clip_with(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str, lock_root: bool) -> Option<BoundClip> {
     let entry = cal.animation(name)?;
     let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: lock_root };
-    let bound = clips.bound(rig, &entry.path, options).ok()?;
+    let mut bound = clips.bound(rig, &entry.path, options).ok()?;
     remember_file(&bound, &entry.path);
+    if aa_anim::trace::enabled() {
+        // the skill trace names a clip started by the `.cal` name it was asked for
+        bound.name = Some(name.to_ascii_lowercase().into());
+    }
     Some(bound)
 }
 

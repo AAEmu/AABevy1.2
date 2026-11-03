@@ -90,6 +90,7 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `mark` | the start point of `moved` |
 | `use TEMPLATE` | request the bag item's ordinary skill (`Request::UseBag`); fails when the bag has none. Equipment and modal powder targeting require the bag's `X2Bag:HandleUse(slot)` path instead |
 | `units [TEMPLATE...]`, `me`, `bag`, `quests`, `echo TEXT` | print state |
+| `trace TEXT` | write a `mark` row (`label` = TEXT, `skill_id` too for a `skill:<id>:...` label) into the skill trace (`AA_SKILL_TRACE=<file.jsonl>`, `docs/aa-client-combat.md`, "Skill trace") and do nothing else. `echo TEXT` writes the same row as it prints. With the trace off both are as before. `cast slot N` / `key slotN` become `press` rows when the HUD takes the key |
 | `quit` / `quit now` | log out and wait for the server to close the connection (45 s) / drop the connection; ends the run |
 
 Conditions: `in_world`, `target`, `target_name TEXT`, `target_template N`, `target_alive`, `target_dead`, `target_hurt`

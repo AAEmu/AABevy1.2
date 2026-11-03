@@ -43,6 +43,12 @@ pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     if game.skills.get(&id).is_none_or(|info| info.ignore_gcd || info.auto_attack) {
         return (0, 0);
     }
+    global_at(game, skills, now)
+}
+
+/// The global cooldown (left, total) itself, for every skill that waits for it ([`gcd_at`] decides which). The skill trace's
+/// `gcd` row.
+pub(crate) fn global_at(game: &GameData, skills: &Skills, now: Instant) -> (u32, u32) {
     let mut best = (0, 0);
     if let Some((at, last)) = skills.last_cast.zip(game.skills.get(&skills.last_cast_skill)) {
         let total = last.gcd_ms;

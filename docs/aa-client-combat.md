@@ -710,6 +710,38 @@ and a live target (a dead one answers code 4).
   (no capture of Protective Wings), and doodads that other players or npcs spawn (their `DoodadsSpawned` clouts) are not drawn:
   open.
 
+## Skill trace (`AA_SKILL_TRACE`, `skilltrace/`)
+
+`AA_SKILL_TRACE=<path.jsonl>` makes the client write one JSON object per line describing what it does during skills (the file is
+replaced at start, rows are flushed every 250 ms and at exit). The format is the `skillparity/v1` trace of
+`tools/skillparity/README.md` (the original client writes the same rows; a differ compares the two skill by skill): every row has
+`src:"bevy"`, `wall_us` (Unix microseconds, `SystemTime::now`), `frame` (Bevy `FrameCount`) and `kind`; names are lower case with `/`
+separators and no `game/` prefix, positions are game coordinates (Z up, X east, Y north; `aa_world::bevy_to_cry`), yaw is degrees
+with 0 = north and counter-clockwise (west is +90), in (-180, 180]. A field the client cannot know is left out. Unset, the plugin
+adds no system and the hooks cost one relaxed atomic load. Rows of one frame are not sorted by time across kinds (`anim` and `sound`
+carry the moment they were asked for, the others the moment they were noticed): sort by `wall_us`. Pass `--require-wall-clock` for a
+comparison run, as for any timing measurement here.
+
+| row | where it comes from | notes |
+|---|---|---|
+| `anim` | `aa_anim::Animator` records every start (`play`, `play_once_then`, `play_layer`, and the clips it switches to itself: the return clip of a one-shot, a random idle variant) while `aa_anim::trace` is on; `skilltrace::world::drain_anims` writes them after the animation pass | `inst` = entity bits, `role` = `player` / `target` (the unit `Target` names) / `other`; `clip` = the `.cal` name, `file` = `BoundClip::source`; `layer` 0 base / 1 the bone-masked layer; `speed` = `Animator::speed` when the row is written (1 for the layer, which runs in real time); `blend` = the fade seconds; units only (`LocalPlayer`, `RemoteUnit`), not previews or props |
+| `fx` | an `aa_fx::Effect` / `ChrEffect` that appears (`Added`), whoever spawned it: combat's `start_items`, `clip_effects`, projectiles, arrival and ground effects, buff and vehicle effects | `name` = `library.group.effect` (a `ChrEffect`: its `.chr` path), `phase:"spawn"`, `pos` where the effect is when it starts, `inst` / `role` the unit it is on (`Effect::body`, else the nearest ancestor with an animator), `bone` when it hangs on a bone of that unit or follows one (`Fx::follow`), `scale`. Placed world effects (torches, fires) and the invisible effects of the pipeline warm-up are not traced |
+| `sound` | `aa_audio::Engine::play_with` (and so `play_at`, `play_2d`, and the `Sound` component's start) records every event it is asked for while `aa_audio::trace` is on | `name` = the event path as asked, `phase:"play"`, `pos` for a positional sound. Every sound, UI and ambience included; a muted run traces the same sounds. PCM voices (the player's music score) are not |
+| `net` | `NetCommand` and `NetEvent` messages (`skilltrace/net.rs`) | `dir` out / in, `op` = the protocol name from `aa_net::opcodes` without `Packet` (`CSStartSkill`, `CSStopCasting`, `CSChangeTarget`, `SCSkillStarted`, `SCSkillFired`, `SCSkillEnded`, `SCSkillStopped`, `SCCastingStopped`, `SCPlotEvent`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCBuffCreated` / `Removed` / `Updated`, `SCSkillCooldownReset`, `SCCooldowns`, `SCTargetChanged`, `SCUnitDeath`, `SCCombatEngaged` / `Cleared` / `FirstHit`, `SCTeleportUnit`); only these. `skill_id`, `tl`, `obj` (the caster of a skill packet, the unit hit, healed, buffed or targeted otherwise) and `fields` (the other small integers: `target`, `cast_ms`, `delay_ms`, `damage`, `hit_type` ...). The row is written in `Update` of the frame that passed the message on, a frame at most after the packet; the server's own log has the exact times |
+| `castbar` | `hud/skill_trace.rs`: `Casts::trace_view`, the state `HUD.casting_info` / `X2Unit:UnitCastingInfo` read | `unit` `player` / `target`, `state` `start` / `stop` (a cast that becomes a channel is a `stop` and a `start`), `name`, `total_ms`, `elapsed_ms` (a channel's bar counts down: the time that has run), `channel` |
+| `cooldown` | `hud/skill_trace.rs`: `panels::action_skill_cooldown` (the number the action bar slot shows, linked skills converted, before the HUD quantises it to a quarter second) and `cooldown::global_at` | `slot` 1..12 (display cell of the current page; skill slots only, not items), `remain_ms`, `total_ms`, `gcd:true` for the global cooldown pair (no `slot`). A row when a cooldown starts or is restarted (`remain_ms` the time left) and one with `remain_ms:0` when it ends |
+| `press` | `hud::panels::action_keys` | `slot` 1..12 and the default key of it (`"1"`..`"0"`, `"-"`, `"="`), written when the HUD takes the press: a real key, the script runner's `cast slot N` and `key slotN`. A click on the bar is not a press |
+| `pos` | `GlobalTransform` of the player and its target | `unit`, `x`, `y`, `z`, `yaw`; a row at the start, when the unit moves more than 1 cm or turns more than 0.1 degree, and when the target is another unit |
+| `frame` | `Time<Real>` | `dt_ms` of every frame |
+| `mark` | the script runner: `trace TEXT` and `echo TEXT` (`docs/aa-client-script.md`) | `label` = the text, `skill_id` for a `skill:<id>:...` label |
+
+The opt-in records live in aa-anim (`trace.rs`: clip starts, `BoundClip::name`) and aa-audio (`trace.rs`: sounds); see `docs/aa-anim.md`
+and `docs/aa-audio.md`. Not covered: the `.cal` name of a clip bound by pak path (creature, seating, vehicle and glide clips have `file`
+only; the clips bound through `ingame::anim::bind_clip`, which is what locomotion, combat, buffs and the hit reactions use, carry
+`clip`), clicks on the action bar, item cooldowns, and the original's `flags`. The row format, the names and the coordinates are unit
+tested (`cargo test -p aa-client --bin aa-client skilltrace`); the trace was written without a server, so the rows of a real fight are
+still to be looked at.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,

@@ -50,6 +50,7 @@ mod cinema_flow;
 pub(crate) mod chat;
 mod combat;
 mod cooldown;
+pub(crate) mod skill_trace;
 mod crafting;
 mod crime;
 pub(crate) mod data;

@@ -109,6 +109,8 @@ pub enum Cmd {
     /// The script starts once the character is in the world; this line only documents it.
     Enter,
     Echo(String),
+    /// A label in the skill trace (`AA_SKILL_TRACE`), nothing else.
+    Trace(String),
     Mark,
     /// Walk to a position (game coordinates).
     WalkTo(f32, f32),
@@ -271,6 +273,7 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "wait" | "pump" | "sleep" => Cmd::Wait(num(a.first(), "seconds")?),
         "enter" | "login" => Cmd::Enter,
         "echo" => Cmd::Echo(rest(text, 1)),
+        "trace" => Cmd::Trace(rest(text, 1)),
         "mark" => Cmd::Mark,
         "walk" | "move" | "goto" => match first.as_deref() {
             None => return Err("walk needs a distance, 'X Y' or 'to <unit>'".into()),
@@ -455,5 +458,6 @@ echo a  b#c
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].cmd, Cmd::Lua("print(#t ..  'a  b')".into()));
         assert_eq!(lines[1].cmd, Cmd::Echo("a  b#c".into()));
+        assert_eq!(parse_line("trace  skill:14376:start # why").unwrap(), Some(Cmd::Trace("skill:14376:start".into())));
     }
 }

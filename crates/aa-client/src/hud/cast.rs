@@ -43,6 +43,15 @@ impl Cast {
     }
 }
 
+/// One unit's bar as `X2Unit:UnitCastingInfo` shows it ([`Casts::trace_view`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CastView {
+    pub name: String,
+    pub total_ms: u32,
+    pub elapsed_ms: u32,
+    pub channel: bool,
+}
+
 /// The casts the bars ask about, by caster object id, and who "player" and "target" are.
 #[derive(Debug, Default)]
 pub struct Casts {
@@ -62,6 +71,17 @@ impl Casts {
         let cast = self.casts.get(&id).filter(|_| id != 0)?;
         let (total, current) = cast.times();
         (total > 0).then(|| (cast.name.clone(), total, current))
+    }
+
+    /// What `X2Unit:UnitCastingInfo` answers for `"player"` / `"target"`, for the skill trace: the bar's name and length, the
+    /// milliseconds it has run, and whether it is a channel (the bar empties).
+    pub(crate) fn trace_view(&self, unit: &str) -> Option<CastView> {
+        let (name, total_ms, current) = self.info(unit)?;
+        let id = if unit == "player" { self.own } else { self.target };
+        let channel = self.casts.get(&id).is_some_and(|c| c.fired.is_some() && c.channel_ms > 0);
+        // a channel's bar counts down: the time that has run is what is gone from it
+        let elapsed_ms = if channel { total_ms.saturating_sub(current) } else { current };
+        Some(CastView { name, total_ms, elapsed_ms, channel })
     }
 
     /// The token the bars know a caster by.
