@@ -182,7 +182,10 @@ fn runtime_entries_use_seconds_the_common_farm_and_the_crop_zone() {
     assert_eq!(growing.doodad_name, "Parsley Doodad");
     assert_eq!(growing.current_phase_name, "Growing");
     assert_eq!(growing.item_type, 13725);
-    assert_eq!(growing.left_growth, 5, "5000 ms + 1000 ms * 0.7, in seconds");
+    assert_eq!(
+        growing.left_growth, 5,
+        "5000 ms + 1000 ms * 0.7, in seconds"
+    );
     assert_eq!(growing.left_protect, 86_390);
     assert_eq!(growing.location, "Gweonid Forest");
     assert_eq!(growing.vpos, (100.0, 200.0));
@@ -196,16 +199,15 @@ fn runtime_entries_use_seconds_the_common_farm_and_the_crop_zone() {
     assert_eq!(growth_remaining_ms(&game, 77, 5000, true), 5700);
 
     // Unknown common farms, farm groups, doodads and func groups are skipped.
-    assert!(build_runtime(
-        Some(&game),
-        None,
-        &list(vec![
-            entry(99, 77, 5000, now),
-            entry(10, 9999, 5000, now),
-        ]),
-        now
-    )
-    .is_empty());
+    assert!(
+        build_runtime(
+            Some(&game),
+            None,
+            &list(vec![entry(99, 77, 5000, now), entry(10, 9999, 5000, now),]),
+            now
+        )
+        .is_empty()
+    );
 }
 
 #[test]
@@ -523,7 +525,10 @@ fn the_original_my_farm_list_shows_growing_and_grown_crops() {
     if !load_commonfarm(&rt) {
         return;
     }
-    rt.lua.globals().set("EXPECTED_ZONE", expected_zone).unwrap();
+    rt.lua
+        .globals()
+        .set("EXPECTED_ZONE", expected_zone)
+        .unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_non_send(rt)

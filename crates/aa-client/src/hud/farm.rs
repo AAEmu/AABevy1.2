@@ -192,9 +192,7 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let s = state.clone();
     x2.set(
         "GetRuntimeCommonFarmDoodadsInfo",
-        lua.create_function(move |lua, (_self, kind): (Value, u32)| {
-            runtime_info(lua, &s, kind)
-        })?,
+        lua.create_function(move |lua, (_self, kind): (Value, u32)| runtime_info(lua, &s, kind))?,
     )?;
 
     let s = state.clone();
@@ -203,10 +201,7 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |_, (_self, kind): (Value, u32)| {
             let v = s.0.borrow();
             Ok(v.list.as_ref().map_or(0, |r| {
-                r.entries
-                    .iter()
-                    .filter(|e| e.farm_group_id == kind)
-                    .count()
+                r.entries.iter().filter(|e| e.farm_group_id == kind).count()
             }) as i64)
         })?,
     )?;
@@ -318,11 +313,10 @@ fn build_runtime(
             .map(|i| i.named.name.clone())
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| doodad_name.to_string());
-        let zone_key = world
-            .and_then(|w| {
-                w.zone_at(Vec3::new(entry.pos.x, entry.pos.y, entry.pos.z))
-                    .map(u32::from)
-            });
+        let zone_key = world.and_then(|w| {
+            w.zone_at(Vec3::new(entry.pos.x, entry.pos.y, entry.pos.z))
+                .map(u32::from)
+        });
         let location = zone_key
             .and_then(|key| game.zone(key))
             .map(|(_, zone, _)| zone.text.clone())
@@ -334,12 +328,8 @@ fn build_runtime(
                 .and_then(|key| game.zone_climate.get(&key))
                 .and_then(|id| game.zone_climate_elems.get(id))
                 .is_some_and(|ids| ids.contains(&climate));
-        let growth_ms = growth_remaining_ms(
-            game,
-            entry.func_group_id,
-            entry.time_left,
-            climate_flag,
-        );
+        let growth_ms =
+            growth_remaining_ms(game, entry.func_group_id, entry.time_left, climate_flag);
         let guard_secs = (f64::from(common.guard_time) * 0.001) as i64;
         let left_protect = (guard_secs - (now - entry.plant_time)).max(0);
         out.push(RuntimeCrop {
