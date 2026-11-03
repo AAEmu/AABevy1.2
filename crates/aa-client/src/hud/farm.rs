@@ -216,14 +216,24 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             // `COMMON_FARM_UPDATED`; a request within 2 s only refreshes the window.
             if b.borrow().snapshot.instance_id != 0 {
                 s.0.borrow_mut().list = None;
-                let key = "cannot_request_commonfarm_info_in_instant_zone";
-                let text = super::alerts::localized_lua(lua, "ERROR_MSG", key)
-                    .unwrap_or_else(|| key.to_string());
-                aa_ui::lua::queue_ui_event(
-                    lua,
-                    "SYSMSG",
-                    vec![Value::String(lua.create_string(&text)?)],
-                );
+                // `FUN_39428370(0x242)`: `announce_error`'s path, with its CHAT_FAILED fallback.
+                let code: i16 = 0x242;
+                let name = super::alerts::error_name(code).unwrap_or("UNKNOWN");
+                match super::alerts::localized_lua(lua, "ERROR_MSG", name) {
+                    Some(text) => aa_ui::lua::queue_ui_event(
+                        lua,
+                        "SYSMSG",
+                        vec![Value::String(lua.create_string(&text)?)],
+                    ),
+                    None => aa_ui::lua::queue_ui_event(
+                        lua,
+                        "CHAT_FAILED",
+                        vec![
+                            Value::String(lua.create_string(format!("Server error {code}"))?),
+                            Value::String(lua.create_string("")?),
+                        ],
+                    ),
+                }
                 aa_ui::lua::queue_ui_event(lua, "COMMON_FARM_UPDATED", Vec::new());
                 return Ok(());
             }
@@ -300,10 +310,10 @@ fn build_runtime(
         let Some(group) = game.housing.farm_groups.get(&common.farm_group_id) else {
             continue;
         };
-        let Some(doodad_name) = game.doodad.name(entry.template_id) else {
+        let Some(doodad_name) = game.housing.farm_doodad_name(entry.template_id) else {
             continue;
         };
-        if !game.doodad.has_phase(entry.func_group_id) {
+        if !game.housing.farm_has_phase(entry.func_group_id) {
             continue;
         }
         let item = game.housing.farm_doodad_item(group.id, entry.template_id);
@@ -322,12 +332,7 @@ fn build_runtime(
             .map(|(_, zone, _)| zone.text.clone())
             .filter(|text| !text.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
-        let climate = game.doodad.climate_of(entry.template_id);
-        let climate_flag = climate != 0
-            && zone_key
-                .and_then(|key| game.zone_climate.get(&key))
-                .and_then(|id| game.zone_climate_elems.get(id))
-                .is_some_and(|ids| ids.contains(&climate));
+        let climate_flag = climate_reduces_growth(game, zone_key, entry.template_id);
         let growth_ms =
             growth_remaining_ms(game, entry.func_group_id, entry.time_left, climate_flag);
         let guard_secs = (common.guard_time as f32 * 0.001) as i64;
@@ -337,8 +342,8 @@ fn build_runtime(
             farm_type: common.id,
             name,
             current_phase_name: game
-                .doodad
-                .phase_name(entry.func_group_id)
+                .housing
+                .farm_phase_name(entry.func_group_id)
                 .unwrap_or_default()
                 .to_string(),
             doodad_name: doodad_name.to_string(),
@@ -349,12 +354,24 @@ fn build_runtime(
             vpos: (entry.pos.x, entry.pos.y),
             // `FUN_390324c0`: `growUp = FUN_3983c170(func_group) == DAT_39adb320`.
             grow_up: game
-                .doodad
-                .growth_step(entry.func_group_id)
+                .housing
+                .farm_growth_step(entry.func_group_id)
                 .is_none_or(|step| step.next_phase == 0),
         });
     }
     out
+}
+
+/// `FUN_39032470`: climate 1 ("all") always scales growth; otherwise the doodad's climate must be
+/// in the zone's `zone_climate_elems` list.
+fn climate_reduces_growth(game: &GameData, zone_key: Option<u32>, template_id: u32) -> bool {
+    let climate = game.housing.farm_climate(template_id);
+    climate == 1
+        || (climate != 0
+            && zone_key
+                .and_then(|key| game.zone_climate.get(&key))
+                .and_then(|id| game.zone_climate_elems.get(id))
+                .is_some_and(|ids| ids.contains(&climate)))
 }
 
 /// `FUN_3983c1b0`: the packet's remaining growth plus the rounded times of the phases after it
@@ -369,12 +386,12 @@ fn growth_remaining_ms(
     let scale = if climate_flag { 0.7f32 } else { 1.0 };
     let mut budget = GROWTH_PHASE_LIMIT;
     let mut next = game
-        .doodad
-        .growth_step(func_group_id)
+        .housing
+        .farm_growth_step(func_group_id)
         .map_or(0, |step| step.next_phase);
     let mut sum = 0.0f64;
     while budget > 0 && next != 0 {
-        let Some(step) = game.doodad.growth_step(next) else {
+        let Some(step) = game.housing.farm_growth_step(next) else {
             break;
         };
         budget -= 1;

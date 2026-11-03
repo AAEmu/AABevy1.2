@@ -5,9 +5,8 @@ use aa_net::Pos;
 use aa_net::farm::CommonFarmEntry;
 
 use crate::hud::api::HudBridge;
-use crate::hud::data::housing::{CommonFarm, FarmGroup, FarmGroupDoodad, Tables};
+use crate::hud::data::housing::{CommonFarm, FarmGroup, FarmGroupDoodad, FarmGrowthStep, Tables};
 use crate::hud::data::{ItemInfo, Named, ZoneGroup};
-use crate::hud::doodad::GrowthStep;
 
 fn game() -> GameData {
     let mut game = GameData::default();
@@ -71,25 +70,29 @@ fn game() -> GameData {
             ..Default::default()
         },
     );
-    game.doodad.set_name_for_test(380, "Parsley Doodad");
-    game.doodad.phase_names.insert(77, "Growing".into());
-    game.doodad.phase_names.insert(78, "Next".into());
-    game.doodad.phase_names.insert(79, "Ripe".into());
-    game.doodad.growth.insert(
+    game.housing
+        .farm_doodad_names
+        .insert(380, "Parsley Doodad".into());
+    game.housing.farm_phase_names.insert(77, "Growing".into());
+    game.housing.farm_phase_names.insert(78, "Next".into());
+    game.housing.farm_phase_names.insert(79, "Ripe".into());
+    game.housing.farm_growth_steps.insert(
         77,
-        GrowthStep {
+        FarmGrowthStep {
             delay_ms: 5000,
             next_phase: 78,
         },
     );
-    game.doodad.growth.insert(
+    game.housing.farm_growth_steps.insert(
         78,
-        GrowthStep {
+        FarmGrowthStep {
             delay_ms: 1000,
             next_phase: 0,
         },
     );
-    game.doodad.climate.insert(380, 3);
+    game.housing.farm_climates.insert(380, 3);
+    // `DAT_39ac318c` = 1 ("all"): this template always scales.
+    game.housing.farm_climates.insert(381, 1);
     game.zones.insert(129, (5, 0));
     game.zone_groups.insert(
         5,
@@ -197,6 +200,12 @@ fn runtime_entries_use_seconds_the_common_farm_and_the_crop_zone() {
     // The climate flag scales the following phases: 1.0 normally, 0.7 with the zone climate.
     assert_eq!(growth_remaining_ms(&game, 77, 5000, false), 6000);
     assert_eq!(growth_remaining_ms(&game, 77, 5000, true), 5700);
+    assert!(climate_reduces_growth(&game, Some(129), 380), "zone list");
+    assert!(
+        climate_reduces_growth(&game, None, 381),
+        "climate 1 is all-zones"
+    );
+    assert!(!climate_reduces_growth(&game, None, 380), "3 is not all");
 
     // Unknown common farms, farm groups, doodads and func groups are skipped.
     assert!(
@@ -321,7 +330,14 @@ fn show_raises_open_common_farm_info_and_walking_away_ends_it() {
 
 #[test]
 fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
+    let Some(db) = std::env::var("AA_DB")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+    else {
+        return;
+    };
     let (rt, bridge) = setup(game());
+    rt.load_ui_texts(std::path::Path::new(&db)).unwrap();
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_non_send(rt)
@@ -334,13 +350,13 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .lua
         .load(
             r#"
-            UPDATED, MESSAGES = 0, 0
+            UPDATED, MESSAGES, MESSAGE = 0, 0, nil
             local updated = UIParent:CreateWidget('emptywidget', 'farmRequestUpdated', 'UIParent')
             updated:RegisterEvent('COMMON_FARM_UPDATED')
             updated:SetHandler('OnEvent', function() UPDATED = UPDATED + 1 end)
             local messages = UIParent:CreateWidget('emptywidget', 'farmRequestMessage', 'UIParent')
             messages:RegisterEvent('SYSMSG')
-            messages:SetHandler('OnEvent', function() MESSAGES = MESSAGES + 1 end)
+            messages:SetHandler('OnEvent', function(self, event, text) MESSAGES = MESSAGES + 1; MESSAGE = text end)
         "#,
         )
         .exec()
@@ -415,6 +431,12 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
     aa_ui::lua::tick(&rt.lua, 16.0);
     assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 2);
     assert_eq!(rt.lua.load("return MESSAGES").eval::<i64>().unwrap(), 1);
+    rt.lua
+        .load(
+            "local want = X2Locale:LocalizeUiText(ERROR_MSG, 'CANNOT_REQUEST_COMMONFARM_INFO_IN_INSTANT_ZONE') assert(MESSAGE == want) assert(MESSAGE ~= 'CANNOT_REQUEST_COMMONFARM_INFO_IN_INSTANT_ZONE')",
+        )
+        .exec()
+        .unwrap();
 }
 
 fn load_commonfarm(rt: &UiRuntime) -> bool {

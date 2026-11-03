@@ -111,14 +111,6 @@ impl Navi {
     }
 }
 
-/// The first `DoodadFuncGrowth` of a phase: `doodad_func_growths.delay` and `next_phase`
-/// (`FUN_3983c170` / `FUN_3983c1b0`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct GrowthStep {
-    pub delay_ms: u32,
-    pub next_phase: u32,
-}
-
 /// What a doodad phase can be used for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Uses {
@@ -148,12 +140,6 @@ pub(super) struct Tables {
     zone_messages: HashSet<u32>,
     /// Attachment funcs require a known-free doodad bond and the separate mount gate.
     attachment_skills: HashSet<(u32, u32)>,
-    /// `doodad_func_groups.id` -> first `DoodadFuncGrowth` (`doodad_phase_funcs` row order).
-    pub(super) growth: HashMap<u32, GrowthStep>,
-    /// `doodad_almighties.id` -> `climate_id` (`FUN_39032470`).
-    pub(super) climate: HashMap<u32, u32>,
-    /// `doodad_func_groups.id` -> localized `name` (the runtime entry's `currentPhaseName`).
-    pub(super) phase_names: HashMap<u32, String>,
 }
 
 impl Tables {
@@ -175,7 +161,7 @@ impl Tables {
                 &detail,
             );
         }
-        let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius, climate_id FROM doodad_almighties")?;
+        let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
             let id = super::data::any_int(r, 0)? as u32;
@@ -189,7 +175,6 @@ impl Tables {
                 t.decals.insert(id, any_float(r, 4)?);
             }
             t.radii.insert(id, (any_float(r, 5)? * 0.001).max(0.1));
-            t.climate.insert(id, super::data::any_int(r, 6)?.max(0) as u32);
         }
         let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_almighties' AND tbl_column_name = 'name' AND en_us <> ''")?;
         let mut rows = q.query([])?;
@@ -220,38 +205,6 @@ impl Tables {
                 t.zone_messages.insert(id);
             }
             t.messages.insert(id, text);
-        }
-        let mut localized = HashMap::new();
-        let mut q = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'doodad_func_groups' AND tbl_column_name = 'name' AND en_us <> ''")?;
-        let mut rows = q.query([])?;
-        while let Some(r) = rows.next()? {
-            localized.insert(super::data::any_int(r, 0)? as u32, r.get::<_, String>(1)?);
-        }
-        let mut q = conn.prepare("SELECT id, name FROM doodad_func_groups")?;
-        let mut rows = q.query([])?;
-        while let Some(r) = rows.next()? {
-            let id = super::data::any_int(r, 0)? as u32;
-            let raw = r.get::<_, Option<String>>(1)?.unwrap_or_default();
-            let text = localized
-                .get(&id)
-                .map(|s| cstr(s).to_owned())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| cstr(&raw).to_owned());
-            t.phase_names.insert(id, text);
-        }
-        // `FUN_3983c1b0` takes the first `DoodadFuncGrowth` of each phase in row order.
-        let mut q = conn.prepare(
-            "SELECT p.doodad_func_group_id, g.delay, g.next_phase
-             FROM doodad_phase_funcs p JOIN doodad_func_growths g ON g.id = p.actual_func_id
-             WHERE p.actual_func_type = 'DoodadFuncGrowth' ORDER BY p.id",
-        )?;
-        let mut rows = q.query([])?;
-        while let Some(r) = rows.next()? {
-            let group = super::data::any_int(r, 0)? as u32;
-            t.growth.entry(group).or_insert(GrowthStep {
-                delay_ms: super::data::any_int(r, 1)?.max(0) as u32,
-                next_phase: super::data::any_int(r, 2)?.max(0) as u32,
-            });
         }
         Ok(t)
     }
@@ -343,31 +296,6 @@ impl Tables {
 
     pub(super) fn name(&self, template_id: u32) -> Option<&str> {
         self.names.get(&template_id).map(String::as_str)
-    }
-
-    /// The first `DoodadFuncGrowth` of a phase (`FUN_3983c170`).
-    pub(super) fn growth_step(&self, func_group_id: u32) -> Option<GrowthStep> {
-        self.growth.get(&func_group_id).copied()
-    }
-
-    /// `doodad_almighties.climate_id` of a template (`FUN_39032470`).
-    pub(super) fn climate_of(&self, template_id: u32) -> u32 {
-        self.climate.get(&template_id).copied().unwrap_or(0)
-    }
-
-    /// The localized `doodad_func_groups.name` of a phase (`FUN_390324c0` +0x14).
-    pub(super) fn phase_name(&self, func_group_id: u32) -> Option<&str> {
-        self.phase_names.get(&func_group_id).map(String::as_str)
-    }
-
-    /// Is `func_group_id` a loaded `doodad_func_groups` row?
-    pub(super) fn has_phase(&self, func_group_id: u32) -> bool {
-        self.phase_names.contains_key(&func_group_id)
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_name_for_test(&mut self, template_id: u32, name: &str) {
-        self.names.insert(template_id, name.to_string());
     }
 }
 

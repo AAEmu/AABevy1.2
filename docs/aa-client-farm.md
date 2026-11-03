@@ -40,7 +40,8 @@ Runtime entries (`FUN_390324C0` / `FUN_39035620`) carry `name`, `currentPhaseNam
 * `leftGrowthTime` and `leftProtectTime` are **seconds**. Growth is `time_left` plus the rounded
   delays of the following `DoodadFuncGrowth` phases (`FUN_3983c1b0` / `FUN_3983c0e0`), scaled by
   the zone-climate flag (`FUN_39032470`): 1.0 normally, 0.7 when the doodad's
-  `doodad_almighties.climate_id` is in the zone's climate list. Protect is
+  `doodad_almighties.climate_id` is 1 (`DAT_39ac318c`, "all") or is in the zone's climate list.
+  Protect is
   `common_farms.guard_time * 0.001` minus the seconds since `plant_time`, floored at 0
   (`FUN_3902fb80`). The getter subtracts whole seconds since the list arrived.
 * `growUp` means **fully grown**: `FUN_3983c170(func_group)` has no further growth phase
