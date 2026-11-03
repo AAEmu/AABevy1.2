@@ -894,7 +894,9 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     interaction.set(
         "SelectInteraction",
         lua.create_function(move |_, (_, id): (Value, i64)| {
-            state.borrow_mut().doodad.chosen.push(id);
+            let mut data = state.borrow_mut();
+            data.doodad.menu_shown = false;
+            data.doodad.chosen.push(id);
             Ok(())
         })?,
     )?;
@@ -4766,6 +4768,38 @@ mod tests {
             "{sent:?}"
         );
         assert!(!app.world().resource::<Inventory>().coffer.is_open());
+    }
+
+    /// Picking a list entry closes the list (`interaction.lua` picks one row), so a later bench
+    /// open must not treat it as still shown and fire a spurious INTERACTION_END.
+    #[test]
+    fn picking_an_interaction_entry_clears_the_shown_list() -> mlua::Result<()> {
+        let lua = aa_lua::new_lua()?;
+        for name in ["X2", "X2Interaction", "HUD", "X2Coffer", "X2Bag"] {
+            lua.globals().set(name, lua.create_table()?)?;
+        }
+        let bridge = Shared::default();
+        install(&lua, &bridge)?;
+        {
+            let mut d = bridge.borrow_mut();
+            d.doodad.menu = Some((
+                300,
+                vec![Entry {
+                    id: 14602,
+                    name: "Gather".into(),
+                }],
+            ));
+            d.doodad.menu_shown = true;
+        }
+        lua.load("X2Interaction:SelectInteraction(14602)").exec()?;
+        let d = bridge.borrow();
+        assert_eq!(d.doodad.chosen, vec![14602]);
+        assert!(!d.doodad.menu_shown, "the pick closes the list");
+        assert!(
+            d.doodad.menu.is_some(),
+            "execute still needs the menu until it consumes it"
+        );
+        Ok(())
     }
 
     fn craft_app(rt: UiRuntime, bridge: Shared, doodads: Doodads, units: Units) -> App {
