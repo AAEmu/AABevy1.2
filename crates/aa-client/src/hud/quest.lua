@@ -367,7 +367,7 @@ X2Quest.TryStartQuestContext = function(self, who, qtype, stype, doodadId, npcId
   if directing then playLines("start", qtype) else HUD.quest_accept(qtype) end
 end
 -- The native `CompleteQuestContext` (`FUN_3949b5c0`): 0x0dd for an in-progress let-it-done quest,
--- 0x0da otherwise (hud/dialog.rs, `CompleteContext`). The directing dialog plays the step first and
+-- 0x0d6 otherwise (hud/dialog.rs, `CompleteContext`). The directing dialog plays the step first and
 -- sends from its last button instead.
 X2Quest.TryCompleteQuestContext = function(self, who, qtype, doodadId, npcId, selected)
   if directing then
