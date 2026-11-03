@@ -1285,6 +1285,7 @@ pub fn route_quest_notices(
     bridge: NonSend<HudBridge>,
     target: Res<Target>,
     mut events: MessageReader<NetEvent>,
+    mut skill_failed: MessageWriter<super::alerts::UseFailed>,
 ) {
     let Some(rt) = rt else { return };
     for NetEvent(e) in events.read() {
@@ -1321,6 +1322,13 @@ pub fn route_quest_notices(
                     }
                 }
                 info!("hud: quest {} needs unit {} (result {:?})", failed.quest_id, failed.unit_obj_id, failed.result);
+                // FUN_39376590 reports the result through FUN_39390900 before it raises 0xf4; result 8
+                // with detail 2 (cooldown) is silent there (FUN_39390900:742294).
+                let result = failed.result.code;
+                let value = if failed.result.raw_flags & 4 != 0 { failed.result.value } else { u32::from(failed.result.extra) };
+                if !(result == super::usable::code::COOLDOWN_TIME && value == 2) {
+                    skill_failed.write(super::alerts::UseFailed { skill: 0, result, value, server: true });
+                }
                 rt.fire_event("QUEST_QUICK_CLOSE_EVENT", failed.quest_id);
             }
             Event::QuestMailSent(sent) => {
@@ -2315,6 +2323,7 @@ mod tests {
         }));
         let mut app = App::new();
         app.add_message::<NetEvent>()
+            .add_message::<super::super::alerts::UseFailed>()
             .insert_resource(Target::default())
             .insert_non_send(HudBridge(shared.clone()))
             .add_systems(Update, route_quest_notices);
@@ -2356,22 +2365,37 @@ mod tests {
     fn a_failed_quest_unit_quick_closes_the_directing_window_only_for_the_current_target() {
         let Some((mut app, shared)) = quest_notice_app() else { return };
         app.world_mut().resource_mut::<Target>().obj_id = Some(42);
-        let failed = |unit_obj_id| {
+        let failed = |unit_obj_id, result| {
             NetEvent(Event::QuestUnitReqFailed(aa_net::quest::QuestUnitReqFailed {
                 quest_id: 1065,
                 unit_obj_id,
-                result: aa_net::skill::SkillResult::default(),
+                result,
             }))
         };
-        app.world_mut().write_message(failed(43));
+        let refused = aa_net::skill::SkillResult { raw_flags: 5, code: 9, extra: 0, value: 7 };
+        app.world_mut().write_message(failed(43, refused));
         app.update();
         assert!(shared.borrow().dialog.directing, "another unit failing does not close the window");
-        app.world_mut().write_message(failed(42));
+        assert!(
+            app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().next().is_none(),
+            "another unit failing reports nothing"
+        );
+        app.world_mut().write_message(failed(42, refused));
         app.update();
         assert!(!shared.borrow().dialog.directing);
+        let reported: Vec<_> = app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().collect();
+        assert_eq!(reported.len(), 1, "FUN_39376590 reports the result before 0xf4");
+        assert_eq!((reported[0].skill, reported[0].result, reported[0].value, reported[0].server), (0, 9, 7, true));
+        // FUN_39390900 returns early for result 8 (cooldown) with detail 2.
+        app.world_mut().write_message(failed(42, aa_net::skill::SkillResult { raw_flags: 5, code: 8, extra: 0, value: 2 }));
+        app.update();
+        assert!(
+            app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().next().is_none(),
+            "a cooldown detail 2 result is silent"
+        );
         let rt = app.world().non_send::<UiRuntime>();
         rt.lua
-            .load("assert(#OBSERVED==1 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
+            .load("assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
             .exec()
             .unwrap();
     }
