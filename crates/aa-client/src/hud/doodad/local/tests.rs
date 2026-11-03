@@ -2,13 +2,13 @@ use super::*;
 
 use bevy::prelude::*;
 
-use aa_net::model::{slot, Item};
+use aa_net::model::{Item, slot};
 use aa_net::state::{Doodads, Inventory, Player, Units};
 use aa_net::{Command, Event, NetCommand};
 
 use crate::hud::api::{HudBridge, HudData, Shared};
 use crate::hud::data::{GameData, SkillInfo};
-use crate::hud::doodad::{execute, find_focus, world_doodad, Focus, PermEnv, Tables, Views};
+use crate::hud::doodad::{Focus, PermEnv, Tables, Views, execute, find_focus, world_doodad};
 use crate::hud::dynamic_actions::{Shown, Source};
 
 const MAILBOX_GROUP: u32 = 107;
@@ -422,12 +422,13 @@ fn a_local_action_use_checks_its_permission() {
     };
     let mut app = dispatch_app(game, 1, 100, 12087, 42, Inventory::default(), None);
     app.update();
-    assert!(app
-        .world_mut()
-        .resource_mut::<Messages<crate::hud::ShowError>>()
-        .drain()
-        .next()
-        .is_none());
+    assert!(
+        app.world_mut()
+            .resource_mut::<Messages<crate::hud::ShowError>>()
+            .drain()
+            .next()
+            .is_none()
+    );
     assert!(sent(&mut app).is_empty());
 }
 
@@ -441,11 +442,13 @@ fn the_insert_counter_needs_the_item_in_the_bag_or_equipment() {
     };
     let mut no_player = dispatch_app(game, 2, 101, COUNTER_SKILL, 0, Inventory::default(), None);
     no_player.update();
-    assert!(!no_player
-        .world_mut()
-        .resource_mut::<Messages<crate::hud::ShowError>>()
-        .drain()
-        .any(|error| error.0 == NOT_ENOUGH_ITEM));
+    assert!(
+        !no_player
+            .world_mut()
+            .resource_mut::<Messages<crate::hud::ShowError>>()
+            .drain()
+            .any(|error| error.0 == NOT_ENOUGH_ITEM)
+    );
     assert!(sent(&mut no_player).is_empty(), "no player sent the skill");
 
     let player = Player {

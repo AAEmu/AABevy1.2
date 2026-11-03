@@ -495,7 +495,13 @@ pub(super) fn end_interaction(rt: &UiRuntime, bridge: &Shared) -> bool {
 /// `merchant_pack_id`, not an NPC's; a bank has no catalog.
 ///
 /// Native `FUN_393b7b10` closes the active interaction (an open NPC store included) first.
-pub(super) fn open_doodad(rt: &UiRuntime, bridge: &Shared, obj_id: u32, pack: u32, bank: bool) -> bool {
+pub(super) fn open_doodad(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    obj_id: u32,
+    pack: u32,
+    bank: bool,
+) -> bool {
     if end_interaction(rt, bridge) {
         rt.fire_event("INTERACTION_END", ());
     }
@@ -504,10 +510,7 @@ pub(super) fn open_doodad(rt: &UiRuntime, bridge: &Shared, obj_id: u32, pack: u3
         data.store.open((obj_id, pack), bank);
         data.store.doodad = true;
     }
-    rt.fire_event(
-        "NPC_INTERACTION_START",
-        if bank { "bank" } else { "store" },
-    );
+    rt.fire_event("NPC_INTERACTION_START", if bank { "bank" } else { "store" });
     true
 }
 

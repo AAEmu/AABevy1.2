@@ -861,9 +861,7 @@ pub(super) fn end_interaction(
     };
     let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
     let ended = bench || menu || coffer || store;
-    if ended
-        && let Some(rt) = rt
-    {
+    if ended && let Some(rt) = rt {
         // `FUN_394d08c0` raises 0x6c for the bench; the store's own close already did.
         if bench {
             rt.fire_event("NPC_INTERACTION_END", ());
@@ -2255,15 +2253,18 @@ pub(super) fn execute(
             .by_id
             .get(&obj_id)
             .and_then(|o| doodad_world(o, &units).map(|pos| (o, pos)))
-            .is_some_and(|(o, pos)| craft_permitted(perm, &player, &doodad_facts(&data, o, pos, env)))
+            .is_some_and(|(o, pos)| {
+                craft_permitted(perm, &player, &doodad_facts(&data, o, pos, env))
+            })
     };
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
             let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
             // Native `FUN_393bc260` handles these funcs before `FUN_393b3ec0` sends the skill: the
             // original window opens locally and the server never sees the use.
-            if let Some(local) =
-                group.zip(game).and_then(|(g, game)| game.doodad.local(g, *skill_id))
+            if let Some(local) = group
+                .zip(game)
+                .and_then(|(g, game)| game.doodad.local(g, *skill_id))
             {
                 if !permitted(obj_id, local.perm) {
                     if let Some(errors) = errors.as_mut() {
