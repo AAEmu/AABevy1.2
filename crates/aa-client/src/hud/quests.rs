@@ -38,6 +38,9 @@ use super::data::{GameData, any_flag, any_int};
 /// Component kinds (`QuestComponentKind`).
 pub mod kind {
     pub const START: u8 = 2;
+    /// The items a step hands out; the native `GetUseTypeQuestItems` reads its `SupplyItem` acts
+    /// (component type 3) and their `show_action_bar` flag.
+    pub const SUPPLY: u8 = 3;
     pub const PROGRESS: u8 = 4;
     pub const READY: u8 = 6;
     pub const REWARD: u8 = 8;
@@ -120,6 +123,9 @@ pub struct ActDef {
     pub grade: u8,
     /// `quest_act_obj_alias_id` when `use_alias`: the objective's own name.
     pub alias: u32,
+    /// `quest_act_supply_items.show_action_bar`: the native shows this supplied item on the
+    /// tracker (`FUN_394a55a0`).
+    pub show_action_bar: bool,
     /// Its objective number within the step, when it counts as one.
     pub objective: Option<u8>,
 }
@@ -356,6 +362,8 @@ struct Detail {
     value: i64,
     grade: u8,
     alias: u32,
+    /// `quest_act_supply_items.show_action_bar` (only that table has the column).
+    show_action_bar: bool,
 }
 
 impl QuestTables {
@@ -465,7 +473,7 @@ impl QuestTables {
             let Ok(mut q) = conn.prepare(&format!("SELECT * FROM {table}")) else { continue };
             let names: Vec<String> = q.column_names().iter().map(|c| c.to_ascii_lowercase()).collect();
             let col = |wanted: &[&str]| wanted.iter().find_map(|w| names.iter().position(|n| n == w));
-            let (id_col, target, count, value, grade, alias, use_alias) = (
+            let (id_col, target, count, value, grade, alias, use_alias, action_bar) = (
                 col(&["id"]),
                 col(&["npc_id", "item_id", "doodad_id", "quest_monster_group_id", "npc_group_id", "quest_id", "quest_context_id", "sphere_id", "skill_id", "buff_id", "craft_id", "appellation_id", "item_group_id", "zone_id"]),
                 col(&["count"]),
@@ -473,6 +481,7 @@ impl QuestTables {
                 col(&["grade_id"]),
                 col(&["quest_act_obj_alias_id"]),
                 col(&["use_alias"]),
+                col(&["show_action_bar"]),
             );
             let Some(id_col) = id_col else { continue };
             let mut rows = q.query([])?;
@@ -492,6 +501,7 @@ impl QuestTables {
                     value: get(value)?.unwrap_or(0),
                     grade: get(grade)?.unwrap_or(0).clamp(0, 255) as u8,
                     alias: if aliased { get(alias)?.unwrap_or(0) as u32 } else { 0 },
+                    show_action_bar: action_bar.map(|c| any_flag(r, c)).transpose()?.unwrap_or(false),
                 };
                 details.insert((ty.clone(), any_int(r, id_col)? as u32), d);
             }
@@ -511,7 +521,17 @@ impl QuestTables {
                 }
             }
             if let Some(c) = t.parts.get_mut(&component) {
-                c.acts.push(ActDef { id, ty, target: d.target, count: d.count, value: d.value, grade: d.grade, alias: d.alias, objective: None });
+                c.acts.push(ActDef {
+                    id,
+                    ty,
+                    target: d.target,
+                    count: d.count,
+                    value: d.value,
+                    grade: d.grade,
+                    alias: d.alias,
+                    show_action_bar: d.show_action_bar,
+                    objective: None,
+                });
             }
         }
         // objective numbers: per quest and component kind, across its components in order
@@ -829,6 +849,61 @@ impl QuestTables {
             }
         }
         r
+    }
+
+    /// The items a quest supplies (`SupplyItem` acts of its kind-3 components): what
+    /// `X2Quest.GetUseTypeQuestItems` reads. `action_bar_only` keeps the acts the native shows on the
+    /// tracker (`show_action_bar`); the restart check reads them all.
+    pub fn supply_item_targets(&self, quest: u32, action_bar_only: bool) -> Vec<u32> {
+        self.parts_of(quest, kind::SUPPLY)
+            .flat_map(|c| &c.acts)
+            .filter(|a| a.ty == "SupplyItem" && a.target != 0 && (!action_bar_only || a.show_action_bar))
+            .map(|a| a.target)
+            .collect()
+    }
+
+    /// How many items a restart hands out again: the sum of the kind-3 `SupplyItem` counts.
+    /// `FUN_3937a8d0` compares it with the player's free bag slots.
+    pub fn supply_item_count(&self, quest: u32) -> i64 {
+        self.parts_of(quest, kind::SUPPLY)
+            .flat_map(|c| &c.acts)
+            .filter(|a| a.ty == "SupplyItem")
+            .map(|a| i64::from(a.count.max(0)))
+            .sum()
+    }
+
+    /// The items a quest asks the player to use: the `ObjItemUse` targets of its Progress steps
+    /// (`X2Quest.GetUseTypeQuestItems` and `IsUseItemInActiveQuest`, `FUN_394a55a0` / `FUN_3949e280`).
+    pub fn use_item_targets(&self, quest: u32) -> Vec<u32> {
+        self.parts_of(quest, kind::PROGRESS)
+            .flat_map(|c| &c.acts)
+            .filter(|a| a.ty == "ObjItemUse" && a.target != 0)
+            .map(|a| a.target)
+            .collect()
+    }
+
+    /// The item targets of objective `index`: `ObjItemUse` / `ObjItemGather` acts of that objective
+    /// plus the component's `EtcItemObtain` items (the native `GetUseTypeQuestItemsByObjIndex`
+    /// collects act types 4, 2 and 0x30).
+    pub fn objective_item_targets(&self, quest: u32, index: u8) -> Vec<u32> {
+        let mut out = Vec::new();
+        for c in self.parts_of(quest, kind::PROGRESS) {
+            let component_objective = c.acts.iter().find_map(|a| a.objective);
+            for a in &c.acts {
+                if a.target == 0 {
+                    continue;
+                }
+                let objective = match a.ty.as_str() {
+                    "ObjItemUse" | "ObjItemGather" => a.objective,
+                    "EtcItemObtain" => component_objective,
+                    _ => None,
+                };
+                if objective == Some(index) {
+                    out.push(a.target);
+                }
+            }
+        }
+        out
     }
 
     /// The bubbles of a component's talk, from its start bubble along `next_bubble`.

@@ -46,6 +46,9 @@ pub enum Request {
     SetActionBarPage { page: u8 },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
     UseBag { slot: usize },
+    /// `HUD.request("use_equip", slot)`: use the item worn in equipment slot `slot` (1 based,
+    /// `X2Equipment.UseEquippedItemByType`).
+    UseEquip { slot: usize },
     /// `HUD.request("resurrect", inPlace)`: the death window's buttons (`X2Player:Resurrect(inPlace)`).
     Resurrect { in_place: bool },
     LearnSkill { id: u32 },
@@ -518,6 +521,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                     slot: num(1) as usize },
                 "use_pet_action" => Request::UsePetAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
+                "use_equip" => Request::UseEquip { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
                 "learn_buff" => Request::LearnBuff { id: num(1).max(0) as u32 },
@@ -644,6 +648,13 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 info.map(|i| i.level),
             ))
         })?,
+    )?;
+    // `items.impl_id` (`ItemImplEnum`): `X2Quest.IsQuestStartItem` is `impl_id` 10
+    // (`FUN_3949c880`).
+    let b = bridge.clone();
+    hud.raw_set(
+        "item_impl",
+        lua.create_function(move |_, id: u32| Ok(b.borrow().game.get().and_then(|g| g.items.get(&id)).map(|i| i.impl_id)))?,
     )?;
     // the player's Character Info numbers (`tipcalc/charstats.rs`): UnitInfo / UnitModifierInfo
     for (name, modifiers) in [("player_info", false), ("player_modifiers", true)] {
@@ -1254,6 +1265,11 @@ pub fn handle_requests(
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
                 panels::use_bag_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
+            }
+            Request::UseEquip { slot } => {
+                let data = bridge.0.borrow();
+                let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+                panels::use_equipped_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
                 // `FUN_39186e70` (`X2Player:Resurrect`): the native sends only while the death

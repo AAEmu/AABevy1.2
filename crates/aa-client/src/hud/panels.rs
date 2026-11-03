@@ -776,6 +776,13 @@ pub fn use_bag_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inven
     }
 }
 
+/// Use a worn item (the tracker's item of an equipment slot, `X2Equipment.UseEquippedItemByType`).
+pub fn use_equipped_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
+    if let Some(Some(item)) = inventory.equipment.slots.get(slot) {
+        use_item(item, env, flight, target.obj_id.unwrap_or(0), net, failed);
+    }
+}
+
 fn use_item(item: &aa_net::model::Item, env: &Env, flight: &InFlight, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
     if skill_id != 0 && env.held_back(skill_id, flight) {

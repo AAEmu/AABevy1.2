@@ -167,6 +167,9 @@ pub struct DialogView {
     cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
+    /// The completed-quest blocks (`SCCompletedQuests` / `SCQuestContextCompleted`), for the
+    /// native getters' completed check (`X2Quest.GetUseTypeQuestItems` with `checkState`).
+    pub completed: Vec<aa_net::quest::CompletedBlock>,
     /// The clock of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
     /// `FUN_3937b240` stores the server's `time_left_ms` as its end and the local receipt time as
     /// its start; `FUN_39379e30` returns `end - (now - start) * 1000`.
@@ -197,10 +200,19 @@ fn texts<'a>(d: &'a HudData, game: &'a GameData) -> Texts<'a> {
 }
 
 /// One quest as the scripts read it: the rows of `HUD.quest_list()` and `HUD.quest_info(qtype)`.
-fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: bool) -> mlua::Result<Table> {
+fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: bool, completed: &[aa_net::quest::CompletedBlock]) -> mlua::Result<Table> {
     let t = &game.quests;
     let row = lua.create_table()?;
     row.set("type", q.template_id)?;
+    let completed = completed.iter().any(|b| b.has(q.template_id));
+    row.set("completed", completed)?;
+    for (key, list) in [
+        ("actionBarItems", t.supply_item_targets(q.template_id, true)),
+        ("supplyItems", t.supply_item_targets(q.template_id, false)),
+        ("useItems", t.use_item_targets(q.template_id)),
+    ] {
+        row.set(key, lua.create_sequence_from(list)?)?;
+    }
     let Some(def) = t.def(q.template_id) else {
         row.set("name", "")?;
         row.set("objectives", lua.create_table()?)?;
@@ -232,6 +244,7 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
         e.set("text", o.text.as_str())?;
         e.set("status", if o.count > 1 { format!("{}/{}", o.done, o.count) } else { String::new() })?;
         e.set("done", step != kind::READY && o.finished())?;
+        e.set("items", lua.create_sequence_from(t.objective_item_targets(q.template_id, i as u8))?)?;
         objectives.set(i + 1, e)?;
     }
     row.set("objectives", objectives)?;
@@ -334,7 +347,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             let Some(game) = d.game.get() else { return Ok(out) };
             let texts = texts(&d, game);
             for (i, q) in d.dialog.quests.iter().enumerate() {
-                out.set(i + 1, quest_table(lua, game, &texts, q, true)?)?;
+                out.set(i + 1, quest_table(lua, game, &texts, q, true, &d.dialog.completed)?)?;
             }
             Ok(out)
         })?,
@@ -349,7 +362,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
                 return Ok(None);
             }
             let q = Quest { template_id: qtype, ..Quest::default() };
-            Ok(Some(quest_table(lua, game, &texts(&d, game), &q, false)?))
+            Ok(Some(quest_table(lua, game, &texts(&d, game), &q, false, &d.dialog.completed)?))
         })?,
     )?;
     let b = bridge.clone();
@@ -632,6 +645,7 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
             d.dialog.condition = c;
         }
         d.dialog.quests = quests.active.clone();
+        d.dialog.completed = quests.completed.clone();
         d.dialog.version += 1;
         d.dialog.seen = true;
         if let Some(f) = facts.get() {
@@ -3265,4 +3279,225 @@ mod tests {
                 .is_none()
         );
     }
+
+    #[test]
+    fn the_original_notifier_helper_reads_the_native_use_items() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let (quest, act) = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            let Some((quest, act)) = g
+                .quests
+                .parts
+                .values()
+                .filter(|c| c.kind == kind::PROGRESS)
+                .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
+                .find(|(_, a): &(u32, &super::super::quests::ActDef)| {
+                    a.ty == "ObjItemUse" && a.target != 0
+                })
+            else {
+                return;
+            };
+            (quest, act.clone())
+        };
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        super::super::api::install(&mut rt, &shared).unwrap();
+        shared.borrow_mut().dialog.quests = vec![Quest {
+            template_id: quest,
+            status: status::PROGRESS,
+            ..Quest::default()
+        }];
+        // `quest_context_notifier.alb` proto 47 is its local `FindQuestItemByType(qtype)`: it calls
+        // X2Quest.GetUseTypeQuestItems(qtype, true) and returns nil as {}.
+        let bytes = aa_pak::Pak::global()
+            .read("scriptsbin/x2ui/questcontext/quest_context_notifier.alb")
+            .unwrap();
+        let original = aa_lua::chunk::parse(&bytes).unwrap();
+        let proto = original.main.protos[47].clone();
+        assert_eq!(proto.num_upvalues, 0);
+        let host = aa_lua::chunk::write(
+            &aa_lua::chunk::Chunk {
+                format: aa_lua::chunk::Format::ALB,
+                main: proto,
+            },
+            aa_lua::chunk::Format::HOST,
+        )
+        .unwrap();
+        let find: mlua::Function = rt.lua.load(&host).into_function().unwrap();
+        let list: Table = find.call(quest).unwrap();
+        let ids: Vec<u32> = list
+            .sequence_values::<u32>()
+            .collect::<mlua::Result<_>>()
+            .unwrap();
+        assert!(
+            ids.contains(&act.target),
+            "quest {quest}: {ids:?} does not hold item {}",
+            act.target
+        );
+        // The per-objective getter the notifier's item buttons use (proto 55 -> FUN_394a58d0).
+        let index = act.objective.expect("ObjItemUse counts as an objective") as u32;
+        let per: Table = rt
+            .lua
+            .load(format!(
+                "return X2Quest:GetUseTypeQuestItemsByObjIndex({quest}, {index})"
+            ))
+            .eval()
+            .unwrap();
+        let ids: Vec<u32> = per
+            .sequence_values::<u32>()
+            .collect::<mlua::Result<_>>()
+            .unwrap();
+        assert!(
+            ids.contains(&act.target),
+            "objective {index} of quest {quest}: {ids:?}"
+        );
+        // A completed quest asks for no items (`checkState`).
+        {
+            let mut data = shared.borrow_mut();
+            data.dialog.completed = vec![aa_net::quest::CompletedBlock {
+                id: aa_net::quest::CompletedBlock::block_of(quest),
+                bits: 1 << (quest % 64),
+            }];
+            data.dialog.version += 1;
+        }
+        let none: Option<Table> = rt
+            .lua
+            .load(format!(
+                "return X2Quest:GetUseTypeQuestItems({quest}, true)"
+            ))
+            .eval()
+            .unwrap();
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn the_original_added_item_message_asks_the_quest_item_getters() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let (start_item, use_item, use_quest) = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            let start = g
+                .items
+                .iter()
+                .find(|(_, i)| i.impl_id == 10)
+                .map(|(id, _)| *id)
+                .unwrap();
+            let Some((quest, item)) = g
+                .quests
+                .parts
+                .values()
+                .filter(|c| c.kind == kind::PROGRESS)
+                .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
+                .find(|(_, a): &(u32, &super::super::quests::ActDef)| {
+                    a.ty == "ObjItemUse"
+                        && a.target != 0
+                        && g.items.get(&a.target).is_some_and(|i| i.impl_id != 10)
+                })
+                .map(|(q, a)| (q, a.target))
+            else {
+                return;
+            };
+            (start, item, quest)
+        };
+        shared.borrow_mut().dialog.quests = vec![Quest {
+            template_id: use_quest,
+            status: status::PROGRESS,
+            ..Quest::default()
+        }];
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        super::super::api::install(&mut rt, &shared).unwrap();
+        rt.lua
+            .load(
+                r#"
+                locale = { chatSystem = { get_item = "ITEM %s", get_quest_start_item = "QUESTSTART %s",
+                    get_use_item_in_active_quest = "USE %s" } }
+                ICON_SIZE = { DEFAULT = 32 }
+                PlayUISound = function() end
+                Script = { ReloadScript = function() return {} end }
+                local mt = { __index = function(_, k)
+                    if type(k) == 'string' and k:sub(1, 3) == 'Get' then return function() return 0 end end
+                    return function() return false end
+                end }
+                local win = setmetatable({}, mt)
+                win.itemSlot = setmetatable({}, mt)
+                win.itemName = setmetatable({}, mt)
+                win.style = setmetatable({}, mt)
+                win.gradeColor = "ffffffff"
+                win.bg = setmetatable({}, mt)
+                addedItemWindow = win
+                GOT = ""
+                "#,
+            )
+            .exec()
+            .unwrap();
+        let bytes = aa_pak::Pak::global()
+            .read("scriptsbin/x2ui/centermessage/additem.alb")
+            .unwrap();
+        let original = aa_lua::chunk::parse(&bytes).unwrap();
+        let host = aa_lua::chunk::write(
+            &aa_lua::chunk::Chunk {
+                format: aa_lua::chunk::Format::ALB,
+                main: original.main.clone(),
+            },
+            aa_lua::chunk::Format::HOST,
+        )
+        .unwrap();
+        rt.lua.load(&host).set_name("@additem.alb").exec().unwrap();
+        let (is_start, use_is_start, in_quest): (bool, bool, bool) = rt
+            .lua
+            .load(format!(
+                "return X2Quest:IsQuestStartItem({start_item}), X2Quest:IsQuestStartItem({use_item}), X2Quest:IsUseItemInActiveQuest({use_item})"
+            ))
+            .eval()
+            .unwrap();
+        assert!(
+            is_start && !use_is_start && in_quest,
+            "the native getters: {is_start} {use_is_start} {in_quest}"
+        );
+        rt.lua
+            .load(format!(
+                "CALLS, RAISED = {{}}, 0; \
+                 local start = X2Quest.IsQuestStartItem; \
+                 X2Quest.IsQuestStartItem = function(self, t) CALLS[#CALLS + 1] = {{ 'start', t }}; return start(self, t) end; \
+                 local use = X2Quest.IsUseItemInActiveQuest; \
+                 X2Quest.IsUseItemInActiveQuest = function(self, t) CALLS[#CALLS + 1] = {{ 'use', t }}; return use(self, t) end; \
+                 addedItemWindow.Raise = function() RAISED = RAISED + 1 end; \
+                 RET = ShowAddedItemMsg({{ itemType = {}, itemGrade = 1, gradeColor = 'ffffffff', name = 'X', itemName = 'X' }}, 3000); \
+                 ShowAddedItemMsg({{ itemType = {}, itemGrade = 1, gradeColor = 'ffffffff', name = 'Y', itemName = 'Y' }}, 3000)",
+                start_item, use_item
+            ))
+            .exec()
+            .unwrap();
+        let (calls, raised, ret, kind): (String, i64, bool, String) = rt
+            .lua
+            .load("local out = ''; for _, c in ipairs(CALLS) do out = out .. c[1] .. ':' .. tostring(c[2]) .. ' ' end; return out, RAISED, RET, type(ShowAddedItemMsg)")
+            .eval()
+            .unwrap();
+        assert!(
+            calls.contains(&format!("start:{start_item}")),
+            "the original message asks IsQuestStartItem: {calls} (ret {ret}, {kind})"
+        );
+        assert!(
+            calls.contains(&format!("use:{use_item}")),
+            "and IsUseItemInActiveQuest: {calls}"
+        );
+        assert_eq!(
+            raised, 2,
+            "the item window opened through the original script"
+        );
+    }
+
+
 }
