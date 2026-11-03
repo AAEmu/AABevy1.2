@@ -654,10 +654,10 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncQuest` 0x08 | `FUN_393bc260` case 8 | sets interaction state 9, then returns 0 (the skill, if any, is sent) | dialog/quest worker |
 | `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the crime/item data and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | missing (crime report dialog) |
 | `DoodadFuncStampMaker` 0x3d | `FUN_393b82a0` 774630 | state 7, `OPEN_EMBLEM_UPLOAD_UI` (0x1a4/420) with the doodad id as a string; returns 1 | missing (`X2Ucc` upload is a stub) |
-| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's bubble (`doodad_func_bubbles.bubble_id`); with a positive extra value it also opens a native message box (0xe9); returns 1 | missing (stuffed-toy text) |
+| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's bubble (`doodad_func_bubbles.bubble_id`); when `next_phase > 0` it sends `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, next_phase, funcId)`, not a message box; returns 1 | missing |
 | `DoodadFuncPurchase` 0x40 | `FUN_393b80d0` 774524 | state 8, a purchase task dialog (10 `DLG_TASK_PURCHASE` / 11 `DLG_TASK_PURCHASE_COIN`) built from `doodad_func_purchases`; returns 1 | missing (purchase confirm) |
 | `DoodadFuncParentInfo` 0x43 | `FUN_393b8400` 774707 | opens the parent house's info through `FUN_393befd0` (`HOUSE_INTERACTION_START` 0x6d/109); returns 1 | missing for doodad parents (housing implements `FUN_393befd0` for house units) |
-| `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; returns 1 | missing (`X2Book.GetBookInfo` is a stub) |
+| `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; when `next_phase > 0` it sends the same `CSChangeDoodadPhasePacket` 0x0e9 (774812); returns 0 (the skill is sent) when the func has neither a page nor a book (774760) | missing (`X2Book.GetBookInfo` is a stub) |
 | `DoodadFuncRenewItem` 0x47 | `FUN_393b8610` 774823 | state 2, `RENEW_ITEM_WND_SHOW` (0x8a/138) with `(doodad_func_renew_items.skill_id, obj id)`; returns 1 | missing (`renew_item.alb` is empty) |
 | `DoodadFuncOpenFarmInfo` 0x48 | `FUN_393b8700` 774877 | state 10, `OPEN_COMMON_FARM_INFO` (0x102/258) with `farm_id`; returns 1 | **done** (`local.rs`, `farm::show_doodad`; skips the skill) |
 | `DoodadFuncEnterSysInstance` 0x4a | `FUN_393bc260` case 0x4a | state 0x12, returns 0 (the skill is sent) | no client action |
@@ -669,7 +669,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | missing (`auction.rs` needs a unit auctioneer and its scope) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
-| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | state 4, `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)`; returns 1 (no packet) | **done** (`local.rs`, `mail::open_at`) |
+| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | state 4, `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)`; the handler also calls `FUN_393ccdd0` (not ported). Mailbox group 107 has `next_phase` 10279; the handler is reached through the pointer table `0x399d2c58` and its direct caller is not recovered, so "no packet" is **unverified** | **done** (`local.rs`, `mail::open_at`) |
 
 The non-skill action ids of `FUN_393bd290` (779073): the func-type map gives Butcher, Cutdown, Dig, Feed,
 Harvest, Mow, Shear, Use, Binding, CraftStart, CraftInfo, CraftCancel, CraftGetItem, the collect types,
