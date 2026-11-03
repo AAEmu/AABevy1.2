@@ -52,6 +52,8 @@ with flags 0. A jump takes off at `sqrt(2 g h)` 8.06 m/s with actor flags 0x08 s
 air, and lands with flags 0x06 moving / 0x04 standing and actor 0x14; only a fall of 20 m/s or more carries the 0x80 fall-velocity block (the
 capture's jumps never do).
 
+Stopping in water still sends one zero-velocity swimming packet immediately; the land stop pair does not replace the swim sender's stop.
+
 A ridden mount follows its wanted speed at the actor model's `game_inertia_accel` (11) whenever a move is requested and at `game_inertia` (4)
 only with no input (`mount_velocity`; the rate choice is `aaemu-physics` `entities/living/step.rs:171-179`, where `|vel_requested|^2 > 0.1`
 uses `inertia_accel`), so a turn at speed and a brake both use 11 and a rate of 0 means no inertia. The captured Leomorph reads 5.9 m/s at its

@@ -920,6 +920,7 @@ pub fn control_player(
         && state.was_input
         && state.drive_vel.length() > 0.05;
     let stop = !swimming && !active && state.was_active && !airborne && landed.is_none();
+    let swim_stop = swimming && !active && state.was_active;
     let zero_stop = match state.stop_pending {
         Some(_) if active => {
             state.stop_pending = None;
@@ -941,6 +942,7 @@ pub fn control_player(
         || takeoff
         || mount_release
         || stop
+        || swim_stop
         || zero_stop
         || first
         || landed.is_some()
@@ -2079,6 +2081,26 @@ mod dive_tests {
         let last = f.moves().last().expect("a movement packet");
         assert_eq!(last.stance, stance::SWIM);
         assert!(last.pos.z < 96.0, "the packet stayed at the surface: {:?}", last.pos);
+    }
+
+    #[test]
+    fn releasing_swim_input_sends_a_zero_velocity_stop() {
+        let terrain = TerrainQuery::fixture_flat("test", 90.0);
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 100.0, 98.7));
+        f.hold("moveforward");
+        for _ in 0..30 {
+            f.tick(1.0 / 60.0);
+        }
+        assert!(f.moves().last().unwrap().moving);
+        f.sent.clear();
+        f.release("moveforward");
+        f.tick(1.0 / 60.0);
+        let stop = f.moves().last().expect("stopping in water must be reported");
+        assert_eq!(stop.stance, stance::SWIM);
+        assert!(!stop.moving);
+        assert_eq!(stop.velocity, [0; 3]);
+        assert_eq!(stop.delta_movement, [0; 3]);
     }
 
     #[test]
