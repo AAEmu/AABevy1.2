@@ -23,19 +23,34 @@ The farm natives are registered next to the other `X2` methods (`FUN_39214380`; 
 The client's typo is the native spelling (`GetFarmGorupInfo`); the scripts call the methods with
 `:` (`SELF` in `commonfarm/info.alb` / `my_farm_info.alb`), so the closures take `(self, arg)`.
 
-`FUN_39035560` refuses the request in an instant zone: it raises the error
+`FUN_39035560` refuses the request in an instant zone: it clears the list, raises the error
 `cannot_request_commonfarm_info_in_instant_zone` (0x242) and `COMMON_FARM_UPDATED` (0x101). It also
-turns a request within 2 s (`_DAT_3999d848` = 2.0) into `COMMON_FARM_UPDATED` without sending.
-The Bevy side uses the character state's instance id for the gate and a 2 s receipt clock.
+turns a request within 2 s (`_DAT_3999d848` = 2.0) into `COMMON_FARM_UPDATED` without sending. A
+sent request clears the list before `CSRequestCommonFarmList`. The Bevy side uses the character
+state's instance id for the gate and a 2 s receipt clock.
 
-Runtime entries (`FUN_39035620`) carry `name`, `currentPhaseName`, `doodadName`, `itemType`,
-`leftGrowthTime`, `leftProtectTime`, `location`, `vPosX`, `vPosY`, `farmType` and `growUp`.
-`SCResponseCommonFarmList` gives the farm kind, doodad template, `time_left` (ms), phase group,
-position and `plant_time` (unix seconds); the item/name come from `farm_group_doodads` and the item
-table. `leftProtectTime` is `plant_time * 1000 + common_farms.guard_time - now`; the server's
-`is_protected` uses the same formula. The packet does not carry the doodad's zone key, so the
-guard time uses the first `common_farms` row of that kind (the zone-specific row is
-**capture-pending**).
+Runtime entries (`FUN_390324C0` / `FUN_39035620`) carry `name`, `currentPhaseName`, `doodadName`,
+`itemType`, `leftGrowthTime`, `leftProtectTime`, `location`, `vPosX`, `vPosY`, `farmType` and
+`growUp`.
+
+* The packet's first field is a **`common_farms.id`**; `FUN_397f2750` gives the row and its
+  `farm_group_id` keys the runtime entry (`GetRuntimeCommonFarmDoodadsInfo` filters by that group).
+  `farmType` is the packet's common farm id. Entries whose common farm, farm group, doodad or func
+  group is unknown are skipped.
+* `leftGrowthTime` and `leftProtectTime` are **seconds**. Growth is `time_left` plus the rounded
+  delays of the following `DoodadFuncGrowth` phases (`FUN_3983c1b0` / `FUN_3983c0e0`), scaled by
+  the zone-climate flag (`FUN_39032470`): 1.0 normally, 0.7 when the doodad's
+  `doodad_almighties.climate_id` is in the zone's climate list. Protect is
+  `common_farms.guard_time * 0.001` minus the seconds since `plant_time`, floored at 0
+  (`FUN_3902fb80`). The getter subtracts whole seconds since the list arrived.
+* `growUp` means **fully grown**: `FUN_3983c170(func_group)` has no further growth phase
+  (`next_phase == 0`, or the phase has no `DoodadFuncGrowth`). `my_farm_info` shows the time only
+  while `leftGrowthTime > 0` and not `growUp`, else the grown label.
+* `location` is the main-world zone under the crop's packet position (`FUN_3902fb00`), `"unknown"`
+  when the world/zone is not loaded.
+* `currentPhaseName` is the `doodad_func_groups.name` at descriptor +0x14 (`FUN_390324C0`),
+  localized like the phase message; `doodadName` is the doodad template name and `name` the planted
+  item's name (else the doodad name).
 
 ## Windows and events
 
@@ -60,13 +75,16 @@ guard time uses the first `common_farms` row of that kind (the zone-specific row
 * The farm-area drawable of `worldmap.ShowCommonFarm` and `SetCommonFarmDrawable`
   (`FUN_3926DE70`, `FUN_392D48C0` / `FUN_392D4F20`) is not drawn: aa-ui still treats
   `ShowCommonFarm` as a no-op (`crates/aa-ui/src/lua/worldmap.rs`) and only stores the drawable.
-* The runtime list is rebuilt from the last `SCResponseCommonFarmList`; no local growth timer
-  redraws `my_farm_info` between packets (the original counts down the times in the same table).
+* The runtime list is rebuilt from the last `SCResponseCommonFarmList`. The getters count the
+  seconds down on every call, and `my_farm_info.alb`'s `OnUpdate` refreshes the visible tab each
+  frame, so the row text follows without a new packet until the list is cleared or refreshed.
 
 ## Tests
 
-`cargo test -p aa-client hud::farm` (with `AA_PAK` and `AA_DB` for the real-script test): the getter
-shapes, a list event raising `COMMON_FARM_UPDATED` and filling the runtime getters, `Show` raising
+`cargo test -p aa-client hud::farm` (with `AA_PAK` and `AA_DB` for the real-script tests): the getter
+shapes, the runtime entry (seconds, following growth phases and climate scale, `growUp`, common
+farm id, phase name, crop zone), a list event raising `COMMON_FARM_UPDATED`, `Show` raising
 `OPEN_COMMON_FARM_INFO` and walking away raising `INTERACTION_END`, the request gate (send once,
-2 s debounce, instant-zone refusal), and the original `commonfarm` scripts opening `farm_info` and
-toggling `myFarminfo` through the main menu action.
+sent-request clearing, 2 s debounce, instant-zone refusal clearing and raising the update), and the
+original `commonfarm` scripts opening `farm_info`, toggling `myFarminfo` through the main menu
+action and rendering a growing crop's time next to a grown crop's label.
