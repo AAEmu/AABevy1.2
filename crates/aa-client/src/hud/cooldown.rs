@@ -46,9 +46,8 @@ pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     global_at(game, skills, now)
 }
 
-/// The global cooldown (left, total) itself, for every skill that waits for it ([`gcd_at`] decides which). The skill trace's
-/// `gcd` row.
-pub(crate) fn global_at(game: &GameData, skills: &Skills, now: Instant) -> (u32, u32) {
+/// The global cooldown (left, total) itself, for every skill that waits for it ([`gcd_at`] decides which).
+pub(super) fn global_at(game: &GameData, skills: &Skills, now: Instant) -> (u32, u32) {
     let mut best = (0, 0);
     if let Some((at, last)) = skills.last_cast.zip(game.skills.get(&skills.last_cast_skill)) {
         let total = last.gcd_ms;
@@ -107,6 +106,15 @@ pub(super) fn mount_display_at(
 pub(super) fn display_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Option<(u32, u32)> {
     let mut best = combined_at(game, skills, id, now)?;
     let info = game.skills.get(&id)?;
+    replace(&mut best, observed_at(info, skills, id, now));
+    Some(best)
+}
+
+/// The skill's own cooldown (left, total), without the global one: the later of the received manager entries and the own-cast
+/// estimate. [`display_at`] is this or [`gcd_at`], whichever ends later, as `X2Action:GetActionCooldownEx` pairs them.
+pub(super) fn own_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Option<(u32, u32)> {
+    let info = game.skills.get(&id)?;
+    let mut best = native_at(info, skills, id, now);
     replace(&mut best, observed_at(info, skills, id, now));
     Some(best)
 }

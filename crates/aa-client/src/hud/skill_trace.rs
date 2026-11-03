@@ -3,9 +3,11 @@
 //!
 //! * `castbar`: `X2Unit:UnitCastingInfo("player" / "target")` is `HUD.casting_info` over [`super::cast::Casts`]; a row when a
 //!   bar appears (`start`), disappears (`stop`) or turns into another (a cast that becomes a channel: `stop`, then `start`).
-//! * `cooldown`: the cooldown an action bar skill slot shows is [`super::panels::action_skill_cooldown`] (the number the HUD
-//!   quantises to a quarter second for the slot; here as it is), and the global cooldown pair is [`super::cooldown::global_at`].
-//!   A row when one starts or is restarted, and one with `remain_ms` 0 when it ends. Display slots 1..=12 of the current page.
+//! * `cooldown`: per action bar skill slot, the pairs `X2Action:GetActionCooldownEx(slot)` gives the original client's recorder
+//!   (`tools/skillparity/run_original.py`), from [`super::panels::action_skill_cooldown_ex`]: the skill's own cooldown is a
+//!   `gcd: false` row, and the pair the slot shows is a `gcd: true` row when it is not the skill's own (the global cooldown is
+//!   longer). A row when one starts or is restarted, and one with `remain_ms` 0 when it ends. Display slots 1..=12 of the
+//!   current page.
 
 use aa_net::items::ActionKind;
 use aa_net::state::{ActionBar, Inventory, Skills};
@@ -72,13 +74,13 @@ fn change(prev: Option<Running>, now: Option<Running>) -> Option<(Running, bool)
     }
 }
 
-/// The global cooldown and the cooldowns of the twelve action bar slots shown.
+/// The two cooldowns of each of the twelve action bar slots shown: the skill's own, and the global one when the slot shows it.
 pub(crate) fn cooldowns(
     bridge: Option<NonSend<HudBridge>>,
     bar: Option<Res<ActionBar>>,
     skills: Option<Res<Skills>>,
     inventory: Option<Res<Inventory>>,
-    mut last: Local<[Option<Running>; 13]>,
+    mut last: Local<[[Option<Running>; 2]; 12]>,
 ) {
     let (Some(bridge), Some(skills)) = (bridge, skills) else { return };
     let data = bridge.0.borrow();
@@ -86,26 +88,37 @@ pub(crate) fn cooldowns(
     let game = shared.get();
     let (now, wall_ms) = (Instant::now(), (skilltrace::wall_us() / 1000) as i64);
     let running = |cd: Option<(u32, u32)>| cd.filter(|(left, _)| *left > 0).map(|(left, total)| Running { end_ms: wall_ms + i64::from(left), total_ms: total });
-    // [0] the global cooldown, [1..=12] the display slots
-    let mut sample: [Option<Running>; 13] = [None; 13];
-    sample[0] = running(game.map(|g| super::cooldown::global_at(g, &skills, now)));
+    // per display slot: [0] the skill's own cooldown, [1] the global cooldown the slot shows instead
+    let mut sample: [[Option<Running>; 2]; 12] = [[None; 2]; 12];
     if let Some(bar) = bar {
-        for (display, cell) in sample.iter_mut().enumerate().skip(1) {
-            let slot = ActionBar::display_slot_on(data.action_page, display - 1).and_then(|s| bar.slots.get(s));
-            if let Some(slot) = slot.filter(|s| !s.is_empty() && matches!(s.kind, ActionKind::Spell | ActionKind::RidePetSpell)) {
-                *cell = running(super::panels::action_skill_cooldown(game, Some(&skills), inventory.as_deref(), slot.id as u32, now));
+        for (display, cell) in sample.iter_mut().enumerate() {
+            let slot = ActionBar::display_slot_on(data.action_page, display).and_then(|s| bar.slots.get(s));
+            let Some(slot) = slot.filter(|s| !s.is_empty() && matches!(s.kind, ActionKind::Spell | ActionKind::RidePetSpell)) else {
+                continue;
+            };
+            if let Some((shown, own)) = super::panels::action_skill_cooldown_ex(game, Some(&skills), inventory.as_deref(), slot.id as u32, now) {
+                *cell = split(shown, own).map(running);
             }
         }
     }
-    for (i, now) in sample.into_iter().enumerate() {
-        // an unchanged cooldown keeps its first sample as the reference, so the rows are edges and not a stream
-        let Some((cooldown, on)) = change(last[i], now) else { continue };
-        let remain = if on { (cooldown.end_ms - wall_ms).max(0) } else { 0 };
-        skilltrace::emit("cooldown", |r| {
-            r.opt_int("slot", (i > 0).then_some(i as i64)).int("remain_ms", remain).int("total_ms", i64::from(cooldown.total_ms)).flag("gcd", i == 0)
-        });
-        last[i] = now;
+    for (display, pair) in sample.into_iter().enumerate() {
+        for (which, now) in pair.into_iter().enumerate() {
+            // an unchanged cooldown keeps its first sample as the reference, so the rows are edges and not a stream
+            let Some((cooldown, on)) = change(last[display][which], now) else { continue };
+            let remain = if on { (cooldown.end_ms - wall_ms).max(0) } else { 0 };
+            skilltrace::emit("cooldown", |r| {
+                r.int("slot", display as i64 + 1).int("remain_ms", remain).int("total_ms", i64::from(cooldown.total_ms)).flag("gcd", which == 1)
+            });
+            last[display][which] = now;
+        }
     }
+}
+
+/// The original recorder's two rows of a slot from `(shown, own)` (left, total) pairs: the skill's own cooldown, and the shown
+/// pair as the global cooldown when it is another one (a longer total than the own).
+fn split(shown: (u32, u32), own: (u32, u32)) -> [Option<(u32, u32)>; 2] {
+    let global = (shown.1 != own.1 && shown.0 > own.0).then_some(shown);
+    [Some(own), global]
 }
 
 #[cfg(test)]
@@ -114,6 +127,16 @@ mod tests {
 
     fn running(end_ms: i64, total_ms: u32) -> Option<Running> {
         Some(Running { end_ms, total_ms })
+    }
+
+    #[test]
+    fn a_slot_shows_the_global_cooldown_as_its_own_row_only_when_it_is_longer() {
+        // Triple Slash: no cooldown of its own, the 2 s global one shows
+        assert_eq!(split((1_900, 2_000), (0, 0)), [Some((0, 0)), Some((1_900, 2_000))]);
+        // Charge: its own 12 s cooldown is longer, the slot shows it and the global one has no row
+        assert_eq!(split((11_900, 12_000), (11_900, 12_000)), [Some((11_900, 12_000)), None]);
+        // nothing running
+        assert_eq!(split((0, 0), (0, 0)), [Some((0, 0)), None]);
     }
 
     #[test]

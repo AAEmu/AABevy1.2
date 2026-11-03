@@ -256,6 +256,26 @@ pub(crate) fn action_skill_cooldown(
     super::cooldown::display_at(game?, skills?, effective, now)
 }
 
+/// What `X2Action:GetActionCooldownEx` answers for a skill slot: the pair the slot shows ([`action_skill_cooldown`]) and the
+/// skill's own pair without the global cooldown, both (left, total) ms.
+pub(crate) fn action_skill_cooldown_ex(
+    game: Option<&GameData>,
+    skills: Option<&Skills>,
+    inventory: Option<&Inventory>,
+    skill: u32,
+    now: Instant,
+) -> Option<((u32, u32), (u32, u32))> {
+    let effective = match crate::ingame::linked_skill::resolve_with(skill, inventory, game) {
+        crate::ingame::linked_skill::LinkedUse::Converted { skill, .. } => skill,
+        _ => skill,
+    };
+    let (game, skills) = (game?, skills?);
+    Some((
+        super::cooldown::display_at(game, skills, effective, now)?,
+        super::cooldown::own_at(game, skills, effective, now)?,
+    ))
+}
+
 pub(in crate::hud) fn skill_slot(game: Option<&GameData>, skills: Option<&Skills>, skill: u32, start: Instant) -> SlotSnap {
     // the skill's own cooldown, or the global cooldown the last cast started (every skill that does not
     // ignore it waits for it), whichever ends later
