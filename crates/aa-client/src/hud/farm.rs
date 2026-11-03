@@ -2,9 +2,9 @@
 //! unchanged Lua) over aa-net's farm protocol and the static `farm_groups` / `farm_group_doodads` /
 //! `common_farms` tables.
 //!
-//! `X2` getters (`FUN_394445B0` .. `FUN_394447C0` in `x2game.dll.c`): `GetFarmGroups` answers the
-//! farm-group ids in data order, `GetFarmGorupInfo(kind)` answers `(name, count, description)` (the
-//! client's typo is the native name), `GetFarmGroupDoodadList(kind)` the allowed doodads' names,
+//! `X2` getters (`FUN_394445B0` .. `FUN_394447C0` in `x2game.dll.c`): `GetFarmGroups` answers
+//! `{ type, name }` entries in data order, `GetFarmGorupInfo(kind)` answers `(name, count,
+//! description)` (the client's typo is the native name), `GetFarmGroupDoodadList(kind)` the allowed doodads' names,
 //! `GetCommonFarmInfo(id)` `(name, guard_time, farm_group_id)` and the runtime getters the player's
 //! planted crops. `SCResponseCommonFarmList` is kept as the runtime list; the window's refresh asks
 //! for it with `RequestRuntimeCommonFarmDoodadInfo` -> `CSRequestCommonFarmList` (0x10b).
