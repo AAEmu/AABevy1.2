@@ -1797,6 +1797,14 @@ all fields in `ServerMsg::DoodadPhaseChanged` and `Event::DoodadPhaseChanged`
 (`obj_id, func_group_id, time_left, puzzle_group, item_template_id`). The lane currently
 writes puzzleGroup=-1; the decoder preserves the signed wire value instead of guessing.
 
+`Command::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id }` is the client's own
+`CSChangeDoodadPhasePacket` 0x0e9 (`FUN_397ac8d0(objId, skill, nextPhase, funcId)` in the
+1.2 client): `bc objId, u32 skill, u32 nextPhase, u32 funcId`. The server reads the same
+four values (`CSChangeDoodadPhasePacket::read`) and logs them; the session sends it only in
+world with a nonzero 24-bit object id. `ShopCommand::BuyCoin { obj_id, func_id }` is
+`CSBuyCoinItemPacket` 0x0af (`bc objId, u32 funcId`), the coin-item confirmation of a
+`DoodadFuncPurchase` (the server's `buy_coin_item` hook is still a warning on AAEmu).
+
 `Doodads` updates those four fields only on an already-known object, preserving identity,
 position, owner and plant time. Zero item/time values clear previous values. Unknown or
 removed objects do not reappear from a phase update. `time_left` is the last announced
