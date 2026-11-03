@@ -416,8 +416,7 @@ is refused as `URK_EQUIP_ITEM` with no packet (never an Item cast with skill 0).
 right now."; any remaining time of it counts, also one as short as the global cooldown). The log has one line per change of the dark set:
 `hud: dark slots [(2, "TOO_FAR_RANGE"), (4, "TOO_FAR_RANGE")]; target Some("Solzreed Fox") at Some(11.7) m`.
 
-Holding a key or clicking fast must not flood the server, so a press is first held back without a word (`Env::held_back`, no
-`UseFailed`, nothing sent), by any of:
+Holding a key or clicking fast must not flood the server, so a press is first held back (`Env::held_back`, nothing sent), by any of:
 
 * the skill is the cast or channel the player is in the middle of (the slot stays lit, but a second press would only be refused);
 * the global cooldown of the last own cast has more than 100 ms left (`Env::gcd_left`, the estimate `cooldown::gcd_at` also draws
@@ -429,7 +428,19 @@ Holding a key or clicking fast must not flood the server, so a press is first he
   player started) or `last_failure` (the server refused one) is newer than it, or after 500 ms. Presses of ignore-gcd skills neither
   set it nor wait for it.
 
-The server holds these back as well (`COOLDOWN_TIME` during the global cooldown); the client just does not ask.
+A held-back press still shows the native refusal (`Env::held_back_refusal` -> `UseFailed`, still nothing sent): `ON_CASTING`
+("Already performing an action.") for the cast, and `NOT_NOW` ("Can't be used right now.") for the global cooldown. The
+2026-11-03 capture pressed Charge five times in one GCD: one `CSStartSkill`, no queue, and "Can't be used right now." at
+185.5-190 s (the press's own 12 s cooldown was already running, so the GCD is what the press path reports); B4 showed
+"Already performing an action." during the Insidious Whisper cast. The native unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151525-151649)
+checks the cast before the cooldowns and writes `ON_CASTING` 7, then `COOLDOWN_TIME` 8 with detail 1 for the skill's own
+cooldown and detail 2 for the global one (`FUN_3989a400`); `FUN_39390900` (742241-742499) prints the text from `FUN_39897990`'s
+result names and hides `8` detail 2. The detail-2 suppression does not name the path that raised `NOT_NOW` 0x2c in the capture,
+so the GCD-before-own-cooldown order and the `NOT_NOW` code are inferred from the capture; the own cooldown after the GCD stays
+`COOLDOWN_TIME` (`FUN_390b7b00` detail 1). Both names print the same text: `ui_texts` 1725 `skill_cooldown_time` and 1759
+`skill_not_now` are both "지금은 사용할 수 없습니다." (the localized "Can't be used right now."). The auto attack latch and an
+unanswered press stay silent, as `FUN_393989e0` returns without a result for the latch and the in-flight wait is this client's
+own guard.
 
 Checked on the lane server with account `bevyhud` (`shots/hud/r5/`): a fox 10.7 m away darkens Triple Slash, Melee Attack and Kick but not
 Shoot Arrow (range 20, bow worn) (`far.png`); the angry rat walking up lights them one by one (log); `--hud-sim mp=10` darkens only
@@ -452,7 +463,8 @@ prints the text `skill_<name>` of the system texts through `formatSkillMessage`,
 (`systemAlertWindow:AddMessageRefresh`). `arg1` names the item or buff a requirement wants. Texts seen: `NO_TARGET` "Select a target.",
 `TOO_FAR_RANGE` "Target is too far.", `TOO_CLOSE_RANGE` "Target is too close.", `LACK_MANA` "Insufficient mana to use this.",
 `INVALID_TARGET` "Invalid target.", `SOURCE_DIED` "Can't be used while dead.", `SOURCE_ALIVE` "Can only be used while dead.",
-`URK_COMBAT` "Can't be used in combat.", `ON_CASTING` "Already performing an action.", `COOLDOWN_TIME` "Can't be used right now.".
+`URK_COMBAT` "Can't be used in combat.", `ON_CASTING` "Already performing an action.", `COOLDOWN_TIME` "Can't be used right now.",
+`NOT_NOW` "Can't be used right now.".
 
 A refusal also speaks: the character's `<race>_<gender>_system_message` sound pack (86 to 98, `sound_packs`) has one voice line per
 result (`FAILURE`, `NO_TARGET`, `LACK_HEALTH`, `LACK_MANA`, `OBSTACLE`, `OUTOF_HEIGHT`, `TOO_CLOSE_RANGE`, `OUTOF_ANGLE`; all the

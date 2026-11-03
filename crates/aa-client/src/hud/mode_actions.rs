@@ -928,6 +928,15 @@ pub(super) fn use_slot(
         let Entry::Player(skill) = entry else {
             return;
         };
+        if let Some(fail) = env.held_back_refusal(skill, flight) {
+            failed.write(super::alerts::UseFailed {
+                skill,
+                result: fail.result,
+                value: fail.value,
+                server: false,
+            });
+            return;
+        }
         if env.held_back(skill, flight) {
             return;
         }
