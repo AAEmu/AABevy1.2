@@ -142,8 +142,9 @@ pub struct DialogView {
     /// The dialog is up (the rest of the HUD hidden).
     pub directing: bool,
     /// The quest whose step the dialog is directing (`quest_context_directing.alb`'s window
-    /// `questType`): set by `HUD.quest_show` when the window starts playing a step, so a late
-    /// refusal for an older quest cannot end a newer window.
+    /// `questType`): set only by `HUD.quest_show` when the window starts playing a step (and
+    /// cleared when directing ends), so a late refusal for an older quest cannot end a newer
+    /// window. Requests do not set it.
     pub quest: Option<u32>,
     /// The top-level widgets hidden for it.
     hidden: Vec<aa_ui::tree::Id>,
@@ -162,6 +163,10 @@ pub struct DialogView {
     /// Quest instances whose clock a refusal cleared: `FUN_3937a130` removes the timer entry and
     /// the tick must not add it again while the same quest is active.
     cleared_left: HashSet<(u32, i64)>,
+    /// Quest instances whose clock has been started (Started / Updated, or the login list's first
+    /// tick): an expired clock is not restarted by the tick; the next Started / Updated is
+    /// (`FUN_3937b240` is the only creator).
+    seeded_left: HashSet<(u32, i64)>,
     pub version: u64,
     /// Whether `quests` holds the server's list yet (the first one raises no events).
     seen: bool,
@@ -651,6 +656,7 @@ pub fn tick_left_times(left: &mut BTreeMap<u32, QuestClock>, quests: &[Quest], n
 fn tick_quest_clocks(dialog: &mut DialogView, quests: &[Quest], now: Instant) -> Vec<(u32, i32)> {
     let active: HashSet<(u32, i64)> = quests.iter().map(|q| (q.template_id, q.id)).collect();
     dialog.cleared_left.retain(|key| active.contains(key));
+    dialog.seeded_left.retain(|key| active.contains(key));
     let timed: Vec<Quest> = quests
         .iter()
         .filter(|q| q.status == status::PROGRESS && q.time_left_ms > 0)
@@ -658,7 +664,11 @@ fn tick_quest_clocks(dialog: &mut DialogView, quests: &[Quest], now: Instant) ->
         .cloned()
         .collect();
     for q in &timed {
-        dialog.left_times.entry(q.template_id).or_insert(QuestClock { end_ms: q.time_left_ms, started: now });
+        // The login list has no Started packet: seed its clock once, at this tick's local time.
+        // An expired clock stays gone until the server sends the next Started / Updated.
+        if dialog.seeded_left.insert((q.template_id, q.id)) {
+            dialog.left_times.entry(q.template_id).or_insert(QuestClock { end_ms: q.time_left_ms, started: now });
+        }
     }
     tick_left_times(&mut dialog.left_times, &timed, now)
 }
@@ -1289,6 +1299,7 @@ pub(super) fn talk_pointer(
 fn start_quest_clock(bridge: &Shared, q: &Quest, end_ms: i32, now: Instant) {
     let mut d = bridge.borrow_mut();
     d.dialog.cleared_left.remove(&(q.template_id, q.id));
+    d.dialog.seeded_left.insert((q.template_id, q.id));
     d.dialog.left_times.insert(q.template_id, QuestClock { end_ms, started: now });
 }
 
@@ -1298,7 +1309,6 @@ fn refuse_quest(rt: &UiRuntime, bridge: &Shared, quest_id: u32) -> bool {
     let mut d = bridge.borrow_mut();
     if d.dialog.directing && d.dialog.quest == Some(quest_id) {
         apply_directing(rt, &mut d.dialog, false);
-        d.dialog.quest = None;
     }
     let instance = d.dialog.quests.iter().find(|q| q.template_id == quest_id).map(|q| q.id);
     if let Some(id) = instance {
@@ -1353,17 +1363,16 @@ pub fn route_quest_notices(
                     let mut d = bridge.0.borrow_mut();
                     if d.dialog.directing && d.dialog.quest == Some(failed.quest_id) {
                         apply_directing(&rt, &mut d.dialog, false);
-                        d.dialog.quest = None;
                     }
                 }
                 info!("hud: quest {} needs unit {} (result {:?})", failed.quest_id, failed.unit_obj_id, failed.result);
-                // FUN_39376590 reports the result through FUN_39390900 before it raises 0xf4; result 8
-                // with detail 2 (cooldown) is silent there (FUN_39390900:742294).
+                // FUN_39376590 reports the result through FUN_39390900 before it raises 0xf4.
+                // The cooldown-detail silence (FUN_39390900:742294) is inside the skill-lookup
+                // branch, and FUN_39376590 passes the no-skill sentinel DAT_3a173784 (718029), so
+                // it does not apply here.
                 let result = failed.result.code;
                 let value = if failed.result.raw_flags & 4 != 0 { failed.result.value } else { u32::from(failed.result.extra) };
-                if !(result == super::usable::code::COOLDOWN_TIME && value == 2) {
-                    skill_failed.write(super::alerts::UseFailed { skill: 0, result, value, server: true });
-                }
+                skill_failed.write(super::alerts::UseFailed { skill: 0, result, value, server: true });
                 rt.fire_event("QUEST_QUICK_CLOSE_EVENT", failed.quest_id);
             }
             Event::QuestMailSent(sent) => {
@@ -1466,7 +1475,6 @@ pub fn handle_dialog(
         };
         match r {
             Req::Accept(quest_id) => {
-                d.dialog.quest = Some(quest_id);
                 let then = Interact::QuestStart { quest_id, npc_obj_id, doodad_obj_id, sphere_id: 0 };
                 let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::START))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
@@ -1481,7 +1489,6 @@ pub fn handle_dialog(
                 }
             }
             Req::Complete(quest_id, selected) => {
-                d.dialog.quest = Some(quest_id);
                 let then = Interact::QuestComplete { quest_id, npc_obj_id, doodad_obj_id, selected };
                 let started = match (cinema.as_deref_mut(), d.game.get().and_then(|g| directing_cinema(&d, g, quest_id, kind::READY))) {
                     (Some(player), Some((component_id, cinema_def))) => super::cinema::start_quest_cinema(
@@ -1511,7 +1518,6 @@ pub fn handle_dialog(
                 }
             }
             Req::Talk(quest_id, component_id, act_id) => {
-                d.dialog.quest = Some(quest_id);
                 send(&mut net, Interact::QuestTalk { npc_obj_id, quest_id, component_id, act_id });
             }
             Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
@@ -1568,6 +1574,9 @@ fn end_talk(d: &mut HudData, _net: &mut MessageWriter<NetCommand>) {
 /// The dialog has the screen to itself: every other top-level widget is hidden while it is up (the
 /// original hides the UI layers below its own) and the ones that were shown come back after.
 fn apply_directing(rt: &UiRuntime, dialog: &mut DialogView, on: bool) {
+    if !on {
+        dialog.quest = None;
+    }
     if dialog.directing == on {
         return;
     }
@@ -2410,6 +2419,7 @@ mod tests {
             .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1065, err: 6 })));
         app.update();
         assert!(!shared.borrow().dialog.directing);
+        assert_eq!(shared.borrow().dialog.quest, None, "ending directing clears the window quest");
         assert!(shared.borrow().dialog.left_times.is_empty(), "the failure clears the quest clock");
         let rt = app.world().non_send::<UiRuntime>();
         rt.lua
@@ -2468,16 +2478,16 @@ mod tests {
         let reported: Vec<_> = app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().collect();
         assert_eq!(reported.len(), 1, "FUN_39376590 reports the result before 0xf4");
         assert_eq!((reported[0].skill, reported[0].result, reported[0].value, reported[0].server), (0, 9, 7, true));
-        // FUN_39390900 returns early for result 8 (cooldown) with detail 2.
+        // FUN_39390900's cooldown-detail silence is inside its skill-lookup branch, and
+        // FUN_39376590 passes the no-skill sentinel DAT_3a173784, so result 8 / detail 2 reports.
         app.world_mut().write_message(failed(42, aa_net::skill::SkillResult { raw_flags: 5, code: 8, extra: 0, value: 2 }));
         app.update();
-        assert!(
-            app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().next().is_none(),
-            "a cooldown detail 2 result is silent"
-        );
+        let reported: Vec<_> = app.world_mut().resource_mut::<Messages<super::super::alerts::UseFailed>>().drain().collect();
+        assert_eq!(reported.len(), 1, "the no-skill sentinel skips the cooldown silence");
+        assert_eq!((reported[0].result, reported[0].value), (8, 2));
         let rt = app.world().non_send::<UiRuntime>();
         rt.lua
-            .load("assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[1].args[1]==1065)")
+            .load("assert(#OBSERVED==2 and OBSERVED[1].event=='QUEST_QUICK_CLOSE_EVENT' and OBSERVED[2].args[1]==1065)")
             .exec()
             .unwrap();
     }
@@ -2622,6 +2632,8 @@ mod tests {
             .exec()
             .unwrap();
         assert_eq!(shared.borrow().dialog.quest, Some(330), "the window's own quest reaches the app");
+        rt.lua.load("X2Quest:LeaveQuestDirectingMode()").exec().unwrap();
+        assert_eq!(shared.borrow().dialog.quest, None, "LeaveQuestDirectingMode clears it");
     }
 
     #[test]
@@ -2656,6 +2668,32 @@ mod tests {
         let events = tick_quest_clocks(&mut shared.borrow_mut().dialog, &[ready], Instant::now());
         assert_eq!(events, vec![(330, 0)], "the next tick removes it and publishes 0");
         assert!(!shared.borrow().dialog.left_times.contains_key(&330));
+    }
+
+    #[test]
+    fn an_expired_clock_is_not_restarted_by_the_tick() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        let q = Quest { id: 77, ..timed(60_000) };
+        let start = Instant::now();
+        assert_eq!(
+            tick_quest_clocks(&mut shared.borrow_mut().dialog, std::slice::from_ref(&q), start),
+            vec![(330, 60_000)],
+            "the login list seeds the clock once"
+        );
+        assert_eq!(
+            tick_quest_clocks(&mut shared.borrow_mut().dialog, std::slice::from_ref(&q), start + Duration::from_secs(61)),
+            vec![(330, 0)]
+        );
+        assert!(shared.borrow().dialog.left_times.is_empty());
+        // FUN_3937b240 is the only creator: the tick must not restart the expired clock.
+        assert!(tick_quest_clocks(&mut shared.borrow_mut().dialog, std::slice::from_ref(&q), start + Duration::from_secs(62)).is_empty());
+        assert!(shared.borrow().dialog.left_times.is_empty(), "an expired clock stays gone");
+        // the server's next Updated starts it again.
+        app.world_mut().write_message(NetEvent(Event::QuestUpdated(q.clone())));
+        app.update();
+        assert!(shared.borrow().dialog.left_times.contains_key(&330), "a later Updated restarts the clock");
+        let events = tick_quest_clocks(&mut shared.borrow_mut().dialog, std::slice::from_ref(&q), Instant::now());
+        assert!(events.len() == 1 && events[0].0 == 330 && events[0].1 > 0, "{events:?}");
     }
 
     #[test]

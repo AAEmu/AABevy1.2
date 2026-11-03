@@ -387,8 +387,9 @@ impl QuestTables {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id = any_int(r, 0)? as u32;
-                let fallback: Option<String> = r.get(1)?;
-                t.quest_mail_names.entry(id).or_insert_with(|| fallback.unwrap_or_default());
+                let base: Option<String> = r.get(1)?;
+                // the en_us localized row wins; without one the base quest_mails.name is the $1
+                t.quest_mail_names.insert(id, en("quest_mails", id).or(base).unwrap_or_default());
             }
         }
         {

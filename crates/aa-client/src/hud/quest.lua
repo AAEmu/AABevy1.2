@@ -344,6 +344,7 @@ X2Quest.LeaveQuestDirectingMode = function(self)
   directing = false
   talkCalled = false
   play = { chain = {}, pos = 0, qtype = 0, ctype = 0, atype = 0 }
+  HUD.quest_show(0)
   -- a cut back to the follow camera and the player shown (quest_camera::set_active(0))
   closeUp = false
   HUD.quest_camera(false)
