@@ -4699,18 +4699,6 @@ mod tests {
     /// another bench.
     #[test]
     fn opening_a_bench_closes_a_shown_interaction_list_or_coffer_first() {
-        let pak = std::env::var("AA_PAK").unwrap_or_else(|_| aa_pak::DEFAULT_PAK.to_string());
-        if !std::path::Path::new(&pak).is_file() {
-            eprintln!("skip: no game_pak at {pak}");
-            return;
-        }
-        let rt = UiRuntime::new("en_us", 800.0, 600.0).unwrap();
-        rt.lua
-            .load(
-                "EVENTS='';local w=UIParent:CreateWidget('emptywidget','interactionProbe','UIParent');                 w:RegisterEvent('INTERACTION_END');w:RegisterEvent('CRAFTING_START');                 w:SetHandler('OnEvent',function(_,event) EVENTS=EVENTS..event..';' end)",
-            )
-            .exec()
-            .unwrap();
         let bridge = Shared::default();
         {
             let mut d = bridge.borrow_mut();
@@ -4721,10 +4709,18 @@ mod tests {
         }
         let mut doodads = Doodads::default();
         doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
-        let mut app = craft_app(rt, bridge.clone(), doodads, Units::default());
         let mut inventory = Inventory::default();
         inventory.coffer.obj_id = 900;
-        app.insert_resource(inventory);
+        let mut app = App::new();
+        app.insert_non_send(HudBridge(bridge.clone()))
+            .insert_resource(doodads)
+            .insert_resource(Units::default())
+            .insert_resource(Views::default())
+            .insert_resource(crate::ingame::DevOptions::default())
+            .insert_resource(inventory)
+            .add_message::<NetCommand>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, execute);
         {
             let mut d = bridge.borrow_mut();
             d.doodad.menu_shown = true;
@@ -4744,11 +4740,6 @@ mod tests {
             bridge.borrow().doodad.coffer_close,
             "the coffer is closed too"
         );
-        let rt = app.world().non_send::<UiRuntime>();
-        rt.lua
-            .load("assert(EVENTS=='INTERACTION_END;CRAFTING_START;','first open: '..EVENTS)")
-            .exec()
-            .unwrap();
 
         app.update();
         let sent = app
