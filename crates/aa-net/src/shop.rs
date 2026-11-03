@@ -56,6 +56,12 @@ pub enum ShopCommand {
         priest_buff_id: u32,
         npc_obj_id: u32,
     },
+    /// `CSBuyCoinItemPacket`: confirm a `DoodadFuncPurchase` coin-item purchase. The doodad func
+    /// identifies the goods and the coin price (`FUN_393bac20`'s packet carries only these two).
+    BuyCoin {
+        obj_id: u32,
+        func_id: u32,
+    },
 }
 
 impl ShopCommand {
@@ -94,6 +100,9 @@ impl ShopCommand {
             }
             Self::ListSold { npc_obj_id } if *npc_obj_id == 0 => return Err("sold list has no NPC"),
             Self::BuyPriestBuff { npc_obj_id, .. } if *npc_obj_id == 0 => return Err("blessing has no priest"),
+            Self::BuyCoin { obj_id, func_id } if *obj_id == 0 || *func_id == 0 => {
+                return Err("coin purchase has no doodad func");
+            }
             _ => {}
         }
         Ok(())
@@ -105,6 +114,7 @@ impl ShopCommand {
             Self::Sell { .. } => cs::CSSellItemsPacket,
             Self::ListSold { .. } => cs::CSListSoldItemPacket,
             Self::BuyPriestBuff { .. } => cs::CSBuyPriestBuffPacket,
+            Self::BuyCoin { .. } => cs::CSBuyCoinItemPacket,
         }
     }
 
@@ -134,6 +144,9 @@ impl ShopCommand {
             }
             Self::BuyPriestBuff { priest_buff_id, npc_obj_id } => {
                 w.u32(*priest_buff_id).bc(*npc_obj_id);
+            }
+            Self::BuyCoin { obj_id, func_id } => {
+                w.bc(*obj_id).u32(*func_id);
             }
         }
     }
@@ -259,6 +272,12 @@ mod tests {
         assert_eq!(packet.opcode(), 0x0b2);
         assert_eq!(packet.encode_body(), [1, 0, 0, 0, 3, 2, 1]);
         assert!(ShopCommand::BuyPriestBuff { priest_buff_id: 1, npc_obj_id: 0 }.validate().is_err());
+        // `CSBuyCoinItemPacket::read_body`: obj_id (bc), id (u32).
+        let packet = ClientMsg::Shop(ShopCommand::BuyCoin { obj_id: 0x010203, func_id: 0x04050607 });
+        assert_eq!(packet.opcode(), 0x0af);
+        assert_eq!(packet.encode_body(), [3, 2, 1, 7, 6, 5, 4]);
+        assert!(ShopCommand::BuyCoin { obj_id: 0, func_id: 1 }.validate().is_err());
+        assert!(ShopCommand::BuyCoin { obj_id: 1, func_id: 0 }.validate().is_err());
     }
 
     #[test]

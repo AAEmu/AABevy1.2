@@ -402,6 +402,8 @@ pub enum Command {
     House(crate::housing::HouseCommand),
     /// Plant `item_id` as the doodad template `id` (`CSCreateDoodad`).
     CreateDoodad(crate::farm::CreateDoodad),
+    /// A client-side doodad func advances the phase (`CSChangeDoodadPhasePacket`).
+    ChangeDoodadPhase { obj_id: u32, skill_id: u32, next_phase: u32, func_id: u32 },
     /// Open or close a coffer, move items in and out ([`crate::coffer`]).
     Coffer(crate::coffer::CofferCommand),
     /// Ask for the player's planted public-farm crops (`CSRequestCommonFarmList`).
@@ -1884,6 +1886,11 @@ impl Session {
             Command::CreateDoodad(request) => {
                 if self.phase == Phase::InWorld {
                     self.send_game(game::ClientMsg::CreateDoodad(request)).await;
+                }
+            }
+            Command::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id } => {
+                if self.phase == Phase::InWorld && (1..=0xff_ffff).contains(&obj_id) {
+                    self.send_game(game::ClientMsg::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id }).await;
                 }
             }
             Command::Coffer(command) => {
