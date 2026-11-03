@@ -2033,12 +2033,12 @@ mod tests {
             decode(sc::SCQuestMailSentPacket, &[4, 3, 2, 1]),
             ServerMsg::QuestMailSent(quest::QuestMailSent { id: 0x0102_0304 })
         );
-        // SCShowQuestArea: u32 quest, i64 x, i64 y, f32 z, f32 radius (client reader FUN_397b7940).
+        // SCShowQuestArea: u32 type, i64 x, i64 y, f32 z, f32 radius (client reader FUN_397b7940).
         let mut w = Writer::new();
         w.u32(9).i64(1 << 44).i64(-(1 << 43)).f32(12.5).f32(30.0);
         assert_eq!(
             decode(sc::SCShowQuestAreaPacket, &w.finish()),
-            ServerMsg::QuestArea(quest::QuestArea { mark: 9, x: 1 << 44, y: -(1 << 43), z: 12.5, radius: 30.0 })
+            ServerMsg::QuestArea(quest::QuestArea { ty: 9, x: 1 << 44, y: -(1 << 43), z: 12.5, radius: 30.0 })
         );
     }
 

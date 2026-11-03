@@ -120,7 +120,7 @@ impl QuestMailSent {
     }
 }
 
-/// `SCShowQuestArea` (`0x1af`): a quest-mark area of style `mark` centred on the fixed-point world
+/// `SCShowQuestArea` (`0x1af`): a quest-mark area of style `type` centred on the fixed-point world
 /// position `(x, y, z)` with `radius` metres.
 ///
 /// The 1.2 reader `FUN_397b7940` (packet vtable `399b3f48`) reads "type" as a `u32` at `+0xc`,
@@ -130,8 +130,8 @@ impl QuestMailSent {
 /// `prefabs/quest_mark.xml` markers (exclamation / question / flower / hunt signs). No Lua event.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct QuestArea {
-    /// The quest-mark style (`FUN_393821f0`'s 1..15; other values draw the default mark).
-    pub mark: u32,
+    /// The quest-mark style (`FUN_3963b590(type)` is the native's "stype" label).
+    pub ty: u32,
     /// Fixed-point world X and Y; the client scales the difference to the player by `2^-44`.
     pub x: i64,
     pub y: i64,
@@ -141,7 +141,7 @@ pub struct QuestArea {
 
 impl QuestArea {
     pub fn read(r: &mut Reader) -> Result<Self> {
-        Ok(Self { mark: r.u32()?, x: r.i64()?, y: r.i64()?, z: r.f32()?, radius: r.f32()? })
+        Ok(Self { ty: r.u32()?, x: r.i64()?, y: r.i64()?, z: r.f32()?, radius: r.f32()? })
     }
 }
 
@@ -294,7 +294,7 @@ mod tests {
         let bytes = w.finish();
         assert_eq!(
             QuestArea::read(&mut Reader::new(&bytes)).unwrap(),
-            QuestArea { mark: 9, x: 0x1234_5678_9abc_def0u64 as i64, y: -7, z: 12.5, radius: 30.0 }
+            QuestArea { ty: 9, x: 0x1234_5678_9abc_def0u64 as i64, y: -7, z: 12.5, radius: 30.0 }
         );
         for cut in 0..bytes.len() {
             assert!(QuestArea::read(&mut Reader::new(&bytes[..cut])).is_err());

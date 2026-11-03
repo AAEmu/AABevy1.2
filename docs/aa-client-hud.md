@@ -610,14 +610,20 @@ HUD state is released so the original handlers can query it and close their wind
 
 * `X2Quest:GetUseTypeQuestItems(qtype, checkState)` (`FUN_394a55a0`): the kind-3 `SupplyItem`
   targets with `show_action_bar`, then the Progress `ObjItemUse` targets. With `checkState` it
-  answers nil for a quest in status 2/3/4 or already completed.
-* `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items plus
-  the objective's own item acts (`ObjItemUse`, `ObjItemGather`, `EtcItemObtain`). The index is the
-  native one, 0 based. The native also merges the other objectives' items; this client returns the
-  requested objective's items and the supplied ones.
+  answers nil for a quest in status 2/3/4, or for a completed non-repeatable quest (the completed
+  bit is ignored when `quest_contexts.repeatable` is set).
+* `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
+  assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
+  the not-done Progress components (the native increments before comparing). A supply item is
+  assigned by `FUN_394a2930`'s relation: the item's use skill's `skill_products` / `skill_reagents`
+  name one of the objective's act item ids; objective 1 takes the ones unrelated to any other
+  objective. `ObjItemGather` / `EtcItemObtain` only feed that relation and are never returned. An
+  unknown template answers an empty table.
+* Every item must pass `FUN_394a55a0`'s filter: the item exists and its `use_skill_id` resolves to a
+  skill (`FUN_39695dc0` + `FUN_396f6390`).
 * `X2Quest:IsQuestStartItem(itemType)` (`FUN_3949c880`): the item's `items.impl_id` is 10.
 * `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
-  `ObjItemUse` target of an active quest.
+  `ObjItemUse` target of an active quest, with the same usable-skill filter.
 * `X2Bag:FindFirstBagSlotItemByItemType` / `UseItemByType` (`FUN_3944dee0` / `FUN_3944d590`) and
   `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
   `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
@@ -627,20 +633,23 @@ HUD state is released so the original handlers can query it and close their wind
 ### Restarting a main quest
 
 `X2Quest:QuestContextRestart(qtype)` (`FUN_3949b780` -> `FUN_3937b200`) sends `CSRestartMainQuest`
-0x0fd (one `u32` quest id) after the native checks in `FUN_3937a8d0`: a 3 s throttle
-(`DAT_39ac7598`, stamped even by a refused try), an existing main quest (`detail_id` 2) that is
-active and not completed, and at least as many free bag slots as the kind-3 `SupplyItem` counts it
-hands out again (error 5; everything else error 0xc through `QUEST_ERROR_INFO`). The server answers
-with a normal Started / Updated, so the journal and tracker follow through `sync_quests`.
+0x0fd (one `u32` quest id). `FUN_3937b200` first ignores a quest that is not active or already
+completed (silently, without touching the throttle); `FUN_3937a8d0` then applies the 3 s throttle
+(`DAT_39ac7598`), the main-quest detail (`detail_id` 2) and at least as many free bag slots as the
+kind-3 `SupplyItem` counts it hands out again (error 5; a missing/non-main template is error 0xc
+through `QUEST_ERROR_INFO`). The server answers with a normal Started / Updated, so the journal and
+tracker follow through `sync_quests`.
 
 ### Server-shown quest areas
 
-`SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` mark style (`FUN_393821f0`'s 1..15
-select the `prefabs/quest_mark.xml` markers), fixed-point `i64` x / `i64` y, `f32` z and `f32`
-radius. The native `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) keeps a quest-mark decal
-list; Bevy keeps the same areas and draws a circle for each in `HUD.quest_areas` on the zone map
-whose rectangle holds the place (`map_quests.rs`, scale `2^-44` from `FUN_3961de30`), on both
-maps. The ground decal itself and its mark icon are not drawn.
+`SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point `i64` x / `i64` y,
+`f32` z and `f32` radius. `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) appends
+`{type, position, radius}` to `DAT_3a173d80` (`FUN_393833f0` push_back, no replace). There is no
+debug-cvar gate: `FUN_393822f0` draws every frame a red (204, 49, 49, 255) sphere of that radius
+and a `"stype: %u"` label from `FUN_3963b590(type)` (unknown types draw no label). Bevy keeps the
+same append-only list (capped at 256) and draws the sphere and label in the world
+(`hud/quest_areas.rs`, scale `2^-44` from `FUN_3961de30`). The label prints the raw type because
+the native `FUN_3963b590` table is not recovered.
 
 ### Quest cinemas
 

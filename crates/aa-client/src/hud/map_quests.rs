@@ -18,11 +18,9 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use aa_net::quest::Quest;
-use aa_net::{Event, NetEvent};
-use bevy::prelude::*;
 use mlua::{Lua, Table};
 
-use super::api::{HudBridge, Shared};
+use super::api::Shared;
 use super::data::GameData;
 
 /// One `area` block, in game metres.
@@ -126,52 +124,6 @@ fn targets_of(game: &GameData, all: &SignSpheres, quest: &Quest) -> Vec<Target> 
         .collect()
 }
 
-/// The fixed-point scale of `SCShowQuestArea`'s X and Y: the native multiplies the difference to
-/// the player by `_DAT_399f9b80` (2^-44) in `FUN_3961de30`.
-const CELL: f64 = 1.0 / 17_592_186_044_416.0;
-
-/// A server-sent area on a zone group's map; the group is the one whose rectangle holds the place.
-fn area_target(game: &GameData, area: &aa_net::quest::QuestArea) -> Option<Target> {
-    let x = area.x as f64 * CELL;
-    let y = area.y as f64 * CELL;
-    let (group, r) = game.zone_groups.iter().find(|(_, g)| {
-        let r = g.rect;
-        r[2] > 0.0 && r[3] > 0.0 && x >= f64::from(r[0]) && x <= f64::from(r[0] + r[2]) && y >= f64::from(r[1]) && y <= f64::from(r[1] + r[3])
-    })?;
-    let r = r.rect;
-    Some(Target {
-        group: *group,
-        u: ((x - f64::from(r[0])) / f64::from(r[2])) as f32,
-        v: (1.0 - (y - f64::from(r[1])) / f64::from(r[3])) as f32,
-        ru: area.radius / r[2],
-        x: x as f32,
-        y: y as f32,
-    })
-}
-
-/// The `SCShowQuestArea` areas on the zone maps.
-fn server_targets(game: &GameData, areas: &[aa_net::quest::QuestArea]) -> Vec<(u32, Target)> {
-    areas.iter().filter_map(|a| area_target(game, a).map(|t| (a.mark, t))).collect()
-}
-
-/// `SCShowQuestArea` (`OnShowQuestArea`, `FUN_391df7b0`): the native keeps a list of quest-mark
-/// decals; the client shows the same areas on the maps. A repeated area updates the same entry.
-pub fn track_areas(mut events: MessageReader<NetEvent>, bridge: NonSend<HudBridge>) {
-    for NetEvent(event) in events.read() {
-        let Event::QuestArea(area) = event else { continue };
-        let mut d = bridge.0.borrow_mut();
-        if let Some(slot) = d.quest_areas.iter_mut().find(|a| a.mark == area.mark && a.x == area.x && a.y == area.y) {
-            *slot = *area;
-        } else {
-            if d.quest_areas.len() >= 64 {
-                d.quest_areas.remove(0);
-            }
-            d.quest_areas.push(*area);
-        }
-        d.quest_area_version = d.quest_area_version.wrapping_add(1);
-    }
-}
-
 /// `HUD.quest_targets(qtype)`: the areas of an active quest's step (an empty list for none).
 pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     let b = bridge.clone();
@@ -191,29 +143,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             }
             Ok(out)
         })?,
-    )?;
-    let b = bridge.clone();
-    hud.raw_set(
-        "quest_areas",
-        lua.create_function(move |lua, ()| {
-            let out = lua.create_table()?;
-            let d = b.borrow();
-            let Some(game) = d.game.get() else { return Ok(out) };
-            for (i, (mark, t)) in server_targets(game, &d.quest_areas).iter().enumerate() {
-                let e = lua.create_table_with_capacity(0, 7)?;
-                e.raw_set("mark", *mark)?;
-                e.raw_set("group", t.group)?;
-                for (k, v) in [("u", t.u), ("v", t.v), ("ru", t.ru), ("x", t.x), ("y", t.y)] {
-                    e.raw_set(k, f64::from(v))?;
-                }
-                out.raw_set(i + 1, e)?;
-            }
-            Ok(out)
-        })?,
-    )?;
-    let b = bridge.clone();
-    hud.raw_set("quest_area_version", lua.create_function(move |_, ()| Ok(b.borrow().quest_area_version))?)?;
-    Ok(())
+    )
 }
 
 /// `map_quests.lua`: the decal and notifier calls of the quest scripts and the markers of the maps (after `quest.lua`).
@@ -279,35 +209,6 @@ mod tests {
     }
 
     #[test]
-    fn a_server_area_is_a_circle_even_without_a_tracked_quest() {
-        let lua = Lua::new();
-        lua.load(
-            r#"
-            X2Decal, X2Map, X2Quest = {}, {}, {}
-            HUD = { state = { zone_group = 2, zone_key_name = "w_a" }, quest_version = function() return 1 end,
-              quest_areas = function() return { { mark = 9, group = 2, u = 0.5, v = 0.25, ru = 0.01 } } end,
-              quest_area_version = function() return 1 end,
-              road_layout = function() return { 0, 0, 1, 1 }, 926, 556 end,
-              road_image_point = function(f, w, h, u, v) return u, v end,
-              quest_targets = function() return {} end }
-            AAUI = { RoadMap = function() return { level = 2, zone = 2, markers = {}, markers_version = 1 } end,
-              WorldMap = function() return { markers = {}, markers_version = 1 } end }
-            "#,
-        )
-        .exec()
-        .unwrap();
-        lua.load(include_str!("map_quests.lua")).exec().unwrap();
-        let (n, icon, r): (i64, String, f64) = lua
-            .load("local m = AAUI.WorldMap().markers; return #m, m[1].icon, m[1].radius")
-            .eval()
-            .unwrap();
-        assert_eq!((n, icon.as_str()), (1, "ui/map/territory_circle.dds"));
-        assert!((r - 0.01).abs() < 1e-9);
-        let n: i64 = lua.load("return #AAUI.RoadMap().markers").eval().unwrap();
-        assert_eq!(n, 1, "the roadmap shows the area too");
-    }
-
-    #[test]
     fn only_the_current_step_counts() {
         let mut game = GameData::default();
         game.zones.insert(133, (2, 0));
@@ -328,23 +229,6 @@ mod tests {
         let ready = Quest { template_id: 179, component_id: 99, status: aa_net::quest::status::READY, ..Default::default() };
         assert!(targets_of(&game, &all, &ready).is_empty());
         assert!(targets_of(&game, &all, &Quest { template_id: 5, ..Default::default() }).is_empty());
-    }
-
-    #[test]
-    fn a_shown_quest_area_lands_on_its_zone_map() {
-        let mut game = GameData::default();
-        game.zone_groups.insert(2, super::super::data::ZoneGroup { rect: [1000.0, 2000.0, 2000.0, 1000.0], ..Default::default() });
-        // 1500, 2500 metres as the client's fixed point (2^-44).
-        let area = aa_net::quest::QuestArea { mark: 9, x: (1500.0 * 2f64.powi(44)) as i64, y: (2500.0 * 2f64.powi(44)) as i64, z: 5.0, radius: 30.0 };
-        let t = server_targets(&game, &[area]);
-        assert_eq!(t.len(), 1);
-        assert_eq!((t[0].0, t[0].1.group), (9, 2));
-        assert!((t[0].1.u - 0.25).abs() < 1e-5);
-        assert!((t[0].1.v - 0.5).abs() < 1e-5);
-        assert!((t[0].1.ru - 0.015).abs() < 1e-6);
-        // off every map rectangle: not drawn
-        let far = aa_net::quest::QuestArea { x: 0, y: 0, ..area };
-        assert!(server_targets(&game, &[far]).is_empty());
     }
 
     /// The real files: every area lies on the map of the zone group it is in (when the client files are there).

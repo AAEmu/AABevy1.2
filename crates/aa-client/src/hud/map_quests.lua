@@ -72,21 +72,6 @@ local function active()
   return out
 end
 
--- `SCShowQuestArea` areas (`HUD.quest_areas`): a plain circle of the area's radius, no number.
-local function areaCircles(place)
-  local out = {}
-  local areas = HUD.quest_areas and HUD.quest_areas() or {}
-  for _, t in ipairs(areas) do
-    local u, v, r = place(t)
-    if u ~= nil then
-      local c = COLORS[1]
-      out[#out + 1] = { icon = CIRCLE, coords = { 0, 0, 128, 128 }, u = u, v = v, radius = r,
-        color = { c[1] / 255, c[2] / 255, c[3] / 255, ALPHA } }
-    end
-  end
-  return out
-end
-
 -- The markers of one area: the circle (below everything) and the number (above), `place(t)` -> u, v, radius or nil.
 local function build(list, place, tag)
   local below, above = {}, {}
@@ -109,7 +94,6 @@ local function build(list, place, tag)
     end
   end
   local out = {}
-  for _, m in ipairs(areaCircles(place)) do out[#out + 1] = m end
   for _, m in ipairs(below) do out[#out + 1] = m end
   for _, m in ipairs(list or {}) do out[#out + 1] = m end
   for _, m in ipairs(above) do out[#out + 1] = m end
@@ -123,11 +107,10 @@ local road = { key = nil, list = {}, version = 0 }
 local roadHook = AAUI.RoadMap
 AAUI.RoadMap = function()
   local r = roadHook()
-  local areas = HUD.quest_area_version and HUD.quest_area_version() or 0
-  if r == nil or r.level ~= 2 or (next(notify) == nil and areas == 0) then return r end
+  if r == nil or r.level ~= 2 or next(notify) == nil then return r end
   local s = HUD.state
   local f, w, h = HUD.road_layout(r.level, r.zone, string.upper(s.zone_key_name))
-  local key = table.concat({ r.markers_version or -1, notifyVersion, areas, HUD.quest_version(), r.zone, s.zone_group,
+  local key = table.concat({ r.markers_version or -1, notifyVersion, HUD.quest_version(), r.zone, s.zone_group,
     w or 0, h or 0, f and f[1] or 0, f and f[2] or 0, f and f[3] or 0, f and f[4] or 0 }, ":")
   if road.key ~= key then
     road.key, road.version = key, road.version + 1
@@ -148,9 +131,8 @@ local world = { key = nil, list = {}, version = 0 }
 local worldHook = AAUI.WorldMap
 AAUI.WorldMap = function()
   local r = worldHook()
-  local areas = HUD.quest_area_version and HUD.quest_area_version() or 0
-  if r == nil or (next(notify) == nil and areas == 0) then return r end
-  local key = table.concat({ r.markers_version or -1, notifyVersion, areas, HUD.quest_version() }, ":")
+  if r == nil or next(notify) == nil then return r end
+  local key = table.concat({ r.markers_version or -1, notifyVersion, HUD.quest_version() }, ":")
   if world.key ~= key then
     world.key, world.version = key, world.version + 1
     world.list = build(r.markers, function(t) return t.u, t.v, t.ru end, function(t) return { level = 2, id = t.group } end)
