@@ -49,6 +49,7 @@ fn workbench_app(data: HudData, doodads: Doodads) -> (App, super::super::api::Sh
         .insert_resource(Units::default())
         .add_message::<NetEvent>()
         .add_message::<NetCommand>()
+        .add_message::<super::super::alerts::ShowError>()
         .add_systems(Update, batch::update);
     (app, bridge)
 }
@@ -181,4 +182,39 @@ fn walking_out_of_range_closes_the_bench_and_refuses_the_request() {
         .load("assert(INTERACTION_END_COUNT==1)")
         .exec()
         .unwrap();
+}
+
+/// Native `FUN_394d6dc0` answers an out-of-range request with `FUN_39428370(0x9a)` (`TOO_FAR_AWAY`)
+/// instead of silently dropping it; the active-interaction monitor then closes the bench.
+#[test]
+fn an_out_of_range_craft_request_shows_too_far_away() {
+    if !real_pak() { return }
+    let mut data = HudData::default();
+    data.character_id = 47;
+    data.pos = Vec3::new(0.0, 10.0, 0.0);
+    data.player_radius = 0.0;
+    let mut game = crate::hud::data::GameData::default();
+    game.crafting = crate::hud::crafting::fixture_tables([(568, vec![5557])]);
+    assert!(data.game.0.set(game).is_ok());
+    assert_eq!(bench::open(&mut data, 300, 568), Some(1));
+    batch::queue(&mut data, 5557, 300, 3);
+    let mut doodads = Doodads::default();
+    doodads.by_id.insert(300, super::fixture::doodad());
+    let (mut app, bridge) = workbench_app(data, doodads);
+    app.update();
+    let sent = app
+        .world_mut()
+        .resource_mut::<Messages<NetCommand>>()
+        .drain()
+        .map(|message| message.0)
+        .collect::<Vec<_>>();
+    assert!(sent.is_empty(), "an out-of-range request sends no craft: {sent:?}");
+    let errors = app
+        .world_mut()
+        .resource_mut::<Messages<super::super::alerts::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect::<Vec<_>>();
+    assert_eq!(errors, vec![0x9a]);
+    assert!(active_bench(&bridge.borrow()).is_none(), "the monitor closes the bench after the refusal");
 }

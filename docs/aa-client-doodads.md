@@ -84,7 +84,8 @@ The bar and right-click list use the normal doodad candidate distance (4 m): nat
 `393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
 `FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap); out of range it
 walks to the doodad (`FUN_390a6af0` pending action) and opens on arrival. `FUN_394d6dc0`
-rechecks the same distance before `CSExecuteCraft` (`batch::command`). The active-interaction monitor `393b7e40`
+rechecks the same distance before `CSExecuteCraft` (`batch::command`) and shows error 0x9a
+(`TOO_FAR_AWAY`) when the request is out of range. The active-interaction monitor `393b7e40`
 closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
 (`batch::update`, which keeps CURRENT maps until the next bench, as `393b7aa0` does).
 `X2Craft:EndCraftingInteraction` (wrapper `39460890`) queues the same close.
