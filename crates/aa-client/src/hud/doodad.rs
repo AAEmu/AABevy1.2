@@ -107,6 +107,9 @@ const COFFER_RANGE: f32 = 6.0;
 const NAVI_ID: i64 = 1 << 32;
 /// How long the walk to a doodad may go without getting nearer before it is given up, seconds.
 const STUCK_SECS: f32 = 3.0;
+/// `ErrorMessageType` 0x9a (`FUN_39428370`): the pending use is still out of reach when the walk
+/// gives up.
+const TOO_FAR_AWAY: i16 = 0x9a;
 /// The keys that end the walk to a doodad (the player takes over).
 const MOVE_ACTIONS: [&str; 5] = ["moveforward", "moveback", "moveleft", "moveright", "jump"];
 
@@ -406,6 +409,9 @@ pub(super) struct View {
     approach: Option<Approach>,
     /// The use that is waiting for that walk to arrive.
     pending: Option<Pending>,
+    /// The walk stopped with no progress while the pending use was still out of the measured
+    /// reach: pointer_use answers it with TOO_FAR_AWAY (0x9a).
+    too_far: bool,
     /// `obj_id` -> the faction from `SCDoodadOriginator` (native doodad+0x350; `FUN_393b3300` case 3).
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
@@ -471,6 +477,7 @@ pub(super) fn start_walk(data: &mut HudData, obj_id: u32, dist: f32, now: f32) {
     super::pets::cancel_mount_walk(data);
     super::dialog::cancel_walk(data);
     data.doodad.pending = None;
+    data.doodad.too_far = false;
     data.doodad.approach = Some(Approach {
         obj_id,
         best: dist,
@@ -701,9 +708,16 @@ fn craft_permitted(perm: u8, player: &PlayerFacts, doodad: &DoodadFacts) -> bool
 }
 
 /// The 3D surface gap from the player to a doodad, the distance `FUN_39093800` compares against
-/// [`INTERACTION_DISTANCE`]. The doodad's radius is its `sim_radius` (scaled by the spawn scale); the native
-/// predicate takes the minimum over the doodad's real colliders, which are not recovered.
-fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> Option<f32> {
+/// [`INTERACTION_DISTANCE`], and whether it measured the drawn model's bounds (`true`) rather than
+/// the `sim_radius` fallback (`false`). The native predicate takes the minimum over the doodad's
+/// real colliders, which are not recovered; that fallback is a centre distance and is 0 for many
+/// templates, so it must not be treated as the native geometry test.
+fn interaction_gap(
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+) -> Option<(f32, bool)> {
     let o = doodads.by_id.get(&obj_id)?;
     let pos = doodad_world(o, units)?;
     let scale = if o.scale > 0.0 { o.scale } else { 1.0 };
@@ -718,20 +732,32 @@ fn interaction_gap(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32
         // the doodad's own (oriented) frame: an axis-aligned world box is too lenient on a rotated model
         let local = transform.to_matrix().inverse().transform_point3(player);
         let nearest = transform.transform_point(local.clamp(lo, hi));
-        return Some(player.distance(nearest) - data.player_radius);
+        return Some((player.distance(nearest) - data.player_radius, true));
     }
     let radius = data
         .game
         .get()
         .map_or(0.0, |g| g.doodad.radius(o.template_id) * scale);
-    Some(super::slave::surface_gap(data.pos, data.player_radius, pos, radius))
+    Some((
+        super::slave::surface_gap(data.pos, data.player_radius, pos, radius),
+        false,
+    ))
 }
 
 /// The native interaction range: `FUN_39093800` refuses when the surface offset is greater than
 /// `max_interaction_doodad_distance` (2.1 m). Workbench entry opens only inside it and the craft
 /// validator (`FUN_394d6dc0`) rechecks it before `CSExecuteCraft`.
 pub(super) fn in_interaction_reach(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
-    interaction_gap(data, doodads, units, obj_id).is_some_and(|gap| gap < INTERACTION_DISTANCE)
+    interaction_gap(data, doodads, units, obj_id).is_some_and(|(gap, _)| gap < INTERACTION_DISTANCE)
+}
+
+/// Whether a use must walk first: the gap measured the drawn model's real bounds and is out of the
+/// 2.1 m reach. A fallback gap (no bounds yet, a parented doodad, a template with no sim radius) is
+/// not the native collider shape, so it never defers: the use is sent or opened and the server
+/// checks the reach.
+fn needs_walk(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
+    interaction_gap(data, doodads, units, obj_id)
+        .is_some_and(|(gap, real)| real && gap >= INTERACTION_DISTANCE)
 }
 
 /// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
@@ -1469,8 +1495,13 @@ fn pointer_use(
     mut dev: ResMut<crate::ingame::DevOptions>,
     houses: Option<Res<aa_net::Houses>>,
     world_info: Option<Res<aa_world::stream::WorldInfo>>,
+    mut errors: MessageWriter<super::alerts::ShowError>,
 ) {
     let mut data = bridge.0.borrow_mut();
+    if std::mem::take(&mut data.doodad.too_far) {
+        // FUN_393b3ec0's pending action never got into reach: FUN_39428370(0x9a).
+        errors.write(super::alerts::ShowError(TOO_FAR_AWAY));
+    }
     let clicked = data.doodad.pointer_pick.take();
     let clicked = (!super::blocks_look_pointer(&data, MouseButton::Right))
         .then_some(clicked)
@@ -1607,7 +1638,9 @@ pub(super) fn walk_to(
         .by_id
         .get(&a.obj_id)
         .and_then(|o| doodad_world(o, units));
-    let gap = interaction_gap(d, doodads, units, a.obj_id).unwrap_or(f32::INFINITY);
+    let measured = interaction_gap(d, doodads, units, a.obj_id);
+    let gap = measured.map_or(f32::INFINITY, |(gap, _)| gap);
+    let fallback = measured.is_some_and(|(_, real)| !real);
     let step = advance(
         target.is_none(),
         moving,
@@ -1639,7 +1672,14 @@ pub(super) fn walk_to(
             if gap < INTERACTION_DISTANCE {
                 return Some(a.obj_id);
             }
-            d.doodad.pending = None;
+            if d.doodad.pending.is_some() {
+                if fallback {
+                    // the sim-radius fallback cannot prove the doodad out of reach: run the use
+                    return Some(a.obj_id);
+                }
+                d.doodad.pending = None;
+                d.doodad.too_far = true;
+            }
             return None;
         }
         Walk::Run => {}
@@ -1692,7 +1732,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         let Some(uses) = game.doodad.uses(o.func_group_id).cloned() else { return false };
         (game.doodad.name(o.template_id).unwrap_or("?").to_string(), uses)
     };
-    let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
+    let (gap, real) = interaction_gap(d, doodads, units, obj_id).unwrap_or((f32::INFINITY, false));
     let dist = d.pos.distance(pos);
     d.doodad.preferred = Some(obj_id);
     // a doodad use is a new target action: a mount walk to the pet or a talk walk must not keep steering
@@ -1728,10 +1768,12 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     }
     // Native `FUN_393b3ec0` checks `FUN_39093800` for every action it is asked to run, so a phase
     // that offers a skill or a navi use walks to the doodad first when it is out of the 2.1 m
-    // surface gap. A craft-only phase is listed out to the bar's centre distance (`DOODAD_REACH`)
-    // and its use walks on its own; the two distances are not compared with each other.
+    // surface gap. Only the drawn model's bounds measure that gap; the sim-radius fallback (often
+    // 0) is not the native collider shape and must not walk. A craft-only phase is listed out to
+    // the bar's centre distance (`DOODAD_REACH`) and its use walks on its own; the two distances
+    // are not compared with each other.
     let only_craft = uses.skills.is_empty() && uses.navi.is_empty();
-    if gap >= INTERACTION_DISTANCE && (!only_craft || dist >= DOODAD_REACH) {
+    if real && gap >= INTERACTION_DISTANCE && (!only_craft || dist >= DOODAD_REACH) {
         info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
         start_walk(d, obj_id, gap, now);
         return false;
@@ -1760,7 +1802,7 @@ fn defer_action(
     generation: Option<u64>,
     now: f32,
 ) {
-    let gap = interaction_gap(d, doodads, units, obj_id).unwrap_or(f32::INFINITY);
+    let gap = interaction_gap(d, doodads, units, obj_id).map_or(f32::INFINITY, |(gap, _)| gap);
     info!("doodad: use {obj_id} ({action}) is {gap:.1} m away: walking there");
     start_walk(d, obj_id, gap, now);
     d.doodad.pending = Some(Pending {
@@ -1824,7 +1866,7 @@ fn use_bench(
     generation: Option<u64>,
 ) -> Option<(u32, usize, bool)> {
     let o = doodads.by_id.get(&obj_id)?;
-    if !in_interaction_reach(d, doodads, units, obj_id) {
+    if needs_walk(d, doodads, units, obj_id) {
         defer_action(
             d,
             doodads,
@@ -1917,9 +1959,9 @@ pub(super) fn execute(
                         opens.push(open);
                     }
                 } else if current {
-                    // Native `FUN_393b3ec0` walks for every action: a skill picked out of the
-                    // 2.1 m surface gap waits for the walk (the pending path) and runs on arrival.
-                    if in_interaction_reach(&d, &doodads, &units, obj_id) {
+                    // Native `FUN_393b3ec0` walks for every action measured against the doodad's
+                    // real colliders; a fallback gap sends the skill and lets the server check.
+                    if !needs_walk(&d, &doodads, &units, obj_id) {
                         commands.push((
                             obj_id,
                             Command::UseDoodadSkill {
@@ -1981,9 +2023,9 @@ pub(super) fn execute(
                 commands.push((obj_id, command));
                 continue;
             }
-            // An entry picked from the list is an action like any other: out of the 2.1 m
-            // surface gap it walks first (`FUN_393b3ec0`) and runs through the pending path.
-            if u32::try_from(id).is_ok() && !in_interaction_reach(&d, &doodads, &units, obj_id) {
+            // An entry picked from the list is an action like any other: a measured gap out of
+            // reach walks first (`FUN_393b3ec0`) and runs through the pending path.
+            if u32::try_from(id).is_ok() && needs_walk(&d, &doodads, &units, obj_id) {
                 let Some(o) = doodads.by_id.get(&obj_id) else { continue };
                 defer_action(
                     &mut d,
@@ -2904,6 +2946,12 @@ mod tests {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(data));
         let mut state = Doodads::default();
         for doodad in doodads {
+            // The walk tests need a measured gap: a drawn 1 x 1 x 1 m model box, not the sim-radius
+            // fallback (which never defers now).
+            shared.borrow_mut().doodad.bounds.insert(
+                doodad.obj_id,
+                (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)),
+            );
             state.by_id.insert(doodad.obj_id, doodad);
         }
         let mut app = App::new();
@@ -2935,7 +2983,8 @@ mod tests {
         doodads
             .by_id
             .insert(7, world_doodad(7, 850, 1, Vec3::ZERO));
-        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        let (gap, real) = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(real, "the drawn model's bounds measured the gap");
         assert!(
             (gap - 1.5).abs() < 1e-4,
             "the 3 x 2 m body leaves 1.5 m from its side (centre distance would be 4 m): {gap}"
@@ -2959,7 +3008,8 @@ mod tests {
         doodad.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4).to_array();
         let mut doodads = Doodads::default();
         doodads.by_id.insert(7, doodad);
-        let gap = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        let (gap, real) = interaction_gap(&data, &doodads, &Units::default(), 7).unwrap();
+        assert!(real, "the drawn model's bounds measured the gap");
         assert!(
             (gap - 2.789).abs() < 0.01,
             "the rotated corner leaves its real 2.79 m gap: {gap}"
@@ -4049,6 +4099,7 @@ mod tests {
             .insert_resource(crate::ingame::DevOptions::default())
             .add_message::<NetCommand>()
             .add_message::<UseFailed>()
+            .add_message::<crate::hud::alerts::ShowError>()
             .add_systems(Update, (pointer_use, execute).chain());
         app
     }
@@ -4083,6 +4134,9 @@ mod tests {
                 .set(mixed_tables(1088, 14602, craft_perm::ANY))
                 .is_ok()
         );
+        data.doodad
+            .bounds
+            .insert(300, (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)));
         let mut doodads = Doodads::default();
         doodads
             .by_id
@@ -4125,6 +4179,9 @@ mod tests {
                 key: -3.0,
                 dist: 3.0,
             });
+            d.doodad
+                .bounds
+                .insert(300, (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)));
             d.dynamic_actions.replace(Some(Shown {
                 source: Source::Doodad {
                     obj_id: 300,
@@ -4180,6 +4237,182 @@ mod tests {
             "{sent:?}"
         );
         assert!(bridge.borrow().doodad.pending.is_none());
+    }
+
+    /// The bar request used by the fallback tests: skill 14602 on doodad 300 in phase 1 at 3 m.
+    fn fallback_skill_app(bounded: bool) -> (App, Shared) {
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            let mut game = GameData::default();
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0);
+            assert!(d.game.0.set(game).is_ok());
+            d.doodad.focus = Some(Focus {
+                obj_id: 300,
+                skills: vec![14602],
+                craft_icon: None,
+                key: -3.0,
+                dist: 3.0,
+            });
+            if bounded {
+                d.doodad
+                    .bounds
+                    .insert(300, (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)));
+            }
+            d.dynamic_actions.replace(Some(Shown {
+                source: Source::Doodad {
+                    obj_id: 300,
+                    phase: 1,
+                    generation: 1,
+                },
+                skills: vec![14602],
+            }));
+            d.dynamic_actions.request(1);
+        }
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(300, world_doodad(300, 850, 1, Vec3::new(0.0, 3.0, 0.0)));
+        let mut views = Views::default();
+        views.fixture_doodad(300, Entity::PLACEHOLDER);
+        (pending_app(bridge.clone(), doodads, Units::default(), views), bridge)
+    }
+
+    /// The sim-radius fallback (no drawn model bounds, or a parented doodad) is not the native
+    /// collider shape: FUN_393b3ec0's range check must not defer. The use is sent at once and the
+    /// server checks the reach.
+    #[test]
+    fn a_doodad_without_drawn_bounds_is_used_at_once() {
+        let (mut app, bridge) = fallback_skill_app(false);
+        app.update();
+        {
+            let d = bridge.borrow();
+            assert!(
+                d.doodad.approach.is_none(),
+                "the fallback gap must not walk"
+            );
+            assert!(d.doodad.pending.is_none(), "no pending use");
+        }
+        let sent = sent_commands(&mut app);
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [Command::UseDoodadSkill {
+                    skill_id: 14602,
+                    doodad_obj_id: 300,
+                }]
+            ),
+            "{sent:?}"
+        );
+    }
+
+    /// The same bar request against a drawn model box does defer: the gap is real and out of reach.
+    #[test]
+    fn a_bounded_doodad_at_3_m_walks_first() {
+        let (mut app, bridge) = fallback_skill_app(true);
+        app.update();
+        {
+            let d = bridge.borrow();
+            assert!(d.doodad.approach.is_some(), "the measured gap walks");
+            assert_eq!(
+                d.doodad.pending,
+                Some(Pending {
+                    obj_id: 300,
+                    action: 14602,
+                    phase: 1,
+                    generation: Some(1),
+                })
+            );
+        }
+        assert!(sent_commands(&mut app).is_empty(), "no skill before the walk");
+    }
+
+    /// A walk that stops with no progress on a real measured gap cannot run the pending use: it
+    /// answers TOO_FAR_AWAY (FUN_39428370(0x9a)) instead of dropping it silently.
+    #[test]
+    fn a_stuck_walk_on_a_measured_gap_shows_too_far_away() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 3.0)]);
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 0.0;
+            h.click = Some(7);
+        }
+        app.update();
+        assert!(shared.borrow().doodad.approach.is_some(), "the bounded doodad walks");
+        shared.borrow_mut().doodad.pending = Some(Pending {
+            obj_id: 7,
+            action: 14602,
+            phase: 1,
+            generation: None,
+        });
+
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 4.0;
+            h.click = None;
+        }
+        app.update();
+        let d = shared.borrow();
+        assert!(d.doodad.too_far, "the stuck pending use is refused");
+        assert!(d.doodad.pending.is_none());
+        assert!(d.doodad.approach.is_none());
+        assert!(app.world().resource::<Harness>().acted.is_empty());
+    }
+
+    /// The same stop on a fallback gap runs the pending use instead: the sim radius cannot prove
+    /// that the doodad is out of reach.
+    #[test]
+    fn a_stuck_walk_on_a_fallback_gap_uses_the_pending_action() {
+        let (mut app, shared) = approach_app(vec![test_doodad(7, 0.0, 3.0)]);
+        shared.borrow_mut().doodad.bounds.clear();
+        {
+            let mut d = shared.borrow_mut();
+            d.doodad.approach = Some(Approach {
+                obj_id: 7,
+                best: 3.0,
+                best_at: 0.0,
+            });
+            d.doodad.pending = Some(Pending {
+                obj_id: 7,
+                action: 14602,
+                phase: 1,
+                generation: None,
+            });
+        }
+        {
+            let mut h = app.world_mut().resource_mut::<Harness>();
+            h.now = 4.0;
+            h.click = None;
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<Harness>().acted,
+            vec![7],
+            "the use follows the stuck walk"
+        );
+        assert!(!shared.borrow().doodad.too_far);
+    }
+
+    /// The refusal from the stuck walk is shown through the alerts system.
+    #[test]
+    fn the_stuck_walk_refusal_is_shown() {
+        let (mut app, bridge) = fallback_skill_app(false);
+        bridge.borrow_mut().doodad.too_far = true;
+        {
+            let mut d = bridge.borrow_mut();
+            d.dynamic_actions.replace(None);
+        }
+        app.update();
+        let errors = app
+            .world_mut()
+            .resource_mut::<Messages<crate::hud::alerts::ShowError>>()
+            .drain()
+            .map(|error| error.0)
+            .collect::<Vec<_>>();
+        assert_eq!(errors, vec![0x9a], "TOO_FAR_AWAY");
     }
 
     /// The pending use is re-checked on arrival: the phase, the view generation and a craft
@@ -4364,6 +4597,9 @@ mod tests {
             ..HudData::default()
         };
         assert!(data.game.0.set(craft_tables(1088, craft_perm::ANY)).is_ok());
+        data.doodad
+            .bounds
+            .insert(300, (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)));
         let mut doodads = Doodads::default();
         doodads.by_id.insert(300, world_doodad(300, 568, 1088, Vec3::new(0.0, 3.0, 0.0)));
         let units = Units::default();

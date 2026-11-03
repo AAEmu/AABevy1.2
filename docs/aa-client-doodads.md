@@ -87,11 +87,19 @@ The bar and right-click list use the normal doodad candidate distance (4 m): nat
 `393bd290` does not range-filter the craft action. On use, `FUN_393b3ec0` checks
 `FUN_39093800` against `max_interaction_doodad_distance` (2.1 m surface gap) for every
 action, skills included; out of range it walks to the doodad (`FUN_390a6af0` pending
-action) and runs the action on arrival. A phase that also offers a skill or navi use
-therefore walks before its list is offered, while a craft-only phase is listed from the
-4 m centre distance. The pending action stores the phase and view generation it was
-picked from; on arrival the port re-checks the phase, the generation and a craft
-permission and drops the use if any changed, and a different bar or list pick cancels it. `FUN_394d6dc0`
+action) and runs the action on arrival. That walk needs a gap measured against the drawn
+model's bounds (the native predicate uses the real colliders): when only the `sim_radius`
+fallback is available (the model is not built yet, a parented doodad on a wagon or ship,
+or a template whose `sim_radius` is 0), the port does not walk — the use is sent or the
+bench opened at once and the server checks the reach. A walk that stops with no progress
+(the character has not got nearer for 3 s) runs the pending use when the gap was that
+fallback and otherwise answers `FUN_39428370(0x9a)` `TOO_FAR_AWAY`. A phase that also
+offers a skill or navi use therefore walks before its list is offered, while a craft-only
+phase is listed from the 4 m centre distance. The pending action stores the phase and view
+generation it was picked from; on arrival the port re-checks the phase, the generation and
+a craft permission and drops the use if any changed, and a different bar or list pick
+cancels it. Picking a list entry closes the list (`menu_shown`), so a later bench open does
+not close it a second time. `FUN_394d6dc0`
 rechecks the same distance before `CSExecuteCraft` (`batch::command`) and shows error 0x9a
 (`TOO_FAR_AWAY`) when the request is out of range. The active-interaction monitor `393b7e40`
 closes through `393b7aa0` (`INTERACTION_END`) when the doodad is gone or out of range
