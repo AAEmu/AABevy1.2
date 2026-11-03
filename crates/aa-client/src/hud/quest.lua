@@ -307,6 +307,8 @@ end
 
 local function playLines(which, qtype, ctype, atype)
   play = { chain = HUD.quest_bubbles(which, qtype, ctype or 0) or {}, pos = 1, qtype = qtype, ctype = ctype or 0, atype = atype or 0 }
+  -- the window's own quest, which a late refusal for an older quest must not close
+  HUD.quest_show(qtype)
   HUD.quest_cinema_permission(qtype, which)
   startCloseUp(qtype)
   if #play.chain == 0 then

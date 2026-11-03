@@ -142,7 +142,8 @@ pub struct DialogView {
     /// The dialog is up (the rest of the HUD hidden).
     pub directing: bool,
     /// The quest whose step the dialog is directing (`quest_context_directing.alb`'s window
-    /// `questType`): the last accept / hand-in / talk request it sent.
+    /// `questType`): set by `HUD.quest_show` when the window starts playing a step, so a late
+    /// refusal for an older quest cannot end a newer window.
     pub quest: Option<u32>,
     /// The top-level widgets hidden for it.
     hidden: Vec<aa_ui::tree::Id>,
@@ -290,6 +291,14 @@ fn bubble_table(lua: &Lua, game: &GameData, texts: &Texts, which: &str, quest: u
 pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     let b = bridge.clone();
     hud.raw_set("quest_version", lua.create_function(move |_, ()| Ok(b.borrow().dialog.version))?)?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_show",
+        lua.create_function(move |_, qtype: u32| {
+            b.borrow_mut().dialog.quest = (qtype != 0).then_some(qtype);
+            Ok(())
+        })?,
+    )?;
     let b = bridge.clone();
     hud.raw_set(
         "quest_left_time",
@@ -2374,6 +2383,9 @@ mod tests {
         };
         let _ = data.game.0.set(game);
         let shared: Shared = Rc::new(RefCell::new(data));
+        let hud = rt.lua.create_table().unwrap();
+        super::install(&rt.lua, &hud, &shared).unwrap();
+        rt.lua.globals().set("HUD", hud).unwrap();
         let mut app = App::new();
         app.add_message::<NetEvent>()
             .add_message::<super::super::alerts::UseFailed>()
@@ -2412,6 +2424,23 @@ mod tests {
             )
             .exec()
             .unwrap();
+    }
+
+    #[test]
+    fn a_late_refusal_for_an_old_quest_does_not_end_a_newer_window() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        // playLines tells the app which quest the window shows (HUD.quest_show); the previous
+        // request's quest must not be used for the refusal comparison.
+        app.world().non_send::<UiRuntime>().lua.load("HUD.quest_show(1066)").exec().unwrap();
+        assert_eq!(shared.borrow().dialog.quest, Some(1066));
+        app.world_mut()
+            .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1065, err: 6 })));
+        app.update();
+        assert!(shared.borrow().dialog.directing, "a late refusal for 1065 must not end the window showing 1066");
+        app.world_mut()
+            .write_message(NetEvent(Event::QuestContextFailed(aa_net::quest::QuestContextFailed { quest_id: 1066, err: 6 })));
+        app.update();
+        assert!(!shared.borrow().dialog.directing, "the window's own quest still closes it");
     }
 
     #[test]
@@ -2586,6 +2615,13 @@ mod tests {
         assert!(left > 59_000 && left <= 60_000, "the getter reads the live clock, not accept_time: {left}");
         let none: i32 = rt.lua.load("return X2Quest:GetQuestContextLeftTime(331)").eval().unwrap();
         assert_eq!(none, -1, "no entry reads -1 (FUN_39379e30)");
+        // playLines tells the app which quest the window shows (HUD.quest_show).
+        rt.lua.load("FAKE={fire_later=function() end}").exec().unwrap();
+        rt.lua
+            .load("X2Quest:EnterQuestDirectingMode(); X2Quest:TryStartQuestContext(nil, 330, 0)")
+            .exec()
+            .unwrap();
+        assert_eq!(shared.borrow().dialog.quest, Some(330), "the window's own quest reaches the app");
     }
 
     #[test]

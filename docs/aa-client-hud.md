@@ -539,8 +539,9 @@ also exercises the live updates.
 A refused request (`SCQuestContextFailed` 0x146) raises `QUEST_ERROR_INFO(err, qtype)`; the native
 `FUN_3937a130` first clears the quest's timer through `FUN_39379ea0`, so the directing window also gets
 `QUEST_LEFT_TIME_UPDATED(qtype, 0)`. `route_quest_notices` (`dialog.rs`) ends the directing window when
-the failed quest is the one the window shows (`quest_context_directing.alb` F37) and lets the original
-scripts print `locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148)
+the failed quest is the one the window itself shows (`quest_context_directing.alb` F37): `playLines`
+reports its questType through `HUD.quest_show`, so a late refusal for an older quest cannot close a
+newer window. The original scripts print `locale.questContext.errors[err]`. A failed quest unit (`SCQuestUnitReqFailed` 0x148)
 raises `QUEST_QUICK_CLOSE_EVENT(qtype)` only when it is the current target (`FUN_39376590`), which
 closes the same window (F36). Quest mail (`SCQuestMailSent` 0x150, and `SCQuestRewardedByMail` 0x14e)
 raises `DOODAD_PHASE_MSG(text)` (`FUN_3937a650`, `FUN_3937a520`) with the `QUEST_MAIL_SENT` /
