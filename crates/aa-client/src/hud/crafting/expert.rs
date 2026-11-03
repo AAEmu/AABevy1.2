@@ -328,24 +328,10 @@ fn can_send(data: &HudData, command: Command) -> bool {
 }
 
 fn dispatch(rt: &aa_ui::UiRuntime, bridge: &Shared, event: &Event) {
-    // Native `FUN_397a9880` returns the ACTUAL difference after clamping; capture the base so
-    // the 0xc3 delta is not the raw wire value.
-    let before = match event {
-        Event::LaborChanged { action, .. } | Event::ActionPoint { action, .. } => {
-            bridge.borrow().crafting.actabilities.get(*action as u32).and_then(|a| a.point)
-        }
-        _ => None,
-    };
-    if !bridge.borrow_mut().crafting.actabilities.apply(event) {
+    let (changed, applied) = bridge.borrow_mut().crafting.actabilities.apply_with_gain(event);
+    if !changed {
         return;
     }
-    let applied = match event {
-        Event::LaborChanged { action, .. } | Event::ActionPoint { action, .. } => {
-            let after = bridge.borrow().crafting.actabilities.get(*action as u32).and_then(|a| a.point);
-            before.zip(after).map(|(before, after)| after.wrapping_sub(before))
-        }
-        _ => None,
-    };
     notify_receipt(rt, bridge, event, applied);
 }
 
@@ -567,12 +553,12 @@ fn modifier_update(
             }
             Event::BuffRemoved { obj_id, index } => {
                 if gated(*obj_id) {
+                    // Native `39389d60` / `0x3938a12b` checks the removed buff's own template
+                    // (`FUN_39388400` on it), not the remaining list. `BuffRemoved` carries only
+                    // the index, so an untracked template (a buff from before the HUD) cannot be
+                    // resolved here and does not refresh.
                     if let Some(buff_id) = data.crafting.expert.modifier_buffs.remove(&(*obj_id, *index)) {
                         refresh |= has_modifier(buff_id);
-                    } else if buffs.as_ref().is_some_and(|b| b.of(*obj_id).iter().any(|e| has_modifier(e.buff.buff_id))) {
-                        // The template was not tracked (a buff from before the HUD): native's
-                        // remaining-list gate still refreshes when another actability buff stays.
-                        refresh = true;
                     }
                 }
             }
@@ -589,18 +575,25 @@ fn modifier_update(
             _ => {}
         }
     }
-    // Native `FUN_393888b0` also refreshes when a tracked buff crosses a tick boundary
-    // (`+0x254 != +0x258`). aa-net keeps the receipt time; the first observation is the
-    // baseline, later tick indices are changes.
+    // Native `FUN_393888b0`: a tick refresh needs the template's raw `duration != tick` gate,
+    // then skips the final tick (`tick_index >= duration / tick`). aa-net keeps the receipt time;
+    // the first observation is the baseline, later tick indices are changes.
     if let Some(buffs) = buffs.as_ref() {
         for id in [player_id, mate_id, slave_id].into_iter().flatten() {
             for entry in buffs.of(id) {
                 let tick_ms = u64::from(entry.buff.tick_ms);
-                if tick_ms == 0 || !has_modifier(entry.buff.buff_id) {
+                if tick_ms == 0
+                    || !has_modifier(entry.buff.buff_id)
+                    || !game.get().is_some_and(|g| g.tips.buff_ticks(entry.buff.buff_id))
+                {
                     continue;
                 }
+                let total = entry.buff.duration_ms.max(0) as u64 / tick_ms;
                 let elapsed = u64::from(entry.buff.elapsed_ms) + entry.received.elapsed().as_millis() as u64;
                 let tick = elapsed / tick_ms;
+                if total != 0 && tick >= total {
+                    continue;
+                }
                 let key = (id, entry.buff.index);
                 if data.crafting.expert.modifier_ticks.insert(key, tick).is_some_and(|previous| previous != tick) {
                     refresh = true;

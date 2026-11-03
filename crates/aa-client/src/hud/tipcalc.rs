@@ -323,9 +323,20 @@ impl TipTables {
         self.mods.get(&buff_id).is_some_and(|mods| mods.iter().any(|m| is_actability_attr(m.attr)))
     }
 
+    /// Native `FUN_393888b0`: the template's raw `duration != tick` gate. A buff whose only tick
+    /// is its final one (`duration == tick`) is skipped.
+    pub fn buff_ticks(&self, buff_id: u32) -> bool {
+        self.buffs.get(&buff_id).is_some_and(|b| b.duration != b.tick)
+    }
+
     #[cfg(test)]
     pub(crate) fn set_buff_mods(&mut self, buff_id: u32, mods: Vec<Mod>) {
         self.mods.insert(buff_id, mods);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_buff_times(&mut self, buff_id: u32, duration: i32, tick: i32) {
+        self.buffs.insert(buff_id, BuffFx { duration, tick, ..BuffFx::default() });
     }
 
     pub fn load(conn: &Connection, text: &HashMap<(&'static str, u32), String>) -> rusqlite::Result<TipTables> {

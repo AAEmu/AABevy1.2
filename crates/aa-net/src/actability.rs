@@ -136,17 +136,46 @@ pub struct Actability {
     pub point: Option<i32>,
     pub step: u8,
 }
-/// Native `FUN_397a9880`: add `delta` to a known total, clamped to `[0, current grade limit]`.
-/// An unknown total stays unknown (the native map always has an int, but the lane's downgrade ACK
-/// omits it until the catalog reconciliation fills it).
-fn add_point(point: Option<i32>, delta: i32, step: u8, up_limits: &[i32]) -> Option<i32> {
-    point.map(|old| {
-        if up_limits.is_empty() {
-            return old.wrapping_add(delta);
-        }
-        let limit = up_limits.get(usize::from(step)).copied().unwrap_or(10000);
-        old.wrapping_add(delta).clamp(0, limit)
-    })
+/// Native `FUN_397a9880`: `gain = (int)(point * 100f * 0.01f)`, capped at the grade-0 up_limit
+/// (10000 when the catalog is missing). A missing entry inserts that gain at grade 0 and returns
+/// it. Otherwise the limit is grade 0 for language ids 21..30 (`FUN_397a7c60`), the last grade for
+/// id 19 (`FUN_397a8d80`), or the current grade's up_limit; the new total is clamped to
+/// `[0, limit]`, the grade is recomputed by `FUN_397a8640`, and the actual difference is returned.
+fn gain_of(point: i32) -> i32 {
+    (point as f32 * 100.0 * 0.01) as i32
+}
+
+fn grade0_limit(up_limits: &[i32]) -> i32 {
+    up_limits.first().copied().unwrap_or(10000)
+}
+
+fn gain_limit(id: u32, step: u8, up_limits: &[i32]) -> i32 {
+    if (21..=30).contains(&id) {
+        grade0_limit(up_limits)
+    } else if id == 19 {
+        up_limits.last().copied().unwrap_or(10000)
+    } else {
+        up_limits.get(usize::from(step)).copied().unwrap_or(10000)
+    }
+}
+
+fn add_point(entry: &mut Actability, id: u32, point: i32, up_limits: &[i32], new_entry: bool) -> i32 {
+    let gain = gain_of(point).min(grade0_limit(up_limits));
+    if new_entry {
+        entry.point = Some(gain);
+        entry.step = 0;
+        return gain;
+    }
+    let Some(old) = entry.point else {
+        // Native always has an int total; the lane's downgrade ACK omits it. Keep the unknown
+        // total (the catalog reconciliation fills it) and report the capped gain.
+        return gain;
+    };
+    let limit = gain_limit(id, entry.step, up_limits);
+    let new = old.wrapping_add(gain).clamp(0, limit);
+    entry.point = Some(new);
+    entry.step = grade_for(up_limits, new);
+    new.wrapping_sub(old)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,54 +246,53 @@ impl Actabilities {
         self.entries.iter().filter(|a| a.step == step).count()
     }
     pub fn apply(&mut self, event: &Event) -> bool {
+        self.apply_with_gain(event).0
+    }
+
+    /// Apply an event and return the actual actability gain native `FUN_397a9880` reports for
+    /// `SCCharacterLaborPowerChanged` / `SCAddActionPoint` (None for other events).
+    pub fn apply_with_gain(&mut self, event: &Event) -> (bool, Option<i32>) {
         let Event::Actability(event) = event else {
             match event {
                 Event::CharacterSelected(state) => {
+                    let up_limits = std::mem::take(&mut self.up_limits);
                     *self = Self {
                         expanded_expert: Some(state.expanded_expert),
+                        up_limits,
                         ..Self::default()
                     };
-                    return true;
+                    return (true, None);
                 }
-                Event::LeftWorld { .. } | Event::Disconnected { .. } | Event::Kicked { .. } => {
+                Event::LeftWorld { .. } => {
+                    // Keep the static limits across the world reset; they are catalog data,
+                    // not character state. Compare the remaining state for change detection.
+                    let up_limits = std::mem::take(&mut self.up_limits);
+                    let changed = *self != Self::default();
+                    *self = Self { up_limits, ..Self::default() };
+                    return (changed, None);
+                }
+                Event::Disconnected { .. } | Event::Kicked { .. } => {
                     let changed = *self != Self::default();
                     *self = Self::default();
-                    return changed;
+                    return (changed, None);
                 }
-                Event::LaborChanged {
-                    action,
-                    point,
-                    step,
-                    ..
-                } if *action > 0 => {
+                Event::LaborChanged { action, point, .. } if *action > 0 => {
                     self.unresolved_downgrades.remove(&(*action as u32));
                     let limits = self.up_limits.clone();
+                    let new_entry = self.get(*action as u32).is_none();
                     let entry = self.get_mut(*action as u32);
-                    // The wire contains a capped delta, never an absolute point total.
-                    entry.point = add_point(entry.point, *point, entry.step, &limits);
-                    // Native recomputes the grade from the total (`FUN_397a8640`), so the wire
-                    // step is only the fallback when no catalog is installed.
-                    entry.step = if limits.is_empty() {
-                        *step
-                    } else {
-                        entry.point.map_or(*step, |point| grade_for(&limits, point))
-                    };
-                    return true;
+                    let gain = add_point(entry, *action as u32, *point, &limits, new_entry);
+                    return (true, Some(gain));
                 }
                 Event::ActionPoint { action, value } if *action > 0 => {
                     self.unresolved_downgrades.remove(&(*action as u32));
                     let limits = self.up_limits.clone();
+                    let new_entry = self.get(*action as u32).is_none();
                     let entry = self.get_mut(*action as u32);
-                    // SCAddActionPoint carries no grade step: native recomputes it from the total.
-                    entry.point = add_point(entry.point, *value, entry.step, &limits);
-                    if !limits.is_empty()
-                        && let Some(point) = entry.point
-                    {
-                        entry.step = grade_for(&limits, point);
-                    }
-                    return true;
+                    let gain = add_point(entry, *action as u32, *value, &limits, new_entry);
+                    return (true, Some(gain));
                 }
-                _ => return false,
+                _ => return (false, None),
             }
         };
         match event {
@@ -330,7 +358,7 @@ impl Actabilities {
                 });
             }
         }
-        true
+        (true, None)
     }
 }
 

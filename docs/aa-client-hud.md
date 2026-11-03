@@ -1873,20 +1873,25 @@ ACTABILITY_EXPERT_CHANGED (0xc3) with the localized group name, actual capped de
 total including unit-attribute modifiers; `chat/chat_msg_event.alb` prints the original
 `actability_value_changed` line (`|cFFFFF65EAlchemy proficiency rose +|,17;. Current
 proficiency: |,10000;` for a 9983+17 gain at the grade-0 limit) and the tab bar updates.
-The gain is clamped to the current grade's up_limit and the grade recomputed from the
-total (`FUN_397a9880` / `FUN_397a8640`), so the callback delta is the applied difference,
-not the raw wire value. `SCAddActionPoint` (0x047, handler `391861f0`) feeds the same
-point add with no nonzero gate. The login snapshot only raises ACTABILITY_REFRESH_ALL,
-so it prints no gain. ACTABILITY_MODIFIER_UPDATE (0x54) follows the native buff manager:
-a buff add (`3938a3c0`), update (`393886c0`), tick (`393888b0`) or remove (`39389d60`)
-on the player, their own mate or own slave refreshes the page when the buff template has
-a modifier on the fixed actability attribute set (`FUN_398a8fe0`: 99..118, 138,
-158..163). Equipment changes do not raise it (the native `UNIT_EQUIPMENT_CHANGED` path
+The gain follows `FUN_397a9880`: `(int)(point*100f*0.01f)` capped at the grade-0
+up_limit, inserted at grade 0 when the entry is missing (returning that gain); otherwise
+language ids 21..30 use the grade-0 limit, id 19 the last grade's limit, and the rest the
+current grade's up_limit, with the total clamped to `[0, limit]` and the grade recomputed
+by `FUN_397a8640`. The callback delta is the applied difference, not the raw wire value.
+`SCAddActionPoint` (0x047, handler `391861f0`) feeds the same point add with no nonzero
+gate. The login snapshot only raises ACTABILITY_REFRESH_ALL, so it prints no gain.
+ACTABILITY_MODIFIER_UPDATE (0x54) follows the native buff manager: a buff add
+(`3938a3c0`), update (`393886c0`), tick (`393888b0`) or remove (`39389d60`) on the
+player, their own mate or own slave refreshes the page when the buff template has a
+modifier on the fixed actability attribute set (`FUN_398a8fe0`: 99..118, 138, 158..163).
+The tick refresh also needs the template's raw `duration != tick` and skips the final
+tick. Equipment changes do not raise it (the native `UNIT_EQUIPMENT_CHANGED` path
 refreshes the page separately). Housing decoration modifiers and live transactions
 remain unverified; unsupported premium-cost paths are not claimed complete.
 
-The focused proficiency module passes13 tests (1 ignored) in the current tree, including
-the login snapshot, gain, grade, action-point, over-limit clamp and buff-event checks.
+The focused proficiency module passes14 tests (1 ignored) in the current tree, including
+the login snapshot, gain, grade, action-point, new-entry, special-limit, over-limit clamp
+and buff-event checks.
 The exact ignored original-script pointer probe passes1 test
 in1.91s: upgrade Cancel/Confirm, delayed upgrade/downgrade replies, expansion Cancel/
 Confirm, unchanged certificate until its own receipt, and stale-character rejection.

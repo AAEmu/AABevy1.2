@@ -188,16 +188,16 @@ fn snapshots_complete_in_chunks_and_new_selection_empty_lists_and_logout_clear_s
 }
 
 #[test]
-fn labor_points_are_deltas_and_unknown_or_downgraded_bases_stay_unknown() {
-    let mut state = Actabilities::default();
-    snapshot(&mut state, true, &[(5, 20000, 1)]);
+fn labor_points_are_deltas_new_entries_are_inserted_and_downgraded_bases_stay_unknown() {
+    let mut state = Actabilities { up_limits: vec![10000, 20000, 30000], ..Default::default() };
+    snapshot(&mut state, true, &[(5, 19998, 1)]);
     state.apply(&Event::LaborChanged {
         amount: -30,
         action: 5,
         point: 2,
         step: 1,
     });
-    assert_eq!(state.get(5).unwrap().point, Some(20002));
+    assert_eq!(state.get(5).unwrap().point, Some(20000));
     state.apply(&Event::LaborChanged {
         amount: -30,
         action: 99,
@@ -208,9 +208,10 @@ fn labor_points_are_deltas_and_unknown_or_downgraded_bases_stay_unknown() {
         state.get(99),
         Some(&Actability {
             id: 99,
-            point: None,
-            step: 2
-        })
+            point: Some(3),
+            step: 0
+        }),
+        "native inserts a missing entry at grade 0 with the capped gain"
     );
     apply(
         &mut state,
@@ -380,7 +381,7 @@ fn kick_and_character_lifecycle_clear_pending_and_unresolved_downgrade_evidence(
 
 #[test]
 fn add_action_point_adds_like_labor_without_a_wire_step() {
-    let mut state = Actabilities::default();
+    let mut state = Actabilities { up_limits: vec![10000, 20000, 30000], ..Default::default() };
     snapshot(&mut state, true, &[(5, 10000, 1)]);
     assert!(state.apply(&Event::ActionPoint { action: 5, value: 17 }));
     assert_eq!(state.get(5).unwrap().point, Some(10017));
@@ -388,6 +389,30 @@ fn add_action_point_adds_like_labor_without_a_wire_step() {
     assert!(state.apply(&Event::ActionPoint { action: 5, value: 0 }));
     assert_eq!(state.get(5).unwrap().point, Some(10017));
     assert!(!state.apply(&Event::ActionPoint { action: 0, value: 5 }));
+}
+
+#[test]
+fn native_gain_inserts_new_entries_and_uses_the_special_limits() {
+    let limits = [10000, 20000, 30000];
+    let mut state = Actabilities { up_limits: limits.to_vec(), ..Default::default() };
+    // A missing entry gets the grade-0-capped gain, grade 0, and returns the gain.
+    assert_eq!(state.apply_with_gain(&Event::ActionPoint { action: 7, value: 50000 }), (true, Some(10000)));
+    assert_eq!(state.get(7), Some(&Actability { id: 7, point: Some(10000), step: 0 }));
+    // id 19 uses the last grade's limit.
+    snapshot(&mut state, true, &[(19, 5000, 0)]);
+    assert_eq!(state.apply_with_gain(&Event::ActionPoint { action: 19, value: 25000 }), (true, Some(10000)));
+    assert_eq!(state.get(19).unwrap().point, Some(15000));
+    assert_eq!(state.get(19).unwrap().step, 1);
+    // Language ids 21..30 use the grade-0 limit.
+    snapshot(&mut state, true, &[(25, 5000, 1)]);
+    assert_eq!(state.apply_with_gain(&Event::ActionPoint { action: 25, value: 8000 }), (true, Some(5000)));
+    assert_eq!(state.get(25).unwrap().point, Some(10000));
+    assert_eq!(state.get(25).unwrap().step, 0);
+    // A >10000 gain on a grade>=1 entry is capped at grade 0 first, then at the current limit.
+    snapshot(&mut state, true, &[(5, 15000, 1)]);
+    assert_eq!(state.apply_with_gain(&Event::ActionPoint { action: 5, value: 50000 }), (true, Some(5000)));
+    assert_eq!(state.get(5).unwrap().point, Some(20000));
+    assert_eq!(state.get(5).unwrap().step, 1);
 }
 
 #[test]
@@ -406,4 +431,20 @@ fn point_gains_clamp_to_the_current_grade_and_recompute_the_grade() {
     snapshot(&mut state, true, &[(5, 100, 0)]);
     state.apply(&Event::ActionPoint { action: 5, value: -5000 });
     assert_eq!(state.get(5).unwrap().point, Some(0));
+}
+
+#[test]
+fn static_limits_survive_character_and_world_resets_without_a_false_change() {
+    let limits = vec![10000, 20000, 30000];
+    let mut state = Actabilities { up_limits: limits.clone(), ..Default::default() };
+    // Only the static limits are present: a world reset is not a character-state change.
+    assert!(!state.apply(&Event::LeftWorld { target: 0 }));
+    assert_eq!(state.up_limits, limits);
+    state.entries.push(Actability { id: 5, point: Some(1), step: 0 });
+    state.loaded = true;
+    assert!(state.apply(&Event::LeftWorld { target: 0 }));
+    assert!(state.entries.is_empty() && !state.loaded);
+    assert_eq!(state.up_limits, limits);
+    assert!(state.apply(&Event::CharacterSelected(Box::default())));
+    assert_eq!(state.up_limits, limits);
 }
