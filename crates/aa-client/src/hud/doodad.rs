@@ -1458,6 +1458,7 @@ fn pointer_use(
     bridge: NonSend<HudBridge>,
     doodads: Res<Doodads>,
     units: Res<Units>,
+    views: Res<Views>,
     time: Res<Time>,
     mut dev: ResMut<crate::ingame::DevOptions>,
     houses: Option<Res<aa_net::Houses>>,
@@ -1486,8 +1487,15 @@ fn pointer_use(
         None
     };
     let menu = if let Some(pending) = pending {
-        data.doodad.menu = Some((pending.obj_id, Vec::new()));
-        data.doodad.chosen.push(pending.action);
+        if pending_use_allowed(&data, &doodads, &units, &views, &pending, env) {
+            data.doodad.menu = Some((pending.obj_id, Vec::new()));
+            data.doodad.chosen.push(pending.action);
+        } else {
+            info!(
+                "doodad: {:?} changed while walking, dropped",
+                pending.obj_id
+            );
+        }
         false
     } else {
         clicked
@@ -1753,6 +1761,48 @@ fn defer_action(
     });
 }
 
+/// Whether a pending use still matches the doodad on arrival: the phase and view generation it was
+/// picked from, the phase still offers the skill, and a craft still passes a craft permission
+/// (native `FUN_393b3ec0` runs the stored action; the checks the pick passed are re-run here).
+fn pending_use_allowed(
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    views: &Views,
+    pending: &Pending,
+    env: PermEnv<'_>,
+) -> bool {
+    let Some(o) = doodads.by_id.get(&pending.obj_id) else {
+        return false;
+    };
+    if o.func_group_id != pending.phase {
+        return false;
+    }
+    if let Some(generation) = pending.generation
+        && views.doodad_generation(pending.obj_id) != Some(generation)
+    {
+        return false;
+    }
+    let Some(game) = data.game.get() else {
+        return false;
+    };
+    let Some(uses) = game.doodad.uses(o.func_group_id) else {
+        return false;
+    };
+    if pending.action == i64::from(CRAFT_ACTION) {
+        let Some(pos) = doodad_world(o, units) else {
+            return false;
+        };
+        let player = player_facts(data, env);
+        let facts = doodad_facts(data, o, pos, env);
+        uses.craft
+            .iter()
+            .any(|perm| craft_permitted(*perm, &player, &facts))
+    } else {
+        u32::try_from(pending.action).is_ok_and(|skill| uses.skills.contains(&skill))
+    }
+}
+
 /// Uses a workbench: opens it inside the 2.1 m range, else walks there and opens on arrival
 /// (native `FUN_393b3ec0` checks `FUN_39093800`, then `FUN_390a6af0` keeps the pending action).
 fn use_bench(
@@ -1793,6 +1843,7 @@ pub(super) fn execute(
     mount: Option<Res<crate::ingame::LocalMount>>,
     views: Res<Views>,
     poses: super::pick::UnitPoses,
+    mut dev: ResMut<crate::ingame::DevOptions>,
     mut out: MessageWriter<NetCommand>,
     mut failed: MessageWriter<super::alerts::UseFailed>,
     time: Option<Res<Time>>,
@@ -1811,6 +1862,26 @@ pub(super) fn execute(
         _ => Vec::new(),
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
+    // A different bar or list pick cancels the pending open (native `FUN_393b3ec0` replaces the
+    // stored action and `FUN_393b7b10` closes the active interaction): a use picked while a walk
+    // to another action is running must not open the old one on arrival.
+    if let Some(pending) = d.doodad.pending {
+        let menu_obj = d.doodad.menu.as_ref().map(|menu| menu.0);
+        let bar_differs = execute.iter().any(|pick| match pick.source {
+            super::dynamic_actions::Source::Doodad { obj_id, .. } => {
+                (obj_id, i64::from(pick.skill)) != (pending.obj_id, pending.action)
+            }
+            super::dynamic_actions::Source::Npc { .. } => true,
+        });
+        let chosen_differs = menu_obj.is_some_and(|obj_id| {
+            obj_id != pending.obj_id || chosen.iter().any(|id| *id != pending.action)
+        });
+        if bar_differs || chosen_differs {
+            if d.doodad.cancel_walk() {
+                dev.script_keys.retain(|c| c != 'W');
+            }
+        }
+    }
     let mut commands = Vec::new();
     let mut opens: Vec<(u32, usize, bool)> = Vec::new();
     for pick in execute {
@@ -4092,6 +4163,128 @@ mod tests {
             "{sent:?}"
         );
         assert!(bridge.borrow().doodad.pending.is_none());
+    }
+
+    /// The pending use is re-checked on arrival: the phase, the view generation and a craft
+    /// permission that changed on the way drop it (native `FUN_393b3ec0` stores only the action;
+    /// the port stores what the pick was checked against).
+    #[test]
+    fn a_pending_use_that_changed_on_the_way_is_dropped() {
+        let arrival =
+            |phase: u32, generation: Option<u64>, craft_perm_id: u8, changed_phase: u32| {
+                let bridge = Shared::default();
+                {
+                    let mut d = bridge.borrow_mut();
+                    d.character_id = 47;
+                    d.pos = Vec3::ZERO;
+                    d.player_radius = 0.0;
+                    assert!(d.game.0.set(craft_tables(1088, craft_perm_id)).is_ok());
+                    d.doodad.pending = Some(Pending {
+                        obj_id: 300,
+                        action: i64::from(CRAFT_ACTION),
+                        phase,
+                        generation,
+                    });
+                    d.doodad.arrived = Some(300);
+                }
+                let mut doodads = Doodads::default();
+                doodads
+                    .by_id
+                    .insert(300, world_doodad(300, 568, changed_phase, Vec3::ZERO));
+                let mut views = Views::default();
+                views.fixture_doodad(300, Entity::PLACEHOLDER);
+                let mut app = pending_app(bridge.clone(), doodads, Units::default(), views);
+                app.update();
+                (bridge, app)
+            };
+
+        let (bridge, mut app) = arrival(1088, Some(1), craft_perm::ANY, 1088);
+        assert_eq!(
+            crate::hud::crafting::active_bench(&bridge.borrow()),
+            Some((300, 568)),
+            "matching pending opens"
+        );
+        assert!(sent_commands(&mut app).is_empty(), "the open is local");
+
+        let (bridge, _) = arrival(1088, Some(7), craft_perm::ANY, 1088);
+        assert!(
+            crate::hud::crafting::active_bench(&bridge.borrow()).is_none(),
+            "a recreated doodad drops it"
+        );
+
+        let (bridge, _) = arrival(1088, Some(1), craft_perm::ANY, 4403);
+        assert!(
+            crate::hud::crafting::active_bench(&bridge.borrow()).is_none(),
+            "a changed phase drops it"
+        );
+
+        let (bridge, _) = arrival(1088, Some(1), craft_perm::OWNER, 1088);
+        assert!(
+            crate::hud::crafting::active_bench(&bridge.borrow()).is_none(),
+            "a permission that no longer passes drops it"
+        );
+    }
+
+    /// A different bar or list pick cancels the pending open and the walk it was holding.
+    #[test]
+    fn a_different_pick_cancels_the_pending_open() {
+        let bridge = Shared::default();
+        {
+            let mut d = bridge.borrow_mut();
+            d.character_id = 47;
+            d.pos = Vec3::ZERO;
+            d.player_radius = 0.0;
+            assert!(
+                d.game
+                    .0
+                    .set(mixed_tables(1088, 14602, craft_perm::ANY))
+                    .is_ok()
+            );
+            d.doodad.pending = Some(Pending {
+                obj_id: 300,
+                action: i64::from(CRAFT_ACTION),
+                phase: 1088,
+                generation: Some(1),
+            });
+            d.doodad.approach = Some(Approach {
+                obj_id: 300,
+                best: 3.0,
+                best_at: 0.0,
+            });
+            d.doodad.menu = Some((300, Vec::new()));
+            d.doodad.chosen.push(14602);
+        }
+        let mut doodads = Doodads::default();
+        doodads
+            .by_id
+            .insert(300, world_doodad(300, 568, 1088, Vec3::ZERO));
+        let mut views = Views::default();
+        views.fixture_doodad(300, Entity::PLACEHOLDER);
+        let mut app = pending_app(bridge.clone(), doodads, Units::default(), views);
+        app.update();
+        {
+            let d = bridge.borrow();
+            assert!(d.doodad.pending.is_none(), "the pending bench is cancelled");
+            assert!(d.doodad.approach.is_none(), "its walk is cancelled");
+            assert!(crate::hud::crafting::active_bench(&d).is_none());
+        }
+        assert!(
+            !app.world()
+                .resource::<crate::ingame::DevOptions>()
+                .script_keys
+                .contains('W')
+        );
+        let sent = sent_commands(&mut app);
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [Command::UseDoodadSkill {
+                    skill_id: 14602,
+                    doodad_obj_id: 300,
+                }]
+            ),
+            "{sent:?}"
+        );
     }
 
     /// Native `FUN_3932aaf0` walks the player's own house list (`DAT_3a167ec4`); the port used
