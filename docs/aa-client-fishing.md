@@ -120,17 +120,23 @@ after the dialog opens (or after a check error).
 
 * Buy checks `FUN_397cf5a0` (1727959): no item on the back -> 0x169 `STORE_BACKPACK_NOGOODS` (361);
   template not in `doodad_func_buy_fish_items` -> 0xe1 `STORE_NPC_NOT_HANDLE_THIS_ITEM` (225); item
-  kind (`item_backpacks.backpack_type_id`) not 6 -> 0x58 `STORE_NOT_SELLABLE_ITEM` (88). The
-  decompile checks the list **before** the kind. The refund is `FUN_397cd350`.
+  kind (`item_backpacks.backpack_type_id`) not 6, `items.price` 0, or no `fish_details` row ->
+  0x58 `STORE_NOT_SELLABLE_ITEM` (88). The decompile checks the list **before** the kind.
 * Convert `FUN_397cf660`: no item -> 0x169; kind not 6 -> 0x58 (checked **before** the list);
   template not in `doodad_func_convert_fish_items` -> 0xe1. No refund.
 * On success the native enters interaction state 0xb/0xc (`FUN_393b7b10`), closes an open task-12/13
   dialog (`FUN_3902cef0`), and shows dialog type 0xC/0xD (`FUN_393b87b0` / `FUN_393b8970`,
   `FUN_3902d670` -> `FUN_3902d570` -> `FUN_3902d400`). The info table gets the base keys
   (`type`, `buttonType`, `isModal`) and `itemInfo` from `FUN_393b93e0` (775600) via
-  `FUN_39421e20` (865691), which writes the refund. `dialog_handler.alb` F12 (task 12) /
-  F21 (task 13) format it: `confirm_buy_fish_title/body` with the icon, name, count and refund,
-  OK `sellAll`; or `ask_convert_fish` / `ask_convert_fish_description`, OK `make`. Both cancel on
+  `FUN_39421e20` (865686-865693). The fish detail tag 6 supplies `f32` weight and `f32` length
+  (`itemInfo.weight` / `.length`), and the refund is
+  `trunc(floor(items.refund * item_grades.refund_multiplier * 0.01 + 0.5) * weight /
+  fish_details.max_weight)` (`FUN_397cd350` 1726122, `fish_details` loaded by `FUN_3979f2a0`);
+  both tasks carry it. `dialog_handler.alb` F12 (task 12) / F21 (task 13) format it:
+  `confirm_buy_fish_title/body` with the icon, name and refund, OK `sellAll`; or `ask_convert_fish`
+  / `ask_convert_fish_description`, OK `make`. Both cancel on `INTERACTION_END`.
+* The interaction ends (`FUN_393b7e40` 774405) when the doodad is gone or the player is out of the
+  configured interaction distance (2.1 m, `FUN_39093800` with cfg +0x2a0); `FUN_393b7aa0` then fires
   `INTERACTION_END`.
 * OK is `FUN_393b8800` (774939): it sends the ordinary doodad func skill (the same call as 770836),
   i.e. `UseDoodadSkill` 21904/22201. Cancel sends nothing.
@@ -143,13 +149,17 @@ Bevy implements this in `hud/doodad/fish.rs` + `hud/doodad/fish.lua`, hooked by 
 * `execute` runs the existing labor/attachment checks first, then for a fish func runs `check`
   (the errors above through `ShowError`) and opens task 12/13 with
   `X2DialogManager:RequestTaskDialog`. `fish.lua` passes
-  `{ type, buttonType, isModal, itemInfo, itemType, itemCount }`, `HUD.item_tip` supplies the icon
-  and name, and buy adds `itemInfo.refund`.
+  `{ type, buttonType = DBT_OK_CANCEL (0), isModal, itemInfo }` (no top-level `itemType`/
+  `itemCount`, as native), `HUD.item_tip` supplies the icon and name, and `itemInfo` gets
+  `weight`, `length` and `refund`.
 * Nothing is sent before OK. `fish::tick` reads the state from the wrapped `OnOK`/`OnCancel`; OK
-  sends the stored `UseDoodadSkill`, cancel drops it. Losing the doodad focus fires
-  `INTERACTION_END` (the script's cancel handler) and drops it too.
+  sends the stored `UseDoodadSkill`, cancel drops it. The tick also drops it when the doodad is
+  gone or the interaction gap reaches `INTERACTION_DISTANCE` (the coffer/bench distance check),
+  firing `INTERACTION_END`.
+* Without the UI runtime (or the `FishDialog` resource) the skill is sent unconfirmed.
 * Tests drive the real `execute` and the original `dialog_handler.alb` from the pak:
-  `hud::doodad::fish::tests` (three errors, the info/refund, OK send, cancel and interaction end).
+  `hud::doodad::fish::tests` (three errors, price/fish_details, the weighted refund, weight/length,
+  OK send, cancel, out-of-reach and despawn).
 
 ## Open (capture-pending)
 
