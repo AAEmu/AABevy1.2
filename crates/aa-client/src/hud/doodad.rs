@@ -2129,6 +2129,20 @@ mod tests {
         assert_eq!(t.name(850), Some("Desireen Memory Tome"));
     }
 
+    /// The fish stands (`tool.fish_scale_a`: 6507, the Mirage Isle contest 7133, the test 6668) sell a fish with
+    /// `DoodadFuncBuyFish` skill 21904 and convert it with `DoodadFuncConvertFish` 22201. Both are ordinary phase
+    /// skills on the dynamic bar (`UseDoodadSkill` at the doodad), not a window of their own.
+    #[test]
+    fn the_fish_stands_offer_their_sell_and_convert_skills() {
+        let Some(conn) = real_db() else { return };
+        let t = Tables::load(&conn).unwrap();
+        for (group, skills) in [(17262, vec![21_904, 22_201]), (19948, vec![21_904, 22_201]), (17729, vec![22_201])] {
+            let uses = t.uses(group).unwrap_or_else(|| panic!("fish stand group {group}"));
+            assert_eq!(uses.skills, skills, "fish stand group {group}");
+            assert!(uses.navi.is_empty(), "the fish stand has no window");
+        }
+    }
+
     /// `find_focus` for a player at `player` among `doodads`; `skills` are (id, `max_range`) rows.
     fn focus_at(
         tables: Tables,
