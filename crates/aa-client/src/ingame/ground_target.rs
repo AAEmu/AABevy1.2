@@ -2172,6 +2172,31 @@ mod tests {
         app
     }
 
+    /// The client never reads `skills.source_not_swim` (+0x14f): a fishing cast from inside the water is
+    /// sent, and the server refuses it with 0x15 `CANNOT_CAST_IN_SWIMMING`.
+    #[test]
+    fn a_fishing_cast_from_water_is_sent_for_the_server_to_refuse() {
+        let mut app = water_app();
+        {
+            let mut movers = app.world_mut().query::<&mut Mover>();
+            movers.single_mut(&mut app.world_mut()).unwrap().pos.z = 99.5;
+        }
+        app.world_mut().resource_mut::<Aiming>().set_preview(
+            SkillPressed { skill: 21_571, item: None, target_obj_id: 0, gcd: true },
+            fishing_skill(),
+            Some((Vec3::new(10.0, 10.0, 100.0), true)),
+        );
+        app.world_mut().resource_mut::<Script>().click();
+        app.update();
+        let sent = std::mem::take(&mut app.world_mut().resource_mut::<Sent>().0);
+        assert!(
+            matches!(&sent[..], [Command::Move(_), Command::UseSkillAt { skill_id: 21_571, .. }]),
+            "{sent:?}"
+        );
+        let failed: Vec<_> = app.world_mut().resource_mut::<Messages<crate::hud::UseFailed>>().drain().collect();
+        assert!(failed.is_empty(), "{failed:?}");
+    }
+
     /// A click outside fishable water raises `INVALID_LOCATION` (0x23, `skill_invalid_location`) and sends
     /// nothing; a click on the water sends the picked surface point unchanged (`FUN_393594c0` clamps only
     /// horizontally; the native bobber is not sunk).
