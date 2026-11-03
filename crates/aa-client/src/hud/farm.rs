@@ -24,12 +24,16 @@ use aa_ui::UiRuntime;
 use bevy::prelude::*;
 use mlua::{Lua, Table, Value};
 
-use super::api::Shared;
+use super::api::{HudBridge, Shared};
 use super::data::GameData;
 
 /// The original refreshes the runtime list at most this often (`FUN_39035560`, `_DAT_3999d848` =
 /// 2.0 s).
 const REFRESH_DEBOUNCE_SECS: f64 = 2.0;
+/// How far the player may walk from the farm doodad before the info window closes. The native ends
+/// the interaction with the doodad; the exact reach is not recovered (capture-pending).
+const FARM_LEAVE: f32 = 10.0;
+
 /// The runtime list as received, with the receipt clock the growth/protect counters count down from.
 #[derive(Clone, Debug)]
 struct Received {
@@ -38,9 +42,17 @@ struct Received {
     unix_ms: i64,
 }
 
+/// The farm doodad whose info window is open (`SCShowCommonFarm`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shown {
+    farm_type: i32,
+    pos: Vec3,
+}
+
 #[derive(Default)]
 struct View {
     list: Option<Received>,
+    show: Option<Shown>,
     /// The last `SCIsUnitInFarmPacket` value (the native's unit farm type at `DAT_39adb270`).
     unit_farm_type: Option<i32>,
     last_request: Option<Instant>,
@@ -287,6 +299,7 @@ fn runtime_entry(
 /// Folds aa-net's farm events into the runtime list and the info window.
 fn sync(
     rt: Option<NonSend<UiRuntime>>,
+    bridge: NonSend<HudBridge>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -294,6 +307,7 @@ fn sync(
     let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
         return;
     };
+    let mut closes = false;
     for NetEvent(event) in events.read() {
         match event {
             Event::Farm(FarmEvent::List(list)) => {
@@ -304,18 +318,49 @@ fn sync(
                 });
                 aa_ui::lua::queue_ui_event(&rt.lua, "COMMON_FARM_UPDATED", Vec::new());
             }
+            Event::Farm(FarmEvent::Show(show)) => {
+                let pos = aa_world::cry_to_bevy(Vec3::new(
+                    show.position().x,
+                    show.position().y,
+                    show.position().z,
+                ));
+                state.0.borrow_mut().show = Some(Shown {
+                    farm_type: show.farm_type,
+                    pos,
+                });
+                // `info.alb` raises the window from `OPEN_COMMON_FARM_INFO(farmType)`.
+                aa_ui::lua::queue_ui_event(
+                    &rt.lua,
+                    "OPEN_COMMON_FARM_INFO",
+                    vec![Value::Integer(i64::from(show.farm_type))],
+                );
+            }
             Event::Farm(FarmEvent::IsUnitInFarm(kind)) => {
                 state.0.borrow_mut().unit_farm_type = Some(*kind);
             }
             Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
                 let mut v = state.0.borrow_mut();
                 v.list = None;
+                v.show = None;
                 v.unit_farm_type = None;
                 v.last_request = None;
                 v.commands.clear();
             }
             _ => {}
         }
+    }
+    // `INTERACTION_END` closes the info window; walking away from the farm doodad ends it.
+    let away = {
+        let v = state.0.borrow();
+        v.show
+            .is_some_and(|show| bridge.0.borrow().pos.distance(show.pos) > FARM_LEAVE)
+    };
+    if away {
+        state.0.borrow_mut().show = None;
+        closes = true;
+    }
+    if closes {
+        aa_ui::lua::queue_ui_event(&rt.lua, "INTERACTION_END", Vec::new());
     }
     let commands = std::mem::take(&mut state.0.borrow_mut().commands);
     for command in commands {

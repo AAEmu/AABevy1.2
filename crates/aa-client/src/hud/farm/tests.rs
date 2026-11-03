@@ -2,7 +2,6 @@ use super::*;
 use aa_net::Pos;
 use aa_net::farm::CommonFarmEntry;
 
-use crate::hud::api::HudBridge;
 use crate::hud::data::housing::{CommonFarm, FarmGroup, FarmGroupDoodad, Tables};
 
 fn game() -> GameData {
@@ -162,6 +161,56 @@ fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
 }
 
 #[test]
+fn show_raises_open_common_farm_info_and_walking_away_ends_it() {
+    let (rt, bridge) = setup(game());
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(rt)
+        .insert_non_send(HudBridge(bridge.clone()))
+        .add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, sync);
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load(
+            r#"
+            FARM_OPENED = 0
+            FARM_ENDED = 0
+            local open = UIParent:CreateWidget('emptywidget', 'farmOpenProbe', 'UIParent')
+            open:RegisterEvent('OPEN_COMMON_FARM_INFO')
+            open:SetHandler('OnEvent', function(self, event, kind) FARM_OPENED = kind end)
+            local ended = UIParent:CreateWidget('emptywidget', 'farmEndProbe', 'UIParent')
+            ended:RegisterEvent('INTERACTION_END')
+            ended:SetHandler('OnEvent', function() FARM_ENDED = FARM_ENDED + 1 end)
+        "#,
+        )
+        .exec()
+        .unwrap();
+    bridge.borrow_mut().pos = aa_world::cry_to_bevy(Vec3::new(100.0, 200.0, 30.0));
+    app.world_mut()
+        .write_message(NetEvent(Event::Farm(FarmEvent::Show(
+            aa_net::ShowCommonFarm {
+                farm_type: 10,
+                count: 1,
+                x: aa_net::wire::coord_to_long(100.0),
+                y: aa_net::wire::coord_to_long(200.0),
+                z: 30.0,
+            },
+        ))));
+    app.update();
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    assert_eq!(rt.lua.load("return FARM_OPENED").eval::<i64>().unwrap(), 10);
+    assert_eq!(rt.lua.load("return FARM_ENDED").eval::<i64>().unwrap(), 0);
+    bridge.borrow_mut().pos = aa_world::cry_to_bevy(Vec3::new(200.0, 200.0, 30.0));
+    app.update();
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    assert_eq!(rt.lua.load("return FARM_ENDED").eval::<i64>().unwrap(), 1);
+}
+
+#[test]
 fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
     let (rt, bridge) = setup(game());
     let mut app = App::new();
@@ -216,4 +265,85 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .unwrap();
     app.update();
     assert!(drain(&mut app).is_empty());
+}
+
+#[test]
+fn the_original_commonfarm_scripts_open_the_info_and_my_farm_windows() {
+    if !std::env::var("AA_PAK").is_ok_and(|p| std::path::Path::new(&p).exists()) {
+        return;
+    }
+    let Some(db) = std::env::var("AA_DB")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+    else {
+        return;
+    };
+    let game = GameData::load(&db).unwrap();
+    // `doodad_func_open_farm_infos.farm_id` is 1..4 in 1.2: those ids are also the matching
+    // `farm_groups` rows (the scripts pass the same value to `GetCommonFarmInfo` and
+    // `GetFarmGorupInfo`).
+    let farm = game
+        .housing
+        .common_farms
+        .iter()
+        .find(|f| f.id == f.farm_group_id)
+        .map_or(1, |f| f.id);
+    let (rt, _) = setup(game);
+    if let Err(e) = aa_lua::run_alb(&rt.lua, aa_lua::stage::INIT_SCRIPT) {
+        eprintln!("skip: base locale: {e}");
+        return;
+    }
+    for toc in [
+        "scriptsbin/x2ui/baselib/toc.g",
+        "scriptsbin/x2ui/commonfarm/toc.g",
+    ] {
+        let errors = aa_lua::run_toc_collect(&rt.lua, toc).unwrap();
+        if let Some((script, error)) = errors.first() {
+            eprintln!("skip: {script}: {error}");
+            return;
+        }
+    }
+    if let Err(e) = aa_lua::run_alb(
+        &rt.lua,
+        "scriptsbin/x2ui/hud/main_menu_bar/main_menu/table.alb",
+    ) {
+        eprintln!("skip: main menu table: {e}");
+        return;
+    }
+    rt.lua
+        .load(
+            r#"
+            local found = false
+            for _, entry in pairs(MAIN_MENU_INFO) do
+                if type(entry) == 'table' and entry.hotkey == 'toggle_common_farm_info' then
+                    found = true
+                end
+            end
+            assert(found, 'main menu entry')
+        "#,
+        )
+        .exec()
+        .unwrap();
+    rt.lua
+        .load(format!(
+            "local n = X2:GetCommonFarmInfo({farm}) assert(n ~= nil, 'common farm {farm}')"
+        ))
+        .exec()
+        .unwrap();
+    let info = aa_ui::lua::ui(&rt.lua)
+        .tree
+        .find("farm_info")
+        .expect("info window");
+    assert!(!aa_ui::lua::ui(&rt.lua).tree.visible(info));
+    rt.fire_event("OPEN_COMMON_FARM_INFO", (i64::from(farm),));
+    assert!(aa_ui::lua::ui(&rt.lua).tree.visible(info));
+    rt.fire_event("INTERACTION_END", ());
+    assert!(!aa_ui::lua::ui(&rt.lua).tree.visible(info));
+    let my_farm = aa_ui::lua::ui(&rt.lua)
+        .tree
+        .find("myFarminfo")
+        .expect("my farm window");
+    assert!(!aa_ui::lua::ui(&rt.lua).tree.visible(my_farm));
+    assert!(aa_ui::content::hotkey(&rt.lua, "toggle_common_farm_info").unwrap());
+    assert!(aa_ui::lua::ui(&rt.lua).tree.visible(my_farm));
 }
