@@ -258,7 +258,7 @@ def build_plan(conn: sqlite3.Connection, trees: list[int], defaults: str = "basi
                    "autoattack_ms": autoattack_ms, "distance_m": distance_m},
         "dummy": {"template": DUMMY_TEMPLATE, "name": names_of_npc(conn) or DUMMY_NAME,
                   "note": "level 50 training doll; spawn it 3-5 m in front of the caster at a fixed spot"},
-        "setup": {"level": 50, "gm": ["/level 50", "/ignoreskillcds true"]},
+        "setup": {"level": 50, "gm": ["/level 50", "/ignoreskillcds false"]},
         "batches": batches,
         "skills": skills_flat,
         "counts": {"batches": len(batches), "skills": len(skills_flat),

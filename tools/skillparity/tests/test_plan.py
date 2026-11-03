@@ -142,7 +142,7 @@ class PlanFromDb(unittest.TestCase):
         p = self.build(trees=[1], defaults="none")
         self.assertEqual(p["schema"], "skillparity/plan/v1")
         self.assertEqual((p["dummy"]["template"], p["dummy"]["name"]), (13013, "Test Doll"))
-        self.assertIn("/ignoreskillcds true", p["setup"]["gm"])
+        self.assertIn("/ignoreskillcds false", p["setup"]["gm"])
         self.assertEqual(p["counts"], {"batches": 2, "skills": 11, "trees": [1]})
         self.assertNotIn(str(self.tmp.name), json.dumps(p))                                # no machine paths in the plan
 

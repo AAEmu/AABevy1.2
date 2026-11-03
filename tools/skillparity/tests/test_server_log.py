@@ -197,6 +197,25 @@ class Cli(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(sl.main(["no-such.log"]), 1)
 
+class CompressedBatchTest(unittest.TestCase):
+    LINE = ("18:01:04.934432 [TRACE] connection - CompressedGamePackets { packets: [(174, [126, 0, 97, 47, 0, 0, 212, 70, 0, 0, "
+            "1, 179, 152, 0, 1, 38, 153, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 38, 153, 0, 2]), "
+            "(173, [212, 70, 0, 0])] }")
+
+    def test_every_inner_packet_is_a_row_and_plot_events_are_decoded(self):
+        rows = sl.parse_lines([self.LINE], date(2026, 11, 3), tz=timezone.utc, ops="all")
+        self.assertEqual([r["op"] for r in rows], ["SCPlotEvent", "SCSkillCooldownReset"])
+        plot = rows[0]
+        self.assertEqual((plot["skill_id"], plot["tl"], plot["obj"]), (18132, 126, 39091))
+        self.assertEqual((plot["fields"]["event_id"], plot["fields"]["target"], plot["fields"]["casting_ms"]), (12129, 39206, 0))
+        self.assertEqual(plot["fields"]["targets"], [39206])
+        self.assertTrue(plot["fields"]["batched"])
+        self.assertEqual(rows[1]["fields"]["len"], 4)
+
+    def test_the_opcode_table_names_the_skill_packets(self):
+        names = sl.sc_names()
+        self.assertEqual((names.get(0xAE), names.get(0xA1), names.get(0xA2)), ("SCPlotEvent", "SCSkillStarted", "SCSkillFired"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -345,6 +345,17 @@ def convert_ui_rows(lines: list[str], clock: ClockMap, slot_skill: dict | None =
     return rows
 
 
+def world_fx(row: dict, origin: tuple[float, float, float] | None) -> dict:
+    """An `fx` row's `pos` in game coordinates: the engine reports it relative to the seamless origin (as the `pos` rows' raw
+    values), so the origin is added; the raw value stays as `pos_local`. A zero position (an effect placed later) is left alone."""
+    pos = row.get("pos")
+    if (row.get("kind") == "fx" and origin and isinstance(pos, list) and len(pos) == 3
+            and all(isinstance(v, (int, float)) for v in pos) and any(pos) and "pos_local" not in row):
+        row["pos_local"] = pos
+        row["pos"] = [round(v + o, 4) for v, o in zip(pos, origin)]
+    return row
+
+
 def parse_origin(text: str) -> tuple[float, float, float] | None:
     parts = [num(p) for p in text.strip().split(",")]
     if len(parts) >= 3 and None not in parts[:3]:
@@ -563,6 +574,7 @@ class Session:
                     continue
                 if isinstance(row, dict) and isinstance(row.get("wall_us"), (int, float)):
                     row.setdefault("src", "orig")
+                    world_fx(row, self.origin)
                     rows.append(row)
                     self.emit(row)
         ui = self.lua(TAKE_ROWS % (lua_str("sp_ui"), lua_str("sp_ui")), "ui")
@@ -745,7 +757,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         session.attach()
         commands = list(args.gm)
         if not args.no_default_gm:
-            commands = list((plan or {}).get("setup", {}).get("gm", ["/level 50", "/ignoreskillcds true"])) + commands
+            commands = list((plan or {}).get("setup", {}).get("gm", ["/level 50", "/ignoreskillcds false"])) + commands
         for command in commands:
             gm(session, command)
         if args.move:
@@ -838,6 +850,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                     if args.stage:                      # every skill from the same spot, as run_bevy.py --stage does
                         record_original().self_target(session.mcp, session.pid)   # ends the auto-attack on the doll
                         gm(session, "/clearcombat")         # no auto-attack or combat state carried into the next skill
+                        gm(session, "/rcd")                 # real cooldowns, none left over from the last run or skill
                         gm(session, "/move " + args.stage.replace(",", " "), wait=args.stage_settle)
                     if args.camera:
                         set_camera(args.pid, *args.camera)
@@ -897,7 +910,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = with_driver("setup", "GM commands, move, spawn the training doll")
     p.add_argument("--plan", type=Path, default=None)
     p.add_argument("--gm", action="append", default=[], help="a GM command to send (repeatable), e.g. '/level 50'")
-    p.add_argument("--no-default-gm", action="store_true", help="skip the plan's setup commands (/level 50, /ignoreskillcds true)")
+    p.add_argument("--no-default-gm", action="store_true", help="skip the plan's setup commands (/level 50, /ignoreskillcds false)")
     p.add_argument("--move", default=None, help='"x y z": /move there first')
     p.add_argument("--spawn-doll", action="store_true", help="/despawn then /spawn npc <doll> and target it")
     p.add_argument("--find-doll", action="store_true", help="target the nearest doll")

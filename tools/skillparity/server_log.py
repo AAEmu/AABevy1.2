@@ -22,6 +22,10 @@ Line shapes understood (real ones from the server source, `rust/crates/aaemu-gam
 * `GamePacket: S->C type 0A1 SCSkillStartedPacket (N bytes)`  `aaemu_game::net=debug`  -> S->C packet by name (dir in)
 * `SCSkillStartedPacket { id: 14376, tl: 5, caster: Unit(1), ... }`  the `{:?}` of a sent packet, trace level of
   `aaemu_game::net::connection`: decoded fields, merged into the S->C row right before it (or a row of its own)
+* `CompressedGamePackets { packets: [(174, [126, 0, ...]), ...] }`  a batch (most skill answers go out this way, `SCSkillStarted`
+  and `SCPlotEvent` included), same trace level: one S->C row per inner packet, named from aa-net's opcode table
+  (`crates/aa-net/src/opcodes.rs`, `sc` module); `SCPlotEvent` bodies are decoded (tl, event_id, skill_id, caster, target,
+  casting_ms), the others keep their length
 
 Packet names lose their `Packet` suffix (`SCSkillStartedPacket` -> `SCSkillStarted`, README names). Row fields: `dir`, `op`,
 `skill_id`, `tl`, `obj`, `fields`. The default `--ops` keeps the skill, plot, cast, cooldown, damage, buff and movement-impulse
@@ -50,6 +54,29 @@ C2S_DEBUG_RE = re.compile(r"GamePacket:\s*C->S\s+(\S+?)(?:\s+conn=(\d+))?\s*$")
 S2C_DEBUG_RE = re.compile(r"GamePacket:\s*S->C\s+type\s+([0-9a-fA-F]+)\s+(\S+)(?:\s+\((\d+)\s+bytes\))?")
 DEBUG_STRUCT_RE = re.compile(r"^(?:\w+::)*(\w+Packet)\s*(\{.*\})\s*$")
 DATE_IN_NAME_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+COMPRESSED_RE = re.compile(r"CompressedGamePackets\s*\{\s*packets:\s*\[(.*)\]\s*\}\s*$")
+INNER_RE = re.compile(r"\((\d+),\s*\[([\d,\s]*)\]\)")
+OPCODES_RS = Path(__file__).resolve().parents[2] / "crates" / "aa-net" / "src" / "opcodes.rs"
+_SC_NAMES: dict[int, str] | None = None
+
+
+def sc_names(path: Path = OPCODES_RS) -> dict[int, str]:
+    """S->C opcode -> packet name (without `Packet`), from the `pub mod sc { ... }` block of aa-net's table."""
+    global _SC_NAMES
+    if _SC_NAMES is None or path != OPCODES_RS:
+        names: dict[int, str] = {}
+        try:
+            text = path.read_text(encoding="utf-8")
+            block = text[text.index("pub mod sc"):]
+            block = block[:block.index("pub mod pp")] if "pub mod pp" in block else block
+            for m in re.finditer(r"(\w+Packet)\s*=\s*0x([0-9a-fA-F]+)", block):
+                names.setdefault(int(m.group(2), 16), strip_op(m.group(1)))
+        except (OSError, ValueError):
+            pass
+        if path != OPCODES_RS:
+            return names
+        _SC_NAMES = names
+    return _SC_NAMES
 
 # what `--ops` keeps by default: everything a skill cast touches (README: server answers, effects, impulses)
 DEFAULT_OPS = (r"Skill|Plot|Cast|Cooldown|Damage|Heal|Buff|Effect|Impulse|Knock|Dash|Teleport|Death|Aggro|Target|"
@@ -272,6 +299,29 @@ def _fixed(v: int) -> float:
     return round((v >> 32) / 4096.0, 4)
 
 
+def decode_sc_plot_event(body: bytes) -> dict | None:
+    """`SCPlotEvent` (aa-net `PlotEvent::read`): tl u16, event u32, skill u32, source and target plot objects (kind 1 = unit
+    with a bc object id, else a position), item id, object id, the next step's cast time (u16, 10 ms units), two fields, the
+    affected units (u8 count, bc ids)."""
+    r = _Reader(body)
+    try:
+        tl = struct.unpack("<H", r.take(2))[0]
+        event_id, skill_id = r.u32(), r.u32()
+        out: dict[str, Any] = {"tl": tl, "event_id": event_id, "skill_id": skill_id}
+        for key in ("caster", "target"):
+            if r.u8() != 1:
+                return out                              # a position: the rest is not needed here
+            out[key] = r.bc()
+        r.take(8 + 3)
+        out["casting_ms"] = struct.unpack("<H", r.take(2))[0] * 10
+        r.take(3 + 2)
+        # the units the step affects: the targets of its effects whose plot target is 4 (`target_unit_count`, then bc ids)
+        out["targets"] = [r.bc() for _ in range(r.u8())]
+        return out
+    except ValueError:
+        return None
+
+
 def decode_cs_start_skill(body: bytes) -> dict | None:
     """`CSStartSkillPacket` (systems/skills/handlers.rs): skill u32, caster (type u8 + bc ..), target (type u8 + ..), flag u8."""
     try:
@@ -392,11 +442,36 @@ class LogParser:
             if self._keep(op):
                 self._emit(row)
             return
+        m = COMPRESSED_RE.search(msg)
+        if m:
+            self._compressed_line(wall, m.group(1))
+            return
         m = DEBUG_STRUCT_RE.match(text.strip())
         if m:
             self._struct_line(wall, m.group(1), m.group(2))
             return
         self.unparsed += 1
+
+    def _compressed_line(self, wall: int, body: str) -> None:
+        names = sc_names()
+        for inner in INNER_RE.finditer(body):
+            opcode = int(inner.group(1))
+            op = names.get(opcode, f"SC_0x{opcode:03X}")
+            try:
+                data = bytes(int(b) for b in inner.group(2).split(",") if b.strip())
+            except ValueError:
+                data = b""
+            row: dict[str, Any] = {"src": "server", "kind": "net", "wall_us": wall, "dir": "in", "op": op,
+                                   "fields": {"opcode": f"0x{opcode:03X}", "len": len(data), "batched": True}}
+            if op == "SCPlotEvent":
+                decoded = decode_sc_plot_event(data)
+                if decoded:
+                    row["skill_id"], row["tl"] = decoded.pop("skill_id"), decoded.pop("tl")
+                    if "caster" in decoded:
+                        row["obj"] = decoded["caster"]
+                    row["fields"].update(decoded)
+            if self._keep(op):
+                self._emit(row)
 
     def _c2s_fields(self, wall: int, m: re.Match) -> None:
         op = strip_op(m.group(3))

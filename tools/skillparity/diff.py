@@ -273,13 +273,15 @@ def name_set_metrics(rows: list[dict], press: float) -> dict:
 
 
 def fx_metrics(trace: Trace, lo: float, hi: float, press: float) -> dict:
-    return name_set_metrics([r for r in trace.window("fx", lo, hi) if r.get("phase") in (None, "spawn")], press)
+    return name_set_metrics([r for r in trace.window("fx", lo, hi) if r.get("phase") in (None, "spawn")
+                             and not common.is_ambient(r.get("name", ""))], press)
 
 
 def sound_metrics(trace: Trace, lo: float, hi: float, press: float) -> dict:
     # the original logs `create` and `play`, aa-client one voice start: compare `play` where a trace has it, else everything
     use_play = any(r.get("phase") == "play" for r in trace.by_kind.get("sound", []))
-    rows = [r for r in trace.window("sound", lo, hi) if not use_play or r.get("phase") == "play"]
+    rows = [r for r in trace.window("sound", lo, hi) if (not use_play or r.get("phase") == "play")
+            and not common.is_ambient(r.get("name", ""))]
     return name_set_metrics(rows, press)
 
 
@@ -310,7 +312,8 @@ def cooldown_metrics(trace: Trace, lo: float, hi: float, press: float, slot: int
         if remain is None or remain <= 0:
             continue
         is_gcd = bool(r.get("gcd"))
-        if not is_gcd and slot is not None and isinstance(r.get("slot"), int) and r["slot"] != slot:
+        # the pressed slot's rows (the global cooldown shows on every slot that waits for it); a row without a slot counts
+        if slot is not None and isinstance(r.get("slot"), int) and r["slot"] != slot:
             continue
         key = "gcd" if is_gcd else "skill"
         if out[key] is None:

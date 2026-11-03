@@ -150,6 +150,15 @@ SKILL_TOKENS = {
     "attack", "cast", "spell", "skill", "shot", "shoot", "slash", "strike", "charge", "combo", "fire", "magic",
     "throw", "stab", "swing", "smash", "bash", "dash", "kick", "punch", "buff", "heal", "channel", "dance",
 }
+# Sounds and effects that are not the skill's: the world's ambience and music, footsteps (other units walk past in both runs at
+# their own times), the UI's clicks. They differ run by run in both clients, so the skill comparison leaves them out (`ambient`).
+AMBIENT_RE = re.compile(r"(^|/)sounds/x2(ambience|music|interface|monster_footstep|footstep)[:/]|^collisions\.footsteps\.")
+
+
+def is_ambient(name: str) -> bool:
+    return bool(AMBIENT_RE.search(norm_name(name)))
+
+
 # Hit reactions: what the target (and only the target) plays after the player's skill.
 HIT_TOKENS = {"hit", "damage", "dmg", "stagger", "knock", "knockback", "down", "react", "reaction", "flinch", "stun", "hurt"}
 

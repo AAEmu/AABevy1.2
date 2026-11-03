@@ -245,6 +245,21 @@ class Driver(unittest.TestCase):
         finally:
             m.close()
 
+class WorldFxTest(unittest.TestCase):
+    def test_the_seamless_origin_is_added_to_an_effect_position(self):
+        row = {"kind": "fx", "pos": [4266.17, 5087.998, 132.65]}
+        ro.world_fx(row, (11264.0, 10240.0, 0.0))
+        self.assertEqual(row["pos"], [15530.17, 15327.998, 132.65])
+        self.assertEqual(row["pos_local"], [4266.17, 5087.998, 132.65])
+        ro.world_fx(row, (11264.0, 10240.0, 0.0))
+        self.assertEqual(row["pos"], [15530.17, 15327.998, 132.65], "applied once")
+
+    def test_a_zero_position_and_other_rows_are_left_alone(self):
+        row = {"kind": "fx", "pos": [0, 0, 0]}
+        self.assertEqual(ro.world_fx(row, (11264.0, 10240.0, 0.0))["pos"], [0, 0, 0])
+        other = {"kind": "sound", "pos": [1.0, 2.0, 3.0]}
+        self.assertEqual(ro.world_fx(other, (11264.0, 10240.0, 0.0))["pos"], [1.0, 2.0, 3.0])
+
 
 if __name__ == "__main__":
     unittest.main()

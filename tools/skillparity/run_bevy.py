@@ -84,7 +84,7 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
              f"echo skillparity run {run_id}"]
     skipped: list[dict] = []
     if setup:
-        lines += [f"gm {c.lstrip('/')}" for c in plan.get("setup", {}).get("gm", ["/level 50", "/ignoreskillcds true"])]
+        lines += [f"gm {c.lstrip('/')}" for c in plan.get("setup", {}).get("gm", ["/level 50", "/ignoreskillcds false"])]
     for c in extra_gm or []:
         lines.append(f"gm {c.lstrip('/')}")
     if move:
@@ -109,7 +109,7 @@ def build_script(plan: dict, batches: list[dict], *, run_id: str, setup: bool = 
             if stage:                                   # every skill from the same spot, as run_original.py --stage does
                 sx, sy, sz = re.split(r"[ ,]+", stage.strip())[:3]
                 # as run_original.py: targeting oneself ends the auto-attack on the doll, then no combat state, then the spot
-                lines += ["target self", "gm clearcombat", "wait 0.8", f"tp {sx} {sy} {sz}", f"wait {stage_settle:g}"]
+                lines += ["target self", "gm clearcombat", "gm rcd", "wait 0.8", f"tp {sx} {sy} {sz}", f"wait {stage_settle:g}"]
                 lines += [c for c in camera or [] if not c.split()[0] == "zoom"]   # a teleport can turn the camera; zoom is relative
             lines.append("target self" if skill.get("select") == "self" else f"target template:{template}")
             lines.append(f"wait {GRACE_AFTER_START:g}")
