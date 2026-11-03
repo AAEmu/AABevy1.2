@@ -1,8 +1,13 @@
 use super::*;
+use std::sync::Arc;
+
 use aa_net::Pos;
 use aa_net::farm::CommonFarmEntry;
 
+use crate::hud::api::HudBridge;
 use crate::hud::data::housing::{CommonFarm, FarmGroup, FarmGroupDoodad, Tables};
+use crate::hud::data::{ItemInfo, Named, ZoneGroup};
+use crate::hud::doodad::GrowthStep;
 
 fn game() -> GameData {
     let mut game = GameData::default();
@@ -56,7 +61,53 @@ fn game() -> GameData {
         },
     ];
     game.housing = housing;
+    game.items.insert(
+        13725,
+        ItemInfo {
+            named: Named {
+                name: "Parsley".into(),
+                icon: String::new(),
+            },
+            ..Default::default()
+        },
+    );
+    game.doodad.set_name_for_test(380, "Parsley Doodad");
+    game.doodad.phase_names.insert(77, "Growing".into());
+    game.doodad.phase_names.insert(78, "Next".into());
+    game.doodad.phase_names.insert(79, "Ripe".into());
+    game.doodad.growth.insert(
+        77,
+        GrowthStep {
+            delay_ms: 5000,
+            next_phase: 78,
+        },
+    );
+    game.doodad.growth.insert(
+        78,
+        GrowthStep {
+            delay_ms: 1000,
+            next_phase: 0,
+        },
+    );
+    game.doodad.climate.insert(380, 3);
+    game.zones.insert(129, (5, 0));
+    game.zone_groups.insert(
+        5,
+        ZoneGroup {
+            text: "Gweonid Forest".into(),
+            key: "w_gweonid_forest".into(),
+            rect: [0.0; 4],
+        },
+    );
+    game.zone_climate.insert(129, 8);
+    game.zone_climate_elems.insert(8, vec![3]);
     game
+}
+
+fn zone_world(zone: u16) -> aa_world::stream::WorldInfo {
+    let mut world = aa_world::World::default();
+    world.cells.insert((0, 0), vec![zone]);
+    aa_world::stream::WorldInfo(Arc::new(world))
 }
 
 fn setup(game: GameData) -> (UiRuntime, Shared) {
@@ -67,14 +118,14 @@ fn setup(game: GameData) -> (UiRuntime, Shared) {
     (rt, bridge)
 }
 
-fn entry() -> CommonFarmEntry {
+fn entry(farm_type: u32, func_group_id: u32, time_left: u32, plant_time: i64) -> CommonFarmEntry {
     CommonFarmEntry {
-        farm_type: 1,
+        farm_type,
         template_id: 380,
-        time_left: 5000,
-        func_group_id: 77,
+        time_left,
+        func_group_id,
         pos: Pos::new(100.0, 200.0, 30.0),
-        plant_time: super::unix_ms() / 1000,
+        plant_time,
     }
 }
 
@@ -110,12 +161,61 @@ fn static_getters_match_the_native_shapes() {
 }
 
 #[test]
+fn runtime_entries_use_seconds_the_common_farm_and_the_crop_zone() {
+    let game = game();
+    let now = entry(10, 77, 5000, 0).plant_time + 10;
+    let world = zone_world(129);
+    let crops = build_runtime(
+        Some(&game),
+        Some(world.0.as_ref()),
+        &list(vec![
+            entry(10, 77, 5000, now - 10),
+            entry(10, 79, 0, now - 10),
+        ]),
+        now,
+    );
+    assert_eq!(crops.len(), 2);
+    let growing = &crops[0];
+    assert_eq!(growing.farm_group_id, 1);
+    assert_eq!(growing.farm_type, 10, "the packet id is the common farm id");
+    assert_eq!(growing.name, "Parsley");
+    assert_eq!(growing.doodad_name, "Parsley Doodad");
+    assert_eq!(growing.current_phase_name, "Growing");
+    assert_eq!(growing.item_type, 13725);
+    assert_eq!(growing.left_growth, 5, "5000 ms + 1000 ms * 0.7, in seconds");
+    assert_eq!(growing.left_protect, 86_390);
+    assert_eq!(growing.location, "Gweonid Forest");
+    assert_eq!(growing.vpos, (100.0, 200.0));
+    assert!(!growing.grow_up);
+    let grown = &crops[1];
+    assert_eq!(grown.left_growth, 0);
+    assert!(grown.grow_up, "no further growth phase");
+
+    // The climate flag scales the following phases: 1.0 normally, 0.7 with the zone climate.
+    assert_eq!(growth_remaining_ms(&game, 77, 5000, false), 6000);
+    assert_eq!(growth_remaining_ms(&game, 77, 5000, true), 5700);
+
+    // Unknown common farms, farm groups, doodads and func groups are skipped.
+    assert!(build_runtime(
+        Some(&game),
+        None,
+        &list(vec![
+            entry(99, 77, 5000, now),
+            entry(10, 9999, 5000, now),
+        ]),
+        now
+    )
+    .is_empty());
+}
+
+#[test]
 fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
     let (rt, bridge) = setup(game());
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_non_send(rt)
         .insert_non_send(HudBridge(bridge))
+        .insert_resource(zone_world(129))
         .add_message::<NetEvent>()
         .add_message::<NetCommand>()
         .add_systems(Update, sync);
@@ -133,7 +233,12 @@ fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
         .exec()
         .unwrap();
     app.world_mut()
-        .write_message(NetEvent(Event::Farm(FarmEvent::List(list(vec![entry()])))));
+        .write_message(NetEvent(Event::Farm(FarmEvent::List(list(vec![entry(
+            10,
+            77,
+            5000,
+            unix_secs() - 10,
+        )])))));
     app.update();
     let rt = app.world().non_send::<UiRuntime>();
     aa_ui::lua::tick(&rt.lua, 16.0);
@@ -147,12 +252,14 @@ fn a_list_event_updates_the_runtime_getters_and_raises_common_farm_updated() {
             local crops = X2:GetRuntimeCommonFarmDoodadsInfo(1)
             assert(#crops == 1)
             local crop = crops[1]
-            assert(crop.farmType == 1 and crop.itemType == 13725)
-            assert(crop.name == '' and crop.doodadName == '')
+            assert(crop.farmType == 10 and crop.itemType == 13725)
+            assert(crop.name == 'Parsley' and crop.doodadName == 'Parsley Doodad')
+            assert(crop.currentPhaseName == 'Growing')
+            assert(crop.location == 'Gweonid Forest')
             assert(crop.vPosX == 100 and crop.vPosY == 200)
-            assert(crop.leftGrowthTime > 4000 and crop.leftGrowthTime <= 5000)
-            assert(crop.leftProtectTime > 86000000)
-            assert(crop.growUp == true)
+            assert(crop.leftGrowthTime <= 5 and crop.leftGrowthTime >= 4)
+            assert(crop.leftProtectTime > 86000 and crop.leftProtectTime <= 86400)
+            assert(crop.growUp == false)
             assert(type(crop.leftProtectTime) == 'number')
         "#,
         )
@@ -220,6 +327,22 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .add_message::<NetEvent>()
         .add_message::<NetCommand>()
         .add_systems(Update, sync);
+    app.world()
+        .non_send::<UiRuntime>()
+        .lua
+        .load(
+            r#"
+            UPDATED, MESSAGES = 0, 0
+            local updated = UIParent:CreateWidget('emptywidget', 'farmRequestUpdated', 'UIParent')
+            updated:RegisterEvent('COMMON_FARM_UPDATED')
+            updated:SetHandler('OnEvent', function() UPDATED = UPDATED + 1 end)
+            local messages = UIParent:CreateWidget('emptywidget', 'farmRequestMessage', 'UIParent')
+            messages:RegisterEvent('SYSMSG')
+            messages:SetHandler('OnEvent', function() MESSAGES = MESSAGES + 1 end)
+        "#,
+        )
+        .exec()
+        .unwrap();
     let drain = |app: &mut App| {
         app.world_mut()
             .resource_mut::<Messages<NetCommand>>()
@@ -227,6 +350,13 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
             .map(|v| v.0)
             .collect::<Vec<_>>()
     };
+    let state = app
+        .world()
+        .non_send::<UiRuntime>()
+        .lua
+        .app_data_ref::<State>()
+        .unwrap()
+        .clone();
     app.world()
         .non_send::<UiRuntime>()
         .lua
@@ -238,7 +368,7 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         drain(&mut app).as_slice(),
         [Command::RequestCommonFarmList]
     ));
-    // A second request inside 2 s only refreshes the window.
+    // A second request inside 2 s only refreshes the window and keeps the list.
     app.world()
         .non_send::<UiRuntime>()
         .lua
@@ -247,15 +377,11 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .unwrap();
     app.update();
     assert!(drain(&mut app).is_empty());
-    // An instant zone refuses the request (0x242) and still refreshes.
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 1);
+    // An instant zone refuses (0x242), clears the list and still refreshes.
     bridge.borrow_mut().snapshot.instance_id = 9;
-    let state = app
-        .world()
-        .non_send::<UiRuntime>()
-        .lua
-        .app_data_ref::<State>()
-        .unwrap()
-        .clone();
     state.0.borrow_mut().last_request = None;
     app.world()
         .non_send::<UiRuntime>()
@@ -265,6 +391,34 @@ fn the_request_gate_sends_once_and_fires_the_update_even_when_refused() {
         .unwrap();
     app.update();
     assert!(drain(&mut app).is_empty());
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    assert_eq!(rt.lua.load("return UPDATED").eval::<i64>().unwrap(), 2);
+}
+
+fn load_commonfarm(rt: &UiRuntime) -> bool {
+    if let Err(e) = aa_lua::run_alb(&rt.lua, aa_lua::stage::INIT_SCRIPT) {
+        eprintln!("skip: base locale: {e}");
+        return false;
+    }
+    for toc in [
+        "scriptsbin/x2ui/baselib/toc.g",
+        "scriptsbin/x2ui/commonfarm/toc.g",
+    ] {
+        let errors = aa_lua::run_toc_collect(&rt.lua, toc).unwrap();
+        if let Some((script, error)) = errors.first() {
+            eprintln!("skip: {script}: {error}");
+            return false;
+        }
+    }
+    if let Err(e) = aa_lua::run_alb(
+        &rt.lua,
+        "scriptsbin/x2ui/hud/main_menu_bar/main_menu/table.alb",
+    ) {
+        eprintln!("skip: main menu table: {e}");
+        return false;
+    }
+    true
 }
 
 #[test]
@@ -289,25 +443,7 @@ fn the_original_commonfarm_scripts_open_the_info_and_my_farm_windows() {
         .find(|f| f.id == f.farm_group_id)
         .map_or(1, |f| f.id);
     let (rt, _) = setup(game);
-    if let Err(e) = aa_lua::run_alb(&rt.lua, aa_lua::stage::INIT_SCRIPT) {
-        eprintln!("skip: base locale: {e}");
-        return;
-    }
-    for toc in [
-        "scriptsbin/x2ui/baselib/toc.g",
-        "scriptsbin/x2ui/commonfarm/toc.g",
-    ] {
-        let errors = aa_lua::run_toc_collect(&rt.lua, toc).unwrap();
-        if let Some((script, error)) = errors.first() {
-            eprintln!("skip: {script}: {error}");
-            return;
-        }
-    }
-    if let Err(e) = aa_lua::run_alb(
-        &rt.lua,
-        "scriptsbin/x2ui/hud/main_menu_bar/main_menu/table.alb",
-    ) {
-        eprintln!("skip: main menu table: {e}");
+    if !load_commonfarm(&rt) {
         return;
     }
     rt.lua
@@ -346,4 +482,78 @@ fn the_original_commonfarm_scripts_open_the_info_and_my_farm_windows() {
     assert!(!aa_ui::lua::ui(&rt.lua).tree.visible(my_farm));
     assert!(aa_ui::content::hotkey(&rt.lua, "toggle_common_farm_info").unwrap());
     assert!(aa_ui::lua::ui(&rt.lua).tree.visible(my_farm));
+}
+
+#[test]
+fn the_original_my_farm_list_shows_growing_and_grown_crops() {
+    if !std::env::var("AA_PAK").is_ok_and(|p| std::path::Path::new(&p).exists()) {
+        return;
+    }
+    let Some(db) = std::env::var("AA_DB")
+        .ok()
+        .filter(|p| std::path::Path::new(p).exists())
+    else {
+        return;
+    };
+    let game = GameData::load(&db).unwrap();
+    let expected_zone = game
+        .zone(129)
+        .map(|(_, zone, _)| zone.text.clone())
+        .unwrap_or_else(|| "unknown".into());
+    let (rt, bridge) = setup(game);
+    if !load_commonfarm(&rt) {
+        return;
+    }
+    rt.lua.globals().set("EXPECTED_ZONE", expected_zone).unwrap();
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_non_send(rt)
+        .insert_non_send(HudBridge(bridge))
+        .insert_resource(zone_world(129))
+        .add_message::<NetEvent>()
+        .add_message::<NetCommand>()
+        .add_systems(Update, sync);
+    // Opening the window runs its `ShowProc`, which requests a fresh list and clears the old one.
+    {
+        let rt = app.world().non_send::<UiRuntime>();
+        assert!(aa_ui::content::hotkey(&rt.lua, "toggle_common_farm_info").unwrap());
+    }
+    app.update();
+    let now = unix_secs();
+    app.world_mut()
+        .write_message(NetEvent(Event::Farm(FarmEvent::List(list(vec![
+            // 380/1779 grows into 1780; 380/1785 is final. Both are planted in common farm 1.
+            entry(1, 1779, 5000, now - 10),
+            entry(1, 1785, 0, now - 10),
+        ])))));
+    app.update();
+    let rt = app.world().non_send::<UiRuntime>();
+    aa_ui::lua::tick(&rt.lua, 16.0);
+    let window = aa_ui::lua::ui(&rt.lua)
+        .tree
+        .find("myFarminfo")
+        .expect("my farm window");
+    let w = aa_ui::lua::object_table(&rt.lua, window)
+        .unwrap()
+        .expect("window object");
+    rt.lua.globals().set("MY_FARM", w).unwrap();
+    rt.lua
+        .load(
+            r#"
+            MY_FARM:RefreshCommonFarmList(1)
+            local crops = X2:GetRuntimeCommonFarmDoodadsInfo(1)
+            assert(#crops == 2 and crops[2].growUp == true, 'growing and grown crops')
+            local growing = MY_FARM.tab.listCtrl.items[1]
+            local grown = MY_FARM.tab.listCtrl.items[2]
+                        local time = growing.subItems[2].textBox:GetText()
+            local expected = MakeTimeString(crops[1].leftGrowthTime)
+            assert(time:sub(1, #expected) == expected, time .. ' / ' .. expected)
+            assert(crops[1].leftGrowthTime > 10 and crops[1].leftGrowthTime < 100000, 'leftGrowthTime is seconds')
+            assert(grown.subItems[2].textBox:GetText():find(locale.commonFarm.growUp, 1, true) ~= nil)
+            local location = growing.subItems[3].label:GetText()
+            assert(location:find(EXPECTED_ZONE, 1, true) ~= nil, location)
+        "#,
+        )
+        .exec()
+        .unwrap();
 }

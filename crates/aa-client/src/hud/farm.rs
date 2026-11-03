@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
-use aa_net::farm::{CommonFarmEntry, CommonFarmList, FarmEvent};
+use aa_net::farm::{CommonFarmList, FarmEvent};
 use aa_net::{Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -33,13 +33,33 @@ const REFRESH_DEBOUNCE_SECS: f64 = 2.0;
 /// How far the player may walk from the farm doodad before the info window closes. The native ends
 /// the interaction with the doodad; the exact reach is not recovered (capture-pending).
 const FARM_LEAVE: f32 = 10.0;
+/// `FUN_390324c0` / `FUN_3983c0e0`: at most 50 growth phases are summed (`local_8 = 0x32`).
+const GROWTH_PHASE_LIMIT: u32 = 50;
+
+/// One runtime crop as `FUN_390324c0` builds it. The times are the seconds left when the list
+/// arrived; `FUN_39035620` subtracts whole seconds since that receipt.
+#[derive(Clone, Debug, Default)]
+struct RuntimeCrop {
+    /// `farm_groups.id`, the key `GetRuntimeCommonFarmDoodadsInfo` filters by.
+    farm_group_id: u32,
+    /// `common_farms.id`, the script's `farmType`.
+    farm_type: u32,
+    name: String,
+    current_phase_name: String,
+    doodad_name: String,
+    item_type: u32,
+    left_growth: i64,
+    left_protect: i64,
+    location: String,
+    vpos: (f32, f32),
+    grow_up: bool,
+}
 
 /// The runtime list as received, with the receipt clock the growth/protect counters count down from.
 #[derive(Clone, Debug)]
 struct Received {
-    list: CommonFarmList,
+    entries: Vec<RuntimeCrop>,
     at: Instant,
-    unix_ms: i64,
 }
 
 /// The farm doodad whose info window is open (`SCShowCommonFarm`).
@@ -62,10 +82,10 @@ struct View {
 #[derive(Clone, Default)]
 pub(super) struct State(Rc<RefCell<View>>);
 
-fn unix_ms() -> i64 {
+fn unix_secs() -> i64 {
     web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as i64)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
@@ -169,11 +189,11 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         )?,
     )?;
 
-    let (s, b) = (state.clone(), bridge.clone());
+    let s = state.clone();
     x2.set(
         "GetRuntimeCommonFarmDoodadsInfo",
         lua.create_function(move |lua, (_self, kind): (Value, u32)| {
-            runtime_info(lua, &s, &b, kind)
+            runtime_info(lua, &s, kind)
         })?,
     )?;
 
@@ -183,10 +203,9 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |_, (_self, kind): (Value, u32)| {
             let v = s.0.borrow();
             Ok(v.list.as_ref().map_or(0, |r| {
-                r.list
-                    .entries
+                r.entries
                     .iter()
-                    .filter(|e| e.farm_type == kind)
+                    .filter(|e| e.farm_group_id == kind)
                     .count()
             }) as i64)
         })?,
@@ -197,9 +216,9 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         "RequestRuntimeCommonFarmDoodadInfo",
         lua.create_function(move |lua, _: mlua::MultiValue| {
             let now = Instant::now();
-            // `FUN_39035560`: an instant zone refuses the request with
-            // `cannot_request_commonfarm_info_in_instant_zone` (0x242), and a request within 2 s
-            // only refreshes the window; both still raise `COMMON_FARM_UPDATED`.
+            // `FUN_39035560`: an instant zone clears the list, shows
+            // `cannot_request_commonfarm_info_in_instant_zone` (0x242) and raises
+            // `COMMON_FARM_UPDATED`; a request within 2 s only refreshes the window.
             if b.borrow().snapshot.instance_id != 0 {
                 aa_ui::lua::queue_ui_event(lua, "COMMON_FARM_UPDATED", Vec::new());
                 return Ok(());
@@ -222,87 +241,153 @@ pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
 
 /// `GetRuntimeCommonFarmDoodadsInfo`: one table per planted crop of `kind`, or nil when there is
 /// none (`FUN_39444630` returns nil for an empty list; `FUN_39035620`).
-fn runtime_info(lua: &Lua, state: &State, bridge: &Shared, kind: u32) -> mlua::Result<Value> {
+fn runtime_info(lua: &Lua, state: &State, kind: u32) -> mlua::Result<Value> {
     let v = state.0.borrow();
     let Some(received) = v.list.as_ref() else {
         return Ok(Value::Nil);
     };
-    if !received.list.entries.iter().any(|e| e.farm_type == kind) {
+    let elapsed = received.at.elapsed().as_secs() as i64;
+    let mut crops = received.entries.iter().filter(|e| e.farm_group_id == kind);
+    if crops.clone().next().is_none() {
         return Ok(Value::Nil);
     }
-    let data = bridge.borrow();
-    let game = data.game.get();
-    let snapshot = &data.snapshot;
-    let at = received.at;
-    let unix = received.unix_ms;
     let out = lua.create_table()?;
-    for (i, entry) in received
-        .list
-        .entries
-        .iter()
-        .filter(|e| e.farm_type == kind)
-        .enumerate()
-    {
-        let t = runtime_entry(lua, game, snapshot, entry, at, unix)?;
+    for (i, crop) in crops.by_ref().enumerate() {
+        let t = lua.create_table()?;
+        let left_growth = crop.left_growth - elapsed;
+        t.set("name", crop.name.as_str())?;
+        t.set("currentPhaseName", crop.current_phase_name.as_str())?;
+        t.set("doodadName", crop.doodad_name.as_str())?;
+        t.set("itemType", i64::from(crop.item_type))?;
+        t.set("leftGrowthTime", left_growth)?;
+        t.set("leftProtectTime", (crop.left_protect - elapsed).max(0))?;
+        t.set("location", crop.location.as_str())?;
+        t.set("vPosX", f64::from(crop.vpos.0))?;
+        t.set("vPosY", f64::from(crop.vpos.1))?;
+        t.set("farmType", i64::from(crop.farm_type))?;
+        t.set("growUp", crop.grow_up)?;
         out.raw_set(i + 1, t)?;
     }
     Ok(Value::Table(out))
 }
 
-fn runtime_entry(
-    lua: &Lua,
+/// Build the runtime list of `FUN_390324c0`: each packet entry is keyed by its **common farm id**,
+/// whose `farm_group_id` selects the group; unknown common farms, farm groups, doodads and phase
+/// groups are skipped.
+fn build_runtime(
     game: Option<&GameData>,
-    snapshot: &super::data::Snapshot,
-    entry: &CommonFarmEntry,
-    at: Instant,
-    unix_now: i64,
-) -> mlua::Result<Table> {
-    let t = lua.create_table()?;
-    let item = game.map_or(0, |g| {
-        g.housing
-            .farm_doodad_item(entry.farm_type, entry.template_id)
-    });
-    let doodad_name = game
-        .and_then(|g| g.doodad.name(entry.template_id))
-        .unwrap_or_default();
-    let name = game
-        .and_then(|g| g.items.get(&item))
-        .map(|i| i.named.name.clone())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| doodad_name.to_string());
-    let phase = game
-        .and_then(|g| g.doodad.message(entry.func_group_id))
-        .unwrap_or_default();
-    // The runtime tree counts down from its own receipt; the list carries the growth time left at
-    // send time, and the guard time comes from `common_farms` (`FarmGroupKind` fallback when the
-    // zone is not carried in the packet).
-    let elapsed = at.elapsed().as_millis() as i64;
-    let left_growth = i64::from(entry.time_left) - elapsed;
-    let guard = game.map_or(0, |g| g.housing.farm_guard_time(entry.farm_type, 0));
-    let left_protect = (entry.plant_time * 1000 + i64::from(guard) - unix_now).max(0);
-    let location = if snapshot.sub_zone.is_empty() {
-        snapshot.zone.clone()
-    } else {
-        snapshot.sub_zone.clone()
-    };
-    t.set("name", name)?;
-    t.set("currentPhaseName", phase)?;
-    t.set("doodadName", doodad_name)?;
-    t.set("itemType", i64::from(item))?;
-    t.set("leftGrowthTime", left_growth)?;
-    t.set("leftProtectTime", left_protect)?;
-    t.set("location", location)?;
-    t.set("vPosX", f64::from(entry.pos.x))?;
-    t.set("vPosY", f64::from(entry.pos.y))?;
-    t.set("farmType", i64::from(entry.farm_type))?;
-    t.set("growUp", left_growth > 0)?;
-    Ok(t)
+    world: Option<&aa_world::World>,
+    list: &CommonFarmList,
+    now: i64,
+) -> Vec<RuntimeCrop> {
+    let Some(game) = game else { return Vec::new() };
+    let mut out = Vec::new();
+    for entry in &list.entries {
+        let Some(common) = game
+            .housing
+            .common_farms
+            .iter()
+            .find(|f| f.id == entry.farm_type)
+        else {
+            continue;
+        };
+        let Some(group) = game.housing.farm_groups.get(&common.farm_group_id) else {
+            continue;
+        };
+        let Some(doodad_name) = game.doodad.name(entry.template_id) else {
+            continue;
+        };
+        if !game.doodad.has_phase(entry.func_group_id) {
+            continue;
+        }
+        let item = game.housing.farm_doodad_item(group.id, entry.template_id);
+        let name = game
+            .items
+            .get(&item)
+            .map(|i| i.named.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| doodad_name.to_string());
+        let zone_key = world
+            .and_then(|w| {
+                w.zone_at(Vec3::new(entry.pos.x, entry.pos.y, entry.pos.z))
+                    .map(u32::from)
+            });
+        let location = zone_key
+            .and_then(|key| game.zone(key))
+            .map(|(_, zone, _)| zone.text.clone())
+            .filter(|text| !text.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        let climate = game.doodad.climate_of(entry.template_id);
+        let climate_flag = climate != 0
+            && zone_key
+                .and_then(|key| game.zone_climate.get(&key))
+                .and_then(|id| game.zone_climate_elems.get(id))
+                .is_some_and(|ids| ids.contains(&climate));
+        let growth_ms = growth_remaining_ms(
+            game,
+            entry.func_group_id,
+            entry.time_left,
+            climate_flag,
+        );
+        let guard_secs = (f64::from(common.guard_time) * 0.001) as i64;
+        let left_protect = (guard_secs - (now - entry.plant_time)).max(0);
+        out.push(RuntimeCrop {
+            farm_group_id: group.id,
+            farm_type: common.id,
+            name,
+            current_phase_name: game
+                .doodad
+                .phase_name(entry.func_group_id)
+                .unwrap_or_default()
+                .to_string(),
+            doodad_name: doodad_name.to_string(),
+            item_type: item,
+            left_growth: (growth_ms / 1000) as i64,
+            left_protect,
+            location,
+            vpos: (entry.pos.x, entry.pos.y),
+            // `FUN_390324c0`: `growUp = FUN_3983c170(func_group) == DAT_39adb320`.
+            grow_up: game
+                .doodad
+                .growth_step(entry.func_group_id)
+                .is_none_or(|step| step.next_phase == 0),
+        });
+    }
+    out
+}
+
+/// `FUN_3983c1b0`: the packet's remaining growth plus the rounded times of the phases after it
+/// (`FUN_3983c0e0`), each scaled by the zone-climate flag: 1.0 normally, 0.7 when the doodad's
+/// climate is in the zone's climate list (`FUN_39032470`).
+fn growth_remaining_ms(
+    game: &GameData,
+    func_group_id: u32,
+    time_left: u32,
+    climate_flag: bool,
+) -> u32 {
+    let scale = if climate_flag { 0.7f64 } else { 1.0 };
+    let mut budget = GROWTH_PHASE_LIMIT;
+    let mut next = game
+        .doodad
+        .growth_step(func_group_id)
+        .map_or(0, |step| step.next_phase);
+    let mut sum = 0.0f64;
+    while budget > 0 && next != 0 {
+        let Some(step) = game.doodad.growth_step(next) else {
+            break;
+        };
+        budget -= 1;
+        sum += f64::from(step.delay_ms) * scale;
+        next = step.next_phase;
+    }
+    (sum.round() as i64 + i64::from(time_left)).max(0) as u32
 }
 
 /// Folds aa-net's farm events into the runtime list and the info window.
 fn sync(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
+    world: Option<Res<aa_world::stream::WorldInfo>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -314,10 +399,18 @@ fn sync(
     for NetEvent(event) in events.read() {
         match event {
             Event::Farm(FarmEvent::List(list)) => {
+                let entries = {
+                    let data = bridge.0.borrow();
+                    build_runtime(
+                        data.game.get(),
+                        world.as_ref().map(|w| w.0.as_ref()),
+                        list,
+                        unix_secs(),
+                    )
+                };
                 state.0.borrow_mut().list = Some(Received {
-                    list: list.clone(),
+                    entries,
                     at: Instant::now(),
-                    unix_ms: unix_ms(),
                 });
                 aa_ui::lua::queue_ui_event(&rt.lua, "COMMON_FARM_UPDATED", Vec::new());
             }
