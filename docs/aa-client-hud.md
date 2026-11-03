@@ -696,6 +696,26 @@ The getters these windows read that were still stubs now follow the natives:
   kind-4 text, else the act description: the native formats the act through `FUN_392d9640` and
   `objective_ptn`, whose alias substitution is not recovered, so the text is approximate.
 
+### Main-quest cutscene replay
+
+`X2Quest:GetMainQuestCutSceneReplayList()` (`FUN_39378e10` -> `FUN_393781a0`) returns nil when there
+is nothing to replay, else an array of `{ name, cinema }`. The native keeps a vector of
+(quest, cinema) pairs: `FUN_3937b540` appends a completed main quest's component cinemas whose
+`cinemas.replay` is set, once per component, and `FUN_3937c940` clears and rebuilds it from the
+completed blocks in the quest table order (`SCCompletedQuests`). The Bevy getter derives the same
+list from the completed blocks and `quest_components.cinema_id` in quest id order. The skill-based
+cinema fallback of `FUN_3937b540` (`FUN_393780a0` through the component's skill) is not implemented;
+in the shipped data all 92 replay cinemas are set directly on main-quest components.
+
+The Past tab (`quest_list/tab_past.alb`) lists `%d. <name>` and its replay button calls
+`X2Player:PlayCinema(<cinema>)`. `FUN_39495550` ignores the empty name, then `FUN_391e2a70` loads
+`worlds/main_world/cinemas/<name>.xml` and sends `CSStartedCinema` (0x0cf). Bevy's `play_cinema`
+uses the same `CinemaPlayer` as a quest movie (camera tracks, input block) and does not mark it
+played, so the same movie may be replayed; while a movie is already running it does nothing, like
+the native's early return. That shared player also sends `CSCompletedCinema` (0x0ce) at the end, as
+a quest movie does; the native replay path shows only the 0x0cf send, so the completion report for
+a replay is an inference, not captured.
+
 ### Server-shown quest areas
 
 `SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /

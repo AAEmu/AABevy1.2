@@ -195,6 +195,16 @@ X2Quest.QuestContextDrop = function(self, idx)
   local q = byIndex(idx)
   if q ~= nil then HUD.quest_drop(q.type) end
 end
+-- The Past tab's replay list (`FUN_39378e10`): completed main quests whose component cinema has
+-- `cinemas.replay`, as { name = <quest name>, cinema = <cinema name> }; nil when there is none.
+X2Quest.GetMainQuestCutSceneReplayList = function(self) return HUD.quest_replay_list() end
+-- `FUN_39495550` -> `FUN_391e2a70`: play the cinema from `worlds/main_world/cinemas/<name>.xml`.
+if X2Player ~= nil then
+  X2Player.PlayCinema = function(self, name)
+    if type(name) == "string" and name ~= "" then HUD.quest_play_cinema(name) end
+  end
+end
+
 -- Titles, categories ---------------------------------------------------------------------------------------
 X2Quest.GetQuestContextMainTitle = function(self, qtype) local q = byType(qtype); return q and q.name or "" end
 X2Quest.GetQuestContextSummary = field("summary", "")

@@ -169,6 +169,8 @@ pub struct CinemaDef {
     pub name: String,
     /// `play_cinema_before_bubble`: the movie comes before the step's lines instead of after them.
     pub before_bubble: bool,
+    /// `cinemas.replay`: a completed main quest's movie can be replayed from the journal's Past tab.
+    pub replay: bool,
 }
 
 /// A component (`quest_components`).
@@ -475,13 +477,13 @@ impl QuestTables {
             }
         }
         if let Ok(mut q) = conn.prepare(
-            "SELECT qc.id, c.name, qc.play_cinema_before_bubble FROM quest_components qc JOIN cinemas c ON c.id = qc.cinema_id",
+            "SELECT qc.id, c.name, qc.play_cinema_before_bubble, c.replay FROM quest_components qc JOIN cinemas c ON c.id = qc.cinema_id",
         ) {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id = any_int(r, 0)? as u32;
                 if let Some(c) = t.parts.get_mut(&id) {
-                    c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)? });
+                    c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)?, replay: any_flag(r, 3)? });
                 }
             }
         }
@@ -868,6 +870,27 @@ impl QuestTables {
     /// `X2Quest.GetObjectiveComponentCount` (`FUN_394a4ae0`): the Progress components of the quest.
     pub fn objective_component_count(&self, quest: u32) -> u32 {
         self.parts_of(quest, kind::PROGRESS).count() as u32
+    }
+
+    /// `X2Quest.GetMainQuestCutSceneReplayList` (`FUN_39378e10`): every completed main quest whose
+    /// component has a `cinemas.replay` movie, as `(quest name, cinema name)`, in quest table order
+    /// (`FUN_3937c940` rebuilds it that way from the completed blocks).
+    pub fn replay_list(&self, completed: &[aa_net::quest::CompletedBlock]) -> Vec<(String, String)> {
+        let mut ids: Vec<u32> = self.defs.keys().copied().collect();
+        ids.sort_unstable();
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(def) = self.defs.get(&id) else { continue };
+            if !def.is_main() || !completed.iter().any(|b| b.has(id)) {
+                continue;
+            }
+            for part in def.components.iter().filter_map(|c| self.parts.get(c)) {
+                if let Some(cinema) = part.cinema.as_ref().filter(|c| c.replay) {
+                    out.push((def.name.clone(), cinema.name.clone()));
+                }
+            }
+        }
+        out
     }
 
     /// `FUN_397d42d0` of a quest's Ready component: whether it has a `QuestActConReportNpc` (0x14) or
@@ -1408,12 +1431,12 @@ mod tests {
         // 1065 "Evacuation Protocol": the Ready component 5336 reports through cinema 17 (fly_east)
         if let Some(c) = t.parts.get(&5336) {
             assert_eq!(c.quest, 1065);
-            assert_eq!(c.cinema, Some(CinemaDef { name: "fly_east".to_string(), before_bubble: false }));
+            assert_eq!(c.cinema, Some(CinemaDef { name: "fly_east".to_string(), before_bubble: false, replay: false }));
         }
         // 2246: the Start component 10186 plays zq_20_karl
         if let Some(c) = t.parts.get(&10186) {
             assert_eq!(c.quest, 2246);
-            assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false }));
+            assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false, replay: false }));
         }
     }
 

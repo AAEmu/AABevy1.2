@@ -102,6 +102,8 @@ pub(crate) enum Req {
     Directing(bool),
     /// The directing window about to play a step (`HUD.quest_cinema_permission`): 0x0d0.
     CinemaPermission { quest: u32, kind: u8 },
+    /// `X2Player:PlayCinema(name)` (`FUN_39495550`): replay a completed main quest's movie.
+    PlayCinema(String),
     /// The talk's close-up camera on or off (`quest_camera::set_active`).
     Camera(bool),
     /// The quest bubble about to be said frames its speaker (`quest_camera::frame_bubble`).
@@ -492,6 +494,34 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     hud.raw_set(
         "quest_objective_components",
         lua.create_function(move |_, qtype: u32| Ok(b.borrow().game.get().map_or(0, |g| g.quests.objective_component_count(qtype))))?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_replay_list",
+        lua.create_function(move |lua, ()| {
+            let d = b.borrow();
+            let Some(game) = d.game.get() else { return Ok(None) };
+            let list = game.quests.replay_list(&d.dialog.completed);
+            if list.is_empty() {
+                return Ok(None);
+            }
+            let out = lua.create_table()?;
+            for (i, (name, cinema)) in list.into_iter().enumerate() {
+                let e = lua.create_table()?;
+                e.set("name", name)?;
+                e.set("cinema", cinema)?;
+                out.set(i + 1, e)?;
+            }
+            Ok(Some(out))
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_play_cinema",
+        lua.create_function(move |_, name: String| {
+            b.borrow_mut().dialog.requests.push(Req::PlayCinema(name));
+            Ok(())
+        })?,
     )?;
     let request = |name: &str, f: fn(mlua::MultiValue) -> Option<Req>| -> mlua::Result<()> {
         let b = bridge.clone();
@@ -1835,6 +1865,11 @@ pub fn handle_dialog(
                 }
                 send(&mut net, Interact::RestartMainQuest { quest_id });
             }
+            Req::PlayCinema(name) => {
+                if let Some(player) = cinema.as_deref_mut() {
+                    super::cinema::play_cinema(player, &mut net, &name);
+                }
+            }
             Req::End => end_talk(&mut d, &mut net),
             Req::Directing(on) => {
                 if let Some(rt) = rt.as_deref() {
@@ -2275,7 +2310,7 @@ mod tests {
     fn bare_runtime(shared: &Shared) -> UiRuntime {
         let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
         rt.lua
-            .load("X2Quest = {}; X2Decal = {}; X2 = {}; X2Util = {}; X2Interaction = {}")
+            .load("X2Quest = {}; X2Decal = {}; X2 = {}; X2Util = {}; X2Interaction = {}; X2Player = {}")
             .set_name("@quest-native-stubs")
             .exec()
             .unwrap();
@@ -3320,6 +3355,60 @@ mod tests {
             )
             .exec()
             .unwrap();
+    }
+
+    #[test]
+    fn the_replay_list_lists_completed_main_quests_with_replay_cinemas() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        shared.borrow_mut().dialog.completed = vec![
+            // 213 "Clearing Your Name" plays sl_el_005 (replay); 1065 is not a main quest;
+            // 2386 is main but its cinema is not replay; 3439 has one replay and one non-replay movie.
+            aa_net::quest::CompletedBlock { id: 213 / 64, bits: 1 << (213 % 64) },
+            aa_net::quest::CompletedBlock { id: 1065 / 64, bits: 1 << (1065 % 64) },
+            aa_net::quest::CompletedBlock { id: 2386 / 64, bits: 1 << (2386 % 64) },
+            aa_net::quest::CompletedBlock { id: 3439 / 64, bits: 1 << (3439 % 64) },
+        ];
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                local list = X2Quest:GetMainQuestCutSceneReplayList()
+                assert(list ~= nil and #list == 2, list and #list)
+                assert(list[1].name == 'Clearing Your Name' and list[1].cinema == 'sl_el_005')
+                assert(list[2].cinema == 'sl_fe_007')
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // Without completed main quests the native answers nil.
+        shared.borrow_mut().dialog.completed.clear();
+        let rt = bare_runtime(&shared);
+        rt.lua.load("assert(X2Quest:GetMainQuestCutSceneReplayList() == nil)").exec().unwrap();
+    }
+
+    #[test]
+    fn play_cinema_starts_the_named_replay_and_ignores_empty_or_unknown_names() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let rt = bare_runtime(&shared);
+        let mut app = handle_dialog_app(shared, rt);
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua.load("X2Player:PlayCinema(''); X2Player:PlayCinema('no_such_cinema')").exec().unwrap();
+        app.update();
+        assert!(sent_requests(&mut app).is_empty(), "an empty or missing cinema starts nothing");
+        app.world().non_send::<UiRuntime>().lua.load("X2Player:PlayCinema('sl_el_005')").exec().unwrap();
+        app.update();
+        assert_eq!(sent_requests(&mut app), [Interact::Cinema { completed: false }]);
+        let playing = app.world().resource::<super::super::cinema::CinemaPlayer>().playing_name().map(str::to_string);
+        assert_eq!(playing.as_deref(), Some("sl_el_005"));
     }
 
     fn quest_notice_app() -> Option<(App, Shared)> {
