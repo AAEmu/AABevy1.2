@@ -236,6 +236,7 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     row.set("group", def.is_group())?;
     row.set("selective", def.selective)?;
     row.set("repeatable", def.repeatable)?;
+    row.set("score", def.score)?;
     // the native getters' values (`quests.rs`), not the raw `let_it_done` column
     row.set("letItDone", active && t.is_let_it_done(q))?;
     row.set("overDone", active && t.is_over_done(q))?;
@@ -439,6 +440,48 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     hud.raw_set(
         "quest_category",
         lua.create_function(move |_, id: u32| Ok(b.borrow().game.get().and_then(|g| g.quests.categories.get(&id).cloned()).unwrap_or_default()))?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_score_current",
+        lua.create_function(move |_, qtype: u32| {
+            let d = b.borrow();
+            let Some(game) = d.game.get() else { return Ok(0i64) };
+            Ok(d.dialog.quests.iter().find(|q| q.template_id == qtype).map_or(0, |q| game.quests.score_current(q)))
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_score_required",
+        lua.create_function(move |_, qtype: u32| Ok(b.borrow().game.get().map_or(0, |g| g.quests.score_required(qtype))))?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_score_objective",
+        lua.create_function(move |_, qtype: u32| Ok(b.borrow().game.get().map_or_else(String::new, |g| g.quests.score_objective(qtype))))?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_linked_summary",
+        lua.create_function(move |_, qtype: u32| Ok(b.borrow().game.get().and_then(|g| g.quests.linked_summary(qtype))))?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_linked_objectives",
+        lua.create_function(move |lua, qtype: u32| {
+            let d = b.borrow();
+            let Some(game) = d.game.get() else { return Ok(None) };
+            let Some(linked) = game.quests.linked_objectives(qtype, &texts(&d, game)) else { return Ok(None) };
+            let out = lua.create_table()?;
+            out.set("ready", linked.ready_components)?;
+            for (i, (obj, count)) in linked.entries.into_iter().enumerate() {
+                let e = lua.create_table()?;
+                e.set("obj", obj)?;
+                e.set("count", count)?;
+                out.set(i + 1, e)?;
+            }
+            Ok(Some(out))
+        })?,
     )?;
     let b = bridge.clone();
     hud.raw_set(
@@ -3219,6 +3262,64 @@ mod tests {
         // QUEST_TASK_READY re-opens the report through the handler the report registered.
         rt.fire_event("QUEST_TASK_READY", 1959u32);
         assert_eq!(dump_shown(&rt.dump_json(), "taskQuest.report"), Some(true));
+    }
+
+    #[test]
+    fn score_and_linked_quest_getters_read_the_native_rows() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        // Quest 92 is a score quest with three Progress components; its counters are [3, 1, 1].
+        shared.borrow_mut().dialog.quests = vec![Quest {
+            template_id: 92,
+            status: status::READY,
+            component_id: 7524,
+            objectives: [3, 1, 1, 0, 0],
+            ..Quest::default()
+        }];
+        let rt = bare_runtime(&shared);
+        let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        rt.load_ui_texts(std::path::Path::new(&db)).unwrap();
+        rt.lua
+            .load(
+                r#"
+                assert(X2Quest:IsScoreQuest(92))
+                assert(X2Quest:GetScoreQuestDoneScore(92) == 100)
+                assert(X2Quest:GetScoreQuestCurrentScore(92) == 90)
+                assert(X2Quest:GetScoreQuestObjective(92) == 'Defeat the Dahuta Cultists in Thorntimbre Woods')
+                assert(X2Quest:GetObjectiveComponentCount(92) == 3)
+                assert(X2Quest:GetFirstObjectiveCount(92) == 20)
+                assert(X2Quest:GetLinkedQuestSummary(92) == 'Kill @NPC_NAME(614), @NPC_NAME(6529), and @NPC_GROUP_NAME(8) in Thorntimbre Woods.')
+                local objs = X2Quest:GetLinkedQuestObjectives(92)
+                assert(#objs == 3, #objs)
+                assert(objs[1].count == 20 and objs[2].count == 20 and objs[3].count == 10)
+                assert(objs[1].obj:find('Thorntimbre Woods') ~= nil)
+                -- a quest without a score: no score line, and a missing quest answers the defaults
+                assert(not X2Quest:IsScoreQuest(330))
+                assert(X2Quest:GetScoreQuestDoneScore(330) == 0)
+                assert(X2Quest:GetScoreQuestCurrentScore(330) == 0)
+                assert(X2Quest:GetScoreQuestObjective(330) == '')
+                -- 2438 has a quest_names kind 2 row but no score: FUN_397d4660 does not search it.
+                assert(X2Quest:GetScoreQuestObjective(2438) == '')
+                assert(X2Quest:GetObjectiveComponentCount(330) == 0)
+                assert(X2Quest:GetFirstObjectiveCount(330) == 0)
+                assert(X2Quest:GetLinkedQuestSummary(330) ~= nil)
+                assert(not X2Quest:IsScoreQuest(999999))
+                assert(X2Quest:GetScoreQuestDoneScore(999999) == 0)
+                assert(X2Quest:GetScoreQuestObjective(999999) == '')
+                assert(X2Quest:GetFirstObjectiveCount(999999) == 0)
+                assert(X2Quest:GetLinkedQuestSummary(999999) == nil)
+                assert(X2Quest:GetLinkedQuestObjectives(999999) == nil)
+                -- 330 has no Progress components: one Ready row with the locale's report text.
+                assert(X2Quest:GetLinkedQuestSummary(330) == 'Meet @NPC_NAME(3511) in Desireen.')
+                local ready = X2Quest:GetLinkedQuestObjectives(330)
+                assert(#ready == 1 and ready[1].count == 0)
+                assert(ready[1].obj == X2Locale:LocalizeUiText(6, 'report_alias'))
+                "#,
+            )
+            .exec()
+            .unwrap();
     }
 
     fn quest_notice_app() -> Option<(App, Shared)> {

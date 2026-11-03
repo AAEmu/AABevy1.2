@@ -86,6 +86,11 @@ X2Quest.IsHiddenQuest = field("hidden", false)
 X2Quest.IsGroupQuest = field("group", false)
 X2Quest.IsSelectiveQuest = field("selective", false)
 X2Quest.IsLivelihoodQuest = field("livelihood", false)
+-- `FUN_397d3600`: `quest_contexts.score` above 0.
+X2Quest.IsScoreQuest = function(self, qtype)
+  local q = byType(qtype)
+  return q ~= nil and (tonumber(q.score) or 0) > 0
+end
 X2Quest.IsDailyQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.daily == true, nil end
 -- The early-completion state of an active quest (`quests.rs`, x2game FUN_397d6320 / FUN_397d71b0);
 -- an inactive quest (the dialog's info row) has neither.
@@ -116,6 +121,17 @@ X2Quest.GetFirstObjectiveCount = function(self, qtype)
 end
 X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
 X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
+-- Score quests: `FUN_397d4660` (the `quest_names` kind 2 line), `FUN_3949cb00` (`FUN_397d5c10`'s
+-- counter sum) and `FUN_3949cc10` (`quest_contexts.score`).
+X2Quest.GetScoreQuestObjective = function(self, qtype)
+  return HUD.quest_score_objective(tonumber(qtype) or 0)
+end
+X2Quest.GetScoreQuestCurrentScore = function(self, qtype)
+  return HUD.quest_score_current(tonumber(qtype) or 0)
+end
+X2Quest.GetScoreQuestDoneScore = function(self, qtype)
+  return HUD.quest_score_required(tonumber(qtype) or 0)
+end
 -- The item types the quest lets the player use on its tracker (`FUN_394a55a0`): the supplied items
 -- whose `show_action_bar` is set, then the `ObjItemUse` items. With `checkState` the native answers
 -- nothing for a failed, ready or dropped quest, or one already completed.
@@ -185,6 +201,32 @@ X2Quest.GetQuestContextSummary = field("summary", "")
 X2Quest.GetQuestContextReadySummary = field("summary", "")
 X2Quest.GetQuestContextProgressSummary = field("summary", "")
 X2Quest.GetQuestContextBody = function(self, qtype) return "" end
+-- Linked quests (the chat link's tooltip): `FUN_394a4dc0` returns the first Progress component
+-- text kind 4 (else the first Ready one) and `FUN_394a4fc0` the Progress objectives. A quest with
+-- no Progress components lists each Ready component as the locale's report text, count 0.
+X2Quest.GetLinkedQuestSummary = function(self, qtype)
+  return HUD.quest_linked_summary(tonumber(qtype) or 0)
+end
+local READY_REPORT_KEYS = { "report_alias", "talk_report_npc", "find_report_doodad" }
+local function linkedReady(count)
+  local text
+  for _, key in ipairs(READY_REPORT_KEYS) do
+    if X2Locale ~= nil and X2Locale.LocalizeUiText ~= nil then
+      local s = X2Locale:LocalizeUiText(6, key)
+      if s ~= nil and s ~= key then text = s; break end
+    end
+  end
+  if text == nil then return {} end
+  local out = {}
+  for i = 1, count do out[i] = { obj = text, count = 0 } end
+  return out
+end
+X2Quest.GetLinkedQuestObjectives = function(self, qtype)
+  local list = HUD.quest_linked_objectives(tonumber(qtype) or 0)
+  if list == nil then return nil end
+  if (tonumber(list.ready) or 0) > 0 then return linkedReady(tonumber(list.ready)) end
+  return list
+end
 -- The folder of a main quest is named after its chapter (the locale's chapter text) and the zone.
 local function chapterText(q)
   local get = locale and locale.questContext and locale.questContext.Get_category

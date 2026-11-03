@@ -265,8 +265,20 @@ pub struct QuestTables {
     pub aliases: HashMap<u32, String>,
     pub monster_groups: HashMap<u32, String>,
     pub doodads: HashMap<u32, String>,
+    /// `quest_names` with `quest_name_kind_id` 2: a score quest's objective line
+    /// (`X2Quest.GetScoreQuestObjective`, `FUN_397d4660`).
+    pub score_objectives: HashMap<u32, String>,
     /// `zones.id` (a quest's zone) -> `zone_groups.id`.
     pub zone_group: HashMap<u32, u32>,
+}
+
+/// The linked-quest objective rows of `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`).
+pub struct LinkedObjectives {
+    /// `(obj, count)` for every Progress component with a counted act.
+    pub entries: Vec<(String, i32)>,
+    /// The Ready components to list when the quest has no Progress components; the text is the
+    /// locale's `report_alias` / `talk_report_npc` / `find_report_doodad`.
+    pub ready_components: u32,
 }
 
 /// What the requirements read of the player.
@@ -378,7 +390,7 @@ impl QuestTables {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, tbl_column_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties', AND tbl_column_name = 'name') OR \
+                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties','quest_mails','quest_names') AND tbl_column_name = 'name') OR \
                  (tbl_name = 'quest_component_texts' AND tbl_column_name = 'text') OR \
                  (tbl_name = 'quest_chat_bubbles' AND tbl_column_name IN ('speech','change_speaker_name')))",
             )?;
@@ -434,6 +446,18 @@ impl QuestTables {
                         components: Vec::new(),
                     },
                 );
+            }
+        }
+        // `quest_names` kind 2 is the score quest's objective line (`FUN_397d4660`).
+        if let Ok(mut q) = conn.prepare("SELECT id, quest_context_id, quest_name_kind_id, name FROM quest_names ORDER BY id") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if any_int(r, 2)? != 2 {
+                    continue;
+                }
+                let id = any_int(r, 0)? as u32;
+                let fallback: Option<String> = r.get(3)?;
+                t.score_objectives.insert(any_int(r, 1)? as u32, en("quest_names", id).or(fallback).unwrap_or_default());
             }
         }
         {
@@ -763,6 +787,74 @@ impl QuestTables {
                 let (d, c) = (i64::from(done), i64::from(count));
                 c > 0 && d >= c && d.min(c * 2) * 2 >= c * 3
             })
+    }
+
+    /// `X2Quest.IsScoreQuest` (`FUN_397d3600`): `quest_contexts.score` is above 0.
+    pub fn is_score(&self, quest: u32) -> bool {
+        self.defs.get(&quest).is_some_and(|def| def.score > 0)
+    }
+
+    /// `X2Quest.GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`): the counters of the
+    /// active quest multiplied by each Progress component's first counted act's amount. An inactive
+    /// or unknown quest has no counter, so the caller passes the active row and this returns 0 there.
+    pub fn score_current(&self, q: &Quest) -> i64 {
+        if !self.is_score(q.template_id) {
+            return 0;
+        }
+        self.score(q)
+    }
+
+    /// `X2Quest.GetScoreQuestDoneScore` (`FUN_3949cc10`): `quest_contexts.score`, 0 for an unknown
+    /// quest or one without a score.
+    pub fn score_required(&self, quest: u32) -> i64 {
+        self.defs.get(&quest).map_or(0, |def| i64::from(def.score))
+    }
+
+    /// `X2Quest.GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`): the `quest_names` row with
+    /// `quest_name_kind_id` 2, or the empty string. The native only searches a quest whose score is
+    /// above 0.
+    pub fn score_objective(&self, quest: u32) -> String {
+        if !self.is_score(quest) {
+            return String::new();
+        }
+        self.score_objectives.get(&quest).cloned().unwrap_or_default()
+    }
+
+    /// `X2Quest.GetLinkedQuestSummary` (`FUN_394a4dc0`): the first Progress component's kind-4 text,
+    /// else the first Ready component's. The native returns the stored text, not its macros expanded.
+    pub fn linked_summary(&self, quest: u32) -> Option<String> {
+        if !self.defs.contains_key(&quest) {
+            return None;
+        }
+        self.parts_of(quest, kind::PROGRESS)
+            .find_map(|c| c.texts.first().cloned())
+            .or_else(|| self.parts_of(quest, kind::READY).find_map(|c| c.texts.first().cloned()))
+    }
+
+    /// `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`): one `{obj, count}` row per Progress
+    /// component with a counted act. A quest without Progress components lists its Ready components
+    /// instead (the caller supplies the locale's report text, count 0).
+    pub fn linked_objectives(&self, quest: u32, texts: &Texts) -> Option<LinkedObjectives> {
+        if !self.defs.contains_key(&quest) {
+            return None;
+        }
+        let mut progress = self.parts_of(quest, kind::PROGRESS).peekable();
+        if progress.peek().is_none() {
+            return Some(LinkedObjectives { entries: Vec::new(), ready_components: self.parts_of(quest, kind::READY).count() as u32 });
+        }
+        let mut entries = Vec::new();
+        for c in progress {
+            let Some(a) = self.counted_act(c) else { continue };
+            let base = self
+                .aliases
+                .get(&a.alias)
+                .filter(|_| a.alias != 0)
+                .map(|s| texts.expand(s))
+                .or_else(|| c.main_text().map(|t| texts.expand(t)))
+                .unwrap_or_else(|| texts.describe(a));
+            entries.push((base, Self::native_act_count(a)));
+        }
+        Some(LinkedObjectives { entries, ready_components: 0 })
     }
 
     /// `X2Quest.GetFirstObjectiveCount` (`FUN_394a4c30`): the amount of the first Progress

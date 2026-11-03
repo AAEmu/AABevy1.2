@@ -676,6 +676,26 @@ The getters these windows read that were still stubs now follow the natives:
 * `X2Quest:GetObjectiveComponentCount(qtype)` (`FUN_394a4ae0`): the template's Progress components
   (not the objectives of the step the quest is at).
 
+### Score and linked quests
+
+* `X2Quest:IsScoreQuest(qtype)` (`FUN_397d3600`) is `quest_contexts.score > 0`.
+* `GetScoreQuestDoneScore` (`FUN_3949cc10`) is that `score` (0 without one).
+* `GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`) multiplies each Progress
+  component's counter by its first counted act's amount for act types 0, 1, 2, 4, 5 and 0x2b; an
+  inactive or unknown quest answers 0. A non-score quest answers 0.
+* `GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`) is the `quest_names` row with
+  `quest_name_kind_id` 2, else the empty string. `quest_contexts.name` is not used.
+* `GetLinkedQuestSummary` (`FUN_394a4dc0`) is the first Progress component's
+  `quest_component_texts` kind-4 text, else the first Ready component's, or nil. It is the stored
+  text, so its macros are not expanded (the native returns the text pointer).
+* `GetLinkedQuestObjectives` (`FUN_394a4fc0`) is an array of `{ obj, count }`, one row per Progress
+  component with a counted act; `count` is `FUN_397d3440`'s amount. A quest with no Progress
+  components lists each Ready component with the locale's `report_alias` / `talk_report_npc` /
+  `find_report_doodad` text (category 6) and count 0; a matching locale key is required, as in the
+  native. An unknown quest answers nil. The objective text is the act alias, else the component's
+  kind-4 text, else the act description: the native formats the act through `FUN_392d9640` and
+  `objective_ptn`, whose alias substitution is not recovered, so the text is approximate.
+
 ### Server-shown quest areas
 
 `SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /
