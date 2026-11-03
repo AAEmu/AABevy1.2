@@ -554,6 +554,11 @@ Handing one in from the quest journal (`who` 0 in `X2Quest:TryCompleteQuestConte
 view (`FUN_3937b860` -> event 245, the doodad id as a string); no 1.2 script registers that event (checked
 the `x2ui` quest scripts), so the client does not raise it.
 
+A doodad that hands a quest in (`SCDoodadCompleteQuest` 0x14d, handled by x2game `FUN_391dc050` ->
+`FUN_393773a0`) raises `COMPLETE_QUEST_CONTEXT_DOODAD(quest, true, doodadId)`; the original handler
+(`quest_context.alb`) calls `TryCompleteQuestContext(2, quest, doodadId, "", selected)`, and the request
+carries the doodad object id. `hud/dialog.rs` handles the packet and `InteractEvent::DoodadCompleteQuest`.
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

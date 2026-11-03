@@ -1244,6 +1244,14 @@ pub fn handle_dialog(
                 rt.fire_event("START_QUEST_CONTEXT_DOODAD", (*quest_id, true, doodad_obj_id.to_string()));
             }
         }
+        if let Event::Interaction(InteractEvent::DoodadCompleteQuest { doodad_obj_id, quest_id }) = e
+            && let Some(rt) = rt.as_deref()
+        {
+            info!("hud: doodad {doodad_obj_id} completes quest {quest_id}");
+            // `FUN_393773a0` raises event 241 with (quest, can-complete, doodad id as a string); the
+            // scripts' handler calls `TryCompleteQuestContext(2, quest, doodad, "", selected)`.
+            rt.fire_event("COMPLETE_QUEST_CONTEXT_DOODAD", (*quest_id, true, doodad_obj_id.to_string()));
+        }
     }
     let mut d = bridge.0.borrow_mut();
     let requests = std::mem::take(&mut d.dialog.requests);
@@ -1812,6 +1820,35 @@ mod tests {
             .set_name("@quest-getters-test")
             .exec()
             .unwrap();
+    }
+
+    #[test]
+    fn a_doodad_completion_fires_the_event_and_sends_the_doodad_id() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        let mut rt = bare_runtime(&shared);
+        // What the original quest_context.alb handler does with COMPLETE_QUEST_CONTEXT_DOODAD.
+        rt.exec(
+            "probe",
+            r#"
+            local w = UIParent:CreateWidget('emptywidget', 'questDoodadProbe', 'UIParent')
+            w:RegisterEvent('COMPLETE_QUEST_CONTEXT_DOODAD')
+            w:SetHandler('OnEvent', function(_, _, q, canComplete, doodadId)
+                assert(canComplete == true)
+                X2Quest:TryCompleteQuestContext(2, q, doodadId, '', 0)
+            end)
+            "#,
+        )
+        .unwrap();
+        let mut app = handle_dialog_app(shared, rt);
+        app.world_mut().write_message(NetEvent(Event::Interaction(InteractEvent::DoodadCompleteQuest {
+            doodad_obj_id: 0x201,
+            quest_id: 330,
+        })));
+        app.update();
+        assert_eq!(
+            sent_requests(&mut app),
+            [Interact::QuestComplete { quest_id: 330, npc_obj_id: 0, doodad_obj_id: 0x201, selected: 0 }]
+        );
     }
 
     #[test]

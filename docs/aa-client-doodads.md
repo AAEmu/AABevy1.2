@@ -62,6 +62,15 @@ doodad names (`localized_texts` of `doodad_almighties`).
   Book's Default Site moves its recall marker to the new point; `SCDoodadPhaseChanged` moves the tome to its timer phase (no skill
   use: the bar goes to the next doodad or hides) and back after a few seconds.
 
+## Quest hand-in
+
+A doodad's quest function can also take a quest in: the server sends `SCDoodadCompleteQuest` 0x14d (`bc`
+doodad, `u32` quest; x2game `FUN_391dc050` -> `FUN_393773a0`). `hud/dialog.rs` raises the original's
+`COMPLETE_QUEST_CONTEXT_DOODAD(quest, true, doodadId)`; its script handler calls
+`TryCompleteQuestContext(2, quest, doodadId, "", selected)`, and the `CSCompleteQuestContext` request
+then carries that doodad object id (or 0x0dd for an in-progress let-it-done quest). The lane server does
+not send 0x14d yet, so the path is tested from the decoded packet, not live.
+
 ## Natural gathering
 
 The use bar offers a func that has a skill. The skill is `doodad_funcs.func_skill_id`; when that is empty it is the
