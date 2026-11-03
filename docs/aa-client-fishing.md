@@ -167,3 +167,6 @@ Bevy implements this in `hud/doodad/fish.rs` + `hud/doodad/fish.lua`, hooked by 
 * a real `NoFishing="1"` volume (none in the 1.2 pak) and its gameplay use;
 * net fishing: how 1.2 picks the fish-school doodad as the skill target;
 * a live fish-stand sale/convert and cast/loot on a lane server.
+
+The fish-stand monitor checks reach and existence before consuming OK, including when a stand
+disappears in the same frame as confirmation. Such a confirmation sends no skill packet.

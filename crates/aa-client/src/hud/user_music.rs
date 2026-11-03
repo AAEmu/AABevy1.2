@@ -706,6 +706,13 @@ pub(super) fn receipt(rt: Option<&UiRuntime>, state: &Shared, event: &Event) {
     ready_buff_catalog(&mut data);
     let removed = super::mode_actions::removal(&data, event);
     buff_receipt(&mut data, event);
+    // This copy needs the same static grade limits as the shared proficiency state.
+    let limits = data.game.get().map(|game| game.crafting.raw_limits.clone());
+    if let Some(limits) = limits
+        && data.user_music.actabilities.up_limits != limits
+    {
+        data.user_music.actabilities.up_limits = limits;
+    }
     data.user_music.actabilities.apply(event);
     if matches!(
         event,

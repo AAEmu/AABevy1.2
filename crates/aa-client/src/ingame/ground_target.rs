@@ -1528,6 +1528,9 @@ mod tests {
 
     #[test]
     fn appearance_powders_route_full_ids_before_any_cast_or_in_flight_state() {
+        if !aa_cry::pak_available() {
+            return;
+        }
         let (shared, rt) = crate::hud::look_test_runtime();
         let mut app = App::new();
         app.add_message::<SkillPressed>()
@@ -1689,6 +1692,9 @@ mod tests {
     #[test]
     fn remapped_open_config_cancels_modal_targets_before_menu_and_preserves_focus_and_held_cursor()
     -> Result<(), Box<dyn std::error::Error>> {
+        if !aa_cry::pak_available() {
+            return Ok(());
+        }
         use bevy::input::{
             ButtonState, InputPlugin,
             keyboard::{Key, KeyboardInput},

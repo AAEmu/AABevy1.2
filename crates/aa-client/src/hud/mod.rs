@@ -36,6 +36,7 @@ mod achievement;
 mod alerts;
 pub(crate) use alerts::{ShowError, UseFailed};
 mod auction;
+mod farm;
 pub(crate) mod housing;
 mod battlefield;
 mod breath;
@@ -286,6 +287,11 @@ pub(crate) fn mode_actions_fixture() {
 #[allow(dead_code)]
 pub(crate) fn vehicle_bar_fixture() {
     mode_actions::fixture::run_vehicle_bar();
+}
+
+#[allow(dead_code)]
+pub(crate) fn summon_info_fixture() {
+    mode_actions::fixture::run_summon_info();
 }
 
 #[allow(dead_code)]
@@ -596,6 +602,7 @@ impl Plugin for HudPlugin {
         mail::plugin(app);
         auction::plugin(app);
         housing::plugin(app);
+        farm::plugin(app);
         loot_roll::plugin(app);
         trade::plugin(app);
         store::plugin(app);
@@ -659,7 +666,7 @@ impl Plugin for HudPlugin {
                     build_hud.run_if(hud_wanted),
                     session::route_session,
                     session::scripted_session.run_if(hud_up),
-                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, targeting::self_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
+                    (sync_hud.after(crate::ingame::turret::local_aim), combat::route_combat, cast::route_casts, items::route_items, loot::fake_loot, loot::sync_loot, loot::loot_input, (dialog::sync_quests, dialog::route_quest_notices, dialog::tick_quest_left_time, dialog::handle_dialog, dialog::drive_npc.after(crate::ingame::teleport::detect).before(api::handle_requests).before(aa_ui::UiFrame), slave::track, dialog::talk_input).chain().after(sync_hud), chat::route_chat, chat::chat_keys, panels::action_keys.in_set(HudItemUse), targeting::tab_target, targeting::self_target, api::handle_requests.in_set(HudItemUse).after(crate::ingame::turret::local_aim), alerts::show).run_if(hud_up).after(crate::ingame::ladder::control_ladder),
                     cameras::match_world_camera,
                     cameras::dev_fov,
                 )

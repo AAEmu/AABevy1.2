@@ -193,6 +193,7 @@ fn app(game: GameData, inventory: Inventory, skill: u32) -> App {
         d.doodad.focus = Some(Focus {
             obj_id: 2075,
             skills: vec![skill],
+            craft_icon: None,
             key: -3.0,
             dist: 3.0,
         });
@@ -231,6 +232,7 @@ fn app(game: GameData, inventory: Inventory, skill: u32) -> App {
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
         .init_resource::<FishDialog>()
+        .init_resource::<crate::ingame::DevOptions>()
         .add_systems(Update, (execute, tick).chain());
     app
 }
@@ -395,6 +397,23 @@ fn the_fish_dialog_ends_out_of_reach_or_with_the_doodad() {
 }
 
 /// No item on the back -> the native 0x169 (361) through the existing error path, no dialog.
+#[test]
+fn a_confirmation_after_the_stand_disappears_sends_nothing() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, fish_inventory(FISH_TEMPLATE, WEIGHT, LENGTH), BUY_SKILL);
+    app.update();
+    assert_eq!(lua_string(&app, "return HUD.fish_state()"), "open");
+    assert!(sent(&mut app).is_empty());
+    lua(&app, "X2DialogManager:OnOK(HUD.fish_id())").unwrap();
+    app.world_mut().resource_mut::<Doodads>().by_id.remove(&2075);
+    app.update();
+    assert!(sent(&mut app).is_empty());
+    assert_eq!(lua_string(&app, "return HUD.fish_state()"), "");
+}
+
 #[test]
 fn no_back_item_shows_store_backpack_nogoods() {
     if !aa_cry::pak_available() {

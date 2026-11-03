@@ -257,6 +257,17 @@ pub(super) fn tick(
         dialog.pending = None;
         return;
     };
+    let in_reach = {
+        let data = bridge.0.borrow();
+        super::in_interaction_reach(&data, &doodads, &units, obj_id)
+    };
+    if !in_reach {
+        info!("doodad: fish-stand interaction ended");
+        rt.fire_event("INTERACTION_END", ());
+        dialog.pending = None;
+        clear(&rt);
+        return;
+    }
     match state(&rt).as_str() {
         "ok" => {
             if let Some(pending) = dialog.pending.take() {
@@ -270,21 +281,7 @@ pub(super) fn tick(
             dialog.pending = None;
             clear(&rt);
         }
-        _ => {
-            let (gone, gap) = {
-                let data = bridge.0.borrow();
-                (
-                    doodads.by_id.get(&obj_id).is_none(),
-                    super::interaction_gap(&data, &doodads, &units, obj_id),
-                )
-            };
-            if gone || gap.is_none_or(|gap| gap >= super::INTERACTION_DISTANCE) {
-                info!("doodad: fish-stand interaction ended");
-                rt.fire_event("INTERACTION_END", ());
-                dialog.pending = None;
-                clear(&rt);
-            }
-        }
+        _ => {}
     }
 }
 

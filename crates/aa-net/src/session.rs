@@ -689,6 +689,9 @@ pub enum Event {
     /// Labor points added (`amount` > 0: "Gained N Labor Point(s)") or spent (`amount` < 0) for
     /// `action` (an actability id, 0 for none), which gained `point` actability points.
     LaborChanged { amount: i32, action: i32, point: i32, step: u8 },
+    /// `SCAddActionPoint`: actability `action` gains `value` points (native `391861f0` has no
+    /// nonzero gate and does not carry a grade step).
+    ActionPoint { action: i32, value: i32 },
     /// Honor and vocation (living) points, sent when the character is selected.
     GamePoints { honor: i32, vocation: i32, other: [i32; 8] },
     /// `kind` 0 honor, 1 vocation: `amount` was added.
@@ -764,6 +767,14 @@ pub enum Event {
     QuestCompleted { quest_id: u32, block: CompletedBlock },
     /// Quest `quest_id` can be taken again.
     QuestReset { quest_id: u32, block: CompletedBlock },
+    /// The server refused a quest request (`SCQuestContextFailed`): `err` indexes the client's
+    /// `questContext.errors`; the UI raises `QUEST_ERROR_INFO`.
+    QuestContextFailed(crate::quest::QuestContextFailed),
+    /// A unit a quest step needs failed (`SCQuestUnitReqFailed`), with the position it failed at;
+    /// when it is the current target the UI raises `QUEST_QUICK_CLOSE_EVENT`.
+    QuestUnitReqFailed(crate::quest::QuestUnitReqFailed),
+    /// A quest mail was sent (`SCQuestMailSent`); the UI shows `QUEST_MAIL_SENT`.
+    QuestMailSent(crate::quest::QuestMailSent),
     /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
@@ -2293,6 +2304,7 @@ impl Session {
             M::LaborPowerChanged { amount, action, point, step } => {
                 self.emit(Event::LaborChanged { amount, action, point, step });
             }
+            M::AddActionPoint { action, value } => self.emit(Event::ActionPoint { action, value }),
             M::GamePoints { honor, vocation, other } => self.emit(Event::GamePoints { honor, vocation, other }),
             M::GamePointChanged { kind, amount } => self.emit(Event::GamePointChanged { kind, amount }),
             M::BmPoint(bm_point) => self.emit(Event::LoyaltyChanged { bm_point }),
@@ -2339,6 +2351,9 @@ impl Session {
             M::QuestUpdated(q) => self.emit(Event::QuestUpdated(q)),
             M::QuestCompleted { quest_id, block } => self.emit(Event::QuestCompleted { quest_id, block }),
             M::QuestReset { quest_id, block } => self.emit(Event::QuestReset { quest_id, block }),
+            M::QuestContextFailed(failed) => self.emit(Event::QuestContextFailed(failed)),
+            M::QuestUnitReqFailed(failed) => self.emit(Event::QuestUnitReqFailed(failed)),
+            M::QuestMailSent(sent) => self.emit(Event::QuestMailSent(sent)),
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),
