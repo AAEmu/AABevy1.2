@@ -664,9 +664,9 @@ All four carry the quest id as the only argument. The original scripts then driv
 `quest_context_hidden_report.alb` calls `ShowHiddenQuestReport(qtype)` on the ready event and
 `HideHiddenQuestReport()` on the complete event, and `quest_context_task.alb` opens its report from
 `QUEST_TASK_READY` (its report registers that handler on the first open; the task marker's OnClick
-opens the journal or the report). The module test loads the World stage and checks the real
-`hiddenQuestReport` / `taskQuest.report` widgets: they are hidden before the event and shown after,
-and the hidden one hides again on completion.
+opens the journal or the report). The module tests load the World stage: the real
+`hiddenQuestReport` widget is hidden before `QUEST_HIDDEN_READY`, shown after it, and hidden again
+on `QUEST_HIDDEN_COMPLETE`; `taskQuest.journal` / `taskQuest.report` show for a ready task quest.
 
 The getters these windows read that were still stubs now follow the natives:
 
