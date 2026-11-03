@@ -91,7 +91,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, id: u32| {
             let d = s.borrow();
             // `FUN_397f2250` returning 0 makes `FUN_391a4cf0` answer nil.
-            if d.game.get().is_some_and(|g| g.appellations.get(&id).is_none()) {
+            if d.game.get().is_some_and(|g| !g.appellations.contains_key(&id)) {
                 return Ok(None);
             }
             row(lua, &d, id).map(Some)
