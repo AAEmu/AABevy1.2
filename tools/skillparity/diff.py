@@ -13,7 +13,7 @@ Each trace is cut into segments by the `mark` rows `skill:<id>:start` / `skill:<
 * net: press -> first `net out CSStartSkill`, and the server's answers (`SCSkillStarted`, `SCSkillFired`, `SCPlotEvent`,
   `SCSkillEnded`, ...) with their first times and counts (server rows when `server.jsonl` exists, the client's own net rows too)
 * anim: every player clip in order (start, layer, speed, blend, loop), first clip times; a start that repeats the same clip
-  within 30 ms (the original's layer-1 copy of each action, an idle asked for twice) counts once
+  within 30 ms (the original's layer-1 copy of each action, also as its `_ub` variant; an idle asked for twice) counts once
 * fx and sound: the set of names, first time and count of each
 * castbar (start, stop, total, channel), cooldown (skill and GCD start and total)
 * pos: the player's and the target's displacement over the segment, when it starts and ends moving, the turn
@@ -266,13 +266,18 @@ COPY_MS = 30.0
 
 def drop_copies(clips: list[dict]) -> tuple[list[dict], int]:
     """Starts that only repeat one shown already: the 1.2 client starts every action clip a second time on layer 1, the
-    upper body (flags 384, ~7 ms later), and asks for an idle twice in two frames. Such a copy is the same clip within
-    `COPY_MS` on layer 1 after layer 0, or on the same layer again. An upper-body variant (`all_co_sk_dashattack_ub`) is
-    another clip and stays."""
+    upper body (flags 384, ~7 ms later), with the clip's `anims.move_ub` variant when the model has it, and asks for an idle
+    twice in two frames. Such a copy is the same clip within `COPY_MS` on the same layer again, or the same clip or its
+    `_ub` / `_mub` variant on layer 1 after layer 0 (`all_co_sk_dashattack_ub` is byte for byte `all_co_sk_dashattack`)."""
     kept: list[dict] = []
     copies = 0
+
+    def upper_of(base: str, name: str) -> bool:
+        return name == base or name in (base + "_ub", base + "_mub")
+
     for c in clips:
-        if any(k["clip"] == c["clip"] and 0 <= c["t_ms"] - k["t_ms"] <= COPY_MS and (k["layer"] == c["layer"] or (k["layer"], c["layer"]) == (0, 1))
+        if any(0 <= c["t_ms"] - k["t_ms"] <= COPY_MS and ((k["layer"] == c["layer"] and k["clip"] == c["clip"])
+                                                           or ((k["layer"], c["layer"]) == (0, 1) and upper_of(k["clip"], c["clip"])))
                for k in kept):
             copies += 1
             continue

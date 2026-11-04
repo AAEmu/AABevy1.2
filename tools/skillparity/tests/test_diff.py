@@ -251,9 +251,10 @@ class Copies(unittest.TestCase):
                  clip("twohand_co_sk_streakattack_1", 145.4), clip("twohand_co_sk_streakattack_1", 151.9, layer=1),
                  clip("all_co_sk_dashattack", 181.1), clip("all_co_sk_dashattack_ub", 188.3, layer=1),
                  clip("twohand_co_sk_streakattack_1", 757.0)]
+        clips.append(clip("bow_co_sk_launch_ub", 900.0, layer=1))
         kept, copies = diff.drop_copies(clips)
-        self.assertEqual(copies, 2)
+        self.assertEqual(copies, 3)
         self.assertEqual([(c["clip"], c["t_ms"]) for c in kept],
                          [("twohand_ba_combat_idle", 0.3), ("twohand_co_sk_streakattack_1", 145.4), ("all_co_sk_dashattack", 181.1),
-                          ("all_co_sk_dashattack_ub", 188.3), ("twohand_co_sk_streakattack_1", 757.0)])
+                          ("twohand_co_sk_streakattack_1", 757.0), ("bow_co_sk_launch_ub", 900.0)])
 
