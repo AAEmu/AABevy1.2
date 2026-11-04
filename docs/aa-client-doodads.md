@@ -652,7 +652,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | Func (`actual_func_type`) | Native case | What 1.2 does | aa-client |
 |---|---|---|---|
 | `DoodadFuncQuest` 0x08 | `FUN_393bc260` case 8 | sets interaction state 9, then returns 0 (the skill, if any, is sent) | dialog/quest worker |
-| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the crime/item data and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | **done** (`local.rs`, `REPORT_CRIME`; the action id is the row's `skill_id`, `FUN_393b7eb0` case 0x34; the report button sends `CSReportCrime` 0x76 through `X2Trial.ReportCrime`; the text is approximate, see gaps) |
+| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the zone name, the target name and localized text category 0x5c, and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | **done** (`local.rs`, `REPORT_CRIME`; the action id is the row's `skill_id`, `FUN_393b7eb0` case 0x34; the report button sends `CSReportCrime` 0x76 through `X2Trial.ReportCrime`; the text is approximate, see gaps) |
 | `DoodadFuncStampMaker` 0x3d | `FUN_393b82a0` 774630 | state 7, `OPEN_EMBLEM_UPLOAD_UI` (0x1a4/420) with the doodad id as a string; returns 1 | **done** (event + minimal `X2Ucc`; the window opens with empty lists, uploads are stubs) |
 | `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's bubble (`doodad_func_bubbles.bubble_id`); when `next_phase > 0` it sends `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, next_phase, funcId)`, not a message box; returns 1 | **done** (`local.rs`, `CHAT_MSG_QUEST` + `Command::ChangeDoodadPhase`; doodad bubbles are not drawn yet) |
 | `DoodadFuncPurchase` 0x40 | `FUN_393b80d0` 774524 | state 8, a purchase task dialog (10 `DLG_TASK_PURCHASE` / 11 `DLG_TASK_PURCHASE_COIN`) built from `doodad_func_purchases`; returns 1 | **done** (`local.rs`, `X2DialogManager:RequestTaskDialog`; OK sends `CSBuyItems` 0x0ae / `CSBuyCoinItem` 0x0af) |
@@ -666,7 +666,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncCofferPerm` 0x51 | `FUN_393bc260` case 0x51 | `FUN_3983b3b0` needs a `DoodadFuncCoffer` with a positive `actual_func_id`; then state 0xd and `COFFER_INTERACTION_START` (0x243/579); returns 1, else 0 (server refusal) | **done** (template-wide coffer check + event; `X2Coffer.SetHouseCofferPermission` still has no packet) |
 | `DoodadFuncMould` 0x53 | `FUN_393bc260` case 0x53 | returns 1 (no-op) | no rows in 1.2 |
 | `DoodadFuncInsertCounter` 0x54 | `FUN_393bc260` case 0x54 | with fewer than `doodad_func_insert_counters.item_count` of `item_id`, shows `NOT_ENOUGH_ITEM` (0x1b/27) and returns 1; else returns 0 (skill sent) | **done** (`local.rs`, `missing_counter_item`) |
-| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the server still requires an auctioneer NPC, see gaps) |
+| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the window closes or the doodad leaves reach; the server still requires an auctioneer NPC, see gaps) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
 | `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | state 4, `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)`; the handler also calls `FUN_393ccdd0` (not ported). Mailbox group 107 has `next_phase` 10279; the handler is reached through the pointer table `0x399d2c58` and its direct caller is not recovered, so "no packet" is **unverified** | **done** (`local.rs`, `mail::open_at`) |
@@ -705,11 +705,13 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   sends no auctioneer for a doodad and the server (`auction_packets.rs::at_auctioneer`) accepts only an
   auctioneer NPC in range, so searches from the auction warehouse doodad are refused until the client
   resolves the nearby auctioneer.
-* **Crime report text**: the native builds `<zone name> >> <target name> >> <crime name>` from the client's
-  own tables; AA_DB has no zone/crime name tables, so `local.rs` sends the doodad name and
-  `<target> >> <doodad> >> crime <crime_kind_id>`. The action id is the row's `skill_id` (11672 on all
-  shipped rows, `FUN_393b7eb0` case 0x34). The report button's `X2Trial.ReportCrime(text)` sends
-  `CSReportCrimePacket` 0x76 with the context `FUN_393bb090` stored (object, skill, next phase, func row).
+* **Crime report text**: `FUN_393bb090` builds `<zone name> >> <target name> >> <localized text,
+  category 0x5c>` from the client's own tables. AA_DB carries neither the zone names nor that
+  localized text, so `local.rs` approximates it as `<target> >> <doodad name> >> crime <crime_kind_id>`
+  (the wording differs from the native; only the target name matches). The action id is the row's
+  `skill_id` (11672 on all shipped rows, `FUN_393b7eb0` case 0x34). The report button's
+  `X2Trial.ReportCrime(text)` sends `CSReportCrimePacket` 0x76 with the context `FUN_393bb090` stored
+  (object, skill, next phase, func row).
 * **Doodad bubbles**: the speech is raised as `CHAT_MSG_QUEST`, but the doodad screen position
   (`GetDoodadScreenPosition`) is still not answered, so no bubble is drawn (same limit as other doodad
   speech).
@@ -717,8 +719,9 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   `FUN_397ac3f0` fills (`+0x14`; the server reads and ignores it) and checks the item template (error 87)
   and the money total (`NOT_ENOUGH_MONEY`) before sending. Task 11 sends `CSBuyCoinItemPacket` after the
   bag **plus** equipment coin count check; when short it shows the `not_enough_coin` message (0x1e3)
-  with the coin name and count, not `NOT_ENOUGH_ITEM`. The server's `buy_coin_item` hook is still a
-  warning on AAEmu, so the coin purchase does not complete there yet.
+  with the coin name and count, not `NOT_ENOUGH_ITEM`. The Rust server's `buy_coin_item`
+  (`systems/npcs/bridges.rs:1214`) resolves the func and runs `use_func`, so the packet has a
+  handler on main.
 * **Parent info** opens the house only when its unit is in view (`Houses` + `Units`); the native looks the
   house up by id, which also works for a house outside the client's view.
 

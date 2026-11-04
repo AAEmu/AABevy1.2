@@ -1800,15 +1800,16 @@ writes puzzleGroup=-1; the decoder preserves the signed wire value instead of gu
 `Command::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id }` is the client's own
 `CSChangeDoodadPhasePacket` 0x0e9 (`FUN_397ac8d0(objId, skill, nextPhase, funcId)` in the
 1.2 client): `bc objId, u32 skill, u32 nextPhase, u32 funcId`. The session sends it only in
-world with a nonzero 24-bit object id. **Server gap**: the Rust server (AAEmu-1.2-Rust)
-does not register opcode 0x0e9 at all; only the old C# server read it (and logged it). The
-byte layout above is the 1.2 client writer (`game.rs` test) and the C# reader, not a
-packet the reference server currently consumes.
+world with a nonzero 24-bit object id. The Rust server (AAEmu-1.2-Rust) registers opcode
+0x0e9 in `systems/npcs/doodad/packets.rs:189`; on main its handler only logs the packet (as
+the C# server did), and a server PR implementing it is in progress. The byte layout above
+is the 1.2 client writer (`game.rs` test), checked against the C# reader.
 
 `ShopCommand::BuyCoin { obj_id, func_id }` is `CSBuyCoinItemPacket` 0x0af
-(`bc objId, u32 funcId`), the coin-item confirmation of a `DoodadFuncPurchase`.
-**Server gap**: AAEmu's `buy_coin_item` hook still only logs a warning, so the coin
-purchase does not complete there yet (the packet is registered and read).
+(`bc objId, u32 funcId`), the coin-item confirmation of a `DoodadFuncPurchase`. The Rust
+server implements `buy_coin_item` in `systems/npcs/bridges.rs:1214`: it resolves the doodad
+func's template (`DoodadManager.GetFunc` + `GetFuncTemplate`) and runs `use_func` (the old
+C# hook only logged a warning).
 
 `Doodads` updates those four fields only on an already-known object, preserving identity,
 position, owner and plant time. Zero item/time values clear previous values. Unknown or

@@ -75,7 +75,8 @@ pub(super) struct Purchase {
 }
 
 /// A `doodad_func_evidence_item_loots` row: the action id is its `skill_id` (`FUN_393b7eb0`
-/// case 0x34 reads detail+8), the window text uses the crime kind.
+/// case 0x34 reads detail+8). `FUN_393bb090` builds the report text from the zone name, the
+/// target name and the client's localized text category 0x5c, not from the crime kind.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Evidence {
     pub crime_kind: u32,
@@ -145,8 +146,9 @@ pub(in crate::hud) enum LocalAction {
     CofferPerm,
     /// The parent house's info (`FUN_393b8400` -> `FUN_393befd0`).
     ParentInfo,
-    /// `REPORT_CRIME`; the action id is `doodad_func_evidence_item_loots.skill_id`, the text uses
-    /// the crime kind.
+    /// `REPORT_CRIME`; the action id is `doodad_func_evidence_item_loots.skill_id`. The native
+    /// text is zone name, target name and localized text category 0x5c (not the crime kind);
+    /// this port approximates it, see [`run`].
     Evidence {
         crime_kind: u32,
         next_phase: i32,
@@ -158,7 +160,8 @@ pub(in crate::hud) enum LocalAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PurchaseOrder {
     /// `CSBuyItemsPacket` (0x0ae): doodad, item and currency. The native's `unk` field is its
-    /// func id; the server reads that field and ignores it, and this client sends 0 there.
+    /// func id (`FUN_397ac3f0` fills it); the server reads that field and ignores it, and this
+    /// client sends the func id there too.
     Buy {
         obj_id: u32,
         func_id: u32,
@@ -202,7 +205,8 @@ pub(super) struct LocalFuncs {
     /// (`FUN_3983b3b0` checks the whole template, not the current phase).
     coffer_perms: HashSet<u32>,
     /// func id -> `doodad_func_evidence_item_loots` (the action id is its `skill_id`, `FUN_393b7eb0`
-    /// case 0x34 reads detail+8; the text uses the crime kind at detail+0).
+    /// case 0x34 reads detail+8; the report text uses localized text category 0x5c, not the
+    /// crime kind at detail+0).
     evidence: HashMap<u32, Evidence>,
 }
 
@@ -556,9 +560,9 @@ pub(super) fn run(
                     .unwrap_or_default();
                 (name, target)
             };
-            // The native text is `<zone> >> <target> >> <crime>`; the crime name and the zone
-            // name come from the client's own tables, which AA_DB does not carry. Keep the
-            // evidence's target and crime kind instead.
+            // FUN_393bb090 builds `<zone> >> <target> >> <localized text category 0x5c>` from
+            // the client's own tables; AA_DB carries neither the zone names nor that text, so
+            // keep the target and approximate the rest with the doodad name and crime kind.
             let text = if target.is_empty() {
                 format!("{name} >> crime {crime_kind}")
             } else {
