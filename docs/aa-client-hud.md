@@ -711,9 +711,11 @@ completed blocks on `SCCompletedQuests`, then sorts by `quest_contexts.chapter_i
 (`FUN_39377f30` compares the quest context's `+0x08` then `+0x24`; the stable order keeps a quest's
 components in component order). A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
 `FUN_3937b2d0` push_back) is appended unsorted until the next rebuild. The Bevy getter reads the
-same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. The
-skill-based cinema fallback of `FUN_3937b540` (`FUN_393780a0` through the component's skill) is not
-implemented; in the shipped data all 92 replay cinemas are set directly on main-quest components.
+same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. When a
+component has no `quest_components.cinema_id`, `FUN_393780a0` falls back to the component's skill:
+the first `CinemaEffect` in `skill_effects` -> `effects.actual_id` -> `cinema_effects.cinema_id` ->
+`cinemas`, with the same `cinemas.replay` filter (quest 3556's component 17120 and skill 17610
+resolve to `sl_ha_024`).
 
 The Past tab (`quest_list/tab_past.alb`) lists `%d. <name>` and its replay button calls
 `X2Player:PlayCinema(<cinema>)`. `FUN_39495550` ignores the empty name, then `FUN_391e2a70` loads

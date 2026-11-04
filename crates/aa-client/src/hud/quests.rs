@@ -187,6 +187,9 @@ pub struct ComponentDef {
     pub acts: Vec<ActDef>,
     /// The bubble the step's talk starts with (`is_start`), 0 for none.
     pub first_bubble: u32,
+    /// `quest_components.skill_id`, 0 for none. A component without a direct cinema uses its
+    /// skill's `CinemaEffect` for the replay list (`FUN_393780a0`).
+    pub skill: u32,
     /// The cinema played for this step, if any.
     pub cinema: Option<CinemaDef>,
 }
@@ -270,6 +273,9 @@ pub struct QuestTables {
     pub aliases: HashMap<u32, String>,
     pub monster_groups: HashMap<u32, String>,
     pub doodads: HashMap<u32, String>,
+    /// Skill id -> the first `CinemaEffect` of its effects (`FUN_393780a0`), for a replay
+    /// component with no `quest_components.cinema_id`.
+    pub skill_cinemas: HashMap<u32, CinemaDef>,
     /// `quest_names` with `quest_name_kind_id` 2: a score quest's objective line
     /// (`X2Quest.GetScoreQuestObjective`, `FUN_397d4660`).
     pub score_objectives: HashMap<u32, String>,
@@ -467,14 +473,14 @@ impl QuestTables {
             }
         }
         {
-            let mut q = conn.prepare("SELECT id, quest_context_id, component_kind_id, or_unit_reqs, hide_quest_marker FROM quest_components ORDER BY quest_context_id, component_kind_id, id")?;
+            let mut q = conn.prepare("SELECT id, quest_context_id, component_kind_id, or_unit_reqs, hide_quest_marker, skill_id FROM quest_components ORDER BY quest_context_id, component_kind_id, id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let (id, quest, kind) = (any_int(r, 0)? as u32, any_int(r, 1)? as u32, any_int(r, 2)? as u8);
                 if kind == kind::START {
                     t.components.insert(id, StartComponent { quest, any_req: any_flag(r, 3)?, hidden: any_flag(r, 4)?, reqs: Vec::new() });
                 }
-                t.parts.insert(id, ComponentDef { id, quest, kind, ..ComponentDef::default() });
+                t.parts.insert(id, ComponentDef { id, quest, kind, skill: any_int(r, 5)? as u32, ..ComponentDef::default() });
                 if let Some(d) = t.defs.get_mut(&quest) {
                     d.components.push(id);
                 }
@@ -489,6 +495,23 @@ impl QuestTables {
                 if let Some(c) = t.parts.get_mut(&id) {
                     c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)?, replay: any_flag(r, 3)? });
                 }
+            }
+        }
+        // `FUN_393780a0`: a replay component without `cinema_id` uses the first CinemaEffect of its
+        // skill (skill_effects -> effects.actual_id -> cinema_effects.cinema_id -> cinemas).
+        if let Ok(mut q) = conn.prepare(
+            "SELECT se.skill_id, c.name, c.replay FROM skill_effects se \
+             JOIN effects e ON e.id = se.effect_id \
+             JOIN cinema_effects ce ON ce.id = e.actual_id \
+             JOIN cinemas c ON c.id = ce.cinema_id \
+             WHERE e.actual_type = 'CinemaEffect' ORDER BY se.skill_id, se.id",
+        ) {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let skill = any_int(r, 0)? as u32;
+                t.skill_cinemas
+                    .entry(skill)
+                    .or_insert(CinemaDef { name: r.get(1)?, before_bubble: false, replay: any_flag(r, 2)? });
             }
         }
         // the detail rows of every act type
@@ -875,6 +898,12 @@ impl QuestTables {
         self.parts_of(quest, kind::PROGRESS).count() as u32
     }
 
+    /// The cinema of a component for the replay list: its own `cinema_id`, else (when it has none)
+    /// the first `CinemaEffect` of its skill (`FUN_393780a0`).
+    fn replay_cinema<'a>(&'a self, c: &'a ComponentDef) -> Option<&'a CinemaDef> {
+        c.cinema.as_ref().or_else(|| self.skill_cinemas.get(&c.skill))
+    }
+
     /// The replay cinemas of `quest`, in component order: `FUN_3937b540` walks a completed main
     /// quest's components and appends each `cinemas.replay` movie.
     pub fn replay_cinemas(&self, quest: u32) -> Vec<String> {
@@ -885,7 +914,7 @@ impl QuestTables {
         def.components
             .iter()
             .filter_map(|id| self.parts.get(id))
-            .filter_map(|c| c.cinema.as_ref())
+            .filter_map(|c| self.replay_cinema(c))
             .filter(|c| c.replay)
             .map(|c| c.name.clone())
             .collect()
@@ -1454,6 +1483,18 @@ mod tests {
             assert_eq!(c.quest, 2246);
             assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false, replay: false }));
         }
+    }
+
+    #[test]
+    fn a_replay_component_without_a_cinema_uses_its_skills_cinema_effect() {
+        let Some(t) = tables() else { return };
+        // Quest 3556's Ready component 17120 has no cinema_id but skill 17610, whose CinemaEffect
+        // leads to cinema 121 "sl_ha_024" (replay).
+        let c = t.parts.get(&17120).expect("quest 3556 has component 17120");
+        assert_eq!((c.quest, c.kind, c.skill, c.cinema.clone()), (3556, kind::READY, 17610, None));
+        assert_eq!(t.replay_cinemas(3556), vec!["sl_ha_024".to_string()]);
+        let block = CompletedBlock { id: (3556 / 64) as u16, bits: 1 << (3556 % 64) };
+        assert_eq!(t.replay_list(std::slice::from_ref(&block)), vec![(3556, "sl_ha_024".to_string())]);
     }
 
     #[test]
