@@ -1925,3 +1925,52 @@ fn a_purchase_dialog_cannot_confirm_after_a_coffer_opens() {
         "the coffer open was not sent"
     );
 }
+
+/// Native `FUN_393b7b10(5, obj)` runs `FUN_393b7aa0` first, which closes the open coffer
+/// (`FUN_394d08c0`) before the new `CSCofferInteraction` open leaves, including when the same
+/// coffer is picked again.
+#[test]
+fn a_coffer_open_closes_the_open_coffer_first() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    for open in [2075_u32, 42] {
+        let Some(game) = game() else { return };
+        let mut inventory = Inventory::default();
+        inventory.coffer.obj_id = open;
+        inventory.coffer.slots = vec![None; 10];
+        let mut app = base_app(game, 22_065, 7983, 12_083, inventory);
+        app.add_systems(Update, execute);
+        {
+            let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+            let mut d = bridge.0.borrow_mut();
+            d.doodad.focus = None;
+            d.dynamic_actions.replace(None);
+            d.doodad.menu = Some((2075, Vec::new()));
+            d.doodad
+                .chosen
+                .push(crate::hud::doodad::NAVI_ID + crate::hud::doodad::Navi::Coffer as i64);
+        }
+        app.update();
+        let sent = sent(&mut app);
+        assert_eq!(sent.len(), 2, "the coffer {open} close and open");
+        assert!(
+            matches!(
+                &sent[0],
+                Command::Coffer(aa_net::CofferCommand::Interact {
+                    obj_id,
+                    open: false
+                }) if *obj_id == open
+            ),
+            "the coffer {open} close must precede the open"
+        );
+        assert!(matches!(
+            &sent[1],
+            Command::Coffer(aa_net::CofferCommand::Interact {
+                obj_id: 2075,
+                open: true
+            })
+        ));
+        assert!(!app.world().resource::<Inventory>().coffer.is_open());
+    }
+}

@@ -871,8 +871,9 @@ pub(super) fn left_interaction(
 
 /// Closes the parts of the active interaction that live in the HUD data: the bench, a shown
 /// interaction list and the coffer (state 5, `FUN_394d08c0` sends the `CSCofferInteraction` close
-/// packet at the top of the next `execute`), and takes the local window state. The caller raises
-/// the events once its borrow of the data ends (see [`finish_interaction`]).
+/// packet at the top of the next `execute`, or before a new coffer opens in the same one), and
+/// takes the local window state. The caller raises the events once its borrow of the data ends
+/// (see [`finish_interaction`]).
 fn end_windows(data: &mut HudData, inventory: &Inventory) -> (Option<LocalState>, bool) {
     let bench = super::crafting::close_bench(data);
     // The local window states FUN_393b7b10 ends (`DAT_3a17e6a0`: open paper 1, renew 2, stamp 7,
@@ -2360,6 +2361,18 @@ pub(super) fn execute(
                         &mut ended_state,
                         &mut ended_windows,
                     );
+                    // The open coffer is state 5: `FUN_393b7aa0` closes it (`FUN_394d08c0`)
+                    // before the new `CSCofferInteraction` open leaves.
+                    if inventory.coffer.is_open() {
+                        let open_id = inventory.coffer.obj_id;
+                        info!("doodad: coffer {open_id} closed");
+                        d.doodad.coffer_close = false;
+                        out.write(NetCommand(Command::Coffer(CofferCommand::Interact {
+                            obj_id: open_id,
+                            open: false,
+                        })));
+                        inventory.coffer.close();
+                    }
                 }
                 commands.push((obj_id, command));
                 continue;
