@@ -382,12 +382,11 @@ impl Animator {
                     self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: fade });
                     *cur = next;
                 }
-            } else if cur.looping {
-                if let Some(ri) = &mut self.random_idle
-                    && let Some(i) = ri.due(cur.loops, dt.abs())
-                {
-                    start_variant = Some((ri.variants[i].clone(), ri.blend_in, ri.blend_out));
-                }
+            } else if cur.looping
+                && let Some(ri) = &mut self.random_idle
+                && let Some(i) = ri.due(cur.loops, dt.abs())
+            {
+                start_variant = Some((ri.variants[i].clone(), ri.blend_in, ri.blend_out));
             }
             if let (Some((v, blend_in, blend_out)), Some(idle)) = (start_variant, self.base_idle.clone()) {
                 if trace::enabled() {
