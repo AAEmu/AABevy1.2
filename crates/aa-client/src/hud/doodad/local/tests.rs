@@ -1726,3 +1726,120 @@ fn a_purchase_dialog_cannot_confirm_after_the_next_interaction() {
     app.update();
     assert!(sent(&mut app).is_empty(), "the old purchase still sent");
 }
+
+/// Native `FUN_393b7b10` runs `FUN_393b7aa0` before the bench (`FUN_394dc360`): the open
+/// purchase dialog (state 8) is an active interaction and is cancelled; its OK cannot send.
+#[test]
+fn a_purchase_dialog_cannot_confirm_after_a_bench_opens() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 11_355, 4601, 17_537, Inventory::default());
+    auction_end_probe(&app);
+    lua(
+        &app,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
+         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
+         PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return PURCHASE ~= nil and PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the purchase dialog did not open"
+    );
+    request_bench(&mut app, 274, 10);
+    app.update();
+    assert_eq!(
+        lua(&app, "return PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the purchase dialog stayed open under the bench"
+    );
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
+    assert!(
+        app.world()
+            .get_non_send::<HudBridge>()
+            .unwrap()
+            .0
+            .borrow()
+            .doodad
+            .local_state
+            .is_none(),
+        "the bench left the purchase state behind"
+    );
+    // The cancelled dialog's OK is inert.
+    lua(&app, "PURCHASE.OkProc()").unwrap();
+    app.update();
+    assert!(sent(&mut app).is_empty(), "the old purchase still sent");
+}
+
+/// Native `FUN_393b7b10(5, ...)` (the coffer open) also runs `FUN_393b7aa0` first: the open
+/// purchase dialog is cancelled before the coffer request leaves.
+#[test]
+fn a_purchase_dialog_cannot_confirm_after_a_coffer_opens() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 11_355, 4601, 17_537, Inventory::default());
+    auction_end_probe(&app);
+    lua(
+        &app,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
+         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
+         PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return PURCHASE ~= nil and PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the purchase dialog did not open"
+    );
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.doodad.menu = Some((2075, Vec::new()));
+        d.doodad
+            .chosen
+            .push(crate::hud::doodad::NAVI_ID + crate::hud::doodad::Navi::Coffer as i64);
+    }
+    app.update();
+    assert_eq!(
+        lua(&app, "return PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the purchase dialog stayed open under the coffer"
+    );
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert!(
+        matches!(
+            sent(&mut app).as_slice(),
+            [Command::Coffer(aa_net::CofferCommand::Interact {
+                obj_id: 2075,
+                open: true
+            })]
+        ),
+        "the coffer open was not sent"
+    );
+}

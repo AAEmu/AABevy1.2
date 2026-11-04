@@ -2211,8 +2211,11 @@ pub(super) fn execute(
         inventory.coffer.close();
     }
     // Native `FUN_393b7b10` runs `FUN_393b7aa0` first when any interaction is active, not only
-    // another bench: the shown interaction list and the coffer window are interactions too.
-    let other_interaction = d.doodad.menu_shown || inventory.coffer.is_open();
+    // another bench: a shown interaction list, the coffer and every local window state are
+    // interactions too. `end_windows` needs the data borrow, so the events are raised after it.
+    let mut ended_state = None;
+    let mut ended_windows = false;
+    let mut ended = false;
     let execute = match d.dynamic_actions.shown().map(|s| s.source) {
         Some(super::dynamic_actions::Source::Doodad { .. })
         | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
@@ -2255,6 +2258,18 @@ pub(super) fn execute(
                         f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
                     });
                 if current && pick.skill == CRAFT_ACTION {
+                    if !needs_walk(&d, &doodads, &units, obj_id)
+                        && d.game.get().is_some()
+                        && doodads.by_id.contains_key(&obj_id)
+                    {
+                        end_once(
+                            &mut d,
+                            &inventory,
+                            &mut ended,
+                            &mut ended_state,
+                            &mut ended_windows,
+                        );
+                    }
                     if let Some(open) =
                         use_bench(&mut d, &doodads, &units, obj_id, now, Some(generation))
                     {
@@ -2309,12 +2324,25 @@ pub(super) fn execute(
     {
         for id in chosen {
             if id == i64::from(CRAFT_ACTION) {
+                if !needs_walk(&d, &doodads, &units, obj_id)
+                    && d.game.get().is_some()
+                    && doodads.by_id.contains_key(&obj_id)
+                {
+                    end_once(
+                        &mut d,
+                        &inventory,
+                        &mut ended,
+                        &mut ended_state,
+                        &mut ended_windows,
+                    );
+                }
                 let generation = views.doodad_generation(obj_id);
                 if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now, generation) {
                     opens.push(open);
                 }
                 continue;
             }
+            let coffer = id - NAVI_ID == Navi::Coffer as i64;
             let navi = match id - NAVI_ID {
                 x if x == Navi::Teleport as i64 => Some(Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id })),
                 x if x == Navi::OpenPortal as i64 => Some(Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id })),
@@ -2322,6 +2350,17 @@ pub(super) fn execute(
                 _ => None,
             };
             if let Some(command) = navi {
+                if coffer {
+                    // `FUN_393b7b10(5, obj)` runs `FUN_393b7aa0` first: the coffer open is a new
+                    // interaction like the bench.
+                    end_once(
+                        &mut d,
+                        &inventory,
+                        &mut ended,
+                        &mut ended_state,
+                        &mut ended_windows,
+                    );
+                }
                 commands.push((obj_id, command));
                 continue;
             }
@@ -2353,15 +2392,13 @@ pub(super) fn execute(
     // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
     // cast ran and the phase changed to 4514; the server only added `SCErrorMsg` BAG_FULL after it
     // (`tools/evidence/gather/capture-results.txt`).
-    if !opens.is_empty() {
-        if other_interaction && inventory.coffer.is_open() {
-            d.doodad.coffer_close = true;
-        }
-        d.doodad.menu_shown = false;
-    }
     let game_slot = d.game.clone();
     let labor = d.snapshot.labor;
     drop(d);
+    if ended {
+        // A new bench or coffer started: `FUN_393b7aa0` (with the store it also closes).
+        finish_interaction(rt.as_deref(), &bridge.0, ended_state, ended_windows);
+    }
     if let Some(rt) = rt.as_deref() {
         for (coin, count) in coin_notices {
             let text = super::alerts::localized_args(
@@ -2493,10 +2530,7 @@ pub(super) fn execute(
         // `FUN_394dc360` then fires event 0x78 with the doodad object id and the unique recipe
         // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
         // count) treats either argument nil/zero as the general recipe book.
-        for (object, count, replaced) in opens {
-            if replaced || other_interaction {
-                rt.fire_event("INTERACTION_END", ());
-            }
+        for (object, count, _) in opens {
             rt.fire_event("CRAFTING_START", (object, count));
         }
     }
