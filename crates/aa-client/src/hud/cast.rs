@@ -32,7 +32,17 @@ pub struct Cast {
     pub channel_ms: u32,
 }
 
+/// How early before its cast time a plot step's bar may be ended by the step after it: the server's steps arrive on its ticks
+/// (Lasso's 1000 ms cast ended 984 ms in, its 700 ms one 702 ms in, in the 1.2 client).
+const STEP_SLACK: std::time::Duration = std::time::Duration::from_millis(100);
+
 impl Cast {
+    /// A later step of the plot ends this bar: its cast time is (nearly) over. A step that runs beside it (Lasso's launch step
+    /// starts the pull at once and its 700 ms bar keeps running in the 1.2 client) does not.
+    fn ends_with_a_step(&self, now: Instant) -> bool {
+        self.fired.is_none() && now.saturating_duration_since(self.started) + STEP_SLACK >= std::time::Duration::from_millis(u64::from(self.cast_ms))
+    }
+
     /// `(castingTime, currentTime)` in ms: the bar fills while casting and empties while channeling.
     fn times(&self) -> (u32, u32) {
         match self.fired {
@@ -153,7 +163,7 @@ pub fn route_casts(mut events: MessageReader<aa_net::NetEvent>, rt: Option<NonSe
                             fires.push(Fire::Start(cast.name.clone(), cast.cast_ms, token));
                         }
                         c.casts.insert(p.caster_obj_id, cast);
-                    } else if known {
+                    } else if known && c.casts.get(&p.caster_obj_id).is_some_and(|k| k.ends_with_a_step(now)) {
                         // the next step of the plot: the cast of the one before is done
                         c.casts.remove(&p.caster_obj_id);
                         fires.extend(c.token(p.caster_obj_id).map(Fire::Succeeded));
@@ -247,6 +257,18 @@ mod tests {
         let (total, current) = cast(0, 0, Some(0), 12_000).times();
         assert_eq!(total, 12_000);
         assert!((11_900..=12_000).contains(&current));
+    }
+
+    #[test]
+    fn only_a_step_at_the_end_of_the_cast_time_ends_the_bar() {
+        let now = Instant::now();
+        // Lasso: the launch step's 700 ms bar, and the pull step that comes 14 ms later beside it
+        assert!(!cast(700, 14, None, 0).ends_with_a_step(now));
+        // the step after it, 702 ms in; the 1000 ms cast ended by the launch step 984 ms in
+        assert!(cast(700, 702, None, 0).ends_with_a_step(now));
+        assert!(cast(1_000, 984, None, 0).ends_with_a_step(now));
+        // a channel ends with its own events
+        assert!(!cast(700, 900, Some(100), 3_000).ends_with_a_step(now));
     }
 
     #[test]
