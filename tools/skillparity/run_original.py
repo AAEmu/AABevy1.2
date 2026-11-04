@@ -551,8 +551,13 @@ class Session:
         if sidecar.is_file():
             info = json.loads(sidecar.read_text(encoding="utf-8"))
             (self.video_path.parent / "video.json").write_text(json.dumps(info, indent=1) + "\n", encoding="utf-8")
-            if info.get("dropped"):
-                self.warn(f"the video dropped {info['dropped']} frames")
+            # `dropped_cfr` counts presents the cadence did not need (the client draws faster than the video's fps): only frames
+            # lost on the way to the encoder, and output frames that repeat the one before, are missing motion
+            lost = int(info.get("lost_queue") or 0) + int(info.get("lost_gpu") or 0)
+            if lost:
+                self.warn(f"the video lost {lost} frames on the way to the encoder")
+            if int(info.get("repeated") or 0) * 20 > int(info.get("frames") or 0):
+                self.warn(f"{info['repeated']} of the video's {info.get('frames')} frames repeat the one before")
         else:
             self.warn("no video sidecar was written")
         return info
