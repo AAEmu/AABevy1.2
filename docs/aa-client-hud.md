@@ -651,11 +651,14 @@ tracker follow through `sync_quests`.
 The server does not send these windows: the client raises the events from the quest packet handlers.
 `sync_quests` now matches them:
 
-* a Started packet whose quest is hidden (`quest_contexts.detail_id` 5) and already ready (status 3)
-  raises `QUEST_HIDDEN_READY`, and every started task quest (6) raises `QUEST_TASK_STARTED`
-  (`FUN_3937b5b0`; no 1.2 script registers the task-started event, but the native raises it);
-* an Updated packet that leaves a hidden or task quest ready raises `QUEST_HIDDEN_READY` /
-  `QUEST_TASK_READY` (`FUN_3937bdf0`);
+* a Started packet whose quest is hidden (`quest_contexts.detail_id` 5) raises only
+  `QUEST_HIDDEN_READY` when it is already ready (status 3), with no `QUEST_CONTEXT_UPDATED`
+  "started", no condition event and no started jingle; every started task quest (6) raises
+  `QUEST_TASK_STARTED` (`FUN_3937b5b0`; no 1.2 script registers the task-started event, but the
+  native raises it);
+* an Updated packet that leaves a task quest ready raises `QUEST_TASK_READY`; a hidden quest raises
+  only `QUEST_HIDDEN_READY` when ready, and skips the normal "updated", objective and "dropped"
+  events (`FUN_3937bdf0` jumps past them);
 * a Completed packet for a hidden quest raises `QUEST_HIDDEN_COMPLETE` (`FUN_3937bb60`);
 * at world entry, and after every completion, the first active hidden quest that is ready raises
   `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).

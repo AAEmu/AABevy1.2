@@ -739,19 +739,31 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                 let task = game.quests.def(q.template_id).is_some_and(|d| d.is_task());
                 match old.iter().find(|o| o.template_id == q.template_id) {
                     None => {
-                        condition = Some(format!("Quest accepted: [{}]", name(q.template_id)));
-                        fire.push(Fire::Updated(q.template_id, "started"));
-                        fire.push(Fire::Condition("started"));
-                        // `FUN_3937b5b0`: a started hidden quest already ready to report, and every
-                        // started task quest (0xf9, no script registers it).
-                        if hidden && q.status == status::READY {
-                            fire.push(Fire::Event("QUEST_HIDDEN_READY", q.template_id));
-                        }
-                        if task {
-                            fire.push(Fire::Event("QUEST_TASK_STARTED", q.template_id));
+                        if hidden {
+                            // `FUN_3937b5b0`: the hidden branch raises only 0xfb when the started
+                            // quest is already ready; no "started" event, condition or jingle.
+                            if q.status == status::READY {
+                                fire.push(Fire::Event("QUEST_HIDDEN_READY", q.template_id));
+                            }
+                        } else {
+                            condition = Some(format!("Quest accepted: [{}]", name(q.template_id)));
+                            fire.push(Fire::Updated(q.template_id, "started"));
+                            fire.push(Fire::Condition("started"));
+                            // every started task quest (0xf9, no script registers it)
+                            if task {
+                                fire.push(Fire::Event("QUEST_TASK_STARTED", q.template_id));
+                            }
                         }
                     }
                     Some(o) if o != q => {
+                        if hidden {
+                            // `FUN_3937bdf0`: the hidden branch raises 0xfb when ready and jumps
+                            // past the normal updated/objective/dropped notifications.
+                            if q.status == status::READY {
+                                fire.push(Fire::Event("QUEST_HIDDEN_READY", q.template_id));
+                            }
+                            continue;
+                        }
                         fire.push(Fire::Updated(q.template_id, "updated"));
                         // the objectives that moved, with their new counters
                         let (before, after) = (game.quests.objectives(o, &texts), game.quests.objectives(q, &texts));
@@ -765,13 +777,9 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                                 fire.push(Fire::Objective(a.text.clone()));
                             }
                         }
-                        // `FUN_3937bdf0`: hidden report and task windows open on the ready status.
-                        if q.status == status::READY {
-                            if hidden {
-                                fire.push(Fire::Event("QUEST_HIDDEN_READY", q.template_id));
-                            } else if task {
-                                fire.push(Fire::Event("QUEST_TASK_READY", q.template_id));
-                            }
+                        // `FUN_3937bdf0`: the task window opens on the ready status.
+                        if q.status == status::READY && task {
+                            fire.push(Fire::Event("QUEST_TASK_READY", q.template_id));
                         }
                     }
                     _ => {}
@@ -790,7 +798,8 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                     if game.quests.def(o.template_id).is_some_and(|d| d.is_hidden()) {
                         fire.push(Fire::Event("QUEST_HIDDEN_COMPLETE", o.template_id));
                     }
-                } else {
+                } else if !game.quests.def(o.template_id).is_some_and(|d| d.is_hidden()) {
+                    // `FUN_3937bdf0`: a hidden quest's update skips the "dropped" path.
                     fire.push(Fire::Updated(o.template_id, "dropped"));
                 }
             }
@@ -3187,6 +3196,27 @@ mod tests {
         rt.lua.load("return #OBSERVED").eval().unwrap()
     }
 
+    /// Records both the native quest events and the ordinary context events, to show which ones a
+    /// quest does and does not raise.
+    fn quest_all_event_runtime() -> UiRuntime {
+        let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        rt.exec(
+            "quest-all-event-probe",
+            r#"
+            OBSERVED = {}
+            local w = UIParent:CreateWidget('emptywidget', 'questAllEventProbe', 'UIParent')
+            w:SetHandler('OnEvent', function(self, event, ...) table.insert(OBSERVED, { event = event, args = { ... } }) end)
+            for _, e in ipairs({ 'QUEST_HIDDEN_READY', 'QUEST_HIDDEN_COMPLETE', 'QUEST_TASK_READY',
+                                 'QUEST_TASK_STARTED', 'QUEST_CONTEXT_UPDATED',
+                                 'QUEST_CONTEXT_OBJECTIVE_EVENT', 'QUEST_CONTEXT_CONDITION_EVENT' }) do
+              w:RegisterEvent(e)
+            end
+            "#,
+        )
+        .unwrap();
+        rt
+    }
+
     #[test]
     fn hidden_and_task_ready_events_follow_the_native_triggers() {
         let shared: Shared = Rc::new(RefCell::new(HudData::default()));
@@ -3227,6 +3257,96 @@ mod tests {
                 assert(#OBSERVED == 2, #OBSERVED)
                 assert(OBSERVED[1].event == 'QUEST_HIDDEN_READY' and OBSERVED[1].args[1] == 1057)
                 assert(OBSERVED[2].event == 'QUEST_TASK_READY' and OBSERVED[2].args[1] == 1959)
+                "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn hidden_quests_skip_the_normal_started_and_updated_notifications() {
+        let shared: Shared = Rc::new(RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let rt = quest_all_event_runtime();
+        shared.borrow_mut().dialog.seen = true;
+        let mut app = quest_sync_app(shared.clone(), rt);
+        let quest = |status, component_id| Quest { template_id: 1057, status, component_id, ..Quest::default() };
+        // A started hidden quest that is already ready raises only the hidden event.
+        app.insert_resource(Quests { active: vec![quest(status::READY, 5560)], ..Quests::default() });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED == 1, #OBSERVED)
+                assert(OBSERVED[1].event == 'QUEST_HIDDEN_READY' and OBSERVED[1].args[1] == 1057)
+                OBSERVED = {}
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // A hidden update that is not ready raises nothing.
+        app.insert_resource(Quests { active: vec![quest(status::PROGRESS, 8129)], ..Quests::default() });
+        app.update();
+        assert_eq!(observation_count(app.world().non_send::<UiRuntime>()), 0);
+        // A hidden update that becomes ready raises only the hidden event.
+        app.insert_resource(Quests { active: vec![quest(status::READY, 5560)], ..Quests::default() });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED == 1, #OBSERVED)
+                assert(OBSERVED[1].event == 'QUEST_HIDDEN_READY' and OBSERVED[1].args[1] == 1057)
+                "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn a_normal_quest_keeps_the_started_and_updated_notifications() {
+        let shared: Shared = Rc::new(RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let rt = quest_all_event_runtime();
+        shared.borrow_mut().dialog.seen = true;
+        let mut app = quest_sync_app(shared.clone(), rt);
+        // 1065 "Evacuation Protocol" is a normal quest with Progress and Ready components.
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1065, status: status::PROGRESS, component_id: 8300, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED == 2, #OBSERVED)
+                assert(OBSERVED[1].event == 'QUEST_CONTEXT_UPDATED' and OBSERVED[1].args[1] == 1065 and OBSERVED[1].args[2] == 'started')
+                assert(OBSERVED[2].event == 'QUEST_CONTEXT_CONDITION_EVENT' and OBSERVED[2].args[2] == 'started')
+                OBSERVED = {}
+                "#,
+            )
+            .exec()
+            .unwrap();
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1065, status: status::READY, component_id: 5336, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(OBSERVED[1].event == 'QUEST_CONTEXT_UPDATED' and OBSERVED[1].args[1] == 1065 and OBSERVED[1].args[2] == 'updated')
+                for _, o in ipairs(OBSERVED) do
+                  assert(o.event ~= 'QUEST_HIDDEN_READY' and o.event ~= 'QUEST_HIDDEN_COMPLETE')
+                  assert(o.event ~= 'QUEST_TASK_READY' and o.event ~= 'QUEST_TASK_STARTED')
+                end
                 "#,
             )
             .exec()
