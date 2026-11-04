@@ -241,3 +241,19 @@ class Cli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Copies(unittest.TestCase):
+    def test_layer_one_copies_and_repeated_requests_are_one_start(self):
+        def clip(name, t, layer=0):
+            return {"clip": name, "t_ms": t, "layer": layer}
+        clips = [clip("twohand_ba_combat_idle", 0.3), clip("twohand_ba_combat_idle", 21.5),
+                 clip("twohand_co_sk_streakattack_1", 145.4), clip("twohand_co_sk_streakattack_1", 151.9, layer=1),
+                 clip("all_co_sk_dashattack", 181.1), clip("all_co_sk_dashattack_ub", 188.3, layer=1),
+                 clip("twohand_co_sk_streakattack_1", 757.0)]
+        kept, copies = diff.drop_copies(clips)
+        self.assertEqual(copies, 2)
+        self.assertEqual([(c["clip"], c["t_ms"]) for c in kept],
+                         [("twohand_ba_combat_idle", 0.3), ("twohand_co_sk_streakattack_1", 145.4), ("all_co_sk_dashattack", 181.1),
+                          ("all_co_sk_dashattack_ub", 188.3), ("twohand_co_sk_streakattack_1", 757.0)])
+

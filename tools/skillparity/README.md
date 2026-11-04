@@ -125,6 +125,9 @@ Details a reader of the reports should know:
   `dir`, `op`, `skill_id`, `tl`, `obj`. Start the lane with `AAEMU_LOG_MS=1` (microsecond fractions; without it the log has whole seconds and
   the server rows are only that exact). Decoded server-to-client fields need the `aaemu_game::net::connection` trace target in
   addition to `net::fields=trace`.
+* **Copies.** The original starts every action clip a second time on layer 1, the upper body (`flags` 384, ~7 ms later), with the
+  clip's `_ub` variant when there is one (`all_co_sk_dashattack_ub`), and sometimes asks for an idle twice in two frames. `diff.py`
+  counts a start that repeats the same clip within 30 ms once; an `_ub` start is its own clip and is compared.
 * **Roles in the original.** `run_original.py` and `diff.py` give the original's `anim` rows their `role` by the rule above:
   the skeleton of the first non-idle, non-locomotion clip within 1 s after the first press is the player; the first other skeleton
   that plays a hit-reaction clip within 3 s of that press is the target.

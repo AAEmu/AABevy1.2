@@ -12,7 +12,8 @@ Each trace is cut into segments by the `mark` rows `skill:<id>:start` / `skill:<
 
 * net: press -> first `net out CSStartSkill`, and the server's answers (`SCSkillStarted`, `SCSkillFired`, `SCPlotEvent`,
   `SCSkillEnded`, ...) with their first times and counts (server rows when `server.jsonl` exists, the client's own net rows too)
-* anim: every player clip in order (start, layer, speed, blend, loop), first clip times
+* anim: every player clip in order (start, layer, speed, blend, loop), first clip times; a start that repeats the same clip
+  within 30 ms (the original's layer-1 copy of each action, an idle asked for twice) counts once
 * fx and sound: the set of names, first time and count of each
 * castbar (start, stop, total, channel), cooldown (skill and GCD start and total)
 * pos: the player's and the target's displacement over the segment, when it starts and ends moving, the turn
@@ -255,8 +256,28 @@ def anim_metrics(trace: Trace, lo: float, hi: float, press: float) -> dict:
         clips.append({"clip": clip, "t_ms": ms_from(r["wall_us"], press), "layer": r.get("layer"), "speed": num(r.get("speed")),
                       "blend": num(r.get("blend")), "loop": r.get("loop"), "file": norm_name(r["file"]) if r.get("file") else None,
                       "flags": r.get("flags"), "locomotion": common.is_locomotion(clip)})
-    return {"clips": clips, "first_ms": clips[0]["t_ms"] if clips else None,
+    clips, copies = drop_copies(clips)
+    return {"clips": clips, "copies": copies, "first_ms": clips[0]["t_ms"] if clips else None,
             "first_skill_ms": next((c["t_ms"] for c in clips if not c["locomotion"]), None)}
+
+
+COPY_MS = 30.0
+
+
+def drop_copies(clips: list[dict]) -> tuple[list[dict], int]:
+    """Starts that only repeat one shown already: the 1.2 client starts every action clip a second time on layer 1, the
+    upper body (flags 384, ~7 ms later), and asks for an idle twice in two frames. Such a copy is the same clip within
+    `COPY_MS` on layer 1 after layer 0, or on the same layer again. An upper-body variant (`all_co_sk_dashattack_ub`) is
+    another clip and stays."""
+    kept: list[dict] = []
+    copies = 0
+    for c in clips:
+        if any(k["clip"] == c["clip"] and 0 <= c["t_ms"] - k["t_ms"] <= COPY_MS and (k["layer"] == c["layer"] or (k["layer"], c["layer"]) == (0, 1))
+               for k in kept):
+            copies += 1
+            continue
+        kept.append(c)
+    return kept, copies
 
 
 def name_set_metrics(rows: list[dict], press: float) -> dict:
