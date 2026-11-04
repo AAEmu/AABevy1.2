@@ -2069,12 +2069,27 @@ fn skill_weapon(book: &SkillBook, id: u32, wield: Wield) -> Option<Out> {
         visual.fire_clip(wield.two_handed, wield.dual).cloned(),
         visual.start_anim.clone(),
     ];
-    clips.into_iter().flatten().find_map(|c| weapon_for_clip(&c)).or_else(|| {
-        if !visual.plot {
-            return None;
-        }
-        book.plot_steps(id).into_iter().find_map(|step| book.plot_event(step).and_then(|p| p.clip().and_then(|c| weapon_for_clip(c))))
-    })
+    clips
+        .into_iter()
+        .flatten()
+        .find_map(|c| weapon_for_clip(&c))
+        .or_else(|| {
+            if !visual.plot {
+                return None;
+            }
+            book.plot_steps(id).into_iter().find_map(|step| book.plot_event(step).and_then(|p| p.clip().and_then(|c| weapon_for_clip(c))))
+        })
+        .or_else(|| weapon_of_skill(visual.active_weapon, wield))
+}
+
+/// The weapon a skill whose clips name none (`all_co_sk_dashattack`) takes out: its `skills.active_weapon_id`. The 1.2 client draws
+/// the greatsword for Charge and Tiger Strike (1) and stands in `twohand_ba_combat_idle`, where an `all_` clip alone left aa-client
+/// in the fist stance (skill parity trace t1h, 2026-11-03).
+fn weapon_of_skill(active_weapon: u8, wield: Wield) -> Option<Out> {
+    match active_weapon {
+        1 => wield.melee.then_some(Out::Blade { dual: wield.dual }),
+        _ => None,
+    }
 }
 
 /// The player presses a skill that needs its weapon while it is away: Bevy draws the weapon and the shield now and turns the
@@ -2109,12 +2124,12 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
         // `FUN_39390f80` is the local player's request path, and both callers pass skill 2 (`DAT_39ac769c`): it draws the
         // weapon and sets `+0x5fc5` (`FUN_39354610`). Its `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2
         // (the click attack `FUN_393923c0` passes `DAT_39ac3874` = 2 too). If the derived idle is already set
-        // (`FUN_39354600`), the deadline is only refreshed (`FUN_393545e0`) and no pulse starts. A skill that turns the auto
-        // attack on (`skills.start_autoattack`) aimed at another unit takes that path too: the 1.2 client restarts
-        // `twohand_ba_combat_idle` at the key press of Triple Slash and Precision Strike from the relaxed stance, before the
-        // server answers (skill parity trace, 2026-11-03). Frenzy, a self buff with the flag, does not.
-        let on_other = st.entity(*target_obj_id).is_some_and(|t| t != me);
-        if *skill_id == MELEE_ATTACK || (on_other && st.book.skill(*skill_id).is_some_and(|v| v.starts_autoattack)) {
+        // (`FUN_39354600`), the deadline is only refreshed (`FUN_393545e0`) and no pulse starts. Every skill that turns the auto
+        // attack on (`skills.start_autoattack`) takes that path too, whatever it aims at: from the relaxed stance the 1.2 client
+        // starts the combat idle at the key press of Triple Slash, Charge, Precision Strike and Lasso (another unit) and of
+        // Whirlwind Slash, Sunder Earth and Frenzy (itself), before the server answers; the four skills without the flag
+        // (Terrifying Roar, Bondbreaker, Battle Focus, Tiger Strike) do not (skill parity trace t1h, 2026-11-03).
+        if *skill_id == MELEE_ATTACK || st.book.skill(*skill_id).is_some_and(|v| v.starts_autoattack) {
             st.commands.queue(move |w: &mut World| {
                 if let Some(mut idle) = w.get_mut::<CombatIdle>(me) {
                     idle.last = now;
@@ -2885,6 +2900,19 @@ mod tests {
     }
 
     /// Unit 4 is each listed unit (none without a list); 1 and 2 are the plot's caster and target, 3 the step's source, 5 none.
+    /// Charge and Tiger Strike have only `all_` clips: their `active_weapon_id` 1 takes the greatsword out; Lasso (0) takes none.
+    #[test]
+    fn a_skill_whose_clips_name_no_weapon_takes_its_active_weapon() {
+        let Some(book) = SkillBook::open() else { return };
+        let greatsword = Wield { two_handed: true, melee: true, ..Default::default() };
+        assert_eq!(skill_weapon(&book, 11918, greatsword), Some(Out::Blade { dual: false }), "Charge");
+        assert_eq!(skill_weapon(&book, 13315, greatsword), Some(Out::Blade { dual: false }), "Tiger Strike");
+        assert_eq!(skill_weapon(&book, 12039, greatsword), None, "Lasso");
+        assert_eq!(skill_weapon(&book, 11918, Wield::default()), None, "no weapon to take out");
+        assert_eq!(weapon_of_skill(1, Wield { melee: true, dual: true, ..Default::default() }), Some(Out::Blade { dual: true }));
+        assert_eq!(weapon_of_skill(3, greatsword), None, "3 leaves the weapon as it is");
+    }
+
     #[test]
     fn a_clip_two_steps_start_in_one_instant_starts_once() {
         let last = (Arc::<str>::from("all_co_sk_dashattack"), 4.25, Some(0.8));
@@ -3247,11 +3275,16 @@ mod tests {
         schedule.run(&mut world);
         let idle = *world.get::<CombatIdle>(me).expect("the auto attack request pulses the idle");
         assert!(idle.pulse_until > idle.last, "it is the +0x5fc5 pulse ({idle:?})");
-        // Frenzy 10455 has start_autoattack 't', but it is a self buff: no pulse
+        // Frenzy 10455, a self buff with start_autoattack 't', enters it too (`fist_ba_combat_idle` at +15 ms in the 1.2 client)
         world.entity_mut(me).remove::<CombatIdle>();
         world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 10455, target_obj_id: 0 }));
         schedule.run(&mut world);
-        assert!(world.get::<CombatIdle>(me).is_none(), "a start_autoattack self-buff does not enter the combat idle");
+        assert!(world.get::<CombatIdle>(me).is_some(), "a start_autoattack self-buff enters the combat idle at the press");
+        // Terrifying Roar 18308, a self skill without the flag, does not
+        world.entity_mut(me).remove::<CombatIdle>();
+        world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 18308, target_obj_id: 0 }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(me).is_none(), "a skill without start_autoattack does not");
         // Triple Slash 18132 (start_autoattack) on another unit enters it at the press, as the 1.2 client does
         let mut doll = crate::hud::fixture_spawn().unit;
         doll.obj_id = 40;

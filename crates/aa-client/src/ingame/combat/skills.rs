@@ -291,6 +291,9 @@ pub struct SkillVisual {
     pub channel_ms: u32,
     /// `skills.start_autoattack`: the skill turns the auto attack on.
     pub starts_autoattack: bool,
+    /// `skills.active_weapon_id`: what the caster holds for the skill (0 nothing, 1 the main weapon, 2 the bow, 3 as it is, 4 the
+    /// instrument; 866 / 190 / 535 / 59 skills have 1 / 2 / 3 / 4).
+    pub active_weapon: u8,
 }
 
 impl SkillVisual {
@@ -964,7 +967,7 @@ impl Inner {
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
                         channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
-                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't' \
+                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't', active_weapon_id \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -982,11 +985,12 @@ impl Inner {
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                         (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
                         int(r, 23).unwrap_or(0) != 0,
+                        int(r, 24).unwrap_or(0).clamp(0, 255) as u8,
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), starts_autoattack)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), starts_autoattack, active_weapon)| {
             let [start, fire, twohand, dual] = anims;
             let tools = [self.tool(main_tool), self.tool(off_tool)];
             Arc::new(SkillVisual {
@@ -1011,6 +1015,7 @@ impl Inner {
                 cast_ms,
                 channel_ms,
                 starts_autoattack,
+                active_weapon,
             })
         });
         self.skills.insert(id, visual.clone());
