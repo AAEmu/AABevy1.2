@@ -129,6 +129,12 @@ Details a reader of the reports should know:
   clip's `anims.move_ub` variant when the model has one (`all_co_sk_dashattack_ub`, byte for byte the full body clip), and sometimes
   asks for an idle twice in two frames. `diff.py` counts a start that repeats the same clip within 30 ms once, and a layer-1 start of
   the clip or its `_ub` / `_mub` variant right after the layer-0 start as a copy of it.
+* **Server ticks.** The lane server answers CSStartSkill on its own tick (100-140 ms later for either client), so an event that follows
+  a server answer is timed from the last answer both clients got (same op, same occurrence; the server log's rows, else the clients'
+  own `net in` rows), with 10 ms of slack because the server stamps its log line after the send (the original showed a cooldown up
+  to 9 ms before the stamp of its answer). The difference then is the client's own reaction; `raw_delta_ms` keeps the press-relative
+  one, `after` names the answer and `server_shift_ms` how far apart the two answers came. Events before the first answer (the
+  press's own reaction: the combat idle, CSStartSkill) stay timed from the press.
 * **Roles in the original.** `run_original.py` and `diff.py` give the original's `anim` rows their `role` by the rule above:
   the skeleton of the first non-idle, non-locomotion clip within 1 s after the first press is the player; the first other skeleton
   that plays a hit-reaction clip within 3 s of that press is the target.

@@ -60,13 +60,18 @@ class Verdicts(unittest.TestCase):
         rec = skill(self.rep, 200)
         self.assertEqual(rec["verdict"], "DIFF")
         clip = diffs(rec, "timing", "anim", "staff_cast_spell_01")[0]
-        self.assertEqual((clip["orig"], clip["bevy"], clip["delta_ms"]), (33.0, 99.0, 66.0))
-        self.assertEqual(clip["text"], "clip `staff_cast_spell_01`: starts 66 ms later in aa-client (orig 33 ms, bevy 99 ms)")
-        self.assertEqual(rec["worst_delta_ms"], 66.0)
+        # the clip is 2 ms before the server's stamp of SCSkillStarted, inside the slack for the stamp's lag: anchored on it
+        self.assertEqual((clip["orig"], clip["bevy"], clip["delta_ms"], clip["raw_delta_ms"]), (33.0, 99.0, 62.0, 66.0))
+        self.assertEqual(clip["text"], "clip `staff_cast_spell_01`: starts 62 ms later after SCSkillStarted in aa-client (orig 33 ms, "
+                                       "bevy 99 ms after the press; the server answered 4 ms apart)")
+        self.assertEqual(rec["worst_delta_ms"], 62.0)
+        # the cast bar follows SCSkillStarted, which reached aa-client's server log 4 ms later: 65 ms raw, 61 ms of its own
         cast = diffs(rec, "timing", "castbar", "cast bar", "start_ms")[0]
-        self.assertEqual(cast["delta_ms"], 65.0)
-        self.assertEqual(diffs(rec, "timing", "castbar", "cast bar", "stop_ms")[0]["delta_ms"], 65.0)
-        self.assertEqual(diffs(rec, "timing", "cooldown", "skill cooldown")[0]["delta_ms"], 60.0)
+        self.assertEqual((cast["delta_ms"], cast["raw_delta_ms"], cast["after"], cast["server_shift_ms"]), (61.0, 65.0, "SCSkillStarted", 4.0))
+        self.assertEqual(cast["text"], "cast bar: starts 61 ms later after SCSkillStarted in aa-client (orig 40 ms, bevy 105 ms after "
+                                       "the press; the server answered 4 ms apart)")
+        self.assertEqual(diffs(rec, "timing", "castbar", "cast bar", "stop_ms")[0]["delta_ms"], 61.0)
+        self.assertEqual(diffs(rec, "timing", "cooldown", "skill cooldown")[0]["delta_ms"], 56.0)
         self.assertEqual(rec["counts"]["timing"], 8)
         self.assertEqual(rec["counts"]["missing"] + rec["counts"]["extra"] + rec["counts"]["value"], 0)
         self.assertGreater(rec["median_shift_ms"], 55)          # everything is late by about the same: a press offset
@@ -126,8 +131,9 @@ class Verdicts(unittest.TestCase):
     def test_report_is_json_and_markdown(self):
         json.dumps(self.rep)
         md = diff.render_markdown(self.rep)
-        self.assertIn("| 200 Test Bolt | DIFF | 0 | 0 | 8 | 0 | 66 |", md)
-        self.assertIn("* clip `staff_cast_spell_01`: starts 66 ms later in aa-client (orig 33 ms, bevy 99 ms)", md)
+        self.assertIn("| 200 Test Bolt | DIFF | 0 | 0 | 8 | 0 | 62 |", md)
+        self.assertIn("* clip `staff_cast_spell_01`: starts 62 ms later after SCSkillStarted in aa-client (orig 33 ms, bevy 99 ms after the press; "
+                      "the server answered 4 ms apart)", md)
         self.assertIn("| 100 Test Slash | PASS |", md)
         self.assertIn("## Most common differences", md)
         self.assertIn("fx `fx.skill.dust`", md)
@@ -258,3 +264,31 @@ class Copies(unittest.TestCase):
                          [("twohand_ba_combat_idle", 0.3), ("twohand_co_sk_streakattack_1", 145.4), ("all_co_sk_dashattack", 181.1),
                           ("twohand_co_sk_streakattack_1", 757.0), ("bow_co_sk_launch_ub", 900.0)])
 
+
+
+class ServerAnswers(unittest.TestCase):
+    def test_an_event_after_an_answer_is_timed_from_that_answer(self):
+        # the server's plot events reached aa-client's log 23 ms later (its tick), both of them
+        d = diff.Differ(1, {"timing_ms": 12.0}, [["SCPlotEvent", 120.0], ["SCPlotEvent", 400.0]],
+                        [["SCPlotEvent", 143.0], ["SCPlotEvent", 423.0]])
+        d.time("anim", "hit", "start_ms", 125.0, 148.0)          # 23 ms later, all of it the server's: no difference
+        d.time("anim", "idle", "start_ms", 0.1, 14.6)            # before any answer: timed from the press
+        d.time("fx", "dust", "first_ms", 410.0, 450.0)           # 17 ms of its own after the second answer
+        self.assertEqual([(x["subject"], x["delta_ms"]) for x in d.diffs], [("idle", 14.5), ("dust", 17.0)])
+        self.assertNotIn("after", d.diffs[0])
+        self.assertEqual((d.diffs[1]["after"], d.diffs[1]["raw_delta_ms"]), ("SCPlotEvent #2", 40.0))
+
+    def test_an_answer_only_one_client_got_is_no_anchor(self):
+        d = diff.Differ(1, {"timing_ms": 12.0}, [["SCSkillStarted", 100.0], ["SCUnitDamaged", 300.0]], [["SCSkillStarted", 110.0]])
+        d.time("sound", "hit", "first_ms", 310.0, 350.0)         # after SCSkillStarted (10 ms apart): 30 ms of its own
+        self.assertEqual((d.diffs[0]["delta_ms"], d.diffs[0]["after"]), (30.0, "SCSkillStarted"))
+
+
+class RandomVariants(unittest.TestCase):
+    def test_a_random_idle_variant_matches_another_of_its_family(self):
+        self.assertEqual(diff.clip_family("twohand_ba_combat_idle_rand_3"), "twohand_ba_combat_idle_rand_N")
+        self.assertEqual(diff.clip_family("fist_ba_relaxed_rand_idle"), "fist_ba_relaxed_rand_idle")
+        clip = lambda name, t: {"clip": name, "t_ms": t, "layer": 0, "speed": 1.0, "blend": 0.2, "loop": False, "file": name + ".caf"}
+        d = diff.Differ(1, {"timing_ms": 12.0, "speed_rel": 0.02, "blend_s": 0.05})
+        diff.compare_anim(d, {"clips": [clip("twohand_ba_combat_idle_rand_3", 5907.0)]}, {"clips": [clip("twohand_ba_combat_idle_rand_5", 5910.0)]})
+        self.assertEqual(d.diffs, [], "another variant of the family at the same time is no difference")

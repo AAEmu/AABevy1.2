@@ -19,7 +19,9 @@ Each trace is cut into segments by the `mark` rows `skill:<id>:start` / `skill:<
 * pos: the player's and the target's displacement over the segment, when it starts and ends moving, the turn
 
 then compares orig with bevy under the README tolerances and classifies each difference: `missing` (orig has it, bevy not),
-`extra` (bevy only), `timing` (a time differs by more than a frame of the slower client) and `value` (speed, blend, loop,
+`extra` (bevy only), `timing` (a time differs by more than a frame of the slower client; an event after a server answer both
+clients got is timed from the last such answer, since the server answers on its own tick and a later tick is not client
+lag: the raw press-relative difference stays in `raw_delta_ms`) and `value` (speed, blend, loop,
 layer, counts, totals, positions). A metric a client never records (no `pos` rows in its whole trace, say) is NO-DATA for
 that pair, never PASS. Verdicts: DIFF (any difference), NO-DATA (a segment or its press is missing, nothing recorded, or the
 anim comparison itself was impossible), else PASS.
@@ -32,6 +34,7 @@ import argparse
 import bisect
 import json
 import math
+import re
 import statistics
 import sys
 from collections import Counter
@@ -51,6 +54,9 @@ FALLBACK_SEGMENT_US = 15_000_000
 ANSWER_OPS = ("SCSkillStarted", "SCSkillFired", "SCPlotEvent", "SCSkillEnded", "SCSkillStopped", "SCCastingStopped",
               "SCPlotEnded", "SCPlotStopped")
 MOVE_START_M = POS_NOISE_M = 0.05     # a position row counts as movement beyond this distance from where the skill started
+# the server stamps its log line after the send: the original showed a cooldown up to 9 ms before the stamp of the answer that
+# started it (t1i, 2026-11-03), so an answer stamped up to this long after an event of the original still anchors it
+ANCHOR_SLACK_MS = 10.0
 
 
 # ---- tolerances ---------------------------------------------------------------------------------------------------
@@ -235,7 +241,7 @@ def net_metrics(rows: list[dict], skill: Any, press: float, source: str) -> dict
     tls = {r["tl"] for r in mine if r.get("skill_id") is not None and r.get("tl") is not None}
     # a packet with the skill id of another skill is dropped above; one with only a `tl` (SCSkillEnded) must belong to our casts
     selected = [r for r in mine if r.get("skill_id") is not None or r.get("tl") is None or r["tl"] in tls]
-    out: dict[str, Any] = {"source": source, "rows": len(selected), "start_skill_ms": None, "answers": {}}
+    out: dict[str, Any] = {"source": source, "rows": len(selected), "start_skill_ms": None, "answers": {}, "events": []}
     for r in selected:
         op, t = r.get("op"), ms_from(r["wall_us"], press)
         if r.get("dir") == "out" and op == "CSStartSkill" and out["start_skill_ms"] is None:
@@ -244,6 +250,17 @@ def net_metrics(rows: list[dict], skill: Any, press: float, source: str) -> dict
             a = out["answers"].setdefault(op, {"first_ms": t, "count": 0, "last_ms": t})
             a["count"] += 1
             a["last_ms"] = t
+            out["events"].append([op, t])
+    return out
+
+
+def answer_keys(events: list) -> list[tuple[float, tuple[str, int]]]:
+    """The server's answers in time order, each keyed by its op and how many of that op came before: (t, (op, n))."""
+    seen: Counter = Counter()
+    out = []
+    for op, t in sorted(events, key=lambda e: e[1]):
+        seen[op] += 1
+        out.append((t, (op, seen[op])))
     return out
 
 
@@ -457,12 +474,25 @@ def _fmt(value: Any, unit: str = "") -> str:
 class Differ:
     """Collects the differences of one skill and the data it used."""
 
-    def __init__(self, skill: Any, tol: dict):
+    def __init__(self, skill: Any, tol: dict, orig_answers: list | None = None, bevy_answers: list | None = None):
         self.skill = skill
         self.tol = tol
         self.diffs: list[dict] = []
         self.no_data: dict[str, str] = {}
         self.shifts: list[float] = []
+        self.orig_answers = answer_keys(orig_answers or [])
+        self.bevy_answers = {key: t for t, key in answer_keys(bevy_answers or [])}
+
+    def anchor(self, o: float) -> tuple[str, float, float] | None:
+        """The last server answer before the original's event that aa-client got too: (label, orig time, bevy time)."""
+        best = None
+        for t, key in self.orig_answers:
+            if t > o + ANCHOR_SLACK_MS:
+                break
+            tb = self.bevy_answers.get(key)
+            if tb is not None:
+                best = (key[0] if key[1] == 1 else f"{key[0]} #{key[1]}", t, tb)
+        return best
 
     def add(self, category: str, metric: str, subject: str, field: str, orig: Any, bevy: Any, **extra: Any) -> None:
         d = {"skill_id": self.skill, "category": category, "metric": metric, "subject": subject, "field": field,
@@ -477,7 +507,13 @@ class Differ:
         if o is None or b is None:
             self.add("missing" if b is None else "extra", metric, subject, field, o, b, **extra)
             return
-        delta = round(b - o, 3)
+        raw = round(b - o, 3)
+        delta, anchor = raw, self.anchor(o)
+        if anchor is not None:
+            # the server answers on its own tick (100-140 ms after CSStartSkill, both clients alike): what a client does after an
+            # answer is timed from that answer, so a later server tick is not counted as client lag
+            delta = round((b - anchor[2]) - (o - anchor[1]), 3)
+            extra = {**extra, "raw_delta_ms": raw, "after": anchor[0], "server_shift_ms": round(anchor[2] - anchor[1], 3)}
         self.shifts.append(delta)
         if abs(delta) > self.tol["timing_ms"]:
             self.add("timing", metric, subject, field, o, b, delta_ms=delta, **extra)
@@ -486,10 +522,18 @@ class Differ:
         self.add("value", metric, subject, field, o, b, **extra)
 
 
+RANDOM_VARIANT = re.compile(r"_rand_\d+$")
+
+
+def clip_family(name: str) -> str:
+    """A random idle variant (`twohand_ba_combat_idle_rand_3`) stands for its family (`..._rand_N`): both clients pick one at random."""
+    return RANDOM_VARIANT.sub("_rand_N", name)
+
+
 def _occurrences(clips: list[dict]) -> dict[str, list[dict]]:
     out: dict[str, list[dict]] = {}
     for c in clips:
-        out.setdefault(c["clip"], []).append(c)
+        out.setdefault(clip_family(c["clip"]), []).append(c)
     return out
 
 
@@ -519,11 +563,11 @@ def compare_anim(d: Differ, o: dict, b: dict) -> None:
                 d.value("anim", label, "blend", x["blend"], y["blend"], delta=r3(y["blend"] - x["blend"]))
             if isinstance(x["loop"], bool) and isinstance(y["loop"], bool) and x["loop"] != y["loop"]:
                 d.value("anim", label, "loop", x["loop"], y["loop"])
-            if x["file"] and y["file"] and x["file"] != y["file"]:
+            if x["file"] and y["file"] and x["file"] != y["file"] and x["clip"] == y["clip"]:
                 d.value("anim", label, "file", x["file"], y["file"])
     # order of the clips both clients played
-    by_orig = [x["clip"] for x, _ in sorted(matched, key=lambda p: p[0]["t_ms"])]
-    by_bevy = [y["clip"] for _, y in sorted(matched, key=lambda p: p[1]["t_ms"])]
+    by_orig = [clip_family(x["clip"]) for x, _ in sorted(matched, key=lambda p: p[0]["t_ms"])]
+    by_bevy = [clip_family(y["clip"]) for _, y in sorted(matched, key=lambda p: p[1]["t_ms"])]
     if by_orig != by_bevy:
         d.value("anim", "clip order", "order", by_orig, by_bevy)
 
@@ -627,7 +671,9 @@ def compare_net(d: Differ, o: dict, b: dict, which: str) -> None:
 
 def compare_skill(skill: Any, occurrence: int, o: dict, b: dict, tol: dict, plan_skill: dict | None) -> dict:
     """The skill's record: verdict, differences, no-data metrics, and both clients' metrics."""
-    d = Differ(skill, tol)
+    # the answers of the server log (both clients' rows from one source), else the clients' own received packets
+    which = next((w for w in ("net_server", "net_client") if o.get(w) and b.get(w)), None)
+    d = Differ(skill, tol, *((o[which].get("events"), b[which].get("events")) if which else ()))
     rec: dict[str, Any] = {"skill_id": skill, "occurrence": occurrence, "name": (plan_skill or {}).get("name")}
     reason = None
     if not o["found"] or not b["found"]:
@@ -722,6 +768,10 @@ def describe(diff: dict) -> str:
         if metric == "net_client" and field == "start_ms":
             verb = "is sent"
         delta = diff["delta_ms"]
+        if diff.get("after"):
+            return (f"{who}: {verb} {abs(delta):.0f} ms {'later' if delta > 0 else 'earlier'} after {diff['after']} in "
+                    f"{CLIENT_NAMES['bevy']} (orig {_fmt(o)} ms, bevy {_fmt(b)} ms after the press; the server answered "
+                    f"{_fmt(diff['server_shift_ms'])} ms apart)")
         return (f"{who}: {verb} {abs(delta):.0f} ms {'later' if delta > 0 else 'earlier'} in {CLIENT_NAMES['bevy']} "
                 f"(orig {_fmt(o)} ms, bevy {_fmt(b)} ms)")
     if cat == "missing":
