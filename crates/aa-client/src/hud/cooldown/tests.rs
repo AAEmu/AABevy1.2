@@ -395,4 +395,9 @@ fn a_cast_the_server_answered_shows_the_received_timer_not_the_estimate() {
     assert_eq!(observed_at(info, &skills, 7, used), (0, 0));
     skills.native_tag_cooldowns[0].updated_at = used - Duration::from_secs(3);
     assert_eq!(observed_at(info, &skills, 7, used), (30_000, 30_000));
+    // a tick before the cast's start is still its answer, a second before is not
+    skills.native_tag_cooldowns[0].updated_at = used - Duration::from_millis(120);
+    assert_eq!(observed_at(info, &skills, 7, used), (0, 0));
+    skills.native_tag_cooldowns[0].updated_at = used - Duration::from_secs(1);
+    assert_eq!(observed_at(info, &skills, 7, used), (30_000, 30_000));
 }

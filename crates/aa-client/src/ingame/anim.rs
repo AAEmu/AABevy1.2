@@ -160,11 +160,17 @@ impl Stance {
 /// peaceful one).
 pub struct StanceClips {
     idle: Option<BoundClip>,
+    /// `<prefix>_ba_combat_idle_rand_N`: what the combat idle plays now and then.
+    idle_variants: Vec<BoundClip>,
     run: [Option<BoundClip>; 8],
     run_clip_speed: f32,
     /// The sprint tier of the stance's run group (`<prefix>_mo_combat_run.lmg`), see [`SprintClips`].
     sprint: SprintClips,
 }
+
+/// Seconds of the combat idle before a random variant, and before the first one after an action (skill parity trace t1i).
+const COMBAT_IDLE_VARIANT_SECS: f32 = 3.0;
+const COMBAT_IDLE_FIRST_AFTER_ACTION_SECS: f32 = 3.12;
 
 /// The second speed tier of a run locomotion group: 1.2's run groups list their eight directions twice, the run clips and then the
 /// sprint clips (`fist_mo_normal_run.lmg`: `fist_mo_sprint_run_f`, `_fl`, `_fr`, `_l`, `_r`, and the run's own `_b`, `_bl`, `_br`;
@@ -234,10 +240,16 @@ impl StanceClips {
         let bind = |name: String, fallback: String| bind_clip(rig, cal, clips, &name).or_else(|| bind_clip(rig, cal, clips, &fallback));
         let base = if stance == Stance::Staff { "onehand" } else { "fist" };
         let idle = bind(format!("{prefix}_ba_combat_idle"), format!("{base}_ba_combat_idle"));
+        // the random variants of the stance's own combat idle (none when the idle is the fallback's)
+        let idle_variants = if bind_clip(rig, cal, clips, &format!("{prefix}_ba_combat_idle")).is_some() {
+            (1..=9).filter_map(|n| bind_clip(rig, cal, clips, &format!("{prefix}_ba_combat_idle_rand_{n}"))).collect()
+        } else {
+            Vec::new()
+        };
         let run: [Option<BoundClip>; 8] = std::array::from_fn(|i| bind(format!("{prefix}_mo_combat_run_{}", DIRS[i]), format!("{base}_mo_combat_run_{}", DIRS[i])));
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let sprint = SprintClips::load(rig, cal, clips, &format!("{prefix}_mo_combat_run"));
-        StanceClips { idle, run, run_clip_speed, sprint }
+        StanceClips { idle, idle_variants, run, run_clip_speed, sprint }
     }
 }
 
@@ -497,6 +509,9 @@ pub fn drive_locomotion(
         } else {
             None
         };
+        // standing in one stance's idle and going to the other's: the 1.2 client blends it like any idle to idle (0.2, relaxed to
+        // combat at a key press and back after it), not like a run (skill parity trace t1i, 2026-11-03: 58 of 58 such changes)
+        let restanced = stance != loco.stance && loco.state == State::Idle;
         if stance != loco.stance {
             loco.stance = stance;
             loco.state = State::Unknown;
@@ -566,11 +581,26 @@ pub fn drive_locomotion(
                     combat_run.or(sprint_run).or_else(|| primary[d].clone()).or_else(|| secondary[d].clone()).or_else(|| primary[0].clone()).or_else(|| secondary[0].clone())
                 }
             };
-            // after an action, the graph's walk out of it (its exit link, else the idle's own 0.2); between idles and runs 0.15
-            let blend = loco.action_exit.take().map(super::combat::idle_blend).unwrap_or(0.15);
+            // after an action, the graph's walk out of it (its exit link, else the idle's own 0.2); from one stance's idle to the
+            // other's the idle's own 0.2 too; between idles and runs 0.15
+            let after_action = loco.action_exit.is_some();
+            let blend = loco.action_exit.take().map(super::combat::idle_blend).unwrap_or(if restanced && wanted == State::Idle {
+                super::combat::idle_blend(0.0)
+            } else {
+                0.15
+            });
             if let Some(clip) = clip {
                 animator.play(clip, true, blend);
-                animator.random_idle = None;
+                // the combat idle's random variants (`*_ba_combat_idle_rand_1..5`): one 3.0 s after the idle comes back from the
+                // last, never the same twice in a row, 0.2 in and out; the first 3.12 s after an action (skill parity trace t1i,
+                // 2026-11-03: 20 variants, 2.99-3.01 s and 3.10-3.15 s)
+                animator.random_idle = match (wanted, stance_clips) {
+                    (State::Idle, Some(c)) if !c.idle_variants.is_empty() => Some(
+                        aa_anim::RandomIdle::every_secs(c.idle_variants.clone(), COMBAT_IDLE_VARIANT_SECS, 0.2, 0.2, (now * 1000.0) as u32)
+                            .first_after(if after_action { COMBAT_IDLE_FIRST_AFTER_ACTION_SECS } else { COMBAT_IDLE_VARIANT_SECS }),
+                    ),
+                    _ => None,
+                };
             }
             loco.state = wanted;
         }

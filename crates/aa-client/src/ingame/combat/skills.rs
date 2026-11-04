@@ -197,6 +197,16 @@ impl FxItem {
     }
 }
 
+/// A clout of a doodad phase (`doodad_func_clouts`) with a projectile: the effect area the 1.2 client shows where the doodad stands
+/// (Sunder Earth's three `대지가르기 효과지역` doodads 3941: `ground_dot_proj` each, at the doodad, 7 ms after `SCDoodadCreated`;
+/// skill parity trace t1i, 2026-11-03). The buff of the clout reaches the units from the server.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Clout {
+    pub projectile: Projectile,
+    /// `doodad_func_clouts.duration` (ms): how long the area lasts; 0 for as long as the doodad is in the phase.
+    pub duration_ms: u32,
+}
+
 /// A thing that flies from the caster to the target (`projectiles`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
@@ -275,10 +285,6 @@ pub struct SkillVisual {
     #[allow(dead_code)]
     pub extras: Extras,
     pub projectile: Option<Projectile>,
-    /// The projectiles of the clouts of the doodad the channel spawns (`skills.channeling_doodad_id`, Protective Wings' doodad 879:
-    /// `doodad_func_clouts.projectile_id`, an effect area on the ground under the caster for as long as the channel lasts). The
-    /// buff of a clout reaches the units from the server (the area trigger applies it), the projectile is the client's.
-    pub clout_projectiles: Vec<Projectile>,
     /// `skills.channeling_anim_id` (not played yet; checked by `examples/skill_coverage.rs`).
     #[allow(dead_code)]
     pub channeling_anim: Option<Arc<str>>,
@@ -294,6 +300,10 @@ pub struct SkillVisual {
     /// `skills.active_weapon_id`: what the caster holds for the skill (0 nothing, 1 the main weapon, 2 the bow, 3 as it is, 4 the
     /// instrument; 866 / 190 / 535 / 59 skills have 1 / 2 / 3 / 4).
     pub active_weapon: u8,
+    /// `skills.match_animation`: a plot step's clip that would loop (`anims.loop`) plays once and holds its last frame until the
+    /// next clip, as the 1.2 client starts it (`RepeatLastKey`, flags 0x204): Sunder Earth's `twohand_co_sk_weapon_blunt_3_cast`,
+    /// where Lasso (no `match_animation`) loops `all_co_sk_pull_cast` (0x202; skill parity trace t1i, 2026-11-03).
+    pub match_animation: bool,
 }
 
 impl SkillVisual {
@@ -507,6 +517,8 @@ struct Inner {
     shakes: HashMap<u32, Arc<Vec<ShakeItem>>>,
     extras: HashMap<u32, Extras>,
     projectiles: HashMap<u32, Option<Projectile>>,
+    /// Doodad phase (`doodad_func_groups.id`) -> its clouts with a projectile.
+    clouts: HashMap<u32, Arc<Vec<Clout>>>,
     buffs: HashMap<u32, Option<Arc<BuffLook>>>,
     tools: HashMap<u32, Option<Tool>>,
 }
@@ -538,6 +550,7 @@ impl SkillBook {
             shakes: HashMap::new(),
             extras: HashMap::new(),
             projectiles: HashMap::new(),
+            clouts: HashMap::new(),
             buffs: HashMap::new(),
             tools: HashMap::new(),
         })))
@@ -555,6 +568,11 @@ impl SkillBook {
     /// What a plot step plays; `None` when it has no clip, effect or projectile.
     pub fn plot_event(&self, event_id: u32) -> Option<Arc<PlotVisual>> {
         self.inner().plot_event(event_id)
+    }
+
+    /// The clouts with a projectile of doodad phase `phase` (`doodad_phase_funcs` of that func group), in table order.
+    pub fn doodad_clouts(&self, phase: u32) -> Arc<Vec<Clout>> {
+        self.inner().doodad_clouts(phase)
     }
 
     /// The clip name of an `anims` row (`fire_anim_id` of `SCSkillFired`).
@@ -705,7 +723,9 @@ impl Inner {
     fn anim_rule(&mut self, current: u8, new: u8, progress: f32) -> u8 {
         let rules = self.rules.get_or_insert_with(|| {
             self.conn
-                .prepare("SELECT first_category_id, second_category_id, before, before_operator_id, default_operator_id FROM anim_rules")
+                // in id order: the first matching row wins, and the table's own row order puts the catch-all 25 (any, any:
+                // replace) before 8 (a skill clip turns a hit down), so hits interrupted skill clips
+                .prepare("SELECT first_category_id, second_category_id, before, before_operator_id, default_operator_id FROM anim_rules ORDER BY id")
                 .and_then(|mut q| {
                     q.query_map([], |r| Ok(AnimRule { first: int(r, 0)? as u8, second: int(r, 1)? as u8, before: int(r, 2)? as f32, before_op: int(r, 3)? as u8, default_op: int(r, 4)? as u8 }))
                         .map(|rows| rows.flatten().collect())
@@ -943,16 +963,21 @@ impl Inner {
         look
     }
 
-    /// The projectiles of the clouts of the doodad skill `skill` channels (`channeling_doodad_id`; the clouts of its first phase).
-    fn clout_projectiles(&mut self, skill: u32) -> Vec<Projectile> {
-        let ids: Vec<u32> = self
+    fn doodad_clouts(&mut self, phase: u32) -> Arc<Vec<Clout>> {
+        if let Some(c) = self.clouts.get(&phase) {
+            return c.clone();
+        }
+        let rows: Vec<(u32, u32)> = self
             .conn
             .prepare(
-                "SELECT c.projectile_id FROM skills s JOIN doodad_func_groups g ON g.doodad_almighty_id = s.channeling_doodad_id AND g.doodad_func_group_kind_id = 1                  JOIN doodad_phase_funcs p ON p.doodad_func_group_id = g.id AND p.actual_func_type = 'DoodadFuncClout'                  JOIN doodad_func_clouts c ON c.id = p.actual_func_id WHERE s.id = ?1 AND c.projectile_id IS NOT NULL AND c.projectile_id > 0 ORDER BY p.id",
+                "SELECT c.projectile_id, c.duration FROM doodad_phase_funcs p JOIN doodad_func_clouts c ON c.id = p.actual_func_id                  WHERE p.doodad_func_group_id = ?1 AND p.actual_func_type = 'DoodadFuncClout' AND c.projectile_id > 0 ORDER BY p.id",
             )
-            .and_then(|mut q| q.query_map(params![skill], |r| Ok(int(r, 0)? as u32)).map(|rows| rows.flatten().collect()))
+            .and_then(|mut q| q.query_map(params![phase], |r| Ok((int(r, 0)? as u32, int(r, 1)?.max(0) as u32))).map(|rows| rows.flatten().collect()))
             .unwrap_or_default();
-        ids.into_iter().filter_map(|id| self.projectile(id)).collect()
+        let clouts: Vec<Clout> = rows.into_iter().filter_map(|(id, duration_ms)| Some(Clout { projectile: self.projectile(id)?, duration_ms })).collect();
+        let clouts = Arc::new(clouts);
+        self.clouts.insert(phase, clouts.clone());
+        clouts
     }
 
     fn skill(&mut self, id: u32) -> Option<Arc<SkillVisual>> {
@@ -967,7 +992,7 @@ impl Inner {
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
                         channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
-                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't', active_weapon_id \
+                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't', active_weapon_id, match_animation = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -984,13 +1009,13 @@ impl Inner {
                         CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0, not_swim: int(r, 22).unwrap_or(0) != 0 },
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                         (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
-                        int(r, 23).unwrap_or(0) != 0,
+                        (int(r, 23).unwrap_or(0) != 0, int(r, 25).unwrap_or(0) != 0),
                         int(r, 24).unwrap_or(0).clamp(0, 255) as u8,
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), starts_autoattack, active_weapon)| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), (starts_autoattack, match_animation), active_weapon)| {
             let [start, fire, twohand, dual] = anims;
             let tools = [self.tool(main_tool), self.tool(off_tool)];
             Arc::new(SkillVisual {
@@ -1008,7 +1033,6 @@ impl Inner {
                 levels: self.levels_of(id),
                 extras: self.extras_of(group),
                 projectile: self.projectile(projectile),
-                clout_projectiles: self.clout_projectiles(id),
                 channeling_anim: self.anim(channeling),
                 effect_delay_ms,
                 plot,
@@ -1016,6 +1040,7 @@ impl Inner {
                 channel_ms,
                 starts_autoattack,
                 active_weapon,
+                match_animation,
             })
         });
         self.skills.insert(id, visual.clone());
@@ -1207,6 +1232,29 @@ mod tests {
 
     fn book() -> Option<SkillBook> {
         std::path::Path::new(aa_anim::db::DEFAULT_DB).exists().then(|| SkillBook::open().expect("database"))
+    }
+
+    /// Sunder Earth's effect area doodad 3941 (phase 9521) has one clout with a projectile: 248, `ground_dot_proj` for 7 s. A
+    /// phase without clouts (the doodad's next one) has none.
+    #[test]
+    fn a_doodad_phase_names_its_clouts_projectile() {
+        let Some(book) = book() else { return };
+        let clouts = book.doodad_clouts(9521);
+        assert_eq!(clouts.len(), 1);
+        let c = &clouts[0];
+        assert_eq!((c.projectile.id, c.duration_ms, c.projectile.is_zone()), (248, 7000, true));
+        assert_eq!(c.projectile.items.iter().map(|i| (i.effect.as_str(), i.start)).collect::<Vec<_>>(), [("abillity_skill_table_m.fight.ground_dot_proj", ev::START)]);
+        assert!(Arc::ptr_eq(&clouts, &book.doodad_clouts(9521)), "cached");
+        assert!(book.doodad_clouts(0).is_empty());
+    }
+
+    /// Sunder Earth matches its animation (its cast step's looping clip plays once and holds), Lasso does not (its cast loops).
+    #[test]
+    fn match_animation_is_read_per_skill() {
+        let Some(book) = book() else { return };
+        assert!(book.skill(10644).expect("Sunder Earth").match_animation);
+        assert!(!book.skill(12039).expect("Lasso").match_animation);
+        assert!(book.clip_loops("twohand_co_sk_weapon_blunt_3_cast") && book.clip_loops("all_co_sk_pull_cast"), "both clips loop by anims.loop");
     }
 
     /// Shoot Arrow: cast clip, launch clip, arrow projectile on the left hand, hit effect on the target.

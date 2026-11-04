@@ -30,6 +30,7 @@
 //! Everything is looked up once per skill and cached (`SkillBook`); a frame costs a few comparisons plus the effects in flight.
 
 mod buffs;
+mod clouts;
 mod framehold;
 mod clips;
 mod flash;
@@ -128,6 +129,9 @@ pub enum Act {
     Attack,
     /// A hit reaction (never interrupts the others).
     Hurt,
+    /// A plot step's clip of a `match_animation` skill that would loop: it plays once and holds its last frame until the cast's
+    /// next clip (see [`skills::SkillVisual::match_animation`]).
+    Held,
 }
 
 /// The unit is dead: it plays its death clip once and stays on its last frame until the server removes it.
@@ -191,7 +195,24 @@ struct Flying {
     duration: f32,
     /// The items of the projectile's group that play where it arrives (its hit and end moments: `fireball_hit`).
     arrival: Arc<Vec<FxItem>>,
+    /// An effect area (`proj_physic_id` 3): it stands where it lands, and its effects play out there ([`Settling`]).
+    zone: bool,
 }
+
+/// An effect area that reached its end (`fx_event_end_id` 5): its continuous effects stop emitting, and the anchor goes once
+/// every effect has finished. The bursts play out: the 1.2 client keeps Sunder Earth's rocks (`ground_launch_standalone_stone1`,
+/// a 3 s particle) for their whole life and crumbles them at their `SpawnDelay` of 2.9 s, about 2.7 s after the zone ended
+/// (skill parity trace t1j, 2026-11-03); aa-client cut the anchor 0.6 s after the end and the rocks went with it. Seconds since
+/// the end.
+#[derive(Component, Default)]
+struct Settling(f32);
+
+/// How long an effect area may settle at most, a safety net for an effect that never finishes (out of range, or one whose
+/// library is missing): the longest burst of the player skills' areas, Sunder Earth's crumble, ends 7.1 s after the zone.
+const ZONE_SETTLE_SECS: f32 = 10.0;
+
+/// The least an effect area lives after its end, for the sounds that ride its anchor (the 0.6 s the anchor had before).
+const ZONE_SETTLE_MIN_SECS: f32 = 0.6;
 
 /// A damage packet at the moment its blow lands (a swing at the clip's sync point, a shot after its flight, a plot step as it
 /// comes): what the HUD's floating numbers and combat log show, as in the real client. `received` is the time the combat code took
@@ -699,6 +720,7 @@ pub fn plugin(app: &mut App) {
     app.add_message::<DamageLanded>()
         .add_systems(Update, pass_damage.run_if(not(resource_exists::<SkillBook>)).run_if(super::world_screens))
         .init_resource::<Combat>()
+        .init_resource::<clouts::CloutFx>()
         .init_resource::<framehold::Frameholds>()
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
@@ -718,9 +740,12 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (request_skill, handle_events, tick_combat_idle, cancel_on_move.after(super::player::control_player).in_set(InputCancellation), cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, update_beams, hold_weapons)
+                (request_skill, handle_events, clouts::doodad_clouts, tick_combat_idle, cancel_on_move.after(super::player::control_player).in_set(InputCancellation), cancel_in_water, preempt_cast, retry_cast, run_timers, flush_landed, mark_corpses, ensure_corpses, buffs::reconcile_buffs, end_actions, sheathe, release_layers, fly_projectiles, settle_zones, update_beams, hold_weapons)
                     .chain()
                     .before(super::anim::drive_locomotion)
+                    // the key press of this frame (the HUD's `UseSkill`): the 1.2 client starts the combat idle within the frame of
+                    // the press, where reading it before the HUD wrote it started it a frame later (skill parity trace t1i, 14-21 ms)
+                    .after(super::ground_target::ItemUseRouting)
                     .run_if(resource_exists::<SkillBook>),
                 turn_to_target.before(super::player::control_player),
                 preload::run_preload.run_if(resource_exists::<SkillBook>).run_if(|| !preload::disabled()),
@@ -1016,7 +1041,7 @@ impl Stage<'_, '_> {
             loco.running = (!looping).then(|| self.book.clip_category(name)).flatten().map(|category| RunningAction { category, started: now, length: f64::from(duration) });
         }
         // a hit reaction is a flinch: the start of its clip, then locomotion fades back in
-        let until = now + if looping { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
+        let until = now + if looping || kind == Act::Held { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
         self.commands.entity(unit).insert(Acting { until, layered });
         if let Some(events) = layer_sounds {
             self.commands.entity(unit).insert(LayerSounds::new(events, now));
@@ -1182,8 +1207,10 @@ impl Stage<'_, '_> {
         let (scale, rotation, _) = unit_xf.to_scale_rotation_translation();
         let anchor = match bone.and_then(|b| self.xforms.get(b).ok()) {
             Some(g) => g.translation(),
-            // no bone: at the feet (id 0) or a chest high point (a bone this rig lacks)
-            None => unit_xf.translation() + if item.bone == 0 { Vec3::ZERO } else { Vec3::Y * scale.y },
+            // no bone (id 0, or one this rig lacks): at the unit's origin. The training doll has no `bip01 head`, and the 1.2
+            // client puts Sunder Earth's `ground_dot` (bone 2) on its origin, where `ground_hit` (bone 0) is too (skill parity
+            // trace t1i, 2026-11-03); aa-client had it a metre up
+            None => unit_xf.translation(),
         };
         let offset = cry_to_bevy(item.offset);
         let mut transform = Transform { translation: anchor + rotation * offset * scale.y, rotation, scale: Vec3::splat(scale.y) };
@@ -1491,7 +1518,8 @@ fn start_shakes(st: &Stage, combat: &mut Combat, shakes: &[ShakeItem], moments: 
 /// end of the skill; `hold` is only the safety net for an end that never comes.
 #[allow(clippy::too_many_arguments)]
 fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name: &str, kind: Act, hold: f64, now: f64) -> Option<f32> {
-    let looping = kind == Act::Cast || st.book.clip_loops(name);
+    let looping = kind == Act::Cast || (kind != Act::Held && st.book.clip_loops(name));
+    let held = kind == Act::Held;
     if let Some(played) = repeated_start(combat.casts.get(&tl).and_then(|c| c.last_clip.as_ref()), name, now) {
         return played;
     }
@@ -1506,7 +1534,7 @@ fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name:
     if played.is_some()
         && let Some(cast) = combat.casts.get_mut(&tl)
     {
-        cast.casting = looping;
+        cast.casting = looping || held;
         cast.played = true;
         combat.owner.insert(cast.caster, tl);
     }
@@ -1810,20 +1838,8 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                     let flight = (f64::from(f.delay_ms.max(0)) / 1000.0 - release).max(0.06);
                     combat.after(now + release, Later::Launch { projectile: projectile.clone(), tl: f.tl, caster, target, target_pos, duration: if projectile.is_beam() && f.channeling_ms > 0 { f.channeling_ms as f32 / 1000.0 } else { flight as f32 }, speed: 0.0, hold: f.channeling_ms > 0 });
                 }
-                // the doodad the channel spawns (Protective Wings: doodad 879 at the caster's feet) has clouts with a projectile: an effect
-                // area on the ground under the caster that stands as long as the channel does
-                if verbose() && !visual.clout_projectiles.is_empty() {
-                    info!("combat: skill {} channels a doodad with {} clout projectile(s)", f.skill_id, visual.clout_projectiles.len());
-                }
-                for projectile in &visual.clout_projectiles {
-                    let secs = if f.channeling_ms > 0 { f.channeling_ms as f32 / 1000.0 } else { 2.0 };
-                    if let Some(e) = launch(st, projectile, caster, Some(caster), None, secs, 0.0)
-                        && f.channeling_ms > 0
-                        && let Some(cast) = combat.casts.get_mut(&f.tl)
-                    {
-                        cast.held.push((e, ev::END));
-                    }
-                }
+                // the doodad the channel spawns (Protective Wings: doodad 879 at the caster's feet) shows its clouts' effect area
+                // from the server's `SCDoodadCreated` (`clouts`), like every doodad with clouts
             }
         }
         Event::PlotEvent(p) => {
@@ -1874,7 +1890,8 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 clip_events = events;
                 release = f64::from(events.release().unwrap_or(0.0));
                 let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
-                if play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now).is_some()
+                let held = visual.as_ref().is_some_and(|v| v.match_animation) && st.book.clip_loops(name);
+                if play_clip(st, combat, p.tl, caster, name, if held { Act::Held } else { Act::Attack }, hold, now).is_some()
                     && let Some(v) = &visual
                 {
                     st.set_tools(caster, v);
@@ -2477,7 +2494,7 @@ fn launch(st: &mut Stage, projectile: &Projectile, caster: Entity, target: Optio
         st.commands.entity(anchor).insert(Beam { caster, src_bone, target: target.map(|t| (t, dest_bone)), to_pos: to });
     } else {
         let arrival: Vec<FxItem> = projectile.items.iter().filter(|i| (i.start == ev::HIT || i.start == ev::END) && !i.effect.is_empty() && !i.is_dot()).cloned().collect();
-        st.commands.entity(anchor).insert(Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05), arrival: Arc::new(arrival) });
+        st.commands.entity(anchor).insert(Flying { from, to_unit: target.map(|t| (t, dest_bone)), to_pos: to, elapsed: 0.0, duration: duration.max(0.05), arrival: Arc::new(arrival), zone: projectile.is_zone() });
     }
     for item in projectile.items.iter().filter(|i| i.start <= ev::LAUNCH && !i.is_dot()) {
         // the client moves the items of bone 0, 8 and 9 (the origin and the hands: the launch flash) onto the projectile's source
@@ -2627,7 +2644,36 @@ fn fly_projectiles(
                 ground_effect(&mut commands, item, f.to_pos, Some(f.from), false);
             }
             commands.entity(entity).remove::<Flying>();
-            fx.ttl = fx.ttl.min(0.6);
+            if f.zone {
+                commands.entity(entity).insert(Settling::default());
+                fx.ttl = ZONE_SETTLE_SECS;
+            } else {
+                fx.ttl = fx.ttl.min(0.6);
+            }
+        }
+    }
+}
+
+/// Lets the effect areas that reached their end play out ([`Settling`]): stops their continuous effects and removes the anchor
+/// when nothing of it is left to show.
+fn settle_zones(time: Res<Time>, mut commands: Commands, mut zones: Query<(Entity, &mut Settling, Option<&Children>)>, mut runs: Query<&mut aa_fx::FxRun>) {
+    let dt = time.delta_secs();
+    for (anchor, mut settling, children) in &mut zones {
+        settling.0 += dt;
+        let mut live = false;
+        for child in children.into_iter().flat_map(|c| c.iter()) {
+            let Ok(mut run) = runs.get_mut(child) else { continue };
+            if run.is_missing() || run.is_finished() {
+                continue;
+            }
+            // the end event stops what keeps emitting; a burst still to come (a `SpawnDelay`) comes
+            if run.one_shot() == Some(false) && !run.is_stopped() {
+                run.stop_emitting();
+            }
+            live = true;
+        }
+        if !live && settling.0 >= ZONE_SETTLE_MIN_SECS {
+            commands.entity(anchor).try_despawn();
         }
     }
 }

@@ -1285,8 +1285,9 @@ mod tests {
         skills.native_tag_cooldowns[0].cooldown.total_ms = 0;
         assert_eq!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.map(|(_, total)| total), Some(0));
 
-        // A longer observed cast still wins, with its own DB duration, as before.
-        skills.last_used.insert(7, Instant::now());
+        // A longer observed cast still wins, with its own DB duration, when the received timer is older than the cast's answer
+        // (here 3 s before it); a timer that came with the cast would be its answer and show instead (`cooldown::observed_at`).
+        skills.last_used.insert(7, start + std::time::Duration::from_secs(3));
         assert_eq!(skill_slot(Some(&game), Some(&skills), 7, start).cooldown.map(|(_, total)| total), Some(10_000));
         skills.last_used.clear();
         skills.native_tag_cooldowns[0].reset = true;

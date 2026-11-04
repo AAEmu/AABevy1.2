@@ -119,9 +119,11 @@ pub(super) fn own_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     Some(best)
 }
 
-/// How long before the cast start a received timer still counts as the answer to that cast: the server sends SCCooldowns
-/// with SCSkillStarted, and the two can arrive in either order within a frame or two.
-const ANSWER_WINDOW: Duration = Duration::from_secs(2);
+/// How long before the cast start a received timer still counts as the answer to that cast: the server sends SCCooldowns in
+/// the tick of the cast, and the cast's start is stamped at its first SCSkillStarted / SCSkillFired / SCPlotEvent, which can
+/// come a tick later (Charge: SCCooldowns 60 ms before its first SCPlotEvent, skill parity trace t1i). A timer from before that
+/// (a login snapshot, an earlier cast) is not the answer.
+const ANSWER_WINDOW: Duration = Duration::from_millis(500);
 
 /// Existing cast-start/DB estimate only; never reintroduce the single tag as received membership. A cast the server
 /// answered with SCCooldowns has no estimate: the 1.2 client shows the received value (Tiger Strike 12600 ms, where the
