@@ -669,7 +669,9 @@ All four carry the quest id as the only argument. The original scripts then driv
 `QUEST_TASK_READY` (its report registers that handler on the first open; the task marker's OnClick
 opens the journal or the report). The module tests load the World stage: the real
 `hiddenQuestReport` widget is hidden before `QUEST_HIDDEN_READY`, shown after it, and hidden again
-on `QUEST_HIDDEN_COMPLETE`; `taskQuest.journal` / `taskQuest.report` show for a ready task quest.
+on `QUEST_HIDDEN_COMPLETE`; the task report is created hidden, a PROGRESS->READY transition through
+`sync_quests` raises `QUEST_TASK_READY` and shows it, and the marker's OnClick opens
+`taskQuest.journal`.
 
 The getters these windows read that were still stubs now follow the natives:
 

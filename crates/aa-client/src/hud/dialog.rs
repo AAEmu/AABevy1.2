@@ -3441,16 +3441,41 @@ mod tests {
     fn the_original_task_windows_show_for_a_task_quest() {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
         let Some(rt) = world_runtime(&shared) else { return };
-        shared.borrow_mut().dialog.quests = vec![Quest { template_id: 1959, status: status::READY, component_id: 9790, ..Quest::default() }];
-        // The task marker's OnClick opens the journal, or the report when the task is ready.
-        rt.exec("task-window", "ShowTaskQuestJournal(1959); ShowTaskQuestReport(1959)")
-            .unwrap();
-        let json = rt.dump_json();
-        assert_eq!(dump_shown(&json, "taskQuest.journal"), Some(true));
-        assert_eq!(dump_shown(&json, "taskQuest.report"), Some(true));
-        // QUEST_TASK_READY re-opens the report through the handler the report registered.
-        rt.fire_event("QUEST_TASK_READY", 1959u32);
+        assert_ne!(dump_shown(&rt.dump_json(), "taskQuest.report"), Some(true), "the report starts hidden");
+        let mut app = quest_sync_app(shared.clone(), rt);
+        // 1959 "Gather Firewood" is a task quest; sync_quests sees it in progress first (the first
+        // list raises no events), then ready when the server updates it.
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1959, status: status::PROGRESS, component_id: 9790, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        // The report registers its QUEST_TASK_READY handler when it is first created. Create it
+        // through the script, then hide it again so the event is what shows it.
+        rt.exec(
+            "task-window",
+            r#"
+            ShowTaskQuestReport(1959)
+            for i = 1, 10 do
+              local _, v = debug.getupvalue(ShowTaskQuestReport, i)
+              if type(v) == 'table' and v.report then v.report:Show(false) end
+            end
+            "#,
+        )
+        .unwrap();
+        assert_eq!(dump_shown(&rt.dump_json(), "taskQuest.report"), Some(false));
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1959, status: status::READY, component_id: 9790, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        // QUEST_TASK_READY re-opens the report through the handler it registered.
         assert_eq!(dump_shown(&rt.dump_json(), "taskQuest.report"), Some(true));
+        // The task marker's OnClick still opens the journal.
+        rt.exec("task-window", "ShowTaskQuestJournal(1959)").unwrap();
+        assert_eq!(dump_shown(&rt.dump_json(), "taskQuest.journal"), Some(true));
     }
 
     #[test]
