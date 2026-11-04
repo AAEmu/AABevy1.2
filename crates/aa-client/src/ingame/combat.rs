@@ -33,6 +33,7 @@ mod buffs;
 mod framehold;
 mod clips;
 mod flash;
+mod graph;
 mod preload;
 pub(crate) mod skills;
 mod sweep;
@@ -52,7 +53,7 @@ use aa_world::{TerrainQuery, WaterQuery, cry_to_bevy};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use super::anim::{Locomotion, Motion, bind_action_clip, bind_clip, clip_file};
+use super::anim::{Locomotion, Motion, RunningAction, bind_action_clip, bind_clip, clip_file};
 use super::player::{LocalPlayer, Mover, PlayerInput, approach_angle};
 use super::units::{RemoteDoodad, RemoteUnit};
 use super::camera::CameraShake;
@@ -61,6 +62,11 @@ use super::tools::SkillTool;
 use super::weapons::{Drawn, Out, StaffSide, Wield, holster_clip, hold_weapons, weapon_for_clip};
 use crate::Screen;
 pub(super) use skills::Sfx;
+
+/// The blend of the idle or run that follows an action whose graph exit link is `exit` (see `graph`).
+pub(super) fn idle_blend(exit: f32) -> f32 {
+    graph::ActionGraph::idle_blend(exit)
+}
 use skills::{CancelRules, FxItem, Projectile, ShakeItem, SkillBook, bone_names, ev, src_bone_names};
 
 /// Eligible movement/yaw cast stops have been submitted before a seat exit.
@@ -243,6 +249,8 @@ struct Cast {
     skill: u32,
     caster: u32,
     target: u32,
+    /// The unit the cast was started on (plot unit 2): `target` follows the steps, this stays.
+    plot_target: u32,
     target_pos: Option<Vec3>,
     started: f64,
     fired: Option<f64>,
@@ -266,6 +274,24 @@ struct Cast {
     cancel_sent: bool,
     /// The skill is a plot: the server names its timeline in `plot_tl_id`.
     plot: bool,
+    /// The caster's anim rules turned the fire clip down (an auto attack during a skill clip): its blow shows nothing.
+    rejected: bool,
+    /// The bound effect groups (`FxGroupAnim`) the plot's steps made so far: a clip that a later step plays on a group's source
+    /// fires the events of that clip the group has not had (x2game binds every bound group of the unit when it plays the clip,
+    /// `3938BF20`). Lasso's `당기기_dot`, made by the cast step, waits for the launch of the next step's `all_co_sk_pull_launch`:
+    /// +1153 ms in the original, 28 ms after that clip (skill parity trace, 2026-11-03).
+    bound: Vec<BoundGroup>,
+}
+
+/// A bound effect group of a plot, where it was made, and the fx events it has had.
+#[derive(Clone)]
+struct BoundGroup {
+    group: skills::StepFx,
+    source: Entity,
+    aim: Option<Entity>,
+    ground: Option<Vec3>,
+    /// A bit per fx event id it has had: an event starts its items once.
+    fired: u16,
 }
 
 /// What cancels a running cast: moving (or jumping), turning, the water.
@@ -450,7 +476,7 @@ impl Fake {
         Some(match op {
             "start" => Event::SkillStarted(SkillStarted { skill_id: arg(1), tl, caster, target, cast_ms: arg(2), base_cast_ms: arg(2), synergy: 0, result: 0, result_value: 0, raw_result: Default::default(), raw_caster, raw_target }),
             "fire" => Event::SkillFired(SkillFired { skill_id: arg(1), tl, caster, target, delay_ms: arg(2) as i32, channeling_ms: arg(3) as i32, fire_anim_id: arg(4), raw_final_flag: 0, result: Default::default(), raw_caster, raw_target }),
-            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: if ground.is_some() { 0 } else { other }, caster_pos: None, target_pos: ground, casting_ms: arg(3) }),
+            "plot" => Event::PlotEvent(PlotEvent { tl, event_id: arg(1), skill_id: arg(2), caster_obj_id: me, target_obj_id: if ground.is_some() { 0 } else { other }, caster_pos: None, target_pos: ground, casting_ms: arg(3), targets: if ground.is_some() || other == 0 { Vec::new() } else { vec![other] } }),
             "hit" => Event::UnitDamaged(UnitDamage {
                 action: CastAction { kind: 0, skill_id: arg(1), tl, buff_id: 0 },
                 caster,
@@ -767,7 +793,7 @@ struct Stage<'w, 's> {
     doodads: Query<'w, 's, (Entity, &'static RemoteDoodad)>,
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
-    actors: Query<'w, 's, (&'static mut Animator, Option<&'static Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
+    actors: Query<'w, 's, (&'static mut Animator, Option<&'static mut Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
     asleep: Query<'w, 's, &'static super::units::Asleep>,
     dead: Query<'w, 's, (), With<Dead>>,
     xforms: Query<'w, 's, &'static GlobalTransform>,
@@ -924,7 +950,7 @@ impl Stage<'_, '_> {
     /// unit cannot (no such clip, dead, busy with something a hit reaction must not interrupt).
     fn play(&mut self, unit: Entity, name: &str, kind: Act, looping: bool, hold: f64, now: f64) -> Option<f32> {
         // a unit on the move plays the clip on its upper body and keeps running below it
-        let mask = {
+        let (mask, exit) = {
             let (_, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
             // a hit reaction never interrupts an action or a run
             if dead || loco.is_none() || (kind == Act::Hurt && (acting.is_some() || motion.is_some_and(|m| m.speed > 0.3))) {
@@ -934,7 +960,9 @@ impl Stage<'_, '_> {
                 return None;
             }
             let moving = kind != Act::Hurt && !full_body_only() && motion.is_some_and(|m| m.speed > 0.3);
-            loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone())
+            // the exit link of the action the whole body is still in (0 from an idle or a run)
+            let exit = acting.filter(|a| !a.layered && a.until > now).and(loco.as_ref().and_then(|l| l.action_exit)).unwrap_or(0.0);
+            (loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone()), exit)
         };
         // a stop marker (`all_ac_stop`, the clip of a skill that only ends what the unit is doing) releases the unit
         if skills::is_stop_clip(name) {
@@ -947,6 +975,12 @@ impl Stage<'_, '_> {
             return None;
         }
         if !self.actors.get(unit).ok()?.0.starts_enabled() { return None; }
+        if self.rejects(unit, name, now) {
+            if verbose() {
+                info!("combat: [{now:.3}] {unit:?} turns {name} down: a skill clip plays (anim_rules)");
+            }
+            return None;
+        }
         let layered = mask.is_some();
         let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
         let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
@@ -960,14 +994,22 @@ impl Stage<'_, '_> {
         self.commands.entity(unit).try_remove::<SkillTool>();
         // the sounds of a clip on the upper body are the combat code's: the animator has it as a layer
         let layer_sounds = if layered { self.layer_sounds(unit, &clip) } else { None };
-        let (mut animator, ..) = self.actors.get_mut(unit).ok()?;
+        let (mut animator, mut loco, ..) = self.actors.get_mut(unit).ok()?;
         if let Some(mask) = mask {
-            animator.play_layer(mask, clip, looping, 0.1);
+            animator.play_layer(mask, clip, looping, graph::UPPER_BODY_BLEND);
         } else {
+            // the blend the 1.2 animation graph walks to the clip's state (see `graph`); 0.08 for a clip it does not know
+            let graph = graph::ActionGraph::get();
             animator.stop_layer(0.0);
-            animator.play(clip, looping, 0.08);
+            animator.play(clip, looping, graph.action_blend(exit, name).unwrap_or(0.08));
             animator.speed = 1.0;
             animator.random_idle = None;
+            if let Some(loco) = loco.as_mut() {
+                loco.action_exit = graph.knows(name).then(|| graph.exit(name));
+            }
+        }
+        if let Some(mut loco) = loco {
+            loco.running = (!looping).then(|| self.book.clip_category(name)).flatten().map(|category| RunningAction { category, started: now, length: f64::from(duration) });
         }
         // a hit reaction is a flinch: the start of its clip, then locomotion fades back in
         let until = now + if looping { hold } else if kind == Act::Hurt { f64::from(duration).min(0.5) } else { f64::from(duration).min(4.0) };
@@ -986,6 +1028,19 @@ impl Stage<'_, '_> {
             info!("combat: [{now:.3}] {name} on {unit:?} ({kind:?}, {duration:.2} s{})", if layered { ", upper body" } else { "" });
         }
         Some(duration)
+    }
+
+    /// x2game's `anim_rules` (`39153EF0`, `39157680`) turn clip `name` down on the unit: the one-shot it plays answers op 5 to the
+    /// new clip's category. A skill clip (4) rejects an auto attack (1), a hit (8) and a reaction (3); an attack rejects a hit in its
+    /// first 30 %. The rejected clip plays nothing, and nothing of its anim events (skill parity trace, 2026-11-03: the auto attack
+    /// the server fires at +2253 during Triple Slash's finisher shows no clip, swing, voice, trail or blow; the finisher plays to its
+    /// end). The loops (cast 6, crowd control 11) are x2game's other list, which aa-client does not keep apart: not judged here.
+    fn rejects(&self, unit: Entity, name: &str, now: f64) -> bool {
+        let Ok((_, Some(loco), Some(_), ..)) = self.actors.get(unit) else { return false };
+        let Some(run) = loco.running.filter(|r| now < r.started + r.length && !matches!(r.category, 6 | 11)) else { return false };
+        let Some(new) = self.book.clip_category(name) else { return false };
+        let progress = ((now - run.started) / run.length.max(1e-3) * 100.0) as f32;
+        self.book.anim_rule(run.category, new, progress) == 5
     }
 
     /// Starts one item of an effect group on a unit: a particle effect (with the sound it carries), or a sound (a voice is the unit's
@@ -1201,7 +1256,7 @@ impl Combat {
         if self.casts.len() > 256 {
             self.casts.retain(|_, c| now - c.started < 20.0);
         }
-        self.casts.entry(tl).or_insert_with(|| Cast { skill, caster, target, started: now, ..Cast::default() })
+        self.casts.entry(tl).or_insert_with(|| Cast { skill, caster, target, plot_target: target, started: now, ..Cast::default() })
     }
 }
 
@@ -1213,14 +1268,148 @@ fn early_moments(events: &clips::ClipEvents) -> [(u8, f64); 3] {
     [(ev::START, 0.0), (ev::FORM, f64::from(events.form.unwrap_or(0.0))), (ev::THROW, f64::from(events.throw.unwrap_or(0.0)))]
 }
 
-/// Starts the items of `moments` of a cast now, or `delay` seconds from now.
+/// The units a plot step's effects can name ([`skills::plot_unit`]).
+struct StepUnits {
+    /// 1: the plot's caster, 2: the unit the plot was started on (when drawn).
+    plot_caster: Option<Entity>,
+    plot_target: Option<Entity>,
+    /// 3: the step's source, the packet's caster.
+    source: Entity,
+    /// 4: the units of the packet's list that are drawn.
+    listed: Vec<Entity>,
+}
+
+impl StepUnits {
+    fn of(&self, id: u8, unit: Option<Entity>) -> Option<Entity> {
+        match id {
+            skills::plot_unit::CASTER => self.plot_caster,
+            skills::plot_unit::PLOT_TARGET => self.plot_target,
+            skills::plot_unit::SOURCE => Some(self.source),
+            skills::plot_unit::EACH => unit,
+            // 5 is a spot: the caller takes the step's target position
+            skills::plot_unit::SPOT => None,
+            _ => None,
+        }
+    }
+}
+
+/// When a group's events fire, in seconds after the step: `(event, at, skip_short)` for [`start_items`].
+///
+/// A bound group (`FxGroupAnim`) whose source plays the step's clip gets `start` at once and `form`, `throw`, `launch` and
+/// `voice_launch` at those anim events of the clip, and only the ones the clip has: x2game fires an fx event from an anim event of
+/// the bound clip only (`3938C040`), so a clip without one never starts the items that wait for it (Sunder Earth's
+/// `twohand_co_sk_weapon_blunt_3_cast` has no events: its `대지가르기_launch` never shows during the cast, where aa-client started
+/// it at once). A bound group on another unit has no clip: `start` only.
+///
+/// A free group (`FxGroup`) fires `start` and the one event of its `value2` at once (`3938DF10`): Charge's hit (`dash_hit` on the
+/// struck unit, event 4) as the step comes. A step with a projectile also sends `launch` to its groups at the release (the
+/// projectile's own launch list, `3938BA40`).
+fn group_moments(group: &skills::StepFx, clip: Option<&clips::ClipEvents>, launch: Option<f64>) -> Vec<(u8, f64, bool)> {
+    let mut out = vec![(ev::START, 0.0, true)];
+    if group.bound {
+        if let Some(events) = clip {
+            for (moment, at, short) in [(ev::FORM, events.form, true), (ev::THROW, events.throw, true), (ev::LAUNCH, events.launch, false), (ev::VOICE, events.voice, false)] {
+                if let Some(at) = at {
+                    out.push((moment, f64::from(at), short));
+                }
+            }
+        }
+    } else if group.fire != ev::START {
+        out.push((group.fire, 0.0, false));
+    }
+    if let Some(at) = launch
+        && !out.iter().any(|(m, ..)| *m == ev::LAUNCH)
+    {
+        out.push((ev::LAUNCH, at, false));
+    }
+    out
+}
+
+/// Starts the effect groups of a plot step where their plot source and target say (x2game `ClientPlotMan::PlayEvent`,
+/// `3938F100`): a group naming unit 4 plays once per unit of the packet's list, none when the list is empty (Whirlwind Slash's
+/// `회오리베기` swirl and Sunder Earth's launch group with the self-centred steps, which list nobody), on the listed unit when it
+/// is the source (Lasso's `염동력_dot` on the pulled target). Items with `on_target` go on the group's target, the rest on its
+/// source. Returns what waits for the damage: the hit items of the bound groups that were made (of every group made, when the
+/// step has a projectile), which play when the blow lands (`clip_unit` is the unit that plays the step's clip).
 #[allow(clippy::too_many_arguments)]
-fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], moments: &[u8], caster: Entity, target: Option<Entity>, ground: Option<Vec3>, now: f64, delay: f64, skip_short: bool) {
+fn start_step_groups(
+    st: &mut Stage,
+    combat: &mut Combat,
+    tl: u16,
+    groups: &[skills::StepFx],
+    units: &StepUnits,
+    clip_unit: Option<Entity>,
+    clip_events: &clips::ClipEvents,
+    projectile_launch: Option<f64>,
+    target_pos: Option<Vec3>,
+    now: f64,
+) -> (Vec<FxItem>, Vec<ShakeItem>) {
+    // the bound groups of earlier steps on the unit that plays this step's clip: the clip's events they have not had
+    if let Some(unit) = clip_unit {
+        let earlier: Vec<(usize, BoundGroup)> =
+            combat.casts.get(&tl).map(|c| c.bound.iter().cloned().enumerate().filter(|(_, b)| b.source == unit).collect()).unwrap_or_default();
+        for (index, mut bound) in earlier {
+            if bound.fired & (1 << ev::FORM) == 0 {
+                start_swings(st, combat, tl, &bound.group.fx, bound.source, bound.aim, now, clip_events);
+            }
+            for (moment, at, short) in group_moments(&bound.group, Some(clip_events), None) {
+                if bound.fired & (1 << moment) != 0 {
+                    continue;
+                }
+                bound.fired |= 1 << moment;
+                start_items(st, combat, tl, &bound.group.fx, &[moment], bound.source, bound.aim, bound.ground, now, at, short, true);
+                start_shakes(st, combat, &bound.group.shakes, &[moment], bound.source, bound.aim, now, at);
+            }
+            if let Some(slot) = combat.casts.get_mut(&tl).and_then(|c| c.bound.get_mut(index)) {
+                slot.fired = bound.fired;
+            }
+        }
+    }
+    let mut hit_fx: Vec<FxItem> = Vec::new();
+    let mut hit_shakes: Vec<ShakeItem> = Vec::new();
+    for group in groups {
+        let each: Vec<Option<Entity>> = if group.per_unit() { units.listed.iter().copied().map(Some).collect() } else { vec![None] };
+        let mut made = false;
+        for unit in each {
+            let Some(source) = units.of(group.source, unit) else { continue };
+            let aim = units.of(group.target, unit);
+            // the step's spot (unit 5), or the spot of a ground target when the target unit is not drawn
+            let ground = if aim.is_none() { target_pos } else { None };
+            made = true;
+            let clip = (group.bound && clip_unit == Some(source)).then_some(clip_events);
+            if clip.is_some() {
+                start_swings(st, combat, tl, &group.fx, source, aim, now, clip_events);
+            }
+            let mut fired = 0u16;
+            for (moment, at, short) in group_moments(group, clip, projectile_launch) {
+                fired |= 1 << moment;
+                start_items(st, combat, tl, &group.fx, &[moment], source, aim, ground, now, at, short, true);
+                start_shakes(st, combat, &group.shakes, &[moment], source, aim, now, at);
+            }
+            if group.bound
+                && let Some(cast) = combat.casts.get_mut(&tl)
+            {
+                cast.bound.push(BoundGroup { group: group.clone(), source, aim, ground, fired });
+            }
+        }
+        if made && (group.bound || projectile_launch.is_some()) {
+            hit_fx.extend(group.fx.iter().cloned());
+            hit_shakes.extend(group.shakes.iter().copied());
+        }
+    }
+    (hit_fx, hit_shakes)
+}
+
+/// Starts the items of `moments` of a cast now, or `delay` seconds from now. `dots`: the items of a plot step's group play even when
+/// they look like a buff's (`_dot`): Lasso's `염동력_dot` (psychokinesis) on the pulled unit and its `당기기_dot` are plot effects
+/// (its buff 3687 has no group), and the original shows both (skill parity trace, 2026-11-03).
+#[allow(clippy::too_many_arguments)]
+fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], moments: &[u8], caster: Entity, target: Option<Entity>, ground: Option<Vec3>, now: f64, delay: f64, skip_short: bool, dots: bool) {
     let toward_caster = st.xforms.get(caster).ok().map(|g| g.translation());
     let toward_target = target.and_then(|t| st.xforms.get(t).ok()).map(|g| g.translation());
     for item in items.iter().filter(|i| moments.contains(&i.start)) {
-        // buff visuals (damage over time, auras) belong to the buff, not to the skill
-        if item.is_dot() {
+        // buff visuals (damage over time, auras) belong to the buff, not to the skill's own group
+        if !dots && item.is_dot() {
             continue;
         }
         // an instant skill never shows what only lives until it fires
@@ -1482,7 +1671,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 }
                 face(st, caster, target, target_pos, now);
                 if !visual.plot {
-                    start_items(st, combat, s.tl, &look.fx, &[ev::START, ev::FORM], caster, target, target_pos, now, 0.0, false);
+                    start_items(st, combat, s.tl, &look.fx, &[ev::START, ev::FORM], caster, target, target_pos, now, 0.0, false, false);
                     start_shakes(&st, combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
                 }
             }
@@ -1533,6 +1722,17 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 })
                 // a dash or a leap has nothing but its controller's clip
                 .or_else(|| if idle { visual.controller_anim.clone() } else { None });
+            // a clip the caster's anim rules turn down (an auto attack while a skill clip plays) shows nothing of the attack
+            if name.as_ref().is_some_and(|n| st.rejects(caster, n, now)) {
+                let cast = combat.casts.get_mut(&f.tl).unwrap();
+                cast.rejected = true;
+                cast.hit_fx = Arc::default();
+                cast.hit_shakes = Arc::default();
+                if verbose() {
+                    info!("combat: [{now:.3}] skill {} fires during a skill clip: its clip, effects and blow are turned down", f.skill_id);
+                }
+                return;
+            }
             let mut release = 0.0;
             let mut voice = 0.0;
             let mut played = false;
@@ -1562,16 +1762,16 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 // an instant skill has not shown its start and form effects yet
                 let [(_, at_start), (_, at_form), (_, at_throw)] = early_moments(&clip_events);
                 if fresh {
-                    start_items(st, combat, f.tl, &look.fx, &[ev::START], caster, target, target_pos, now, at_start, true);
-                    start_items(st, combat, f.tl, &look.fx, &[ev::FORM], caster, target, target_pos, now, at_form, true);
+                    start_items(st, combat, f.tl, &look.fx, &[ev::START], caster, target, target_pos, now, at_start, true, false);
+                    start_items(st, combat, f.tl, &look.fx, &[ev::FORM], caster, target, target_pos, now, at_form, true, false);
                     start_shakes(&st, combat, &look.shakes, &[ev::START], caster, target, now, at_start);
                     start_shakes(&st, combat, &look.shakes, &[ev::FORM], caster, target, now, at_form);
                 }
                 start_swings(st, combat, f.tl, &look.fx, caster, target, now, &clip_events);
-                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, target_pos, now, at_throw, false);
-                start_items(st, combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, target_pos, now, at_throw, false, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false, false);
                 // the voice line at the moment the clip calls it
-                start_items(st, combat, f.tl, &look.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false, false);
                 start_shakes(&st, combat, &look.shakes, &[ev::THROW], caster, target, now, at_throw);
                 start_shakes(&st, combat, &look.shakes, &[ev::LAUNCH], caster, target, now, release);
                 if let Some(projectile) = &look.projectile {
@@ -1637,13 +1837,11 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             let idle = !combat.casts.get(&p.tl).is_some_and(|c| c.played);
             let clip = step.as_ref().and_then(|s| s.clip().cloned()).or_else(|| if idle { visual.as_ref().and_then(|v| v.controller_anim.clone()) } else { None });
             let mut release = 0.0;
-            let mut voice = 0.0;
             let mut clip_events = clips::ClipEvents::default();
             if let Some(name) = &clip {
                 let events = st.events(caster, name);
                 clip_events = events;
                 release = f64::from(events.release().unwrap_or(0.0));
-                voice = f64::from(events.voice_time().unwrap_or(0.0));
                 let hold = if p.casting_ms > 0 { f64::from(p.casting_ms) / 1000.0 + 1.0 } else { 20.0 };
                 if play_clip(st, combat, p.tl, caster, name, Act::Attack, hold, now).is_some()
                     && let Some(v) = &visual
@@ -1654,19 +1852,21 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
             let Some(step) = step else { return };
             face(st, caster, target, target_pos, now);
-            if !step.fx.is_empty() {
+            if !step.groups.is_empty() {
+                let (plot_caster, plot_target) = combat.casts.get(&p.tl).map(|c| (c.caster, c.plot_target)).unwrap_or((p.caster_obj_id, p.target_obj_id));
+                let units = StepUnits {
+                    plot_caster: st.caster_entity(plot_caster),
+                    plot_target: st.entity(plot_target),
+                    source: caster,
+                    listed: p.targets.iter().filter_map(|&id| st.entity(id)).collect(),
+                };
+                // only an anim effect's clip drives the bound groups (not a dash's controller clip, not the skill's own)
+                let clip_unit = (step.clip().is_some() && !step.controller).then_some(caster);
+                let (hit_fx, hit_shakes) = start_step_groups(st, combat, p.tl, &step.groups, &units, clip_unit, &clip_events, step.projectile.is_some().then_some(release), target_pos, now);
                 let cast = combat.casts.get_mut(&p.tl).unwrap();
-                cast.hit_fx = step.fx.clone();
-                cast.hit_shakes = step.shakes.clone();
+                cast.hit_fx = Arc::new(hit_fx);
+                cast.hit_shakes = Arc::new(hit_shakes);
             }
-            start_swings(st, combat, p.tl, &step.fx, caster, target, now, &clip_events);
-            for (moment, at) in early_moments(&clip_events) {
-                start_items(st, combat, p.tl, &step.fx, &[moment], caster, target, target_pos, now, at, true);
-                start_shakes(&st, combat, &step.shakes, &[moment], caster, target, now, at);
-            }
-            start_items(st, combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
-            start_items(st, combat, p.tl, &step.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
-            start_shakes(&st, combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
             if let Some(projectile) = &step.projectile {
                 start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
                 // a beam lives as long as the step's `ProjectileAnim` says (the channel); a flight takes the time its speed needs
@@ -1747,7 +1947,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             .max(now);
             // Native weapon audio requires a known cast. Preserve the received attack
             // holdable / packed hit until impact; hurt FX and audio admission are separate.
-            let sound = cast.map(|_| d.clone());
+            let sound = cast.filter(|c| !c.rejected).map(|_| d.clone());
             let hurt = (!missed).then_some(if hit_type::is_critical(d.hit_type) { "all_re_combat_critical" } else { "all_re_combat_hit" });
             if let Some(attacker) = caster.filter(|c| *c != target) {
                 combat.last_attacker.insert(d.target_obj_id, attacker);
@@ -1893,8 +2093,12 @@ fn request_skill(time: Res<Time>, mut requests: MessageReader<NetCommand>, mut s
         // `FUN_39390f80` is the local player's request path, and both callers pass skill 2 (`DAT_39ac769c`): it draws the
         // weapon and sets `+0x5fc5` (`FUN_39354610`). Its `+0x158` / `+0x5fc6` branch for another skill is unreachable in 1.2
         // (the click attack `FUN_393923c0` passes `DAT_39ac3874` = 2 too). If the derived idle is already set
-        // (`FUN_39354600`), the deadline is only refreshed (`FUN_393545e0`) and no pulse starts.
-        if *skill_id == MELEE_ATTACK {
+        // (`FUN_39354600`), the deadline is only refreshed (`FUN_393545e0`) and no pulse starts. A skill that turns the auto
+        // attack on (`skills.start_autoattack`) aimed at another unit takes that path too: the 1.2 client restarts
+        // `twohand_ba_combat_idle` at the key press of Triple Slash and Precision Strike from the relaxed stance, before the
+        // server answers (skill parity trace, 2026-11-03). Frenzy, a self buff with the flag, does not.
+        let on_other = st.entity(*target_obj_id).is_some_and(|t| t != me);
+        if *skill_id == MELEE_ATTACK || (on_other && st.book.skill(*skill_id).is_some_and(|v| v.starts_autoattack)) {
             st.commands.queue(move |w: &mut World| {
                 if let Some(mut idle) = w.get_mut::<CombatIdle>(me) {
                     idle.last = now;
@@ -2642,6 +2846,42 @@ mod tests {
     const SKELETON: &str = "objects/characters/nuian/male/nude/nu_m_base.chr";
     const CAL: &str = "objects/characters/nuian/male/nude/nu_m_base.cal";
 
+    fn group(bound: bool, fire: u8) -> skills::StepFx {
+        skills::StepFx { bound, source: skills::plot_unit::CASTER, target: skills::plot_unit::EACH, fire, fx: Arc::default(), shakes: Arc::default() }
+    }
+
+    /// A bound group gets `start` at once and only the anim events its clip has (seconds into the clip); without a clip, `start`
+    /// only. A free group fires `start` and its one event at once. A projectile's release sends `launch` to both.
+    #[test]
+    fn group_moments_follow_the_clip_or_the_free_event() {
+        let triple = clips::ClipEvents { form: Some(0.24), throw: Some(0.73), launch: Some(0.30), combat_sync: Some(0.30), voice: Some(0.19), aw_none: None };
+        let moments = |g: &skills::StepFx, clip: Option<&clips::ClipEvents>, launch| -> Vec<(u8, f64)> {
+            group_moments(g, clip, launch).into_iter().map(|(m, at, _)| (m, (at * 100.0).round() / 100.0)).collect()
+        };
+        assert_eq!(moments(&group(true, 0), Some(&triple), None), [(ev::START, 0.0), (ev::FORM, 0.24), (ev::THROW, 0.73), (ev::LAUNCH, 0.3), (ev::VOICE, 0.19)]);
+        // Sunder Earth's cast clip has no events: its launch group shows only its start items
+        assert_eq!(moments(&group(true, 0), Some(&clips::ClipEvents::default()), None), [(ev::START, 0.0)]);
+        assert_eq!(moments(&group(true, 0), None, None), [(ev::START, 0.0)]);
+        // Charge's blow: hit at once
+        assert_eq!(moments(&group(false, ev::HIT), Some(&triple), None), [(ev::START, 0.0), (ev::HIT, 0.0)]);
+        assert_eq!(moments(&group(false, 0), None, Some(0.4)), [(ev::START, 0.0), (ev::LAUNCH, 0.4)]);
+        assert_eq!(moments(&group(true, 0), Some(&triple), Some(0.4)).iter().filter(|(m, _)| *m == ev::LAUNCH).count(), 1, "one launch");
+    }
+
+    /// Unit 4 is each listed unit (none without a list); 1 and 2 are the plot's caster and target, 3 the step's source, 5 none.
+    #[test]
+    fn step_units_name_the_plot_and_the_listed_units() {
+        let mut world = World::new();
+        let [me, plot_target, listed] = [(); 3].map(|_| world.spawn_empty().id());
+        let units = StepUnits { plot_caster: Some(me), plot_target: Some(plot_target), source: me, listed: vec![listed] };
+        assert_eq!(units.of(skills::plot_unit::CASTER, None), Some(me));
+        assert_eq!(units.of(skills::plot_unit::PLOT_TARGET, None), Some(plot_target));
+        assert_eq!(units.of(skills::plot_unit::SOURCE, None), Some(me));
+        assert_eq!(units.of(skills::plot_unit::EACH, Some(listed)), Some(listed));
+        assert_eq!(units.of(skills::plot_unit::EACH, None), None);
+        assert_eq!(units.of(skills::plot_unit::SPOT, Some(listed)), None);
+    }
+
     #[test]
     fn scheduled_weapon_sound_keeps_each_received_context() {
         let book = SkillBook::open().expect("read-only game catalog");
@@ -2957,9 +3197,9 @@ mod tests {
         assert!((idle.last - 5.0).abs() < 1e-6, "the clear does not refresh the deadline ({idle:?})");
     }
 
-    /// The request path pulses the combat idle for the local player's auto attack only: `FUN_39390f80`'s only callers pass
-    /// skill 2 (`DAT_39ac769c`; the click attack passes `DAT_39ac3874` = 2), so its `+0x158` / `+0x5fc6` branch never runs in
-    /// 1.2. A `start_autoattack` self-buff (Frenzy 10455) starts no combat idle.
+    /// The request path pulses the combat idle for the local player's auto attack: `FUN_39390f80`'s callers pass skill 2
+    /// (`DAT_39ac769c`; the click attack passes `DAT_39ac3874` = 2), and so does a `start_autoattack` skill aimed at another unit
+    /// (the 1.2 client's combat idle at the press of Triple Slash). A `start_autoattack` self-buff (Frenzy 10455) starts none.
     #[test]
     fn only_the_auto_attack_request_pulses_the_combat_idle() {
         let Some(book) = SkillBook::open() else { return };
@@ -2982,11 +3222,23 @@ mod tests {
         schedule.run(&mut world);
         let idle = *world.get::<CombatIdle>(me).expect("the auto attack request pulses the idle");
         assert!(idle.pulse_until > idle.last, "it is the +0x5fc5 pulse ({idle:?})");
-        // Frenzy 10455 has start_autoattack 't', but no 1.2 caller passes it to FUN_39390f80: no pulse
+        // Frenzy 10455 has start_autoattack 't', but it is a self buff: no pulse
         world.entity_mut(me).remove::<CombatIdle>();
         world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 10455, target_obj_id: 0 }));
         schedule.run(&mut world);
         assert!(world.get::<CombatIdle>(me).is_none(), "a start_autoattack self-buff does not enter the combat idle");
+        // Triple Slash 18132 (start_autoattack) on another unit enters it at the press, as the 1.2 client does
+        let mut doll = crate::hud::fixture_spawn().unit;
+        doll.obj_id = 40;
+        world.spawn((super::super::units::RemoteUnit::announced(&doll), GlobalTransform::default()));
+        world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 18132, target_obj_id: 40 }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(me).is_some(), "a start_autoattack skill on another unit enters the combat idle at the press");
+        // a skill without the flag does not (Tiger Strike 13315)
+        world.entity_mut(me).remove::<CombatIdle>();
+        world.resource_mut::<Messages<NetCommand>>().write(NetCommand(Command::UseSkill { skill_id: 13315, target_obj_id: 40 }));
+        schedule.run(&mut world);
+        assert!(world.get::<CombatIdle>(me).is_none(), "Tiger Strike does not turn the auto attack on");
     }
 
     /// `FUN_39391670` needs a real blow: a miss or a zero sets no battle flag, and a dead unit is left out.

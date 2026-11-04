@@ -889,6 +889,7 @@ mod tests {
             caster_pos: None,
             target_pos: None,
             casting_ms: 800,
+            targets: Vec::new(),
         });
         assert!(s.apply(&plot));
         assert_eq!(s.casting_of(5).unwrap().cast_ms, 800);
@@ -906,6 +907,7 @@ mod tests {
                 caster_pos: None,
                 target_pos: None,
                 casting_ms,
+                targets: Vec::new(),
             })
         };
         assert!(s.apply(&step(12, 0)));
@@ -922,7 +924,7 @@ mod tests {
         let mut s = skills();
         s.set_plot_gcd_catalog([(12148, 2000)].into());
         let step = |event_id, caster_obj_id| {
-            Event::PlotEvent(PlotEvent { tl: 7, event_id, skill_id: 18132, caster_obj_id, target_obj_id: 9, caster_pos: None, target_pos: None, casting_ms: 0 })
+            Event::PlotEvent(PlotEvent { tl: 7, event_id, skill_id: 18132, caster_obj_id, target_obj_id: 9, caster_pos: None, target_pos: None, casting_ms: 0, targets: Vec::new() })
         };
         assert!(s.apply(&step(12129, 5)), "the first step starts the plot");
         assert!(s.plot_gcd.is_none());

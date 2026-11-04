@@ -383,6 +383,7 @@ mod tests {
             caster_pos: None,
             target_pos: None,
             casting_ms: 10,
+            targets: Vec::new(),
         }));
         state.apply(&Event::PlotStopped {
             tl: 4,

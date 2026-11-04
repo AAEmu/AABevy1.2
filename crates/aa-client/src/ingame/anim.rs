@@ -379,11 +379,24 @@ pub struct Locomotion {
     stance: Option<Stance>,
     /// A climb clip is playing; leaving the ladder invalidates the state once.
     pub(super) on_climb: bool,
+    /// The exit link of the action that last played on the whole body (the animation graph's `X_anim -> Skill End`, see
+    /// `combat::graph`), until locomotion takes over: the idle or run after it blends that long (0.3 s after a shout).
+    pub action_exit: Option<f32>,
+    /// The one-shot action clip the unit plays, for x2game's `anim_rules` (see `combat`).
+    pub running: Option<RunningAction>,
+}
+
+/// A one-shot action clip as x2game's anim queue keeps it: its `anims` category, when it started and how long it lasts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunningAction {
+    pub category: u8,
+    pub started: f64,
+    pub length: f64,
 }
 
 impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
-        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false }
+        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false, action_exit: None, running: None }
     }
 
     /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
@@ -553,8 +566,10 @@ pub fn drive_locomotion(
                     combat_run.or(sprint_run).or_else(|| primary[d].clone()).or_else(|| secondary[d].clone()).or_else(|| primary[0].clone()).or_else(|| secondary[0].clone())
                 }
             };
+            // after an action, the graph's walk out of it (its exit link, else the idle's own 0.2); between idles and runs 0.15
+            let blend = loco.action_exit.take().map(super::combat::idle_blend).unwrap_or(0.15);
             if let Some(clip) = clip {
-                animator.play(clip, true, 0.15);
+                animator.play(clip, true, blend);
                 animator.random_idle = None;
             }
             loco.state = wanted;

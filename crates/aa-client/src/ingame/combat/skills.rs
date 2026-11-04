@@ -289,6 +289,8 @@ pub struct SkillVisual {
     /// `skills.casting_time` / `channeling_time` (ms): what the dev sweep (`AA_COMBAT_SWEEP`) plays the skill with.
     pub cast_ms: u32,
     pub channel_ms: u32,
+    /// `skills.start_autoattack`: the skill turns the auto attack on.
+    pub starts_autoattack: bool,
 }
 
 impl SkillVisual {
@@ -335,6 +337,44 @@ impl SkillVisual {
     }
 }
 
+/// Who a plot step's effect acts from and on (`plot_effects.source_id` / `target_id`, x2game `3938E6B0`).
+pub mod plot_unit {
+    /// The plot's caster.
+    pub const CASTER: u8 = 1;
+    /// The plot's target.
+    pub const PLOT_TARGET: u8 = 2;
+    /// The step's source (the packet's caster).
+    pub const SOURCE: u8 = 3;
+    /// Each unit the packet lists (`SCPlotEvent` targets): the effect plays once per unit, and not at all without one.
+    pub const EACH: u8 = 4;
+    /// The step's target spot, no unit.
+    pub const SPOT: u8 = 5;
+}
+
+/// An effect group of a plot step (`special_effects` 35 `FxGroup` / 36 `FxGroupAnim`) and where it goes. The group is made when the
+/// step arrives and fires its `start` items; what else starts depends on the kind (x2game `3938DF10` / `3938DF90`, `393ED520`):
+/// a bound group (36) follows the anim events of its source's clip (form, throw, launch, hit, voice: only the ones the clip has),
+/// a free group (35) fires the one event `fire` at once. Both end with the plot.
+#[derive(Clone, Debug)]
+pub struct StepFx {
+    /// 36: the group follows the clip of its source.
+    pub bound: bool,
+    /// [`plot_unit`] of the unit the group sits on and of the unit it aims at (where `on_target` items go).
+    pub source: u8,
+    pub target: u8,
+    /// `special_effects.value2` of a free group: the [`ev`] it fires at once (0: only `start`).
+    pub fire: u8,
+    pub fx: Arc<Vec<FxItem>>,
+    pub shakes: Arc<Vec<ShakeItem>>,
+}
+
+impl StepFx {
+    /// The group plays once per unit of the packet's list.
+    pub fn per_unit(&self) -> bool {
+        self.source == plot_unit::EACH || self.target == plot_unit::EACH
+    }
+}
+
 /// What one step of a plot does (`SCPlotEvent::event_id`).
 #[derive(Clone, Debug, Default)]
 pub struct PlotVisual {
@@ -342,9 +382,12 @@ pub struct PlotVisual {
     pub anim: Option<Arc<str>>,
     /// Every anim of the step, in order (most steps with two start with a stop).
     pub anims: Vec<Arc<str>>,
+    /// Every item of the step's effect groups (see [`PlotVisual::groups`] for where each goes).
     pub fx: Arc<Vec<FxItem>>,
     /// The camera shakes of the step's effect groups.
     pub shakes: Arc<Vec<ShakeItem>>,
+    /// The step's effect groups in order, with their source and target.
+    pub groups: Vec<StepFx>,
     pub extras: Extras,
     pub projectile: Option<Projectile>,
     /// `special_effects.value3` of the step's projectile effect: its speed (m/s; 0 = the default flight time).
@@ -352,6 +395,9 @@ pub struct PlotVisual {
     /// `special_effects.value2` of the step's projectile effect (`ProjectileAnim`): how long a beam lives, in ms (Lasso 700, Crippling
     /// Mire 4500, Absorb Lifeforce 6500; 0 for Arc Lightning and Mana Force, whose effects play out by themselves).
     pub projectile_ms: u32,
+    /// [`PlotVisual::anim`] is the clip of the step's `SkillController` (a dash), not an anim effect: it moves the caster but drives
+    /// no effect group. The original plays no `voice_launch` of Charge's group 1496 although `all_co_sk_dashattack` has the event.
+    pub controller: bool,
 }
 
 impl PlotVisual {
@@ -405,6 +451,26 @@ impl BuffLook {
     }
 }
 
+/// A row of `anim_rules`: what a clip of category `second` asked while one of `first` plays does (10 is any category).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnimRule {
+    pub first: u8,
+    pub second: u8,
+    /// Percent of the current clip until which `before_op` applies (0: never).
+    pub before: f32,
+    pub before_op: u8,
+    pub default_op: u8,
+}
+
+/// The `anim_rules` operator for categories `current` -> `new` at `progress` percent (x2game `39153EF0`; 4 when no row matches).
+pub fn anim_rule(rules: &[AnimRule], current: u8, new: u8, progress: f32) -> u8 {
+    const ANY: u8 = 10;
+    rules
+        .iter()
+        .find(|r| (r.first == ANY || r.first == current) && (r.second == ANY || r.second == new))
+        .map_or(4, |r| if r.before <= 0.0 || r.before <= progress { r.default_op } else { r.before_op })
+}
+
 /// `all_co_sk_stop` / `all_ac_stop`: the anim a plot step plays first to end the clip before it, followed by the clip it wants.
 pub fn is_stop_clip(name: &str) -> bool {
     name.ends_with("_stop")
@@ -430,6 +496,10 @@ struct Inner {
     upper: HashMap<String, Option<Arc<str>>>,
     /// Clip name -> `anims.loop`.
     loops: HashMap<String, bool>,
+    /// Clip name -> `anims.category_id`.
+    categories: HashMap<String, Option<u8>>,
+    /// `anim_rules` in table order (read on first use).
+    rules: Option<Vec<AnimRule>>,
     groups: HashMap<u32, Arc<Vec<FxItem>>>,
     shakes: HashMap<u32, Arc<Vec<ShakeItem>>>,
     extras: HashMap<u32, Extras>,
@@ -459,6 +529,8 @@ impl SkillBook {
             anims: HashMap::new(),
             upper: HashMap::new(),
             loops: HashMap::new(),
+            categories: HashMap::new(),
+            rules: None,
             groups: HashMap::new(),
             shakes: HashMap::new(),
             extras: HashMap::new(),
@@ -493,6 +565,19 @@ impl SkillBook {
     }
 
     /// The clip loops (`anims.loop`): the cast and channel poses.
+    /// `anims.category_id` of clip `name` (`anim_category`: 1 attack, 2 idle, 3 reaction, 4 skill, 6 cast loop, 7 emote, 8 hit,
+    /// 11 crowd control).
+    pub fn clip_category(&self, name: &str) -> Option<u8> {
+        self.inner().clip_category(name)
+    }
+
+    /// The `anim_rules` operator for a clip of category `new` asked while one of category `current` is `progress` percent through
+    /// (x2game `39153EF0`): the first row whose categories match (10 matches any) says `before_operator_id` until its `before`
+    /// percent and `default_operator_id` from there; no row is 4 (replace). 5 rejects the new clip.
+    pub fn anim_rule(&self, current: u8, new: u8, progress: f32) -> u8 {
+        self.inner().anim_rule(current, new, progress)
+    }
+
     pub fn clip_loops(&self, name: &str) -> bool {
         self.inner().clip_loops(name)
     }
@@ -603,6 +688,28 @@ impl Inner {
             .map(Arc::from);
         self.upper.insert(name.to_string(), upper.clone());
         upper
+    }
+
+    fn clip_category(&mut self, name: &str) -> Option<u8> {
+        if let Some(c) = self.categories.get(name) {
+            return *c;
+        }
+        let category = self.conn.query_row("SELECT category_id FROM anims WHERE name = ?1", params![name], |r| r.get::<_, Option<i64>>(0)).ok().flatten().and_then(|c| u8::try_from(c).ok());
+        self.categories.insert(name.to_string(), category);
+        category
+    }
+
+    fn anim_rule(&mut self, current: u8, new: u8, progress: f32) -> u8 {
+        let rules = self.rules.get_or_insert_with(|| {
+            self.conn
+                .prepare("SELECT first_category_id, second_category_id, before, before_operator_id, default_operator_id FROM anim_rules")
+                .and_then(|mut q| {
+                    q.query_map([], |r| Ok(AnimRule { first: int(r, 0)? as u8, second: int(r, 1)? as u8, before: int(r, 2)? as f32, before_op: int(r, 3)? as u8, default_op: int(r, 4)? as u8 }))
+                        .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default()
+        });
+        anim_rule(rules, current, new, progress)
     }
 
     fn clip_loops(&mut self, name: &str) -> bool {
@@ -857,7 +964,7 @@ impl Inner {
                         string_instrument_start_anim_id, percussion_instrument_start_anim_id, tube_instrument_start_anim_id, \
                         string_instrument_fire_anim_id, percussion_instrument_fire_anim_id, tube_instrument_fire_anim_id, \
                         channeling_cancelable = 't', stop_casting_by_turn = 't', casting_time, channeling_time, \
-                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't' \
+                        mainhand_tool_id, offhand_tool_id, source_not_swim = 't', start_autoattack = 't' \
                  FROM skills WHERE id = ?1",
                 params![id],
                 |r| {
@@ -874,11 +981,12 @@ impl Inner {
                         CancelRules { channel_on_move: int(r, 16).unwrap_or(0) != 0, on_turn: int(r, 17).unwrap_or(0) != 0, not_swim: int(r, 22).unwrap_or(0) != 0 },
                         (int(r, 18)?.max(0) as u32, int(r, 19)?.max(0) as u32),
                         (int(r, 20)?.max(0) as u32, int(r, 21)?.max(0) as u32),
+                        int(r, 23).unwrap_or(0) != 0,
                     ))
                 },
             )
             .ok();
-        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool))| {
+        let visual = row.map(|(anims, group, projectile, effect_delay_ms, plot, channeling, controller, instrument_start, instrument_fire, cancel, (cast_ms, channel_ms), (main_tool, off_tool), starts_autoattack)| {
             let [start, fire, twohand, dual] = anims;
             let tools = [self.tool(main_tool), self.tool(off_tool)];
             Arc::new(SkillVisual {
@@ -902,6 +1010,7 @@ impl Inner {
                 plot,
                 cast_ms,
                 channel_ms,
+                starts_autoattack,
             })
         });
         self.skills.insert(id, visual.clone());
@@ -925,25 +1034,35 @@ impl Inner {
         if let Some(p) = self.plots.get(&event_id) {
             return p.clone();
         }
-        // special effects of the event: 34 Anim (anim id), 35 / 36 FxGroup(Anim) (group id), 37 / 38 Projectile(Anim)
-        let effects: Vec<(i64, u32, f32, u32)> = self
+        // special effects of the event: 34 Anim (anim id), 35 / 36 FxGroup(Anim) (group id), 37 / 38 Projectile(Anim); with the
+        // effect's plot source and target
+        type Row = (i64, u32, f32, u32, u8, u8);
+        let effects: Vec<Row> = self
             .conn
             .prepare(
-                "SELECT s.special_effect_type_id, s.value1, s.value3, s.value2 FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
+                "SELECT s.special_effect_type_id, s.value1, s.value3, s.value2, e.source_id, e.target_id FROM plot_effects e JOIN special_effects s ON s.id = e.actual_id \
                  WHERE e.event_id = ?1 AND e.actual_type = 'SpecialEffect' AND s.special_effect_type_id IN (34, 35, 36, 37, 38) ORDER BY e.position, e.id",
             )
-            .and_then(|mut q| q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32, int(r, 2)? as f32, int(r, 3)?.max(0) as u32))).map(|rows| rows.flatten().collect()))
+            .and_then(|mut q| {
+                q.query_map(params![event_id], |r| Ok((int(r, 0)?, int(r, 1)? as u32, int(r, 2)? as f32, int(r, 3)?.max(0) as u32, int(r, 4)? as u8, int(r, 5)? as u8)))
+                    .map(|rows| rows.flatten().collect())
+            })
             .unwrap_or_default();
         let mut visual = PlotVisual::default();
         let mut fx: Vec<FxItem> = Vec::new();
         let mut shakes: Vec<ShakeItem> = Vec::new();
-        for (kind, value, speed, ms) in effects {
+        for (kind, value, speed, ms, source, target) in effects {
             match kind {
                 34 => visual.anims.extend(self.anim(value)),
                 35 | 36 => {
-                    fx.extend(self.group(value).iter().cloned());
-                    shakes.extend(self.shakes_of(value).iter().copied());
+                    let group = self.group(value);
+                    let group_shakes = self.shakes_of(value);
+                    fx.extend(group.iter().cloned());
+                    shakes.extend(group_shakes.iter().copied());
                     visual.extras = visual.extras.plus(self.extras_of(value));
+                    // value2 of a free group is the event it fires at once; a bound one reads nothing more (300 on one row)
+                    let fire = if kind == 35 { u8::try_from(ms).unwrap_or(0) } else { 0 };
+                    visual.groups.push(StepFx { bound: kind == 36, source, target, fire, fx: group, shakes: group_shakes });
                 }
                 _ => {
                     let first = visual.projectile.is_none();
@@ -966,6 +1085,7 @@ impl Inner {
         {
             visual.anims.push(clip.clone());
             visual.anim = Some(clip);
+            visual.controller = true;
         }
         visual.fx = Arc::new(fx);
         visual.shakes = Arc::new(shakes);
@@ -1324,6 +1444,44 @@ mod tests {
         }
         assert_eq!(book.plot_event(5100).and_then(|p| p.clip().cloned()).as_deref(), Some("all_co_sk_dashattack"), "Charge");
         assert_ne!(book.plot_event(2659).and_then(|p| p.clip().cloned()).as_deref(), Some("all_re_combat_struggle"), "Lasso's pull");
+        assert!(book.plot_event(5100).is_some_and(|p| p.controller), "Charge's dash clip comes from its controller");
+        assert!(book.plot_event(12134).is_some_and(|p| !p.controller), "Triple Slash's clip is an anim effect");
+    }
+
+    /// x2game's `anim_rules`: a skill clip rejects an auto attack, a hit and a reaction (op 5); an auto attack rejects a hit in its first
+    /// 30 % and is replaced by a skill (the wildcard row, 4); no row is 4.
+    #[test]
+    fn anim_rules_reject_attacks_during_skills() {
+        let rule = |first, second, before, before_op, default_op| AnimRule { first, second, before, before_op, default_op };
+        let rules = [rule(4, 1, 0.0, 1, 5), rule(1, 8, 30.0, 5, 4), rule(6, 10, 0.0, 1, 5), rule(10, 10, 0.0, 1, 4)];
+        assert_eq!(anim_rule(&rules, 4, 1, 50.0), 5);
+        assert_eq!(anim_rule(&rules, 1, 4, 50.0), 4);
+        assert_eq!(anim_rule(&rules, 1, 8, 10.0), 5);
+        assert_eq!(anim_rule(&rules, 1, 8, 40.0), 4);
+        assert_eq!(anim_rule(&rules, 6, 4, 0.0), 5, "the first matching row wins over the wildcard");
+        assert_eq!(anim_rule(&[], 4, 1, 0.0), 4);
+        let Some(book) = book() else { return };
+        assert_eq!(book.clip_category("twohand_co_sk_streakattack_3"), Some(4));
+        assert_eq!(book.clip_category("twohand_co_attack_2"), Some(1));
+        assert_eq!(book.anim_rule(4, 1, 20.0), 5, "Triple Slash turns the auto attack down");
+        assert_eq!(book.anim_rule(1, 4, 20.0), 4, "a skill replaces an auto attack");
+        assert_eq!(book.anim_rule(4, 8, 20.0), 5);
+    }
+
+    /// A step's effect groups keep their kind, plot source and target, and the event a free group fires (skill parity trace,
+    /// 2026-11-03): Whirlwind Slash's swirl goes to each listed unit, Lasso's psychokinesis sits on each pulled unit and fires
+    /// `hit`, Charge's blow fires `hit` on each struck unit, Lasso's cast group aims at the plot's target.
+    #[test]
+    fn plot_step_groups_keep_their_source_and_target() {
+        let Some(book) = book() else { return };
+        let group = |event: u32| book.plot_event(event).and_then(|p| p.groups.first().map(|g| (g.bound, g.source, g.target, g.fire)));
+        assert_eq!(group(7097), Some((true, plot_unit::CASTER, plot_unit::EACH, 0)), "Whirlwind Slash");
+        assert_eq!(group(2659), Some((false, plot_unit::EACH, plot_unit::SOURCE, ev::HIT)), "Lasso's pull");
+        assert_eq!(group(5402), Some((false, plot_unit::CASTER, plot_unit::EACH, ev::HIT)), "Charge's blow");
+        assert_eq!(group(2656), Some((true, plot_unit::CASTER, plot_unit::PLOT_TARGET, 0)), "Lasso's cast");
+        let whirl = book.plot_event(7097).unwrap();
+        assert!(whirl.groups[0].per_unit() && !whirl.groups[0].fx.is_empty());
+        assert_eq!(whirl.fx.len(), whirl.groups.iter().map(|g| g.fx.len()).sum::<usize>(), "fx is every group's items");
     }
 
     /// A song has a clip per instrument family (string, percussion, tube); the other skills have none.
