@@ -1404,6 +1404,21 @@ fn start_step_groups(
     (hit_fx, hit_shakes)
 }
 
+/// The end of the plot is the `END` event of its bound groups (once each): the items that start there play (Lasso's `full_dot_end`
+/// as the channel ends, +17 ms after the 1.2 client's cast bar stops; aa-client never showed it, skill parity trace t1h). Called after
+/// [`Combat::release`], which takes away what ends at `END`, so these items stay.
+fn end_bound_groups(st: &mut Stage, combat: &mut Combat, tl: u16, now: f64) {
+    let open: Vec<(usize, BoundGroup)> =
+        combat.casts.get(&tl).map(|c| c.bound.iter().cloned().enumerate().filter(|(_, b)| b.fired & (1 << ev::END) == 0).collect()).unwrap_or_default();
+    for (index, bound) in open {
+        start_items(st, combat, tl, &bound.group.fx, &[ev::END], bound.source, bound.aim, bound.ground, now, 0.0, false, true);
+        start_shakes(st, combat, &bound.group.shakes, &[ev::END], bound.source, bound.aim, now, 0.0);
+        if let Some(slot) = combat.casts.get_mut(&tl).and_then(|c| c.bound.get_mut(index)) {
+            slot.fired |= 1 << ev::END;
+        }
+    }
+}
+
 /// Starts the items of `moments` of a cast now, or `delay` seconds from now. `dots`: the items of a plot step's group play even when
 /// they look like a buff's (`_dot`): Lasso's `염동력_dot` (psychokinesis) on the pulled unit and its `당기기_dot` are plot effects
 /// (its buff 3687 has no group), and the original shows both (skill parity trace, 2026-11-03).
@@ -1868,7 +1883,13 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             }
             let Some(step) = step else { return };
             face(st, caster, target, target_pos, now);
-            if !step.groups.is_empty() {
+            // only an anim effect's clip drives the bound groups (not a dash's controller clip, not the skill's own); a step
+            // without groups of its own still drives the earlier ones: Lasso's launch step (`all_co_sk_pull_launch`, a clip and a
+            // projectile) fires the `full_dot` of the cast step's group at the clip's launch, +31 ms in the original, where
+            // aa-client showed nothing (skill parity trace t1h, 2026-11-03)
+            let clip_unit = (step.clip().is_some() && !step.controller).then_some(caster);
+            let bound_waiting = clip_unit.is_some() && combat.casts.get(&p.tl).is_some_and(|c| !c.bound.is_empty());
+            if !step.groups.is_empty() || bound_waiting {
                 let (plot_caster, plot_target) = combat.casts.get(&p.tl).map(|c| (c.caster, c.plot_target)).unwrap_or((p.caster_obj_id, p.target_obj_id));
                 let units = StepUnits {
                     plot_caster: st.caster_entity(plot_caster),
@@ -1876,12 +1897,12 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                     source: caster,
                     listed: p.targets.iter().filter_map(|&id| st.entity(id)).collect(),
                 };
-                // only an anim effect's clip drives the bound groups (not a dash's controller clip, not the skill's own)
-                let clip_unit = (step.clip().is_some() && !step.controller).then_some(caster);
                 let (hit_fx, hit_shakes) = start_step_groups(st, combat, p.tl, &step.groups, &units, clip_unit, &clip_events, step.projectile.is_some().then_some(release), target_pos, now);
-                let cast = combat.casts.get_mut(&p.tl).unwrap();
-                cast.hit_fx = Arc::new(hit_fx);
-                cast.hit_shakes = Arc::new(hit_shakes);
+                if !step.groups.is_empty() {
+                    let cast = combat.casts.get_mut(&p.tl).unwrap();
+                    cast.hit_fx = Arc::new(hit_fx);
+                    cast.hit_shakes = Arc::new(hit_shakes);
+                }
             }
             if let Some(projectile) = &step.projectile {
                 start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
@@ -2015,6 +2036,7 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
         Event::SkillEnded { tl } | Event::CastingStopped { tl, .. } | Event::PlotEnded { tl } | Event::PlotStopped { tl, .. } => {
             let tl = *tl;
             combat.release(&mut st.commands, tl, ev::END);
+            end_bound_groups(st, combat, tl, now);
             // a looping clip ends with the skill, or with the cast that was interrupted
             end_loop(st, combat, tl);
             if let Some(c) = combat.casts.get_mut(&tl) {
@@ -2899,7 +2921,6 @@ mod tests {
         assert_eq!(moments(&group(true, 0), Some(&triple), Some(0.4)).iter().filter(|(m, _)| *m == ev::LAUNCH).count(), 1, "one launch");
     }
 
-    /// Unit 4 is each listed unit (none without a list); 1 and 2 are the plot's caster and target, 3 the step's source, 5 none.
     /// Charge and Tiger Strike have only `all_` clips: their `active_weapon_id` 1 takes the greatsword out; Lasso (0) takes none.
     #[test]
     fn a_skill_whose_clips_name_no_weapon_takes_its_active_weapon() {
@@ -2922,6 +2943,7 @@ mod tests {
         assert_eq!(repeated_start(None, "all_co_sk_dashattack", 4.25), None);
     }
 
+    /// Unit 4 is each listed unit (none without a list); 1 and 2 are the plot's caster and target, 3 the step's source, 5 none.
     #[test]
     fn step_units_name_the_plot_and_the_listed_units() {
         let mut world = World::new();
