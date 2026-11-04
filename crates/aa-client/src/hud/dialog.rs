@@ -174,6 +174,10 @@ pub struct DialogView {
     /// The completed-quest blocks (`SCCompletedQuests` / `SCQuestContextCompleted`), for the
     /// native getters' completed check (`X2Quest.GetUseTypeQuestItems` with `checkState`).
     pub completed: Vec<aa_net::quest::CompletedBlock>,
+    /// The native replay vector (`FUN_3937b2d0`): completed main quests' `cinemas.replay` movies as
+    /// `(quest, cinema)`. `FUN_3937c940` rebuilds and sorts it on `SCCompletedQuests`;
+    /// `FUN_3937bb60` appends a runtime completion unsorted until the next rebuild.
+    pub replay: Vec<(u32, String)>,
     /// The clock of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
     /// `FUN_3937b240` stores the server's `time_left_ms` as its end and the local receipt time as
     /// its start; `FUN_39379e30` returns `end - (now - start) * 1000`.
@@ -505,15 +509,14 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
         lua.create_function(move |lua, ()| {
             let d = b.borrow();
             let Some(game) = d.game.get() else { return Ok(None) };
-            let list = game.quests.replay_list(&d.dialog.completed);
-            if list.is_empty() {
+            if d.dialog.replay.is_empty() {
                 return Ok(None);
             }
             let out = lua.create_table()?;
-            for (i, (name, cinema)) in list.into_iter().enumerate() {
+            for (i, (quest, cinema)) in d.dialog.replay.iter().enumerate() {
                 let e = lua.create_table()?;
-                e.set("name", name)?;
-                e.set("cinema", cinema)?;
+                e.set("name", game.quests.def(*quest).map(|d| d.name.clone()).unwrap_or_default())?;
+                e.set("cinema", cinema.as_str())?;
                 out.set(i + 1, e)?;
             }
             Ok(Some(out))
@@ -723,6 +726,9 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
         let d = &mut *d;
         let Some(game) = d.game.get() else { return };
         let old = std::mem::take(&mut d.dialog.quests);
+        if fresh {
+            d.dialog.replay = game.quests.replay_list(&quests.completed);
+        }
         let texts = Texts { game, player: d.snapshot.name.as_str(), race: d.snapshot.race };
         let name = |id: u32| game.quests.def(id).map(|q| texts.expand(&q.name)).unwrap_or_default();
         let mut condition = None;
@@ -1713,6 +1719,30 @@ pub fn handle_dialog(
                 info!("hud: doodad {doodad_obj_id} completes quest {quest_id}");
                 rt.fire_event("COMPLETE_QUEST_CONTEXT_DOODAD", (*quest_id, can_complete, doodad_obj_id.to_string()));
             }
+        }
+        match e {
+            // `FUN_3937c940`: clear the replay vector and rebuild it from the completed blocks,
+            // then sort by (chapter_idx, quest_idx).
+            Event::CompletedQuests(blocks) => {
+                let mut d = bridge.0.borrow_mut();
+                if let Some(game) = d.game.get() {
+                    d.dialog.replay = game.quests.replay_list(blocks);
+                }
+            }
+            // `FUN_3937bb60` -> `FUN_3937b540` -> `FUN_3937b2d0`: append a runtime completion
+            // unsorted until the next rebuild.
+            Event::QuestCompleted { quest_id, .. } => {
+                let mut d = bridge.0.borrow_mut();
+                if let Some(game) = d.game.get() {
+                    for cinema in game.quests.replay_cinemas(*quest_id) {
+                        d.dialog.replay.push((*quest_id, cinema));
+                    }
+                }
+            }
+            Event::CharacterSelected(_) | Event::LeftWorld { .. } | Event::Disconnected { .. } => {
+                bridge.0.borrow_mut().dialog.replay.clear();
+            }
+            _ => {}
         }
     }
     let mut d = bridge.0.borrow_mut();
@@ -3370,20 +3400,23 @@ mod tests {
     }
 
     #[test]
-    fn the_replay_list_lists_completed_main_quests_with_replay_cinemas() {
+    fn the_replay_list_sorts_by_chapter_and_quest_index_and_appends_runtime_completions() {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
         if !with_game(&shared) {
             return;
         }
-        shared.borrow_mut().dialog.completed = vec![
-            // 213 "Clearing Your Name" plays sl_el_005 (replay); 1065 is not a main quest;
-            // 2386 is main but its cinema is not replay; 3439 has one replay and one non-replay movie.
-            aa_net::quest::CompletedBlock { id: 213 / 64, bits: 1 << (213 % 64) },
-            aa_net::quest::CompletedBlock { id: 1065 / 64, bits: 1 << (1065 % 64) },
-            aa_net::quest::CompletedBlock { id: 2386 / 64, bits: 1 << (2386 % 64) },
-            aa_net::quest::CompletedBlock { id: 3439 / 64, bits: 1 << (3439 % 64) },
-        ];
         let rt = bare_runtime(&shared);
+        let mut app = handle_dialog_app(shared, rt);
+        let block = |q: u32| aa_net::quest::CompletedBlock { id: (q / 64) as u16, bits: 1 << (q % 64) };
+        // 2385 (chapter 1, quest 1), 213 (chapter 1, quest 8) and 3439 (chapter 1, quest 10) play
+        // replay cinemas; 1065 is not a main quest and 2386's movie is not replay.
+        let send = |app: &mut App, e: Event| app.world_mut().write_message(NetEvent(e));
+        send(
+            &mut app,
+            Event::CompletedQuests(vec![block(213), block(1065), block(2386), block(3439)]),
+        );
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
         rt.lua
             .load(
                 r#"
@@ -3395,9 +3428,43 @@ mod tests {
             )
             .exec()
             .unwrap();
+        // A runtime completion is appended unsorted (`FUN_3937bb60` -> `FUN_3937b540`).
+        send(&mut app, Event::QuestCompleted { quest_id: 2385, block: block(2385) });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                local list = X2Quest:GetMainQuestCutSceneReplayList()
+                assert(#list == 3, #list)
+                assert(list[1].cinema == 'sl_el_005' and list[2].cinema == 'sl_fe_007')
+                assert(list[3].name == 'The Field of Honor' and list[3].cinema == 'sl_el_001')
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // The next SCCompletedQuests rebuilds and sorts it: 2385 (q1) comes before 213 (q8).
+        send(
+            &mut app,
+            Event::CompletedQuests(vec![block(213), block(2385), block(3439)]),
+        );
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                local list = X2Quest:GetMainQuestCutSceneReplayList()
+                assert(#list == 3, #list)
+                assert(list[1].cinema == 'sl_el_001' and list[2].cinema == 'sl_el_005')
+                assert(list[3].cinema == 'sl_fe_007')
+                "#,
+            )
+            .exec()
+            .unwrap();
         // Without completed main quests the native answers nil.
-        shared.borrow_mut().dialog.completed.clear();
-        let rt = bare_runtime(&shared);
+        send(&mut app, Event::CompletedQuests(Vec::new()));
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
         rt.lua.load("assert(X2Quest:GetMainQuestCutSceneReplayList() == nil)").exec().unwrap();
     }
 

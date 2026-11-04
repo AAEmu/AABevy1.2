@@ -703,11 +703,14 @@ The getters these windows read that were still stubs now follow the natives:
 `X2Quest:GetMainQuestCutSceneReplayList()` (`FUN_39378e10` -> `FUN_393781a0`) returns nil when there
 is nothing to replay, else an array of `{ name, cinema }`. The native keeps a vector of
 (quest, cinema) pairs: `FUN_3937b540` appends a completed main quest's component cinemas whose
-`cinemas.replay` is set, once per component, and `FUN_3937c940` clears and rebuilds it from the
-completed blocks in the quest table order (`SCCompletedQuests`). The Bevy getter derives the same
-list from the completed blocks and `quest_components.cinema_id` in quest id order. The skill-based
-cinema fallback of `FUN_3937b540` (`FUN_393780a0` through the component's skill) is not implemented;
-in the shipped data all 92 replay cinemas are set directly on main-quest components.
+`cinemas.replay` is set, once per component. `FUN_3937c940` clears and rebuilds it from the
+completed blocks on `SCCompletedQuests`, then sorts by `quest_contexts.chapter_idx` and `quest_idx`
+(`FUN_39377f30` compares the quest context's `+0x08` then `+0x24`; the stable order keeps a quest's
+components in component order). A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
+`FUN_3937b2d0` push_back) is appended unsorted until the next rebuild. The Bevy getter reads the
+same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. The
+skill-based cinema fallback of `FUN_3937b540` (`FUN_393780a0` through the component's skill) is not
+implemented; in the shipped data all 92 replay cinemas are set directly on main-quest components.
 
 The Past tab (`quest_list/tab_past.alb`) lists `%d. <name>` and its replay button calls
 `X2Player:PlayCinema(<cinema>)`. `FUN_39495550` ignores the empty name, then `FUN_391e2a70` loads

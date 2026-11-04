@@ -76,6 +76,9 @@ pub struct QuestDef {
     /// `QuestDetail`: 1 normal, 2 main, 5 hidden, 6 task, 7 daily, 8 livelihood, 9 group ...
     pub detail: u32,
     pub chapter: u32,
+    /// `quest_contexts.quest_idx`: the quest's position within its chapter, the second replay
+    /// list sort key (`FUN_39377f30` compares `+0x24` after `+0x08`).
+    pub quest_idx: u32,
     pub zone_id: u32,
     pub selective: bool,
     pub let_it_done: bool,
@@ -422,7 +425,7 @@ impl QuestTables {
         }
         {
             let mut q = conn.prepare(
-                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id, use_quest_camera, score FROM quest_contexts",
+                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, quest_idx, zone_id, use_quest_camera, score FROM quest_contexts",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -441,9 +444,10 @@ impl QuestTables {
                         let_it_done: any_flag(r, 6)?,
                         detail: any_int(r, 7)? as u32,
                         chapter: any_int(r, 8)? as u32,
-                        zone_id: any_int(r, 9)? as u32,
-                        use_quest_camera: any_flag(r, 10)?,
-                        score: any_int(r, 11)?.max(0) as u32,
+                        quest_idx: any_int(r, 9)? as u32,
+                        zone_id: any_int(r, 10)? as u32,
+                        use_quest_camera: any_flag(r, 11)?,
+                        score: any_int(r, 12)?.max(0) as u32,
                         repeatable: t.repeatable.contains(&id),
                         components: Vec::new(),
                     },
@@ -871,24 +875,37 @@ impl QuestTables {
         self.parts_of(quest, kind::PROGRESS).count() as u32
     }
 
+    /// The replay cinemas of `quest`, in component order: `FUN_3937b540` walks a completed main
+    /// quest's components and appends each `cinemas.replay` movie.
+    pub fn replay_cinemas(&self, quest: u32) -> Vec<String> {
+        let Some(def) = self.defs.get(&quest) else { return Vec::new() };
+        if !def.is_main() {
+            return Vec::new();
+        }
+        def.components
+            .iter()
+            .filter_map(|id| self.parts.get(id))
+            .filter_map(|c| c.cinema.as_ref())
+            .filter(|c| c.replay)
+            .map(|c| c.name.clone())
+            .collect()
+    }
+
     /// `X2Quest.GetMainQuestCutSceneReplayList` (`FUN_39378e10`): every completed main quest whose
-    /// component has a `cinemas.replay` movie, as `(quest name, cinema name)`, in quest table order
-    /// (`FUN_3937c940` rebuilds it that way from the completed blocks).
-    pub fn replay_list(&self, completed: &[aa_net::quest::CompletedBlock]) -> Vec<(String, String)> {
-        let mut ids: Vec<u32> = self.defs.keys().copied().collect();
-        ids.sort_unstable();
+    /// component has a `cinemas.replay` movie, as `(quest id, cinema name)`. `FUN_3937c940`
+    /// rebuilds the vector from the completed blocks and `FUN_39377f30` sorts it by
+    /// `(chapter_idx, quest_idx)`; the stable sort keeps a quest's components in order.
+    pub fn replay_list(&self, completed: &[aa_net::quest::CompletedBlock]) -> Vec<(u32, String)> {
         let mut out = Vec::new();
-        for id in ids {
-            let Some(def) = self.defs.get(&id) else { continue };
-            if !def.is_main() || !completed.iter().any(|b| b.has(id)) {
+        for id in self.defs.keys().copied() {
+            if !completed.iter().any(|b| b.has(id)) {
                 continue;
             }
-            for part in def.components.iter().filter_map(|c| self.parts.get(c)) {
-                if let Some(cinema) = part.cinema.as_ref().filter(|c| c.replay) {
-                    out.push((def.name.clone(), cinema.name.clone()));
-                }
+            for cinema in self.replay_cinemas(id) {
+                out.push((id, cinema));
             }
         }
+        out.sort_by_key(|(id, _)| self.defs.get(id).map_or((0, 0), |d| (d.chapter, d.quest_idx)));
         out
     }
 
