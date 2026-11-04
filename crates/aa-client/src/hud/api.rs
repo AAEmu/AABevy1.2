@@ -315,6 +315,54 @@ pub(super) const RESURRECT_RETRY_MS: u64 = 10_000;
 /// Where the road map images sit in the roadmap window (generated from the client's `map/road_map_list.lua`).
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
+/// `X2Time.GetLocalTime` / `TimeToDate`: the report and mail windows' date fields. The native
+/// returns the local clock as a Unix timestamp and its civil date; this uses UTC (the client has
+/// no time zone database; the offset is at most a day).
+fn install_time(lua: &Lua) -> mlua::Result<()> {
+    let time: Table = lua.globals().get("X2Time")?;
+    time.set(
+        "GetLocalTime",
+        lua.create_function(|_, _: MultiValue| {
+            let secs = web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            Ok(secs)
+        })?,
+    )?;
+    time.set(
+        "TimeToDate",
+        lua.create_function(|lua, (_this, ts): (Value, i64)| {
+            let days = ts.div_euclid(86_400);
+            let secs = ts.rem_euclid(86_400);
+            let z = days + 719_468;
+            let era = z.div_euclid(146_097);
+            let doe = z - era * 146_097;
+            let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+            let mut year = yoe + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let day = doy - (153 * mp + 2) / 5 + 1;
+            let mut month = mp + if mp < 10 { 3 } else { -9 };
+            if month <= 2 {
+                year += 1;
+            }
+            if month <= 0 {
+                month += 12;
+            }
+            let t = lua.create_table()?;
+            t.set("year", year)?;
+            t.set("month", month)?;
+            t.set("day", day)?;
+            t.set("hour", secs / 3_600)?;
+            t.set("minute", (secs / 60) % 60)?;
+            t.set("second", secs % 60)?;
+            Ok(t)
+        })?,
+    )?;
+    Ok(())
+}
+
 /// Install the game API into a fresh runtime, before the stage's scripts run.
 pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     // 1. the X2* objects and constants (the login screens' install, with an empty bridge)
@@ -422,6 +470,9 @@ pub fn install(rt: &mut UiRuntime, bridge: &Shared) -> mlua::Result<()> {
     super::appellation::install(lua, bridge)?;
     super::portal::install(lua, bridge)?;
     super::doodad::install(lua, bridge)?;
+    super::books::install(lua, bridge)?;
+    super::ucc::install(lua)?;
+    install_time(lua)?;
     super::store::services::load_script(lua)?;
     super::duel::install(lua, bridge)?;
     super::trial::install(lua, bridge)?;

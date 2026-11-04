@@ -393,7 +393,7 @@ local dialogHandlers, dialogs, dialogCount = {}, {}, 0
 function X2DialogManager:SetHandler(task, fn)
   dialogHandlers[task] = fn
 end
-local function requestDialog(fn, owner, buttonType, suppliedInfo)
+local function requestDialog(fn, owner, buttonType, suppliedInfo, task)
   local info = { buttonType = buttonType, isModal = true }
   for k, v in pairs(suppliedInfo or {}) do info[k] = v end
   dialogCount = dialogCount + 1
@@ -407,7 +407,7 @@ local function requestDialog(fn, owner, buttonType, suppliedInfo)
   local decorate = dialogHandlers[DLG_TASK_DEFAULT]
   if decorate then decorate(wnd, info) end
   if fn then fn(wnd, info) end
-  dialogs[wnd:GetId()] = { wnd = wnd, owner = owner }
+  dialogs[wnd:GetId()] = { wnd = wnd, owner = owner, task = task }
   wnd:Show(true)
   wnd:Raise()
   return wnd
@@ -422,13 +422,21 @@ function X2DialogManager:RequestTaskDialog(task, info, owner)
   -- Native3902d270 refuses the visual before allocation without a default decorator.
   -- The application retains the accepted task for retry; this is not a false choice.
   if not dialogHandlers[DLG_TASK_DEFAULT] then return nil end
-  return requestDialog(dialogHandlers[task], owner, DBT_OK_CANCEL, info)
+  return requestDialog(dialogHandlers[task], owner, DBT_OK_CANCEL, info, task)
 end
 local function closeDialog(id)
   local d = dialogs[id]
   if d then
     dialogs[id] = nil
+    d.wnd.__dialog_closed = true
     d.wnd:Show(false)
+  end
+end
+-- Native `X2DialogManager:Delete(task)` removes the dialog of that task
+-- (`FUN_3902db50`/`FUN_3902cef0`); scripts use it before requesting it again.
+function X2DialogManager:Delete(task)
+  for id, d in pairs(dialogs) do
+    if d.task == task then closeDialog(id) end
   end
 end
 function X2DialogManager:OnOK(id) closeDialog(id) end
