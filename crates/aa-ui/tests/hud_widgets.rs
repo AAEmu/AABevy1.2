@@ -436,3 +436,41 @@ fn chat_wheel_scrolls_and_holds_the_view() {
     }
     assert_eq!(scroll() as f64, max);
 }
+
+/// A refresh that changes nothing in a slot sends its `OnContentUpdated` handler nothing; a changed value is sent alone, other
+/// content (another skill) all over again. Every action bar refresh used to run every slot's handlers (~545, 32 ms).
+#[test]
+fn a_slot_refresh_sends_only_what_changed() {
+    let ui = runtime();
+    ui.exec(
+        "@setup",
+        r#"
+        ISLOT_ACTION = 1
+        events = {}
+        content = { type = "skill", id = 7, icon = "ui/icon/icon_skill_basic01.dds", canUse = true }
+        AAUI.SlotContent = function(slotType, idx) return content end
+        bar = UIParent:CreateWidget("window", "bar", "UIParent")
+        bar:SetExtent(100, 60)
+        bar:AddAnchor("TOPLEFT", "UIParent", 100, 100)
+        bar:Show(true)
+        slot = bar:CreateChildWidget("slot", "slot", 1, true)
+        slot:SetExtent(42, 42)
+        slot:AddAnchor("TOPLEFT", bar, 5, 5)
+        slot:SetHandler("OnContentUpdated", function(self, what, v) events[#events + 1] = what .. ":" .. tostring(v) end)
+        slot:EstablishSlot(ISLOT_ACTION, 1)
+        "#,
+    )
+    .unwrap();
+    let first = eval::<String>(&ui, "table.concat(events, ' ')");
+    assert!(first.contains("action_binded:true") && first.contains("can_use:true"), "{first}");
+    ui.exec("@clear", "events = {}").unwrap();
+    ui.refresh_slots().unwrap();
+    assert_eq!(eval::<String>(&ui, "table.concat(events, ' ')"), "", "nothing changed");
+    ui.exec("@dark", "content = { type = 'skill', id = 7, icon = 'ui/icon/icon_skill_basic01.dds', canUse = false }").unwrap();
+    ui.refresh_slots().unwrap();
+    assert_eq!(eval::<String>(&ui, "table.concat(events, ' ')"), "can_use:false");
+    ui.exec("@other", "events = {}; content = { type = 'skill', id = 8, icon = 'ui/icon/icon_skill_basic02.dds', canUse = false }").unwrap();
+    ui.refresh_slots().unwrap();
+    let other = eval::<String>(&ui, "table.concat(events, ' ')");
+    assert!(other.contains("action_binded:true") && other.contains("can_use:false"), "another skill is told again: {other}");
+}
