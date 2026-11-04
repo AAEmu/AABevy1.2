@@ -948,10 +948,11 @@ fn window_open(rt: &UiRuntime) -> bool {
         .unwrap_or(false)
 }
 
-/// A doodad auction (`FUN_393b8b80`, state 0xe) is cleared when its window closes or the player
-/// leaves: `FUN_394ce540` calls `FUN_393b7b50(0xe)`, which runs `FUN_393b7aa0`
-/// (`NPC_INTERACTION_END`, then `INTERACTION_END`) and clears the state. Without this a later
-/// interaction would end a window that was already gone.
+/// A doodad auction (`FUN_393b8b80`, state 0xe) is cleared when the doodad is gone (0x183) or out
+/// of reach (0x184): the auctioneer resolver `FUN_394ce540` calls `FUN_393b7b50(0xe)`, and the
+/// walk-away check `FUN_393b7e40` ends any active interaction. Both run `FUN_393b7aa0`
+/// (`NPC_INTERACTION_END`, then `INTERACTION_END`). Closing the window alone leaves state 0xe set
+/// until one of those takes it.
 fn close_doodad_auction(
     rt: &UiRuntime,
     bridge: &Shared,
@@ -970,7 +971,7 @@ fn close_doodad_auction(
     let left = doodads.is_none_or(|doodads| {
         super::doodad::left_interaction(&bridge.borrow(), doodads, units, local.obj_id)
     });
-    if window_open(rt) && !left {
+    if !left {
         return;
     }
     super::doodad::end_interaction(Some(rt), bridge, inventory);

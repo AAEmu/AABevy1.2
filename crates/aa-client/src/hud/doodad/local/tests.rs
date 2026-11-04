@@ -44,6 +44,20 @@ fn game() -> Option<GameData> {
 }
 
 fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Inventory) -> App {
+    let mut app = base_app(game, group, template, action, inventory);
+    app.add_systems(
+        Update,
+        (
+            execute,
+            crate::hud::store::update,
+            crate::hud::auction::sync,
+        ),
+    );
+    app
+}
+
+/// [`app`] without the HUD systems, for tests that run only the ones they exercise.
+fn base_app(game: GameData, group: u32, template: u32, action: u32, inventory: Inventory) -> App {
     let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).expect("the UI runtime");
     let mut views = Views::default();
     views.fixture_doodad(2075, Entity::PLACEHOLDER);
@@ -98,15 +112,7 @@ fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Invent
         .add_message::<NetCommand>()
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
-        .init_resource::<crate::ingame::DevOptions>()
-        .add_systems(
-            Update,
-            (
-                execute,
-                crate::hud::store::update,
-                crate::hud::auction::sync,
-            ),
-        );
+        .init_resource::<crate::ingame::DevOptions>();
     app
 }
 
@@ -1210,10 +1216,11 @@ fn the_auction_interaction_ends_before_a_mailbox() {
     );
 }
 
-/// The native clears state 0xe when the auction window closes (`FUN_394ce540` ->
-/// `FUN_393b7b50(0xe)`); a later mailbox is a fresh interaction and must not end it again.
+/// Closing the auction window leaves state 0xe set: `FUN_394ce540` only clears it when the
+/// doodad is gone or out of reach. The next interaction (a mailbox) still takes it over and
+/// raises `NPC_INTERACTION_END` then `INTERACTION_END` once.
 #[test]
-fn a_closed_auction_does_not_end_again_at_the_next_interaction() {
+fn a_closed_auction_still_ends_at_the_next_interaction() {
     if !aa_cry::pak_available() {
         return;
     }
@@ -1240,12 +1247,12 @@ fn a_closed_auction_does_not_end_again_at_the_next_interaction() {
         Some(false),
         "the auction window did not close"
     );
-    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
     assert_eq!(
         lua(&app, "return INTER_ENDS").unwrap().as_integer(),
-        Some(1)
+        Some(0)
     );
-    assert!(
+    assert_eq!(
         app.world()
             .get_non_send::<HudBridge>()
             .unwrap()
@@ -1253,8 +1260,9 @@ fn a_closed_auction_does_not_end_again_at_the_next_interaction() {
             .borrow()
             .doodad
             .local_state
-            .is_none(),
-        "the closed auction left its state behind"
+            .map(|state| state.state),
+        Some(0xe),
+        "closing the window cleared the auction state"
     );
 
     request_mailbox(&mut app);
@@ -1265,12 +1273,86 @@ fn a_closed_auction_does_not_end_again_at_the_next_interaction() {
         Some(1)
     );
     assert_eq!(
+        lua(&app, "return ORDER")
+            .unwrap()
+            .as_string()
+            .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            .as_deref(),
+        Some("N;I;"),
+        "NPC_INTERACTION_END must come first"
+    );
+    assert_eq!(
         lua(&app, "return IsActivatedMailBox()")
             .unwrap()
             .as_boolean(),
         Some(true),
         "the mailbox did not open"
     );
+}
+
+/// An NPC store opens while a doodad auction is active: `npc_interaction.alb` hides the auction
+/// window on `NPC_INTERACTION_START`, but that alone must not clear state 0xe or the auction would
+/// close the store it just opened (`store::end_interaction`).
+#[test]
+fn a_closed_auction_does_not_end_an_npc_store() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = base_app(game, 22_065, 7983, 12_083, Inventory::default());
+    app.add_systems(Update, (execute, crate::hud::auction::sync));
+    auction_end_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the auction window did not open"
+    );
+    // `store::start_selected` installs the store context, then raises the event.
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.store.npc = Some((4242, 0));
+        d.store.doodad = false;
+    }
+    let rt = app.world().get_non_send::<UiRuntime>().unwrap();
+    rt.fire_event("NPC_INTERACTION_START", ("store", "", "4242"));
+    tick(&app);
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true),
+        "the store window did not open"
+    );
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the auction window stayed open under the store"
+    );
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    assert_eq!(bridge.0.borrow().store.npc, Some((4242, 0)));
+    assert_eq!(
+        bridge.0.borrow().doodad.local_state.map(|state| state.state),
+        Some(0xe)
+    );
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(0)
+    );
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true),
+        "the store closed on the next frame"
+    );
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
 }
 
 /// `DoodadFuncCofferPerm` (`FUN_393bc260` case 0x51): `FUN_3983b3b0` finds the template's
