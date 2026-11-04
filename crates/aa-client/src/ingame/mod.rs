@@ -284,16 +284,19 @@ impl Plugin for InGamePlugin {
 
 /// The world's time of day follows the server's game clock (`aa_net::state::WorldInfo`, extrapolated from its last packet: the
 /// HUD's clock reads the same), on the loading screen as well as in game. Nothing happens until the server has sent the time;
-/// `--hour H` pins the hour for screenshot tests.
+/// `--hour H` (or the script's `hour H`) pins the hour for screenshot tests.
 fn sync_clock(info: Option<Res<aa_net::state::WorldInfo>>, dev: Res<dev::DevOptions>, mut clock: ResMut<aa_world::WorldClock>, mut logged: Local<bool>) {
-    if dev.hour.is_some() {
-        return;
-    }
-    let Some(hour) = info.and_then(|w| w.hour_now()) else { return };
+    let hour = match dev.hour {
+        Some(pinned) => pinned,
+        None => {
+            let Some(hour) = info.and_then(|w| w.hour_now()) else { return };
+            hour
+        }
+    };
     if (clock.hour - hour).abs() > 1e-5 {
         clock.hour = hour;
     }
-    if !*logged {
+    if !*logged && dev.hour.is_none() {
         *logged = true;
         info!("world clock follows the server: {hour:.2} h");
     }

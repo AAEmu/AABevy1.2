@@ -568,7 +568,9 @@ fn run_script(mut r: ResMut<Runner>, mut ctx: Ctx, mut events: MessageReader<Net
 
     // ---- the start: in the world with the HUD up
     let Some(started) = r.started else {
-        let ready = *ctx.screen.get() == Screen::InGame && ctx.built.up && ctx.me().is_some() && ctx.own() != 0;
+        // `--no-hud` (stills of the bare world) never builds the HUD: the world and the own unit are enough then
+        let hud = ctx.built.up || aa_dev::args().into_iter().any(|a| a == "--no-hud");
+        let ready = *ctx.screen.get() == Screen::InGame && hud && ctx.me().is_some() && ctx.own() != 0;
         if ready {
             let began = *r.started.get_or_insert(now);
             r.mark = ctx.me().unwrap_or_default();
@@ -709,6 +711,14 @@ fn start(r: &mut Runner, c: &mut Ctx, cmd: &Cmd, now: f32) -> Option<Active> {
             for mut o in &mut c.cameras {
                 o.pitch = crate::ingame::camera::clamp_pitch(deg.to_radians());
             }
+            Some(Active::Wait { until: now + 0.1 })
+        }
+        Cmd::View(view) => {
+            c.dev.view = view.map(|(at, dir)| (Vec3::from(at), Vec3::from(dir)));
+            Some(Active::Wait { until: now + 0.1 })
+        }
+        Cmd::Hour(hour) => {
+            c.dev.hour = *hour;
             Some(Active::Wait { until: now + 0.1 })
         }
         Cmd::FaceUnit(spec) => {
