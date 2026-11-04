@@ -268,6 +268,10 @@ struct Cast {
     casting: bool,
     /// A clip of this cast has played on the caster.
     played: bool,
+    /// The last clip this cast started, when, and what [`Stage::play`] said: two steps of one packet batch that name the same clip
+    /// start it once (Charge's start step falls back to the skill's controller clip and its launch step's controller has the same
+    /// `all_co_sk_dashattack`: one start in the original, two in the same frame here; skill parity trace t1f, 2026-11-03).
+    last_clip: Option<(Arc<str>, f64, Option<f32>)>,
     /// What the player's input cancels now (a cast of the local player whose skill is flagged for it).
     cancel: Option<Cancel>,
     /// The cancel went to the server (once per cast).
@@ -1473,7 +1477,13 @@ fn start_shakes(st: &Stage, combat: &mut Combat, shakes: &[ShakeItem], moments: 
 #[allow(clippy::too_many_arguments)]
 fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name: &str, kind: Act, hold: f64, now: f64) -> Option<f32> {
     let looping = kind == Act::Cast || st.book.clip_loops(name);
+    if let Some(played) = repeated_start(combat.casts.get(&tl).and_then(|c| c.last_clip.as_ref()), name, now) {
+        return played;
+    }
     let played = st.play(caster, name, kind, looping, hold, now);
+    if let Some(cast) = combat.casts.get_mut(&tl) {
+        cast.last_clip = Some((Arc::from(name), now, played));
+    }
     if played.is_some() && name.starts_with("all_") {
         // a spell puts the staff back on the back (the real client, after a weapon skill had sent it to the hip)
         st.commands.entity(caster).try_insert(StaffSide(false));
@@ -1489,6 +1499,12 @@ fn play_clip(st: &mut Stage, combat: &mut Combat, tl: u16, caster: Entity, name:
         clip_effects(st, combat, caster, name, now);
     }
     played
+}
+
+/// What the cast's start of `name` at this same instant gave, when it has started that clip at `now` already ([`Cast::last_clip`]);
+/// a later start of the same clip (Tiger Strike's second dash) plays it again.
+fn repeated_start(last: Option<&(Arc<str>, f64, Option<f32>)>, name: &str, now: f64) -> Option<Option<f32>> {
+    last.filter(|(n, at, _)| &**n == name && *at == now).map(|&(_, _, played)| played)
 }
 
 /// The effects the clip starts itself (`effect` anim events: the flowers of `/flowers`, the tears of `/sad`), at their times.
@@ -2869,6 +2885,15 @@ mod tests {
     }
 
     /// Unit 4 is each listed unit (none without a list); 1 and 2 are the plot's caster and target, 3 the step's source, 5 none.
+    #[test]
+    fn a_clip_two_steps_start_in_one_instant_starts_once() {
+        let last = (Arc::<str>::from("all_co_sk_dashattack"), 4.25, Some(0.8));
+        assert_eq!(repeated_start(Some(&last), "all_co_sk_dashattack", 4.25), Some(Some(0.8)), "Charge's start and launch steps");
+        assert_eq!(repeated_start(Some(&last), "all_co_sk_dashattack", 4.6), None, "a later step plays it again (Tiger Strike's dashes)");
+        assert_eq!(repeated_start(Some(&last), "all_co_sk_dashattack_2", 4.25), None, "another clip starts");
+        assert_eq!(repeated_start(None, "all_co_sk_dashattack", 4.25), None);
+    }
+
     #[test]
     fn step_units_name_the_plot_and_the_listed_units() {
         let mut world = World::new();
