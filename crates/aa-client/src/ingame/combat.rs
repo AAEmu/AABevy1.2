@@ -1205,6 +1205,14 @@ impl Combat {
     }
 }
 
+/// When after the clip starts the items of each early moment begin: `START` at once, `FORM` and `THROW` at the clip's own
+/// `form` / `throw` anim events (0 when the clip has none). The original fires them there: Battle Focus' `attack_speedup_cast`
+/// (THROW) at +253 ms into `all_co_sk_shout` (throw phase 0.255 of 0.98 s), Frenzy's `reckless_cast` (THROW) at +259 ms, where
+/// aa-client started both with the skill (skill parity trace, 2026-11-03).
+fn early_moments(events: &clips::ClipEvents) -> [(u8, f64); 3] {
+    [(ev::START, 0.0), (ev::FORM, f64::from(events.form.unwrap_or(0.0))), (ev::THROW, f64::from(events.throw.unwrap_or(0.0)))]
+}
+
 /// Starts the items of `moments` of a cast now, or `delay` seconds from now.
 #[allow(clippy::too_many_arguments)]
 fn start_items(st: &mut Stage, combat: &mut Combat, tl: u16, items: &[FxItem], moments: &[u8], caster: Entity, target: Option<Entity>, ground: Option<Vec3>, now: f64, delay: f64, skip_short: bool) {
@@ -1552,16 +1560,19 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
             combat.release(&mut st.commands, f.tl, ev::LAUNCH);
             if !visual.plot {
                 // an instant skill has not shown its start and form effects yet
+                let [(_, at_start), (_, at_form), (_, at_throw)] = early_moments(&clip_events);
                 if fresh {
-                    start_items(st, combat, f.tl, &look.fx, &[ev::START, ev::FORM], caster, target, target_pos, now, 0.0, true);
-                    start_shakes(&st, combat, &look.shakes, &[ev::START, ev::FORM], caster, target, now, 0.0);
+                    start_items(st, combat, f.tl, &look.fx, &[ev::START], caster, target, target_pos, now, at_start, true);
+                    start_items(st, combat, f.tl, &look.fx, &[ev::FORM], caster, target, target_pos, now, at_form, true);
+                    start_shakes(&st, combat, &look.shakes, &[ev::START], caster, target, now, at_start);
+                    start_shakes(&st, combat, &look.shakes, &[ev::FORM], caster, target, now, at_form);
                 }
                 start_swings(st, combat, f.tl, &look.fx, caster, target, now, &clip_events);
-                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, target_pos, now, 0.0, false);
+                start_items(st, combat, f.tl, &look.fx, &[ev::THROW], caster, target, target_pos, now, at_throw, false);
                 start_items(st, combat, f.tl, &look.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
                 // the voice line at the moment the clip calls it
                 start_items(st, combat, f.tl, &look.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
-                start_shakes(&st, combat, &look.shakes, &[ev::THROW], caster, target, now, 0.0);
+                start_shakes(&st, combat, &look.shakes, &[ev::THROW], caster, target, now, at_throw);
                 start_shakes(&st, combat, &look.shakes, &[ev::LAUNCH], caster, target, now, release);
                 if let Some(projectile) = &look.projectile {
                     start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);
@@ -1606,14 +1617,18 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 let rules = visual.as_ref().map(|v| v.cancel).unwrap_or_default();
                 cast.cancel = cancel_of(rules, if p.casting_ms > 0 { Phase::Cast } else { Phase::Channel });
             }
+            let step = st.book.plot_event(p.event_id);
+            // a cast step without a clip of its own shows the skill's start clip; one with its own (Sunder Earth's
+            // `twohand_co_sk_weapon_blunt_3_cast`, Lasso's `all_co_sk_pull_cast` and its launch step) plays only that: the original
+            // starts one clip per step (skill parity trace, 2026-11-03), where both made two or three starts of the same clip
             if p.casting_ms > 0
+                && step.as_ref().is_none_or(|s| s.clip().is_none())
                 && let Some(v) = visual.as_ref()
                 && let Some(name) = v.instrument_start_clip(wield.instrument).or(v.start_anim.as_ref()).cloned()
                 && play_clip(st, combat, p.tl, caster, &name, Act::Cast, f64::from(p.casting_ms) / 1000.0 + 1.0, now).is_some()
             {
                 st.set_tools(caster, v);
             }
-            let step = st.book.plot_event(p.event_id);
             // `all_co_sk_stop`: ends the clip that loops before this step (alone, it is the whole step)
             if step.as_ref().is_some_and(|s| s.stops()) {
                 end_loop(st, combat, p.tl);
@@ -1645,10 +1660,12 @@ fn apply(event: &Event, now: f64, st: &mut Stage, combat: &mut Combat, clock: &m
                 cast.hit_shakes = step.shakes.clone();
             }
             start_swings(st, combat, p.tl, &step.fx, caster, target, now, &clip_events);
-            start_items(st, combat, p.tl, &step.fx, &[ev::START, ev::FORM, ev::THROW], caster, target, target_pos, now, 0.0, true);
+            for (moment, at) in early_moments(&clip_events) {
+                start_items(st, combat, p.tl, &step.fx, &[moment], caster, target, target_pos, now, at, true);
+                start_shakes(&st, combat, &step.shakes, &[moment], caster, target, now, at);
+            }
             start_items(st, combat, p.tl, &step.fx, &[ev::LAUNCH], caster, target, target_pos, now, release, false);
             start_items(st, combat, p.tl, &step.fx, &[ev::VOICE], caster, target, target_pos, now, if voice > 0.0 { voice } else { release }, false);
-            start_shakes(&st, combat, &step.shakes, &[ev::START, ev::FORM, ev::THROW], caster, target, now, 0.0);
             start_shakes(&st, combat, &step.shakes, &[ev::LAUNCH], caster, target, now, release);
             if let Some(projectile) = &step.projectile {
                 start_shakes(&st, combat, &projectile.shakes, &[ev::START, ev::FORM, ev::THROW, ev::LAUNCH], caster, target, now, release);

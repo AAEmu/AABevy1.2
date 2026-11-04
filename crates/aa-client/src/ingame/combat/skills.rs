@@ -908,6 +908,19 @@ impl Inner {
         visual
     }
 
+    /// The clip of the first `SkillController` of plot event `event_id` that moves the caster or the step's source (plot source 1
+    /// or 3; source 4 moves the units the step affects, Lasso's pull).
+    fn step_controller_clip(&mut self, event_id: u32) -> Option<Arc<str>> {
+        let id: u32 = self
+            .conn
+            .prepare(
+                "SELECT c.start_anim_id FROM plot_effects e JOIN skill_controllers c ON c.id = e.actual_id                  WHERE e.event_id = ?1 AND e.actual_type = 'SkillController' AND e.source_id IN (1, 3) AND c.start_anim_id > 0                  ORDER BY e.position, e.id LIMIT 1",
+            )
+            .and_then(|mut q| q.query_row(params![event_id], |r| Ok(int(r, 0)? as u32)))
+            .ok()?;
+        self.anim(id)
+    }
+
     fn plot_event(&mut self, event_id: u32) -> Option<Arc<PlotVisual>> {
         if let Some(p) = self.plots.get(&event_id) {
             return p.clone();
@@ -945,6 +958,15 @@ impl Inner {
         }
         // 450 steps play two anims: `all_co_sk_stop` (end the clip before) and then the clip itself; the step is the latter
         visual.anim = visual.anims.iter().rev().find(|a| !is_stop_clip(a)).or(visual.anims.first()).cloned();
+        // a step that moves its caster (a `SkillController` whose subject, the effect's source, is the caster or the step's source)
+        // and has no anim of its own plays the controller's clip: Tiger Strike's two dashes (`all_co_sk_dashattack_2`, events 118
+        // and 119) have no anim effect at all, and the original plays the clip as each arrives (skill parity trace, 2026-11-03)
+        if visual.anim.as_ref().is_none_or(|a| is_stop_clip(a))
+            && let Some(clip) = self.step_controller_clip(event_id)
+        {
+            visual.anims.push(clip.clone());
+            visual.anim = Some(clip);
+        }
         visual.fx = Arc::new(fx);
         visual.shakes = Arc::new(shakes);
         let plot = (visual.anim.is_some() || !visual.fx.is_empty() || !visual.shakes.is_empty() || visual.projectile.is_some()).then(|| Arc::new(visual));
@@ -1290,6 +1312,18 @@ mod tests {
         assert_eq!(dash.controller_anim.as_deref(), Some("all_co_sk_dashattack"));
         assert_eq!(book.skill(12049).unwrap().controller_anim.as_deref(), Some("all_co_sk_backstep"));
         assert_eq!(book.skill(16064).unwrap().controller_anim, None);
+    }
+
+    /// A plot step that dashes its caster without an anim of its own plays the controller's clip; a step that pulls its target
+    /// (Lasso, controller subject 4) does not give the caster that clip.
+    #[test]
+    fn plot_steps_take_their_controller_clip() {
+        let Some(book) = book() else { return };
+        for event in [118, 119] {
+            assert_eq!(book.plot_event(event).and_then(|p| p.clip().cloned()).as_deref(), Some("all_co_sk_dashattack_2"), "Tiger Strike {event}");
+        }
+        assert_eq!(book.plot_event(5100).and_then(|p| p.clip().cloned()).as_deref(), Some("all_co_sk_dashattack"), "Charge");
+        assert_ne!(book.plot_event(2659).and_then(|p| p.clip().cloned()).as_deref(), Some("all_re_combat_struggle"), "Lasso's pull");
     }
 
     /// A song has a clip per instrument family (string, percussion, tube); the other skills have none.
