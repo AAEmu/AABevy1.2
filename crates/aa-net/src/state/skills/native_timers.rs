@@ -64,6 +64,15 @@ impl Skills {
         }
         result.map(|(left, total)| (Duration::from_millis(u64::from(left)), Duration::from_millis(u64::from(total))))
     }
+    /// Whether a received row for the skill or one of its tags arrived at or after `since`, expired
+    /// rows included. A cast the server answered with a timer shows that timer, not the estimate.
+    pub fn native_cooldown_received_since(&self, skill_id: u32, tags: &[u32], since: Instant) -> bool {
+        self.native_skill_cooldowns.iter().any(|row| row.cooldown.id == skill_id && row.updated_at >= since)
+            || self
+                .native_tag_cooldowns
+                .iter()
+                .any(|row| tags.contains(&row.cooldown.id) && row.updated_at >= since)
+    }
     pub(super) fn clear_received_state(&mut self) {
         let last_frame_ms = self.native_last_frame_ms;
         let catalog = std::mem::take(&mut self.cooldown_catalog);

@@ -119,11 +119,19 @@ pub(super) fn own_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     Some(best)
 }
 
-/// Existing cast-start/DB estimate only; never reintroduce the single tag as received membership.
+/// How long before the cast start a received timer still counts as the answer to that cast: the server sends SCCooldowns
+/// with SCSkillStarted, and the two can arrive in either order within a frame or two.
+const ANSWER_WINDOW: Duration = Duration::from_secs(2);
+
+/// Existing cast-start/DB estimate only; never reintroduce the single tag as received membership. A cast the server
+/// answered with SCCooldowns has no estimate: the 1.2 client shows the received value (Tiger Strike 12600 ms, where the
+/// DB says 18000).
 pub(super) fn observed_at(info: &SkillInfo, skills: &Skills, id: u32, now: Instant) -> (u32, u32) {
     if let Some(&used) = skills.last_used.get(&id) {
         let reset = info.tag != 0 && skills.reset_tags.iter().any(|&(tag, at)| tag == info.tag && at >= used);
-        if !reset {
+        let since = used.checked_sub(ANSWER_WINDOW).unwrap_or(used);
+        let answered = skills.native_cooldown_received_since(id, &info.tags, since);
+        if !reset && !answered {
             let left = Duration::from_millis(u64::from(info.cooldown_ms)).saturating_sub(now.saturating_duration_since(used));
             return (ms(left), info.cooldown_ms);
         }
