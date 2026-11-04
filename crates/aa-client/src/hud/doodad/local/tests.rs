@@ -9,7 +9,9 @@ use aa_net::{Command, Event, NetCommand};
 
 use crate::hud::api::{HudBridge, HudData, Shared};
 use crate::hud::data::{GameData, SkillInfo};
-use crate::hud::doodad::{Focus, PermEnv, Tables, Views, execute, find_focus, world_doodad};
+use crate::hud::doodad::{
+    CRAFT_ACTION, Focus, PermEnv, Tables, Views, execute, find_focus, world_doodad,
+};
 use crate::hud::dynamic_actions::{Shown, Source};
 
 const MAILBOX_GROUP: u32 = 107;
@@ -97,7 +99,14 @@ fn app(game: GameData, group: u32, template: u32, action: u32, inventory: Invent
         .add_message::<crate::hud::UseFailed>()
         .add_message::<crate::hud::ShowError>()
         .init_resource::<crate::ingame::DevOptions>()
-        .add_systems(Update, (execute, crate::hud::store::update));
+        .add_systems(
+            Update,
+            (
+                execute,
+                crate::hud::store::update,
+                crate::hud::auction::sync,
+            ),
+        );
     app
 }
 
@@ -767,19 +776,24 @@ fn end_interaction_closes_the_bench_coffer_and_shown_list() {
         assert!(crate::hud::crafting::open_bench(&mut d, 300, 0).is_some());
         d.doodad.menu = Some((2075, Vec::new()));
         d.doodad.menu_shown = true;
+        d.doodad.local_state = Some(crate::hud::doodad::LocalState {
+            state: 8,
+            obj_id: 2075,
+        });
     }
     {
         let rt = app.world().get_non_send::<UiRuntime>().unwrap();
         let bridge = app.world().get_non_send::<HudBridge>().unwrap();
-        assert!(crate::hud::doodad::end_interaction(
-            Some(rt),
-            &bridge.0,
-            &inventory
-        ));
+        assert_eq!(
+            crate::hud::doodad::end_interaction(Some(rt), &bridge.0, &inventory)
+                .map(|state| state.state),
+            Some(8)
+        );
         let d = bridge.0.borrow();
         assert_eq!(crate::hud::crafting::active_bench(&d), None);
         assert!(d.doodad.coffer_close);
         assert!(!d.doodad.menu_shown && d.doodad.menu.is_none());
+        assert!(d.doodad.local_state.is_none());
     }
     assert_eq!(
         lua(&app, "return INTER_ENDS").unwrap().as_integer(),
@@ -794,11 +808,7 @@ fn end_interaction_closes_the_bench_coffer_and_shown_list() {
         let rt = app.world().get_non_send::<UiRuntime>().unwrap();
         let bridge = app.world().get_non_send::<HudBridge>().unwrap();
         bridge.0.borrow_mut().doodad.menu = Some((2075, Vec::new()));
-        assert!(!crate::hud::doodad::end_interaction(
-            Some(rt),
-            &bridge.0,
-            &inventory
-        ));
+        assert!(crate::hud::doodad::end_interaction(Some(rt), &bridge.0, &inventory).is_none());
         assert!(bridge.0.borrow().doodad.menu.is_some());
     }
     assert_eq!(
@@ -1070,6 +1080,197 @@ fn the_auction_doodad_opens_the_auction_window() {
         "the auction window did not open"
     );
     assert!(sent(&mut app).is_empty());
+}
+
+/// Turns the fixture doodad into the mailbox and asks the bar for its action.
+fn request_mailbox(app: &mut App) {
+    app.world_mut().resource_mut::<Doodads>().by_id.insert(
+        2075,
+        world_doodad(
+            2075,
+            MAILBOX_TEMPLATE,
+            MAILBOX_GROUP,
+            Vec3::new(10.0, 10.0, 100.0),
+        ),
+    );
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.doodad.focus = Some(Focus {
+            obj_id: 2075,
+            skills: vec![MAILBOX_ACTION],
+            craft_icon: None,
+            key: -3.0,
+            dist: 3.0,
+        });
+        let generation = d.dynamic_actions.shown().and_then(|s| match s.source {
+            Source::Doodad { generation, .. } => Some(generation),
+            _ => None,
+        });
+        d.dynamic_actions.replace(Some(Shown {
+            source: Source::Doodad {
+                obj_id: 2075,
+                phase: MAILBOX_GROUP,
+                generation: generation.unwrap_or_default(),
+            },
+            skills: vec![MAILBOX_ACTION],
+        }));
+        d.dynamic_actions.request(1);
+    }
+}
+
+/// Turns the fixture doodad into a workbench and asks the bar for its craft action.
+fn request_bench(app: &mut App, template: u32, group: u32) {
+    app.world_mut().resource_mut::<Doodads>().by_id.insert(
+        2075,
+        world_doodad(2075, template, group, Vec3::new(10.0, 10.0, 100.0)),
+    );
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.doodad.focus = Some(Focus {
+            obj_id: 2075,
+            skills: vec![CRAFT_ACTION],
+            craft_icon: None,
+            key: -3.0,
+            dist: 3.0,
+        });
+        let generation = d.dynamic_actions.shown().and_then(|s| match s.source {
+            Source::Doodad { generation, .. } => Some(generation),
+            _ => None,
+        });
+        d.dynamic_actions.replace(Some(Shown {
+            source: Source::Doodad {
+                obj_id: 2075,
+                phase: group,
+                generation: generation.unwrap_or_default(),
+            },
+            skills: vec![CRAFT_ACTION],
+        }));
+        d.dynamic_actions.request(1);
+    }
+}
+
+fn auction_end_probe(app: &App) {
+    lua(
+        app,
+        "NPC_ENDS=0; INTER_ENDS=0; ORDER='';\
+         local a=UIParent:CreateWidget('emptywidget','auctionNpcEnd','UIParent');\
+         a:RegisterEvent('NPC_INTERACTION_END');\
+         a:SetHandler('OnEvent',function() NPC_ENDS=NPC_ENDS+1; ORDER=ORDER..'N;' end);\
+         local b=UIParent:CreateWidget('emptywidget','auctionInterEnd','UIParent');\
+         b:RegisterEvent('INTERACTION_END');\
+         b:SetHandler('OnEvent',function() INTER_ENDS=INTER_ENDS+1; ORDER=ORDER..'I;' end)",
+    )
+    .unwrap();
+}
+
+/// `FUN_393b7aa0` raises `NPC_INTERACTION_END` (0x6c) for the auction state 0xe before
+/// `INTERACTION_END` (0xd2): the next interaction (a mailbox) takes over.
+#[test]
+fn the_auction_interaction_ends_before_a_mailbox() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 22_065, 7983, 12_083, Inventory::default());
+    auction_end_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the auction window did not open"
+    );
+    request_mailbox(&mut app);
+    app.update();
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert_eq!(
+        lua(&app, "return ORDER")
+            .unwrap()
+            .as_string()
+            .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            .as_deref(),
+        Some("N;I;"),
+        "NPC_INTERACTION_END must come first"
+    );
+    assert_eq!(
+        lua(&app, "return IsActivatedMailBox()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the mailbox did not open"
+    );
+}
+
+/// The native clears state 0xe when the auction window closes (`FUN_394ce540` ->
+/// `FUN_393b7b50(0xe)`); a later mailbox is a fresh interaction and must not end it again.
+#[test]
+fn a_closed_auction_does_not_end_again_at_the_next_interaction() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 22_065, 7983, 12_083, Inventory::default());
+    auction_end_probe(&app);
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the auction window did not open"
+    );
+    lua(&app, "auctionWindow:Show(false)").unwrap();
+    tick(&app);
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the auction window did not close"
+    );
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert!(
+        app.world()
+            .get_non_send::<HudBridge>()
+            .unwrap()
+            .0
+            .borrow()
+            .doodad
+            .local_state
+            .is_none(),
+        "the closed auction left its state behind"
+    );
+
+    request_mailbox(&mut app);
+    app.update();
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(
+        lua(&app, "return INTER_ENDS").unwrap().as_integer(),
+        Some(1)
+    );
+    assert_eq!(
+        lua(&app, "return IsActivatedMailBox()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the mailbox did not open"
+    );
 }
 
 /// `DoodadFuncCofferPerm` (`FUN_393bc260` case 0x51): `FUN_3983b3b0` finds the template's

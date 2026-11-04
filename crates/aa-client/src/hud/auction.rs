@@ -7,7 +7,7 @@ use web_time::Instant;
 
 use aa_net::auction::{AuctionLot, AuctionSearch, AuctioneerIds, PAGE_SIZE, listing_fee};
 use aa_net::model::Item;
-use aa_net::state::{Inventory, Units};
+use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::{AuctionCommand, AuctionEvent, Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -948,6 +948,34 @@ fn window_open(rt: &UiRuntime) -> bool {
         .unwrap_or(false)
 }
 
+/// A doodad auction (`FUN_393b8b80`, state 0xe) is cleared when its window closes or the player
+/// leaves: `FUN_394ce540` calls `FUN_393b7b50(0xe)`, which runs `FUN_393b7aa0`
+/// (`NPC_INTERACTION_END`, then `INTERACTION_END`) and clears the state. Without this a later
+/// interaction would end a window that was already gone.
+fn close_doodad_auction(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    inventory: &Inventory,
+    doodads: Option<&Doodads>,
+    units: &Units,
+) {
+    let Some(local) = bridge
+        .borrow()
+        .doodad
+        .local_state
+        .filter(|state| state.state == 0xe)
+    else {
+        return;
+    };
+    let left = doodads.is_none_or(|doodads| {
+        super::doodad::left_interaction(&bridge.borrow(), doodads, units, local.obj_id)
+    });
+    if window_open(rt) && !left {
+        return;
+    }
+    super::doodad::end_interaction(Some(rt), bridge, inventory);
+}
+
 fn anonymous_quote(command: &AuctionCommand) -> bool {
     matches!(command, AuctionCommand::LowestPrice { auctioneer, .. } if auctioneer.obj_id == 0 && auctioneer.obj_id2 == 0)
 }
@@ -977,11 +1005,12 @@ pub(super) fn start_selected(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn sync(
+pub(super) fn sync(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     inventory: Res<Inventory>,
     units: Res<Units>,
+    doodads: Option<Res<Doodads>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -1040,6 +1069,7 @@ fn sync(
             }
         }
     }
+    close_doodad_auction(&rt, &bridge.0, &inventory, doodads.as_deref(), &units);
     let (signals, notices, unlock, commands) = {
         let mut v = state.0.borrow_mut();
         (

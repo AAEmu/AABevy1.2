@@ -470,7 +470,7 @@ pub(super) fn run(
         _ => 0,
     };
     if state != 0 {
-        bridge.borrow_mut().doodad.local_state = Some(state);
+        bridge.borrow_mut().doodad.local_state = Some(super::LocalState { state, obj_id });
     }
     match local {
         LocalAction::Mailbox => super::super::mail::open_at(rt, obj_id),

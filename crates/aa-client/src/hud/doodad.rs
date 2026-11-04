@@ -463,6 +463,14 @@ struct Entry {
     name: String,
 }
 
+/// The local interaction `FUN_393b7b10(state, obj_id)` remembers: `DAT_3a17e6a0` and
+/// `DAT_3a17e6a4`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LocalState {
+    pub state: u8,
+    pub obj_id: u32,
+}
+
 #[derive(Default)]
 pub(super) struct View {
     focus: Option<Focus>,
@@ -505,9 +513,10 @@ pub(super) struct View {
     pub(super) crime_report: Option<CrimeReport>,
     /// `X2Trial.ReportCrime` calls since the last `execute`: context and report text.
     pub(super) crime_reports: Vec<(CrimeReport, String)>,
-    /// The interaction state (`DAT_3a17e6a0`) of an open local window (1, 2, 7, 8, 0xd, 0xe);
-    /// the next `end_interaction` (`FUN_393b7aa0`) ends it.
-    pub(super) local_state: Option<u8>,
+    /// The interaction state (`DAT_3a17e6a0`) of an open local window (1, 2, 7, 8, 0xd, 0xe) and
+    /// the object it belongs to (`DAT_3a17e6a4`, `FUN_393b7b10`); the next `end_interaction`
+    /// (`FUN_393b7aa0`) ends it.
+    pub(super) local_state: Option<LocalState>,
     /// Purchase dialogs confirmed since the last `execute`; each sends its native packet.
     pub(super) purchases: Vec<local::PurchaseOrder>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
@@ -860,40 +869,83 @@ pub(super) fn left_interaction(
     }
 }
 
+/// Closes the parts of the active interaction that live in the HUD data: the bench, a shown
+/// interaction list and the coffer (state 5, `FUN_394d08c0` sends the `CSCofferInteraction` close
+/// packet at the top of the next `execute`), and takes the local window state. The caller raises
+/// the events once its borrow of the data ends (see [`finish_interaction`]).
+fn end_windows(data: &mut HudData, inventory: &Inventory) -> (Option<LocalState>, bool) {
+    let bench = super::crafting::close_bench(data);
+    // The local window states FUN_393b7b10 ends (`DAT_3a17e6a0`: open paper 1, renew 2, stamp 7,
+    // purchase 8, coffer permission 0xd, auction 0xe).
+    let state = data.doodad.local_state.take();
+    // Only a list that was shown (`other_interaction`) is an active interaction; a single action
+    // kept in `menu` for the immediate-use path is not.
+    let menu = std::mem::take(&mut data.doodad.menu_shown);
+    if menu {
+        data.doodad.menu = None;
+    }
+    let coffer = inventory.coffer.is_open();
+    if coffer {
+        data.doodad.coffer_close = true;
+    }
+    (state, bench || menu || coffer || state.is_some())
+}
+
+/// The event half of the native `FUN_393b7aa0` (774053): `NPC_INTERACTION_END` (0x6c) for states
+/// 0xe/0xf/0x11 first, then `INTERACTION_END` (0xd2) once when something was active. The
+/// store/bank that `store::end_interaction` closes raises its own `NPC_INTERACTION_END`.
+fn finish_interaction(
+    rt: Option<&UiRuntime>,
+    bridge: &Shared,
+    state: Option<LocalState>,
+    windows: bool,
+) -> bool {
+    let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
+    let ended = windows || store;
+    if let Some(rt) = rt {
+        if state.is_some_and(|state| matches!(state.state, 0xe | 0xf | 0x11)) {
+            rt.fire_event("NPC_INTERACTION_END", ());
+        }
+        if ended {
+            rt.fire_event("INTERACTION_END", ());
+        }
+    }
+    ended
+}
+
+/// `end_windows` once per `execute`: `FUN_393b7b10` ends the active interaction only before the
+/// first new bench or coffer of the frame.
+fn end_once(
+    data: &mut HudData,
+    inventory: &Inventory,
+    done: &mut bool,
+    state: &mut Option<LocalState>,
+    windows: &mut bool,
+) {
+    if *done {
+        return;
+    }
+    *done = true;
+    let (taken, ended) = end_windows(data, inventory);
+    *state = taken;
+    *windows = ended;
+}
+
 /// Ends the interaction that is active before a new local window, the native `FUN_393b7aa0`
-/// (774053): the bench and the shown interaction list, the coffer (state 5, `FUN_394d08c0` sends
-/// the `CSCofferInteraction` close packet), and the store/bank (states 0xe/0xf/0x11, which raise
-/// `NPC_INTERACTION_END`). It then raises `INTERACTION_END` (0xd2) once when something was active.
+/// (774053): the bench and the shown interaction list, the coffer (state 5), the store/bank and
+/// the local window state. Raises `NPC_INTERACTION_END` first for states 0xe/0xf/0x11, then
+/// `INTERACTION_END` (0xd2) once when something was active. Returns the taken state.
 pub(super) fn end_interaction(
     rt: Option<&UiRuntime>,
     bridge: &Shared,
     inventory: &Inventory,
-) -> bool {
-    let (bench, menu, coffer, state) = {
+) -> Option<LocalState> {
+    let (state, windows) = {
         let mut data = bridge.borrow_mut();
-        let bench = super::crafting::close_bench(&mut data);
-        // The local window states FUN_393b7b10 ends (`DAT_3a17e6a0`: open paper 1, renew 2,
-        // stamp 7, purchase 8, coffer permission 0xd, auction 0xe).
-        let state = data.doodad.local_state.take().is_some();
-        // Only a list that was shown (`other_interaction`) is an active interaction; a single
-        // action kept in `menu` for the immediate-use path is not.
-        let menu = std::mem::take(&mut data.doodad.menu_shown);
-        if menu {
-            data.doodad.menu = None;
-        }
-        let coffer = inventory.coffer.is_open();
-        if coffer {
-            // execute sends `CSCofferInteraction` for the flag.
-            data.doodad.coffer_close = true;
-        }
-        (bench, menu, coffer, state)
+        end_windows(&mut data, inventory)
     };
-    let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
-    let ended = bench || menu || coffer || state || store;
-    if ended && let Some(rt) = rt {
-        rt.fire_event("INTERACTION_END", ());
-    }
-    ended
+    finish_interaction(rt, bridge, state, windows);
+    state
 }
 
 /// Whether a use must walk first: the gap measured the drawn model's real bounds and is out of the
