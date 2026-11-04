@@ -687,8 +687,9 @@ The getters these windows read that were still stubs now follow the natives:
 * `GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`) is the `quest_names` row with
   `quest_name_kind_id` 2, else the empty string. `quest_contexts.name` is not used.
 * `GetLinkedQuestSummary` (`FUN_394a4dc0`) is the first Progress component's
-  `quest_component_texts` kind-4 text, else the first Ready component's, or nil. It is the stored
-  text, so its macros are not expanded (the native returns the text pointer).
+  `quest_component_texts` kind-4 text, else the first Ready component's, or nil. The native copies
+  the text (`FUN_3901aa10`) and expands its macros (`FUN_39435050`) before pushing the result, so
+  the getter returns the expanded text (for example `@NPC_NAME(614)` becomes the NPC's name).
 * `GetLinkedQuestObjectives` (`FUN_394a4fc0`) is an array of `{ obj, count }`, one row per Progress
   component with a counted act; `count` is `FUN_397d3440`'s amount. A quest with no Progress
   components lists each Ready component with the locale's `report_alias` / `talk_report_npc` /

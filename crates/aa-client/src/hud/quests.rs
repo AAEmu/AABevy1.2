@@ -821,14 +821,15 @@ impl QuestTables {
     }
 
     /// `X2Quest.GetLinkedQuestSummary` (`FUN_394a4dc0`): the first Progress component's kind-4 text,
-    /// else the first Ready component's. The native returns the stored text, not its macros expanded.
-    pub fn linked_summary(&self, quest: u32) -> Option<String> {
+    /// else the first Ready component's, with its macros expanded: the native copies the text
+    /// (`FUN_3901aa10`) and runs the macro expander (`FUN_39435050`) before pushing the result.
+    pub fn linked_summary(&self, quest: u32, texts: &Texts) -> Option<String> {
         if !self.defs.contains_key(&quest) {
             return None;
         }
         self.parts_of(quest, kind::PROGRESS)
-            .find_map(|c| c.texts.first().cloned())
-            .or_else(|| self.parts_of(quest, kind::READY).find_map(|c| c.texts.first().cloned()))
+            .find_map(|c| c.texts.first().map(|t| texts.expand(t)))
+            .or_else(|| self.parts_of(quest, kind::READY).find_map(|c| c.texts.first().map(|t| texts.expand(t))))
     }
 
     /// `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`): one `{obj, count}` row per Progress

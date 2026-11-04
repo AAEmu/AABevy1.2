@@ -465,7 +465,11 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     let b = bridge.clone();
     hud.raw_set(
         "quest_linked_summary",
-        lua.create_function(move |_, qtype: u32| Ok(b.borrow().game.get().and_then(|g| g.quests.linked_summary(qtype))))?,
+        lua.create_function(move |_, qtype: u32| {
+            let d = b.borrow();
+            let Some(game) = d.game.get() else { return Ok(None) };
+            Ok(game.quests.linked_summary(qtype, &texts(&d, game)))
+        })?,
     )?;
     let b = bridge.clone();
     hud.raw_set(
@@ -3330,7 +3334,7 @@ mod tests {
                 assert(X2Quest:GetScoreQuestObjective(92) == 'Defeat the Dahuta Cultists in Thorntimbre Woods')
                 assert(X2Quest:GetObjectiveComponentCount(92) == 3)
                 assert(X2Quest:GetFirstObjectiveCount(92) == 20)
-                assert(X2Quest:GetLinkedQuestSummary(92) == 'Kill @NPC_NAME(614), @NPC_NAME(6529), and @NPC_GROUP_NAME(8) in Thorntimbre Woods.')
+                assert(X2Quest:GetLinkedQuestSummary(92) == 'Kill Dahuta Priestess Efina, Dahuta Slave Belucci, and Dahuta Cultists in Thorntimbre Woods.')
                 local objs = X2Quest:GetLinkedQuestObjectives(92)
                 assert(#objs == 3, #objs)
                 assert(objs[1].count == 20 and objs[2].count == 20 and objs[3].count == 10)
@@ -3355,7 +3359,7 @@ mod tests {
                 assert(X2Quest:GetLinkedQuestSummary(999999) == nil)
                 assert(X2Quest:GetLinkedQuestObjectives(999999) == nil)
                 -- 330 has no Progress components: one Ready row with the locale's report text.
-                assert(X2Quest:GetLinkedQuestSummary(330) == 'Meet @NPC_NAME(3511) in Desireen.')
+                assert(X2Quest:GetLinkedQuestSummary(330) == 'Meet Woodcutter Gallagher in Desireen.')
                 local ready = X2Quest:GetLinkedQuestObjectives(330)
                 assert(#ready == 1 and ready[1].count == 0)
                 assert(ready[1].obj == X2Locale:LocalizeUiText(6, 'report_alias'))
