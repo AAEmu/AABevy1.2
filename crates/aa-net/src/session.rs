@@ -775,6 +775,8 @@ pub enum Event {
     QuestUnitReqFailed(crate::quest::QuestUnitReqFailed),
     /// A quest mail was sent (`SCQuestMailSent`); the UI shows `QUEST_MAIL_SENT`.
     QuestMailSent(crate::quest::QuestMailSent),
+    /// `SCShowQuestArea`: the server placed a quest's area (`event::Event::QuestArea` for the HUD).
+    QuestArea(crate::quest::QuestArea),
     /// An NPC's function list, a doodad's quest offer, NPC chat ([`crate::interaction::InteractEvent`]).
     Interaction(crate::interaction::InteractEvent),
     Shop(crate::shop::ShopEvent),
@@ -2362,6 +2364,7 @@ impl Session {
             M::QuestContextFailed(failed) => self.emit(Event::QuestContextFailed(failed)),
             M::QuestUnitReqFailed(failed) => self.emit(Event::QuestUnitReqFailed(failed)),
             M::QuestMailSent(sent) => self.emit(Event::QuestMailSent(sent)),
+            M::QuestArea(area) => self.emit(Event::QuestArea(area)),
             M::Interaction(e) => self.emit(Event::Interaction(e)),
             M::Shop(e) => self.emit(Event::Shop(e)),
             M::Party(e) => self.emit(Event::Party(e)),

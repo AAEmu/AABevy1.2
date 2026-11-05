@@ -66,7 +66,12 @@ X2Quest.GetActiveQuestType = function(self, idx)
 end
 X2Quest.GetActiveQuestTitle = function(self, qtype) local q = byType(qtype); return q and q.name or false end
 X2Quest.GetActiveQuestLevel = function(self, idx) local q = byIndex(idx); return q and q.level or 1 end
-X2Quest.GetActiveQuestComparedLevel = function(self, idx) return 0 end
+-- The player's level less the quest's (`FUN_3949d050`); a bad index reads 0.
+X2Quest.GetActiveQuestComparedLevel = function(self, idx)
+  local q = byIndex(idx)
+  if q == nil then return 0 end
+  return (HUD.state and HUD.state.level or 0) - (q.level or 0)
+end
 -- 1 = in progress, 3 = ready to be reported.
 X2Quest.GetActiveQuestListStatus = function(self, idx) local q = byIndex(idx); return q and q.status or 0 end
 X2Quest.GetActiveQuestObjectiveText = function(self, qtype, i)
@@ -94,20 +99,77 @@ X2Quest.IsOverDoneQuestByType = function(self, qtype) return overDone(byType(qty
 X2Quest.IsReadyForCompleteQuest = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
 X2Quest.IsProgressQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 1 end
 X2Quest.IsReadyQuestInJournal = function(self, qtype) local q = byType(qtype); return q ~= nil and q.status == 3 end
-X2Quest.NowIsAggroComponent = function(self, qtype) return false end
+-- `FUN_394a53c0`: a Progress component's first counted act is `ObjAggro`; a quest that is not
+-- active answers nil.
+X2Quest.NowIsAggroComponent = function(self, qtype)
+  local q = byType(qtype)
+  if q == nil or (tonumber(q.status) or 0) == 0 then return nil end
+  return q.aggro == true
+end
 X2Quest.GetObjectiveComponentCount = function(self, qtype)
   local q = byType(qtype)
   return q and #q.objectives or 0
 end
 X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
 X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
-X2Quest.GetUseTypeQuestItems = function(self, qtype, all) return {} end
-X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, qtype, index) return {} end
-X2Quest.IsQuestStartItem = function(self, itemType) return false end
-X2Quest.IsUseItemInActiveQuest = function(self, itemType) return false end
+-- The item types the quest lets the player use on its tracker (`FUN_394a55a0`): the supplied items
+-- whose `show_action_bar` is set, then the `ObjItemUse` items. With `checkState` the native answers
+-- nothing for a failed, ready or dropped quest, or one already completed.
+local function pushUnique(out, seen, list)
+  for _, id in ipairs(list or {}) do
+    local t = tonumber(id)
+    if t ~= nil and not seen[t] then seen[t] = true; out[#out + 1] = t end
+  end
+end
+X2Quest.GetUseTypeQuestItems = function(self, qtype, checkState)
+  local q = byType(qtype)
+  if q == nil then return nil end
+  if checkState then
+    local status = tonumber(q.status) or 0
+    if status == 2 or status == 3 or status == 4 then return nil end
+    -- the completed bit only rejects a non-repeatable quest (`FUN_397d5200` guarded by +0x28).
+    if q.completed and not q.repeatable then return nil end
+  end
+  local out, seen = {}, {}
+  pushUnique(out, seen, q.actionBarItems)
+  pushUnique(out, seen, q.useItems)
+  return out
+end
+-- The items of one objective (`FUN_394a58d0`): the supplied items assigned to it plus its
+-- `ObjItemUse` items. The index is the native one, 1 based over the not-done Progress components;
+-- an unknown template answers an empty table.
+X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, qtype, index)
+  return HUD.quest_items_by_obj_index(tonumber(qtype) or 0, tonumber(index) or 0)
+end
+-- `FUN_3949c880`: an item impl 10 (`ItemImplEnum`) starts a quest.
+X2Quest.IsQuestStartItem = function(self, itemType)
+  local t = tonumber(itemType)
+  if t == nil or t == 0 then return false end
+  return HUD.item_impl(t) == 10
+end
+-- `FUN_3949e280`: the item is a SupplyItem or an ObjItemUse target of an active quest.
+X2Quest.IsUseItemInActiveQuest = function(self, itemType)
+  local t = tonumber(itemType)
+  if t == nil or t == 0 then return false end
+  sync()
+  for _, q in ipairs(QUESTS) do
+    for _, list in ipairs({ q.supplyItems, q.useItems }) do
+      for _, id in ipairs(list or {}) do
+        if tonumber(id) == t then return true end
+      end
+    end
+  end
+  return false
+end
 X2Quest.GetQuestReportNpcTypeByQuestType = field("reportNpc", nil)
 X2Quest.GetQuestReportNpcNameByQuestType = field("reportNpcName", nil)
 X2Quest.GetQuestLinkText = function(self, qtype) local q = byType(qtype); return q and string.format("|q%d;", tonumber(qtype)) or "" end
+-- Restart a main quest (`FUN_3949b780` / `FUN_3937b200`): the native refuses quietly a zero quest
+-- and lets the request path check the rest.
+X2Quest.QuestContextRestart = function(self, qtype)
+  local t = tonumber(qtype) or 0
+  if t ~= 0 then HUD.quest_restart(t) end
+end
 -- Give the quest up (the quest log's button; the list's index).
 X2Quest.QuestContextDrop = function(self, idx)
   local q = byIndex(idx)
@@ -169,12 +231,44 @@ end
 -- Rewards -------------------------------------------------------------------------------------------------------
 X2Quest.GetQuestContextRewardExp = field("exp", "0")
 X2Quest.GetQuestContextRewardCopper = field("copper", 0)
-X2Quest.GetQuestContextRewardAAPoint = function(self, qtype) return 0 end
+-- `FUN_394a11a0`: the first `SupplyAaPoint` reward act's point value (0 without one).
+X2Quest.GetQuestContextRewardAAPoint = function(self, qtype)
+  local q = byType(qtype)
+  if q == nil then return 0 end
+  return tonumber(q.aaPoint) or 0
+end
 X2Quest.RewardLaborPower = field("labor", nil)
 X2Quest.RewardHonorPoint = field("honor", nil)
 X2Quest.RewardCrimePoint = field("crime", nil)
 X2Quest.RewardLivingPoint = field("living", nil)
-X2Quest.GetQuestContextRewardAppellation = function(self, qtype) return nil end
+-- `FUN_394a0de0` / `FUN_391a4cf0`: the `SupplyAppellation` reward as an APPELLATION_INFO table
+-- ([TYPE] = id, [NAME], [BUFF_INFO]).
+local APPELLATION = rawget(_G, "APPELLATION_INFO") or { TYPE = 1, NAME = 2, BUFF_INFO = 3 }
+local function appellationInfo(raw)
+  if raw == nil then return nil end
+  local t = {}
+  t[APPELLATION.TYPE] = raw.id
+  t[APPELLATION.NAME] = raw.name
+  if raw.buff_id ~= nil then
+    local tipType = raw.buff_kind == 1 and "buff" or "debuff"
+    local category = tipType
+    if X2Locale ~= nil and X2Locale.LocalizeUiText ~= nil then
+      category = X2Locale:LocalizeUiText(33, tipType)
+    end
+    t[APPELLATION.BUFF_INFO] = {
+      buff_id = raw.buff_id, name = raw.buff_name, path = raw.path,
+      description = raw.description, tipType = tipType, category = category,
+    }
+  end
+  return t
+end
+X2Quest.GetQuestContextRewardAppellation = function(self, qtype)
+  local q = byType(qtype)
+  local id = q and tonumber(q.appellation) or nil
+  if id == nil or id == 0 then return nil end
+  -- a missing appellation row leaves the native table empty, not nil.
+  return appellationInfo(HUD.appellation_row(id)) or {}
+end
 local function items(qtype, key)
   local q = byType(qtype)
   return q and q[key] or {}

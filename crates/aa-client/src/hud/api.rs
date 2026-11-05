@@ -46,6 +46,9 @@ pub enum Request {
     SetActionBarPage { page: u8 },
     /// `HUD.request("use_bag", slot)`: a right click on the bag item in real slot `slot` (1 based).
     UseBag { slot: usize },
+    /// `HUD.request("use_equip", slot)`: use the item worn in equipment slot `slot` (1 based,
+    /// `X2Equipment.UseEquippedItemByType`).
+    UseEquip { slot: usize },
     /// `HUD.request("resurrect", inPlace)`: the death window's buttons (`X2Player:Resurrect(inPlace)`).
     Resurrect { in_place: bool },
     LearnSkill { id: u32 },
@@ -150,6 +153,10 @@ pub struct HudData {
     pub loot: super::loot::LootView,
     /// The NPC talked to, the quest dialog and the quest rows the scripts read (`dialog.rs`).
     pub dialog: super::dialog::DialogView,
+    /// The areas `SCShowQuestArea` placed (`map_quests.rs`), newest last.
+    pub quest_areas: Vec<aa_net::quest::QuestArea>,
+    /// Bumped when an area is added or replaced, so the maps rebuild their markers.
+    pub quest_area_version: u64,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
     /// When the player may stand up again after dying (HUD clock, ms): `X2Player:GetResurrectionCountdown` counts down to it.
@@ -250,6 +257,8 @@ impl Default for HudData {
             casts: Default::default(),
             loot: Default::default(),
             dialog: Default::default(),
+            quest_areas: Vec::new(),
+            quest_area_version: 0,
             afk: false,
             death_ends: Default::default(),
             death_started: Default::default(),
@@ -518,6 +527,7 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                     slot: num(1) as usize },
                 "use_pet_action" => Request::UsePetAction { slot: num(1).max(1) as usize },
                 "use_bag" => Request::UseBag { slot: num(1).max(1) as usize },
+                "use_equip" => Request::UseEquip { slot: num(1).max(1) as usize },
                 "resurrect" => Request::Resurrect { in_place: num(1) != 0 },
                 "learn_skill" => Request::LearnSkill { id: num(1).max(0) as u32 },
                 "learn_buff" => Request::LearnBuff { id: num(1).max(0) as u32 },
@@ -527,18 +537,18 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                     let npc_token = if old == super::skillbook::NO_ABILITY {
                         None
                     } else {
-                        let Some(scope) = super::store::services::allows(&b.borrow(), super::store::services::ABILITY) else { return Ok(()) };
+                        let Some(scope) = super::store::services::allows(&b.borrow(), super::store::services::ABILITY) else { return Ok(false) };
                         Some(scope.token())
                     };
                     Request::SwapAbility { old, ability: num(2).clamp(0, 255) as u8, npc_token }
                 },
                 other => {
                     warn!("hud: unknown request {other:?}");
-                    return Ok(());
+                    return Ok(false);
                 }
             };
             b.borrow_mut().requests.push(request);
-            Ok(())
+            Ok(true)
         })?,
     )?;
     // `X2Action:GetActionBarPage` / `SetActionBarPage`: the scripts' page API is 1 based, the
@@ -644,6 +654,13 @@ fn install_functions(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()
                 info.map(|i| i.level),
             ))
         })?,
+    )?;
+    // `items.impl_id` (`ItemImplEnum`): `X2Quest.IsQuestStartItem` is `impl_id` 10
+    // (`FUN_3949c880`).
+    let b = bridge.clone();
+    hud.raw_set(
+        "item_impl",
+        lua.create_function(move |_, id: u32| Ok(b.borrow().game.get().and_then(|g| g.items.get(&id)).map(|i| i.impl_id)))?,
     )?;
     // the player's Character Info numbers (`tipcalc/charstats.rs`): UnitInfo / UnitModifierInfo
     for (name, modifiers) in [("player_info", false), ("player_modifiers", true)] {
@@ -1254,6 +1271,11 @@ pub fn handle_requests(
                 let data = bridge.0.borrow();
                 let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
                 panels::use_bag_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
+            }
+            Request::UseEquip { slot } => {
+                let data = bridge.0.borrow();
+                let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+                panels::use_equipped_slot(slot - 1, &env, &flight, &inventory, &target, &mut pressed, &mut failed);
             }
             Request::Resurrect { in_place } => {
                 // `FUN_39186e70` (`X2Player:Resurrect`): the native sends only while the death

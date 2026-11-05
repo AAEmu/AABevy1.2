@@ -439,6 +439,45 @@ mod tests {
     }
 
     #[test]
+    fn the_quest_tracker_uses_the_first_bag_or_worn_item_of_a_type() {
+        let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        rt.lua
+            .load(
+                r#"
+                X2Bag, X2Equipment = {}, {}
+                X2Cursor = { GetHeld = function() return nil end }
+                ISLOT_BAG = 2
+                USED = nil
+                USE_OK = true
+                AAUI = { UseSlot = function(kind, slot, button) USED = { kind, slot, button }; return USE_OK end }
+                HUD = { bag_slots = 4, bag = { [2] = { id = 777, count = 1 } }, equipment = { [4] = { id = 777 } },
+                        requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot } end }
+                "#,
+            )
+            .exec()
+            .unwrap();
+        load_script(&rt.lua).unwrap();
+        rt.lua
+            .load(
+                r#"
+                assert(X2Bag:FindFirstBagSlotItemByItemType(777) == 2)
+                assert(X2Bag:FindFirstBagSlotItemByItemType(9) == nil)
+                assert(X2Bag:UseItemByType(777) == true)
+                assert(USED[1] == ISLOT_BAG and USED[2] == 2 and USED[3] == "RightButton")
+                assert(X2Bag:UseItemByType(9) == false)
+                USE_OK = false
+                assert(X2Bag:UseItemByType(777) == false, 'a use that cannot be issued is false')
+                assert(X2Equipment:FindEquippedItemByType(777) == 4)
+                assert(X2Equipment:UseEquippedItemByType(777) == true)
+                assert(HUD.requests[1][1] == "use_equip" and HUD.requests[1][2] == 4)
+                assert(X2Equipment:UseEquippedItemByType(9) == false)
+                "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
     fn requests_arrive_with_slots_counted_from_zero() {
         let lua = Lua::new();
         let hud = lua.create_table().unwrap();

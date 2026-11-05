@@ -48,6 +48,21 @@ fn no_title_shown_is_nil() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn the_quest_reward_row_is_the_native_appellation_info() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, _state) = setup(&[], 0)?;
+    rt.lua
+        .load(
+            r#"
+        local r = HUD.appellation_row(100)
+        assert(r.id == 100 and type(r.name) == "string" and r.name ~= "", "row")
+        assert(HUD.appellation_row(999999) == nil, "FUN_397f2250 returns 0")
+    "#,
+        )
+        .exec()?;
+    Ok(())
+}
+
+#[test]
 fn the_pages_hold_five_titles() {
     let titles = Appellations { owned: (1..=12).collect(), ..Default::default() };
     assert_eq!((page_ids(&titles, 1).len(), page_ids(&titles, 2).len(), page_ids(&titles, 3).len()), (5, 5, 2));

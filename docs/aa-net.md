@@ -660,6 +660,7 @@ The quest notices are their own `Event` variants (`aa_net::quest`), not interact
 | `QuestContextFailed { quest_id, err }` | `SCQuestContextFailed` 0x146: `u32` quest id, `u8` error | `FUN_397b5c90` (fields `"type"` u32, `"err"` u8) -> `OnQuestContextFailed` `FUN_391dbcd0` -> `FUN_3937a130`, which raises `QUEST_ERROR_INFO` |
 | `QuestUnitReqFailed { quest_id, unit_obj_id, result }` | `SCQuestUnitReqFailed` 0x148: `u32` id, `bc` unit, `SkillResult` | `FUN_397b5d00` (`"type"`, `"bc"`, `SkillResult` through `FUN_397b1ef0`) -> `OnQuestUnitReqFailed` `FUN_391dbdd0` -> `FUN_39376590`, which raises `QUEST_QUICK_CLOSE_EVENT` when it is the current target |
 | `QuestMailSent { id }` | `SCQuestMailSent` 0x150: one `u32` (`quest_mails.id`) | `FUN_397b5f00` (`"type"`) -> `OnQuestMailSent` `FUN_391dc1d0` -> `FUN_3937a650`, `DOODAD_PHASE_MSG(QUEST_MAIL_SENT with the row's name)` |
+| `QuestArea { ty, x, y, z, radius }` | `SCShowQuestArea` 0x1af: `u32` type, `i64` x, `i64` y, `f32` z, `f32` radius (fixed-point Cry-space X/Y) | `FUN_397b7940` (`"type"`, `"x"`, `"y"`, `"z"`, `"radius"`) -> `OnShowQuestArea` `FUN_391df7b0` -> `FUN_393840b0` (append to the area list; no Lua event) |
 
 `SCQuestContextFailed` matches the server's writer (`systems/quests/packets.rs`). The other two have no
 server writer (only the opcode constants); their tests use the client reader's bytes. The 1.2 reader for
@@ -684,7 +685,11 @@ What the lane server (`bevy`) does not do:
 * It sends no refusal: `SCQuestContextFailed` and `SCQuestUnitReqFailed` are never sent, so a refused
   accept or hand-in gets no answer. Bevy now decodes and shows them when a server does send them; with
   the lane server the dialog stays open until Escape.
-* `CSQuestStartWith` and `CSRestartMainQuest` are only logged.
+* `CSQuestStartWith` is only logged. `CSRestartMainQuest` 0x0fd (one `u32` quest id) is now read
+  by `try_restart_quest` (`systems/quests/engine.rs`) and answers with a normal
+  `SCQuestContextStartedPacket`; Bevy sends it from `X2Quest:QuestContextRestart` with the native
+  preconditions (main detail 2, active, not completed, 3 s throttle, free bag slots for the
+  re-supplied items).
 * No distance check on talk, accept or hand-in: any NPC in view can be talked to.
 * `CSInteractNPC` only gets an empty `SCAiAggro`: no greeting, no `SCNpcChatMessage`.
 

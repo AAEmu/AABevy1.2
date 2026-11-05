@@ -644,6 +644,9 @@ pub enum ServerMsg {
     QuestUnitReqFailed(quest::QuestUnitReqFailed),
     /// `SCQuestMailSent`: a quest mail was sent (`QUEST_MAIL_SENT` system text).
     QuestMailSent(quest::QuestMailSent),
+    /// `SCShowQuestArea`: the server places a quest's area at a world position; the native draws
+    /// its quest-mark decal (no Lua event).
+    QuestArea(quest::QuestArea),
     // -- skills and combat
     SkillStarted(SkillStarted),
     SkillFired(SkillFired),
@@ -823,6 +826,7 @@ impl ServerMsg {
             Self::QuestContextFailed(_) => "SCQuestContextFailed",
             Self::QuestUnitReqFailed(_) => "SCQuestUnitReqFailed",
             Self::QuestMailSent(_) => "SCQuestMailSent",
+            Self::QuestArea(_) => "SCShowQuestArea",
             Self::SkillStarted(_) => "SCSkillStarted",
             Self::SkillFired(_) => "SCSkillFired",
             Self::SkillEnded { .. } => "SCSkillEnded",
@@ -1336,6 +1340,7 @@ impl ServerMsg {
             sc::SCQuestContextFailedPacket => Self::QuestContextFailed(quest::QuestContextFailed::read(r)?),
             sc::SCQuestUnitReqFailedPacket => Self::QuestUnitReqFailed(quest::QuestUnitReqFailed::read(r)?),
             sc::SCQuestMailSentPacket => Self::QuestMailSent(quest::QuestMailSent::read(r)?),
+            sc::SCShowQuestAreaPacket => Self::QuestArea(quest::QuestArea::read(r)?),
             sc::SCQuestContextStartedPacket => Self::QuestStarted(quest::read_context(r)?),
             sc::SCQuestContextUpdatedPacket => Self::QuestUpdated(quest::read_context(r)?),
             sc::SCQuestContextCompletedPacket | sc::SCQuestContextResetPacket => {
@@ -2027,6 +2032,13 @@ mod tests {
         assert_eq!(
             decode(sc::SCQuestMailSentPacket, &[4, 3, 2, 1]),
             ServerMsg::QuestMailSent(quest::QuestMailSent { id: 0x0102_0304 })
+        );
+        // SCShowQuestArea: u32 type, i64 x, i64 y, f32 z, f32 radius (client reader FUN_397b7940).
+        let mut w = Writer::new();
+        w.u32(9).i64(1 << 44).i64(-(1 << 43)).f32(12.5).f32(30.0);
+        assert_eq!(
+            decode(sc::SCShowQuestAreaPacket, &w.finish()),
+            ServerMsg::QuestArea(quest::QuestArea { ty: 9, x: 1 << 44, y: -(1 << 43), z: 12.5, radius: 30.0 })
         );
     }
 

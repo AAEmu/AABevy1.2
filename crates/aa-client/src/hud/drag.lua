@@ -136,6 +136,26 @@ X2Bag.HandleUse = function(self, virtual)
   end
 end
 
+-- `X2Bag.FindFirstBagSlotItemByItemType` (`FUN_3944dee0`): the first bag slot (1 based) holding the
+-- item template, nil when there is none.
+X2Bag.FindFirstBagSlotItemByItemType = function(self, itemType)
+  itemType = tonumber(itemType)
+  if itemType == nil then return nil end
+  for slot = 1, HUD.bag_slots do
+    local s = HUD.bag[slot]
+    if s ~= nil and s.id == itemType then return slot end
+  end
+  return nil
+end
+
+-- `X2Bag.UseItemByType` (`FUN_3944d590`): use the first bag item of the type; true when one was
+-- found (and the use requested), false otherwise.
+X2Bag.UseItemByType = function(self, itemType)
+  local slot = X2Bag:FindFirstBagSlotItemByItemType(itemType)
+  if slot == nil or AAUI.UseSlot == nil then return false end
+  return AAUI.UseSlot(ISLOT_BAG, slot, "RightButton") == true
+end
+
 -- Wear the bag item (the candidates listed under an equipment slot).
 X2Bag.EquipBagItem = function(self, bagSlot, isAux)
   local s = HUD.bag[bagSlot]
@@ -165,6 +185,26 @@ X2Equipment.PickupEquippedItem = function(self, es)
   else
     X2Cursor:ClearCursor()
   end
+end
+
+-- `X2Equipment.FindEquippedItemByType` (`FUN_3946ee10`): the worn slot (1 based, matching
+-- `HUD.equipment`) of the item template.
+X2Equipment.FindEquippedItemByType = function(self, itemType)
+  itemType = tonumber(itemType)
+  if itemType == nil then return nil end
+  for es = 1, 28 do
+    local s = HUD.equipment[es]
+    if s ~= nil and s.id == itemType then return es end
+  end
+  return nil
+end
+
+-- `X2Equipment.UseEquippedItemByType` (`FUN_39470aa0`): use the worn item of the type.
+X2Equipment.UseEquippedItemByType = function(self, itemType)
+  local es = X2Equipment:FindEquippedItemByType(itemType)
+  if es == nil then return false end
+  HUD.request("use_equip", es)
+  return true
 end
 
 X2Equipment.IsInventoriable = function(self, es) return true end
