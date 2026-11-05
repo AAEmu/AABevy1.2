@@ -257,11 +257,11 @@ pub(super) fn tick(
         dialog.pending = None;
         return;
     };
-    let in_reach = {
+    let ended = {
         let data = bridge.0.borrow();
-        super::in_interaction_reach(&data, &doodads, &units, obj_id)
+        super::left_interaction(&data, &doodads, &units, obj_id)
     };
-    if !in_reach {
+    if ended {
         info!("doodad: fish-stand interaction ended");
         rt.fire_event("INTERACTION_END", ());
         dialog.pending = None;

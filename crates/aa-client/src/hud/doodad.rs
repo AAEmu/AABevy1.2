@@ -14,8 +14,9 @@
 //! skill's `max_range`: the capture bounds it at 3.0 m in and 4.5 m out for Gather (whose `max_range` is also 4),
 //! and storage skill 15307 (`max_range` 20) must still clear at the same distance.
 //! The lamp 2319's fake-use skill 13166 (offered by the original too) comes from the func's own detail row (`gather.rs`),
-//! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). Not listed here yet:
-//! the Mailbox's 11400 "Open Mailbox" (no `func_skill_id` and no detail row; the mail window opens with Ctrl-E, `mail.rs`).
+//! as do the decal portals' 17557 (not seen: the capture stood 5.5 m from one, outside its 4 m reach). The Mailbox's
+//! 11400 "Open Mailbox" is the native func-type mapping of `DoodadFuncNaviOpenMailbox`; its use opens the mail window
+//! locally and sends nothing (`local.rs`).
 //!
 //! What the player sees is the original's:
 //!
@@ -62,6 +63,7 @@ use super::{HudKeyboardFocus, HudPointerOverUi};
 
 mod fish;
 mod gather;
+mod local;
 
 /// Skills the dynamic action bar leaves out (`dynamic_action_bar.lua`, `ShoulPassShow`).
 const HIDDEN_SKILLS: [u32; 2] = [0, 10994];
@@ -176,12 +178,17 @@ pub(super) struct Tables {
     fish_convert_items: HashMap<u32, HashSet<u32>>,
     /// `fish_details.item_id` -> `max_weight` (the refund denominator).
     fish_max_weights: HashMap<u32, f32>,
+    /// `(doodad_func_group_id, action id)` -> a window the client opens itself and its permission.
+    locals: HashMap<(u32, u32), local::LocalUse>,
+    /// `(doodad_func_group_id, action id)` -> `DoodadFuncInsertCounter` requirement and permission.
+    insert_counters: HashMap<(u32, u32), local::CounterUse>,
 }
 
 impl Tables {
     pub(super) fn load(conn: &Connection) -> rusqlite::Result<Self> {
         let mut t = Tables::default();
         let detail = gather::DetailSkills::load(conn)?;
+        let local = local::LocalFuncs::load(conn);
         let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -190,13 +197,14 @@ impl Tables {
             let kind: Option<String> = r.get(2)?;
             let func_id = super::data::any_int(r, 3)? as u32;
             let perm = super::data::any_int(r, 4)? as u8;
-            t.add_resolved(
+            t.add_resolved_local(
                 group,
                 skill,
                 kind.as_deref().unwrap_or(""),
                 func_id,
                 perm,
                 &detail,
+                &local,
             );
         }
         (t.fish_buy_items, t.fish_convert_items, t.fish_max_weights) = fish::load_items(conn);
@@ -250,6 +258,7 @@ impl Tables {
 
     /// [`Tables::add`] for a `doodad_funcs` row whose own detail table (or, for the legacy gather
     /// funcs, the server adapter) names the skill when `func_skill_id` is empty.
+    #[cfg(test)]
     fn add_resolved(
         &mut self,
         group: u32,
@@ -259,21 +268,39 @@ impl Tables {
         perm: u8,
         detail: &gather::DetailSkills,
     ) {
+        self.add_resolved_local(group, skill, kind, func_id, perm, detail, &local::LocalFuncs::default());
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_resolved_local(
+        &mut self,
+        group: u32,
+        skill: u32,
+        kind: &str,
+        func_id: u32,
+        perm: u8,
+        detail: &gather::DetailSkills,
+        local: &local::LocalFuncs,
+    ) {
         let skill = if skill != 0 {
             skill
+        } else if kind == "DoodadFuncNaviOpenMailbox" {
+            // Native FUN_397aa970 maps the func type to 11400 "Open Mailbox"; the func row itself
+            // has no `func_skill_id`.
+            local::MAILBOX_ACTION
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
         self.add_fish_func(group, skill, kind, func_id);
-        self.add_full(group, skill, kind, perm);
+        self.add_full(group, skill, kind, perm, func_id, local);
     }
 
     #[cfg(test)]
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
-        self.add_full(group, skill, kind, 0);
+        self.add_full(group, skill, kind, 0, 0, &local::LocalFuncs::default());
     }
 
-    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8) {
+    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8, func_id: u32, local_funcs: &local::LocalFuncs) {
         if skill != 0 && kind == "DoodadFuncAttachment" {
             self.attachment_skills.insert((group, skill));
         }
@@ -302,11 +329,39 @@ impl Tables {
         if let Some(perm) = craft {
             uses.craft.push(perm);
         }
+        if skill != 0 {
+            if let Some(action) = local_funcs.local(kind, func_id) {
+                self.locals
+                    .insert((group, skill), local::LocalUse { action, perm });
+            }
+            if kind == "DoodadFuncInsertCounter"
+                && let Some((item, count)) = local_funcs.insert_counter(func_id)
+            {
+                self.insert_counters.insert(
+                    (group, skill),
+                    local::CounterUse {
+                        item,
+                        count,
+                        perm,
+                    },
+                );
+            }
+        }
     }
 
     /// What the phase `group` can be used for (`None`: nothing).
     pub(super) fn uses(&self, group: u32) -> Option<&Uses> {
         self.uses.get(&group).filter(|u| !u.skills.is_empty() || !u.navi.is_empty() || !u.craft.is_empty())
+    }
+
+    /// The window the client opens itself for action `action` of phase `group`, and its permission.
+    pub(super) fn local(&self, group: u32, action: u32) -> Option<local::LocalUse> {
+        self.locals.get(&(group, action)).copied()
+    }
+
+    /// The `DoodadFuncInsertCounter` requirement of action `action` and its permission.
+    pub(super) fn insert_counter(&self, group: u32, action: u32) -> Option<local::CounterUse> {
+        self.insert_counters.get(&(group, action)).copied()
     }
 
     fn allows_attachment(&self, group: u32, skill: u32, bond_free: bool, mount_free: bool) -> bool {
@@ -754,11 +809,59 @@ fn interaction_gap(
     ))
 }
 
-/// The native interaction range: `FUN_39093800` refuses when the surface offset is greater than
-/// `max_interaction_doodad_distance` (2.1 m). Workbench entry opens only inside it and the craft
-/// validator (`FUN_394d6dc0`) rechecks it before `CSExecuteCraft`.
-pub(super) fn in_interaction_reach(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
-    interaction_gap(data, doodads, units, obj_id).is_some_and(|(gap, _)| gap < INTERACTION_DISTANCE)
+/// `FUN_393b7e40` (774405): the interaction ended. A real measured gap at or past the 2.1 m reach
+/// ends it; a fallback gap (no drawn bounds, a parented doodad) is a centre distance, and the
+/// action was offered up to [`DOODAD_REACH`], so only a gap past that proves the player left. A
+/// gone doodad always ends it. This is the close rule all the local interactions share.
+pub(super) fn left_interaction(
+    data: &HudData,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+) -> bool {
+    if !doodads.by_id.contains_key(&obj_id) {
+        return true;
+    }
+    match interaction_gap(data, doodads, units, obj_id) {
+        Some((gap, true)) => gap >= INTERACTION_DISTANCE,
+        Some((gap, false)) => gap >= DOODAD_REACH,
+        // The doodad exists but has no composed world position: `FUN_39093800` cannot measure it
+        // either, and the interaction must not stay open forever.
+        None => true,
+    }
+}
+
+/// Ends the interaction that is active before a new local window, the native `FUN_393b7aa0`
+/// (774053): the bench and the shown interaction list, the coffer (state 5, `FUN_394d08c0` sends
+/// the `CSCofferInteraction` close packet), and the store/bank (states 0xe/0xf/0x11, which raise
+/// `NPC_INTERACTION_END`). It then raises `INTERACTION_END` (0xd2) once when something was active.
+pub(super) fn end_interaction(
+    rt: Option<&UiRuntime>,
+    bridge: &Shared,
+    inventory: &Inventory,
+) -> bool {
+    let (bench, menu, coffer) = {
+        let mut data = bridge.borrow_mut();
+        let bench = super::crafting::close_bench(&mut data);
+        // Only a list that was shown (`other_interaction`) is an active interaction; a single
+        // action kept in `menu` for the immediate-use path is not.
+        let menu = std::mem::take(&mut data.doodad.menu_shown);
+        if menu {
+            data.doodad.menu = None;
+        }
+        let coffer = inventory.coffer.is_open();
+        if coffer {
+            // execute sends `CSCofferInteraction` for the flag.
+            data.doodad.coffer_close = true;
+        }
+        (bench, menu, coffer)
+    };
+    let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
+    let ended = bench || menu || coffer || store;
+    if ended && let Some(rt) = rt {
+        rt.fire_event("INTERACTION_END", ());
+    }
+    ended
 }
 
 /// Whether a use must walk first: the gap measured the drawn model's real bounds and is out of the
@@ -791,8 +894,8 @@ fn to_vec(p: aa_net::Pos) -> Vec3 {
 /// The right-click preference is a port behaviour that only ranks doodads: it must not force the doodad past a
 /// slave in [`arbitrate`], because 1.2 has one candidate set ordered by the native key. The capture's bar beside
 /// tome 851 (a chair 0.7 m away, the tome 4.9 m ahead) was the chair's skill 15857; beside tome 850 (the Mailbox
-/// 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox", which is not listed here yet (see the
-/// module doc). The tomes' own 14602 was not observed. A doodad has no recovered collision shape, so its gap is
+/// 1.5 m away, the tome 2.7 m) it was 11400, the Mailbox's "Open Mailbox" (the func-type mapping of
+/// `DoodadFuncNaviOpenMailbox`, see `local.rs`). The tomes' own 14602 was not observed. A doodad has no recovered collision shape, so its gap is
 /// the centre distance minus the player's radius; the doodad's own radius is 0 here.
 fn find_focus(data: &HudData, doodads: &Doodads, units: &Units, env: PermEnv<'_>) -> Option<Focus> {
     if data.doodad.seated {
@@ -820,7 +923,18 @@ fn find_focus(data: &HudData, doodads: &Doodads, units: &Units, env: PermEnv<'_>
         // same as a skill's; the 2.1 m use range is checked when the action is used.
         let facts = doodad_facts(data, o, pos, env);
         let craft = uses.craft.iter().any(|perm| craft_permitted(*perm, &player, &facts));
-        let mut skills = uses.skills.clone();
+        // Native `FUN_393bd290` checks every func's permission before it lists the action
+        // (`FUN_393b3300`); the local windows and the insert-counter check are funcs too.
+        let mut skills = Vec::with_capacity(uses.skills.len() + 1);
+        for skill in &uses.skills {
+            let local = game.doodad.local(o.func_group_id, *skill);
+            let counter = game.doodad.insert_counter(o.func_group_id, *skill);
+            let permitted = local.is_none_or(|l| craft_permitted(l.perm, &player, &facts))
+                && counter.is_none_or(|c| craft_permitted(c.perm, &player, &facts));
+            if permitted {
+                skills.push(*skill);
+            }
+        }
         if craft {
             skills.push(CRAFT_ACTION);
         }
@@ -1761,18 +1875,33 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
         dev.script_keys.retain(|c| c != 'W');
     }
     let Some(game) = d.game.get() else { return false };
-    let mut entries: Vec<Entry> = uses
-        .skills
-        .iter()
-        .map(|s| Entry { id: i64::from(*s), name: game.skills.get(s).map(|i| i.named.name.clone()).unwrap_or_else(|| format!("skill {s}")) })
-        .collect();
+    let player = player_facts(d, env);
+    let facts = doodad_facts(d, o, pos, env);
+    // `FUN_393bd290` lists only the funcs `FUN_393b3300` permits: the local windows and the
+    // insert-counter check are funcs too.
+    let mut listed_skills = 0;
+    let mut entries: Vec<Entry> = Vec::with_capacity(uses.skills.len() + 1);
+    for skill in &uses.skills {
+        let local = game.doodad.local(o.func_group_id, *skill);
+        let counter = game.doodad.insert_counter(o.func_group_id, *skill);
+        let permitted = local.is_none_or(|l| craft_permitted(l.perm, &player, &facts))
+            && counter.is_none_or(|c| craft_permitted(c.perm, &player, &facts));
+        if !permitted {
+            continue;
+        }
+        listed_skills += 1;
+        entries.push(Entry {
+            id: i64::from(*skill),
+            name: game
+                .skills
+                .get(skill)
+                .map(|i| i.named.name.clone())
+                .unwrap_or_else(|| format!("skill {skill}")),
+        });
+    }
     // Each craft func's permission is checked on its own (native `FUN_393bd290` calls
     // `FUN_393b3300` per func); the action is listed at the bar's distance, not the 2.1 m use range.
-    let craft = {
-        let player = player_facts(d, env);
-        let facts = doodad_facts(d, o, pos, env);
-        uses.craft.iter().any(|perm| craft_permitted(*perm, &player, &facts))
-    };
+    let craft = uses.craft.iter().any(|perm| craft_permitted(*perm, &player, &facts));
     if craft {
         entries.push(Entry {
             id: i64::from(CRAFT_ACTION),
@@ -1790,7 +1919,7 @@ fn right_click(d: &mut HudData, doodads: &Doodads, units: &Units, obj_id: u32, n
     // 0) is not the native collider shape and must not walk. A craft-only phase is listed out to
     // the bar's centre distance (`DOODAD_REACH`) and its use walks on its own; the two distances
     // are not compared with each other.
-    let only_craft = uses.skills.is_empty() && uses.navi.is_empty();
+    let only_craft = listed_skills == 0 && uses.navi.is_empty();
     if real && gap >= INTERACTION_DISTANCE && (!only_craft || dist >= DOODAD_REACH) {
         info!("doodad: {name} ({obj_id}) is {gap:.1} m away (interaction reach {INTERACTION_DISTANCE:.1} m): walking there");
         start_walk(d, obj_id, gap, now);
@@ -1869,7 +1998,22 @@ fn pending_use_allowed(
             .iter()
             .any(|perm| craft_permitted(*perm, &player, &facts))
     } else {
-        u32::try_from(pending.action).is_ok_and(|skill| uses.skills.contains(&skill))
+        let Some(pos) = doodad_world(o, units) else {
+            return false;
+        };
+        let player = player_facts(data, env);
+        let facts = doodad_facts(data, o, pos, env);
+        u32::try_from(pending.action).is_ok_and(|skill| {
+            uses.skills.contains(&skill)
+                && game
+                    .doodad
+                    .local(o.func_group_id, skill)
+                    .is_none_or(|local| craft_permitted(local.perm, &player, &facts))
+                && game
+                    .doodad
+                    .insert_counter(o.func_group_id, skill)
+                    .is_none_or(|counter| craft_permitted(counter.perm, &player, &facts))
+        })
     }
 }
 
@@ -1900,6 +2044,15 @@ fn use_bench(
     super::crafting::open_bench(d, obj_id, o.template_id).map(|(count, replaced)| (obj_id, count, replaced))
 }
 
+/// The world/house/seating state the doodad use permission needs; bundled to keep the execute
+/// system under Bevy's parameter limit.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct InteractionEnv<'w> {
+    houses: Option<Res<'w, aa_net::Houses>>,
+    world_info: Option<Res<'w, aa_world::stream::WorldInfo>>,
+    seats: Option<Res<'w, crate::ingame::seating::Seats>>,
+}
+
 /// The uses the bar, the keys and the list asked for become packets.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute(
@@ -1908,7 +2061,7 @@ pub(super) fn execute(
     doodads: Res<Doodads>,
     units: Res<Units>,
     mut inventory: ResMut<Inventory>,
-    seats: Option<Res<crate::ingame::seating::Seats>>,
+    env_res: InteractionEnv,
     player: Option<Res<aa_net::state::Player>>,
     mount: Option<Res<crate::ingame::LocalMount>>,
     views: Res<Views>,
@@ -2081,8 +2234,81 @@ pub(super) fn execute(
     let labor = d.snapshot.labor;
     drop(d);
     let game = game_slot.get();
+    let env = PermEnv {
+        houses: env_res.houses.as_deref(),
+        world: env_res.world_info.as_deref().map(|w| w.0.as_ref()),
+    };
+    // The native `FUN_393b3300` gate, with the same player/doodad facts as the listing. `None`
+    // means the doodad cannot be measured, so the listing would not offer it either: skip it
+    // silently instead of showing a permission error.
+    let permitted = |obj_id: u32, perm: u8| -> Option<bool> {
+        let data = bridge.0.borrow();
+        let player = player_facts(&data, env);
+        doodads
+            .by_id
+            .get(&obj_id)
+            .and_then(|o| doodad_world(o, &units).map(|pos| (o, pos)))
+            .map(|(o, pos)| craft_permitted(perm, &player, &doodad_facts(&data, o, pos, env)))
+    };
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
+            let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
+            // Native `FUN_393bc260` handles these funcs before `FUN_393b3ec0` sends the skill: the
+            // original window opens locally and the server never sees the use.
+            if let Some(local) = group
+                .zip(game)
+                .and_then(|(g, game)| game.doodad.local(g, *skill_id))
+            {
+                match permitted(obj_id, local.perm) {
+                    Some(true) => {}
+                    Some(false) => {
+                        if let Some(errors) = errors.as_mut() {
+                            errors.write(crate::hud::ShowError(local::NO_PERM));
+                        }
+                        continue;
+                    }
+                    None => continue,
+                }
+                local::run(
+                    rt.as_deref(),
+                    &bridge.0,
+                    &doodads,
+                    &units,
+                    &inventory,
+                    obj_id,
+                    local.action,
+                );
+                continue;
+            }
+            if let Some(counter) = group
+                .zip(game)
+                .and_then(|(g, game)| game.doodad.insert_counter(g, *skill_id))
+            {
+                match permitted(obj_id, counter.perm) {
+                    Some(true) => {}
+                    Some(false) => {
+                        if let Some(errors) = errors.as_mut() {
+                            errors.write(crate::hud::ShowError(local::NO_PERM));
+                        }
+                        continue;
+                    }
+                    None => continue,
+                }
+                // Native case 0x54 returns 1 with no local player: handled, not sent.
+                if player.as_ref().is_none_or(|p| p.spawn.is_none()) {
+                    continue;
+                }
+                if local::missing_counter_item(&inventory, counter.item, counter.count) {
+                    debug!(
+                        "doodad: skill {skill_id} needs {} of item {}",
+                        counter.count, counter.item
+                    );
+                    if let Some(errors) = errors.as_mut() {
+                        errors.write(crate::hud::ShowError(local::NOT_ENOUGH_ITEM));
+                    }
+                    continue;
+                }
+            }
             if lacks_labor(game.map(|g| &g.rules), *skill_id, labor) {
                 debug!("doodad: skill {skill_id} needs more labor than {labor}");
                 failed.write(super::alerts::UseFailed {
@@ -2093,11 +2319,10 @@ pub(super) fn execute(
                 });
                 continue;
             }
-            let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
             let mount_free = player.as_ref().and_then(|p| p.spawn.as_ref())
                 .is_some_and(|spawn| spawn.unit.attached_to.is_none())
                 && mount.as_ref().is_none_or(|mount| mount.0.is_none());
-            let bond_free = seats.as_ref().is_some_and(|seats| seats.own_free());
+            let bond_free = env_res.seats.as_ref().is_some_and(|seats| seats.own_free());
             if group.zip(game).is_some_and(|(group, game)| !game.doodad.allows_attachment(group, *skill_id, bond_free, mount_free)) {
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
                 continue;
@@ -2889,7 +3114,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             mailbox_skill, None,
-            "the Mailbox's func has no skill: 11400 is native-only"
+            "the Mailbox row has no func_skill_id: 11400 is the native func-type mapping"
         );
     }
 
@@ -3892,7 +4117,7 @@ mod tests {
     }
     fn craft_tables(group: u32, perm: u8) -> GameData {
         let mut tables = Tables::default();
-        tables.add_full(group, 0, "DoodadFuncCraftPack", perm);
+        tables.add_full(group, 0, "DoodadFuncCraftPack", perm, 0, &local::LocalFuncs::default());
         GameData {
             doodad: tables,
             crafting: crate::hud::crafting::fixture_tables([(568, vec![5557]), (2241, vec![6666])]),
@@ -4156,7 +4381,7 @@ mod tests {
 
     fn mixed_tables(group: u32, skill: u32, perm: u8) -> GameData {
         let mut game = craft_tables(group, perm);
-        game.doodad.add_full(group, skill, "DoodadFuncUse", 0);
+        game.doodad.add_full(group, skill, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
         game
     }
 
@@ -4212,7 +4437,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0);
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4290,7 +4515,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0);
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4587,7 +4812,7 @@ mod tests {
             d.character_id = 47;
             d.pos = Vec3::ZERO;
             let mut game = craft_tables(1088, craft_perm::ANY);
-            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0);
+            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.pending = Some(Pending {
                 obj_id: 300,

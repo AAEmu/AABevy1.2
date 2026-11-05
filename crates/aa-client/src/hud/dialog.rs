@@ -32,6 +32,8 @@ pub(super) use npc::candidates::Catalog as NpcCandidateCatalog;
 #[allow(dead_code)]
 pub(super) mod fixture;
 pub(super) use npc::{Scope as NpcScope, Selected as SelectedNpc, active_scope, choose_npc, close_npc, drive_npc, npc_menu_current, query_npc, scope_current};
+#[cfg(test)]
+pub(super) use npc::track_npc;
 
 use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;

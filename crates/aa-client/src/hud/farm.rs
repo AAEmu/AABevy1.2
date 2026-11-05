@@ -401,6 +401,21 @@ fn growth_remaining_ms(
     (sum.round() as i64 + i64::from(time_left)).max(0) as u32
 }
 
+/// `DoodadFuncOpenFarmInfo` (`FUN_393b8700` 774877): the client opens the info window itself for
+/// `doodad_func_open_farm_infos.farm_id`; the func's skill is not sent. The walk-away close is the
+/// same as the server packet's (`FARM_LEAVE`, capture-pending).
+pub(super) fn show_doodad(rt: &UiRuntime, farm_type: i32, pos: Vec3) {
+    let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
+        return;
+    };
+    state.0.borrow_mut().show = Some(Shown { farm_type, pos });
+    aa_ui::lua::queue_ui_event(
+        &rt.lua,
+        "OPEN_COMMON_FARM_INFO",
+        vec![Value::Integer(i64::from(farm_type))],
+    );
+}
+
 /// Folds aa-net's farm events into the runtime list and the info window.
 fn sync(
     rt: Option<NonSend<UiRuntime>>,

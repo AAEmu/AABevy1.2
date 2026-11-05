@@ -934,7 +934,7 @@ fn resolved(scope: Scope, data: &HudData, player: &Player, units: &Units) -> boo
         && units.get(scope.npc.0).is_some_and(|unit| matches!(unit.kind, UnitKind::Npc {template_id,..} if template_id == scope.npc.1))
 }
 
-pub(super) fn track_npc(
+pub(in crate::hud) fn track_npc(
     mut events: MessageReader<NetEvent>,
     bridge: NonSend<HudBridge>,
     built: Res<super::super::HudBuilt>,
