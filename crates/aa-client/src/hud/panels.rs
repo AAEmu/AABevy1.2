@@ -768,6 +768,10 @@ pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inve
     match action.kind {
         ActionKind::Spell | ActionKind::RidePetSpell => {
             let skill = action.id as u32;
+            if let Some(f) = env.held_back_refusal(skill, flight) {
+                failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });
+                return;
+            }
             if env.held_back(skill, flight) {
                 return;
             }
@@ -807,8 +811,14 @@ pub fn use_bag_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inven
 
 fn use_item(item: &aa_net::model::Item, env: &Env, flight: &InFlight, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     let skill_id = env.game.and_then(|g| g.items.get(&item.template_id)).map_or(0, |i| i.use_skill);
-    if skill_id != 0 && env.held_back(skill_id, flight) {
-        return;
+    if skill_id != 0 {
+        if let Some(f) = env.held_back_refusal(skill_id, flight) {
+            failed.write(UseFailed { skill: skill_id, result: f.result, value: f.value, server: false });
+            return;
+        }
+        if env.held_back(skill_id, flight) {
+            return;
+        }
     }
     if let Some((skill, f)) = env.precheck_item(item.template_id) {
         failed.write(UseFailed { skill, result: f.result, value: f.value, server: false });

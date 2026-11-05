@@ -20,8 +20,10 @@
 //! The own cooldown comes last ([`Env::cooldown`]): the sweep already shows it, so it does not darken the icon. Unknown skills and
 //! rules without data pass: the server has the last word and its refusal is shown too (`refusal.rs`).
 //!
-//! Before any of that a press can be held back without a word ([`Env::held_back`]): the skill is being cast, the global cooldown
-//! has not run out, or the previous press is still on its way to the server ([`InFlight`]).
+//! Before any of that a press can be held back ([`Env::held_back`]): the skill is being cast, the global cooldown has not run
+//! out, or the previous press is still on its way to the server ([`InFlight`]). A held-back press still says why when the
+//! client has a native result for it ([`Env::held_back_refusal`]: `ON_CASTING` for any ongoing cast, `COOLDOWN_TIME` for
+//! the skill's own cooldown); a GCD-only press, the auto attack latch and an unanswered press stay silent.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -332,6 +334,15 @@ const MELEE_ATTACK: u32 = 2;
 /// The global cooldown left under which a press goes out anyway: the client counts it from the server's answer, which is a
 /// little behind the server's own clock.
 const GCD_SLACK_MS: u32 = 100;
+
+/// Why a press is held back (see [`Env::hold`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hold {
+    Cast,
+    AutoAttack,
+    Gcd,
+    Flight,
+}
 
 /// The last press of a skill that starts the global cooldown, until the server has answered it. The client's own estimate of
 /// the cooldown only starts with that answer, so the presses in between would all be sent. A driven slave's bar keeps its
@@ -676,19 +687,62 @@ impl Env<'_> {
         self.game.and_then(|g| g.skills.get(&skill)).is_some_and(|i| i.auto_attack)
     }
 
-    /// A press the client drops without a word, so that holding a key sends nothing the server would refuse: the skill is
-    /// being cast, the global cooldown has more than [`GCD_SLACK_MS`] left, the last press has no answer yet, or the auto attack
-    /// latch (`X2Unit + 0x3ad5`) is set for skill 2 (`FUN_393989e0` returns 1 only for `DAT_39ac769c` = 2; the off-hand and
-    /// ranged basics 3 and 4 are not swallowed).
-    pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
+    /// Why a press is held back, in native order: the cast, the auto attack latch, the global cooldown, then an unanswered
+    /// press. `None` sends it.
+    fn hold(&self, skill: u32, flight: &InFlight) -> Option<Hold> {
         let skill = self.effective_skill(skill);
         if self.casting(skill) {
-            return true;
+            return Some(Hold::Cast);
         }
         if skill == MELEE_ATTACK && self.skills.is_some_and(|s| s.auto_attack) {
-            return true;
+            return Some(Hold::AutoAttack);
         }
-        self.uses_gcd(skill) && (self.gcd_left(skill) > GCD_SLACK_MS || self.skills.is_some_and(|s| flight.pending(s, Instant::now())))
+        if !self.uses_gcd(skill) {
+            return None;
+        }
+        let now = Instant::now();
+        if self.gcd_left(skill) > GCD_SLACK_MS {
+            return Some(Hold::Gcd);
+        }
+        self.skills
+            .is_some_and(|s| flight.pending(s, now))
+            .then_some(Hold::Flight)
+    }
+
+    /// A press the client drops, so that holding a key sends nothing the server would refuse: the skill is being cast, the
+    /// global cooldown has more than [`GCD_SLACK_MS`] left, the last press has no answer yet, or the auto attack latch
+    /// (`X2Unit + 0x3ad5`) is set for skill 2 (`FUN_393989e0` returns 1 only for `DAT_39ac769c` = 2; the off-hand and ranged
+    /// basics 3 and 4 are not swallowed).
+    pub fn held_back(&self, skill: u32, flight: &InFlight) -> bool {
+        self.hold(skill, flight).is_some()
+    }
+
+    /// The native refusal a held-back press shows, `None` for the holds that stay silent (the auto attack latch, an
+    /// unanswered press, and a GCD press with nothing else to say).
+    ///
+    /// The native unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151525-151649) checks any ongoing
+    /// cast first (`ON_CASTING` 7 for the player's four cast fields `+0x3ac4`, `+0x3ac8`, `+0x3acc`, `+0x3ad0`), then
+    /// `COOLDOWN_TIME` 8 with `FUN_3989a400` (1931224-1931240): the skill's own/tag cooldown detail 1 first; only when
+    /// that is done, and the skill does not ignore the GCD (`+0xdc == 0`), the running global cooldown detail 2.
+    /// `FUN_39390900` prints the result text through `FUN_39897990` and hides detail 2 (742279), so a GCD-only press is
+    /// silent natively; detail 1 prints `skill_cooldown_time`, "Can't be used right now." (the capture's B2 text was
+    /// Charge on its own 12 s cooldown). Nothing on the press path writes `NOT_NOW` 0x2c: its writers are pet/mate-bar
+    /// checks. `Hold::Gcd` therefore repeats the any-cast check (`busy`) before the own cooldown, so B4's press during
+    /// another skill's cast inside the GCD says `ON_CASTING`.
+    pub fn held_back_refusal(&self, skill: u32, flight: &InFlight) -> Option<Fail> {
+        let hold = self.hold(skill, flight)?;
+        let skill = self.effective_skill(skill);
+        match hold {
+            Hold::Cast => Some(fail(code::ON_CASTING)),
+            Hold::Gcd => {
+                let busy = self
+                    .rules()
+                    .and_then(|rules| rules.skills.get(&skill))
+                    .and_then(|r| self.busy(skill, r));
+                busy.or_else(|| self.cooldown(skill))
+            }
+            Hold::AutoAttack | Hold::Flight => None,
+        }
     }
 
     /// What the client refuses before it asks the server: everything that darkens the slot ([`Env::slot_blocked`]), except
@@ -1470,6 +1524,97 @@ mod tests {
         assert_eq!(failed(&mut app), 1, "the refusal is shown");
     }
 
+    /// A held-back press shows the native result and sends nothing. `FUN_390b7b00` checks any cast first, then
+    /// `COOLDOWN_TIME` detail 1 (the skill's own cooldown); the GCD alone (detail 2) is hidden by `FUN_39390900`.
+    /// Drives `use_slot`, the real message path.
+    #[test]
+    fn a_held_back_press_shows_the_native_refusal_and_sends_nothing() {
+        use aa_net::items::{ActionKind, ActionSlot, ACTION_SLOTS};
+        use aa_net::state::{ActionBar, Target};
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::{App, MessageWriter, MinimalPlugins, Res, Update};
+        use crate::hud::UseFailed;
+        use crate::hud::panels::use_slot;
+        use crate::ingame::ground_target::SkillPressed;
+
+        #[derive(Resource)]
+        struct Fixture {
+            game: GameData,
+            me: Snapshot,
+        }
+        fn press(
+            fixture: Res<Fixture>,
+            skills: Res<Skills>,
+            bar: Res<ActionBar>,
+            target: Res<Target>,
+            mut net: MessageWriter<SkillPressed>,
+            mut failed: MessageWriter<UseFailed>,
+        ) {
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: None, target_pos: None, skills: Some(&skills), buffs: &[], inventory: None };
+            use_slot(1, &env, &InFlight::default(), &bar, &Inventory::default(), &target, &mut net, &mut failed);
+        }
+        let mut game = gcd_game();
+        game.skills.get_mut(&1).unwrap().cooldown_ms = 12_000;
+        let mut bar = ActionBar { slots: vec![ActionSlot::default(); ACTION_SLOTS], ..Default::default() };
+        bar.slots[1] = ActionSlot { kind: ActionKind::Spell, id: 1 };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Fixture { game, me: me() })
+            .insert_resource(bar)
+            .insert_resource(Target::default())
+            .insert_resource(Skills { obj_id: 5, ..Skills::default() })
+            .add_message::<SkillPressed>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, press);
+        let sent = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<SkillPressed>>();
+            m.drain().collect::<Vec<_>>()
+        };
+        let failed = |app: &mut App| {
+            let mut m = app.world_mut().resource_mut::<Messages<UseFailed>>();
+            m.drain().collect::<Vec<_>>()
+        };
+        // during the GCD, with the skill's own cooldown still running: COOLDOWN_TIME (detail 1) and nothing sent
+        let mut skills = app.world_mut().resource_mut::<Skills>();
+        skills.last_cast = Some(Instant::now() - Duration::from_millis(300));
+        skills.last_cast_skill = 2;
+        skills.last_used.insert(1, Instant::now());
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        let f = failed(&mut app);
+        assert_eq!(f.len(), 1);
+        assert_eq!((f[0].skill, f[0].result, f[0].server), (1, code::COOLDOWN_TIME, false));
+        // the GCD alone: silent, still nothing sent
+        app.world_mut().resource_mut::<Skills>().last_used.clear();
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        assert!(failed(&mut app).is_empty(), "a GCD-only press is silent natively (result 8 detail 2)");
+        // another skill's cast inside the GCD: ON_CASTING, still nothing sent
+        app.world_mut().resource_mut::<Skills>().casting.insert(5, casting(2, 5000, Instant::now(), None, 0));
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        let f = failed(&mut app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].result, code::ON_CASTING);
+        // after the GCD, the own cooldown still running: COOLDOWN_TIME and nothing sent
+        let mut skills = app.world_mut().resource_mut::<Skills>();
+        skills.casting.clear();
+        skills.last_cast = Some(Instant::now() - Duration::from_secs(2));
+        skills.last_used.insert(1, Instant::now() - Duration::from_secs(1));
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        let f = failed(&mut app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].result, code::COOLDOWN_TIME);
+        // the own cooldown over: the press goes out
+        app.world_mut().resource_mut::<Skills>().last_used.clear();
+        app.update();
+        let s = sent(&mut app);
+        assert_eq!(s.len(), 1);
+        assert_eq!((s[0].skill, s[0].gcd), (1, true));
+        assert!(failed(&mut app).is_empty());
+    }
+
     /// The player cast skill 1 `ago` ago.
     fn cast_ago(ago: Duration) -> Skills {
         Skills { obj_id: 5, last_cast: Some(Instant::now() - ago), last_cast_skill: 1, ..Skills::default() }
@@ -1516,19 +1661,50 @@ mod tests {
         Ok(())
     }
 
+    /// The native order from `FUN_390b7b00` + `FUN_3989a400` + `FUN_39390900`: any cast first, then the skill's own
+    /// cooldown (`COOLDOWN_TIME` detail 1), and the GCD alone (detail 2) is silent. The capture's B2 text was Charge on
+    /// its own 12 s cooldown; B4's press during another skill's cast inside the GCD said "Already performing an action.".
     #[test]
-    fn presses_during_the_global_cooldown_are_dropped_quietly() {
-        let g = gcd_game();
+    fn presses_during_the_global_cooldown_follow_the_native_check_order() {
+        let mut g = gcd_game();
+        g.skills.get_mut(&2).unwrap().cooldown_ms = 12_000;
         let me = me();
         let flight = InFlight::default();
-        let held = |skills: &Skills, skill| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.held_back(skill, &flight);
-        assert!(held(&cast_ago(Duration::from_millis(300)), 2));
+        let now = Instant::now();
+        let refusal = |skills: &Skills, skill| Env { skills: Some(skills), ..env(&g, &me, None, 0.0) }.held_back_refusal(skill, &flight);
+        // the GCD alone: held back but silent (result 8 detail 2 is hidden)
+        assert!(Env { skills: Some(&cast_ago(Duration::from_millis(300))), ..env(&g, &me, None, 0.0) }.held_back(2, &flight));
+        assert_eq!(refusal(&cast_ago(Duration::from_millis(300)), 2), None);
+        // the skill's own cooldown during the GCD: detail 1 prints
+        let mut own = cast_ago(Duration::from_millis(300));
+        own.last_used.insert(2, Instant::now());
+        assert_eq!(refusal(&own, 2), Some(fail(code::COOLDOWN_TIME)));
+        // another skill's cast inside the GCD: any cast is checked before the cooldown
+        let mut casting_inside = cast_ago(Duration::from_millis(300));
+        casting_inside.casting.insert(5, casting(3, 5000, now, None, 0));
+        assert_eq!(refusal(&casting_inside, 2), Some(fail(code::ON_CASTING)));
+        // a channel of another skill follows the existing busy rule
+        let mut channeling = cast_ago(Duration::from_millis(300));
+        channeling.casting.insert(5, casting(3, 0, now, Some(now), 4000));
+        assert_eq!(refusal(&channeling, 2), Some(fail(code::CANNOT_CAST_IN_CHANNELING)));
         // the last 100 ms are the server's to judge, and an ignore_gcd skill never waits
-        assert!(!held(&cast_ago(Duration::from_millis(950)), 2));
-        assert!(!held(&cast_ago(Duration::from_millis(300)), 3));
-        assert!(!held(&Skills::default(), 2));
-        // the gcd is no reason to refuse with an alert
+        assert!(!Env { skills: Some(&cast_ago(Duration::from_millis(950))), ..env(&g, &me, None, 0.0) }.held_back(2, &flight));
+        assert_eq!(refusal(&cast_ago(Duration::from_millis(950)), 2), None);
+        assert!(!Env { skills: Some(&cast_ago(Duration::from_millis(300))), ..env(&g, &me, None, 0.0) }.held_back(3, &flight));
+        assert_eq!(refusal(&cast_ago(Duration::from_millis(300)), 3), None);
+        assert!(!Env { skills: Some(&Skills::default()), ..env(&g, &me, None, 0.0) }.held_back(2, &flight));
+        assert_eq!(refusal(&Skills::default(), 2), None);
+        // the GCD itself is no reason for `precheck`: it is already held back, and after it an own cooldown
+        // is the remaining `COOLDOWN_TIME` refusal
         assert_eq!(Env { skills: Some(&cast_ago(Duration::from_millis(300))), ..env(&g, &me, None, 0.0) }.precheck(2), None);
+        assert_eq!(Env { skills: Some(&cast_ago(Duration::from_secs(2))), ..env(&g, &me, None, 0.0) }.precheck(2), None);
+        let mut after_gcd = cast_ago(Duration::from_secs(2));
+        after_gcd.last_used.insert(2, Instant::now() - Duration::from_secs(1));
+        assert_eq!(
+            Env { skills: Some(&after_gcd), ..env(&g, &me, None, 0.0) }.precheck(2),
+            Some(fail(code::COOLDOWN_TIME)),
+            "after the GCD the skill's own cooldown is COOLDOWN_TIME (detail 1)"
+        );
     }
 
     #[test]
@@ -1551,6 +1727,11 @@ mod tests {
         assert!(!held(Some(casting(3, 0, now, None, 0)), 3), "an instant skill is no cast");
         assert!(!held(Some(casting(3, 1000, now - Duration::from_secs(10), None, 0)), 3), "a cast whose end never came");
         assert!(!held(None, 3));
+        // the same skill pressed again shows the native ON_CASTING; another skill says it through `precheck`'s busy
+        skills.casting.insert(5, casting(3, 5000, now, None, 0));
+        let e = Env { skills: Some(&skills), ..env(&g, &me, None, 0.0) };
+        assert_eq!(e.held_back_refusal(3, &flight), Some(fail(code::ON_CASTING)));
+        assert_eq!(e.precheck(2), Some(fail(code::ON_CASTING)), "another skill during the cast shows the same busy text");
     }
 
     #[test]

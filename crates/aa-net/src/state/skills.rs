@@ -943,6 +943,36 @@ mod tests {
         s.apply(&Event::Disconnected { message: String::new() });
         assert_eq!(s.plot_gcd_catalog.get(&12148), Some(&2000));
     }
+    /// The 2026-11-03 capture's Charge acceptance: `SCCooldowns` (12 s own cooldown) and the first `SCPlotEvent`
+    /// (5099, whose `GlobalCooldown` effect is 600 ms) in one batch, with no `SCSkillStarted` / `SCSkillFired`.
+    #[test]
+    fn a_charge_shaped_acceptance_batch_starts_the_gcd_skill_cooldown_and_cast() {
+        use crate::skill::SkillCooldowns;
+        let mut s = skills();
+        s.set_plot_gcd_catalog([(5099, 600)].into());
+        assert!(s.apply(&Event::Cooldowns(SkillCooldowns {
+            skills: vec![Cooldown { id: 11918, total_ms: 12_000, remaining_ms: 12_000 }],
+            tags: vec![],
+        })));
+        assert!(s.cooldown_left(11918, 0, 12_000).unwrap() > Duration::from_millis(11_900));
+        let step = Event::PlotEvent(PlotEvent {
+            tl: 42,
+            event_id: 5099,
+            skill_id: 11918,
+            caster_obj_id: 5,
+            target_obj_id: 9,
+            caster_pos: None,
+            target_pos: None,
+            casting_ms: 0,
+        });
+        assert!(s.apply(&step), "the first plot step starts the skill");
+        assert_eq!((s.last_cast_skill, s.last_used.contains_key(&11918)), (11918, true));
+        assert!(s.casting_of(5).is_some_and(|c| c.skill_id == 11918 && c.tl == 42), "the plot starts the cast/action");
+        let (left, total) = s.plot_gcd_at(Instant::now()).unwrap();
+        assert!(left > Duration::from_millis(500) && total == Duration::from_millis(600), "{left:?} of {total:?}");
+        assert!(s.gcd_left(600).is_some_and(|left| left > Duration::from_millis(500)), "the acceptance starts the GCD");
+    }
+
     fn received(id: u32, total_ms: u32, remaining_ms: u32, at: Instant) -> ReceivedCooldown {
         ReceivedCooldown {
             cooldown: Cooldown {

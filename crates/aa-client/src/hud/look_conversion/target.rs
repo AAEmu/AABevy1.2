@@ -76,6 +76,9 @@ fn admission(
     {
         return Admission::Unsupported;
     }
+    if let Some(fail) = env.held_back_refusal(skill, flight) {
+        return Admission::Failed(fail);
+    }
     if env.held_back(skill, flight) {
         return Admission::Held;
     }
