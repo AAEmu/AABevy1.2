@@ -43,6 +43,10 @@ pub enum Interact {
     TryQuestCompleteAsLetItDone { quest_id: u32, obj_id: u32, selected: i32 },
     /// `CSDropQuestContext`: give quest `quest_id` up. Answered by `QuestUpdated` with status dropped.
     QuestDrop { quest_id: u32 },
+    /// `CSRestartMainQuest`: restart the active main quest `quest_id` (`X2Quest:QuestContextRestart`,
+    /// native `FUN_3937b200` / `FUN_3937a8d0`). The server reads one `u32` and answers with a normal
+    /// `SCQuestContextStarted` (`systems/quests/packets.rs:522`).
+    RestartMainQuest { quest_id: u32 },
     /// `CSQuestTalkMade`: the talk objective `act_id` (`quest_acts.id`) of component `component_id` of
     /// quest `quest_id` was done with the NPC `npc_obj_id`. Answered by `QuestUpdated`.
     QuestTalk { npc_obj_id: u32, quest_id: u32, component_id: u32, act_id: u32 },
@@ -72,6 +76,7 @@ impl Interact {
             Self::QuestComplete { .. } => cs::CSCompleteQuestContextPacket,
             Self::TryQuestCompleteAsLetItDone { .. } => cs::CSTryQuestCompleteAsLetItDonePacket,
             Self::QuestDrop { .. } => cs::CSDropQuestContextPacket,
+            Self::RestartMainQuest { .. } => cs::CSRestartMainQuestPacket,
             Self::QuestTalk { .. } => cs::CSQuestTalkMadePacket,
             Self::NaviTeleport { .. } => cs::CSNaviTeleportPacket,
             Self::NaviOpenPortal { .. } => cs::CSNaviOpenPortalPacket,
@@ -101,7 +106,7 @@ impl Interact {
             Self::TryQuestCompleteAsLetItDone { quest_id, obj_id, selected } => {
                 w.u32(quest_id).bc(obj_id).i32(selected);
             }
-            Self::QuestDrop { quest_id } => {
+            Self::QuestDrop { quest_id } | Self::RestartMainQuest { quest_id } => {
                 w.u32(quest_id);
             }
             Self::QuestTalk { npc_obj_id, quest_id, component_id, act_id } => {
@@ -265,6 +270,9 @@ mod tests {
         assert_eq!(b, [0x4A, 0x01, 0, 0, 5, 0, 0, 2, 0, 0, 0]);
         assert_eq!(Interact::TryQuestCompleteAsLetItDone { quest_id: 0, obj_id: 0, selected: 0 }.opcode(), 0x0dd);
         assert_eq!(body(&Interact::QuestDrop { quest_id: 330 }), [0x4A, 0x01, 0, 0]);
+        // CSRestartMainQuest: one u32 (server `CSRestartMainQuestPacket::read`).
+        assert_eq!(body(&Interact::RestartMainQuest { quest_id: 330 }), [0x4A, 0x01, 0, 0]);
+        assert_eq!(Interact::RestartMainQuest { quest_id: 0 }.opcode(), 0x0fd);
         // CSQuestTalkMade: bc npc, u32 quest, u32 component, u32 act
         let b = body(&Interact::QuestTalk { npc_obj_id: 7, quest_id: 1, component_id: 2, act_id: 3 });
         assert_eq!(b, [7, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);

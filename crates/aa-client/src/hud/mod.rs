@@ -110,6 +110,7 @@ mod mail;
 mod marks;
 mod markers;
 mod map_quests;
+mod quest_areas;
 mod map_services;
 mod map_slaves;
 mod notices;
@@ -580,6 +581,7 @@ impl Plugin for HudPlugin {
         pets::plugin(app);
         loot::plugin(app);
         dialog::plugin(app);
+        quest_areas::plugin(app);
         ring::plugin(app);
         markers::plugin(app);
         stubs::plugin(app);

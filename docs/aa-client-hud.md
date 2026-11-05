@@ -604,6 +604,142 @@ a Reward step has `QuestActSupplySelectiveItem` and no reward is selected, and e
 in progress and not let-it-done. Nothing is sent for those. Local refusal events fire after the
 HUD state is released so the original handlers can query it and close their window.
 
+### Quest items on the tracker
+
+`quest.lua` serves the original `quest_context_notifier.alb` and `centermessage/additem.alb` calls:
+
+* `X2Quest:GetUseTypeQuestItems(qtype, checkState)` (`FUN_394a55a0`): the kind-3 `SupplyItem`
+  targets with `show_action_bar`, then the Progress `ObjItemUse` targets. With `checkState` it
+  answers nil for a quest in status 2/3/4, or for a completed non-repeatable quest (the completed
+  bit is ignored when `quest_contexts.repeatable` is set).
+* `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
+  assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
+  the not-done Progress components (the native increments before comparing); the counted act types
+  are inferred from `FUN_397d3370`'s switch (`FUN_397d5b90`'s native set is not recovered). A supply item is
+  assigned by `FUN_394a2930`'s first test: the item's use skill's `skill_products` (the native
+  skill list at `+0x1f8`) name one of the objective's act item ids; objective 1 takes the ones
+  unrelated to any other objective. Its second test (effect list `+0x1e8`, effect `+0x1c` type 0x18
+  sub-type 0x1b, the contains checks) is not recovered. `ObjItemGather` / `EtcItemObtain` only feed
+  that relation and are never returned (and are not use-skill filtered). An unknown template
+  answers an empty table.
+* Every item must pass `FUN_394a55a0`'s filter: the item exists and its `use_skill_id` resolves to a
+  skill (`FUN_39695dc0` + `FUN_396f6390`).
+* `X2Quest:IsQuestStartItem(itemType)` (`FUN_3949c880`): the item's `items.impl_id` is 10.
+* `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
+  `ObjItemUse` target of an active quest, with the same usable-skill filter.
+* `X2Quest:NowIsAggroComponent` (`FUN_394a53c0`) takes the first act in `FUN_397d5b90`'s counted
+  set, not the first act; the native set `DAT_3a5e11f4` is not recovered, so the counted act types
+  (`counts_as_objective`) stand in.
+* `X2Bag:FindFirstBagSlotItemByItemType` / `UseItemByType` (`FUN_3944dee0` / `FUN_3944d590`) and
+  `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
+  `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
+  bag / worn item use (`HUD.request("use_bag")` / `"use_equip"`). The tests drive the original
+  notifier helper (proto 47) and the original added-item message.
+
+### Restarting a main quest
+
+`X2Quest:QuestContextRestart(qtype)` (`FUN_3949b780` -> `FUN_3937b200`) sends `CSRestartMainQuest`
+0x0fd (one `u32` quest id). `FUN_3937b200` first ignores a quest that is not active or already
+completed (silently, without touching the throttle); `FUN_3937a8d0` then applies the 3 s throttle
+(`DAT_39ac7598`), the main-quest detail (`detail_id` 2) and at least as many free bag slots as the
+kind-3 `SupplyItem` counts it hands out again (error 5; a missing/non-main template is error 0xc
+through `QUEST_ERROR_INFO`). The server answers with a normal Started / Updated, so the journal and
+tracker follow through `sync_quests`.
+
+### Hidden-report and task quests
+
+The server does not send these windows: the client raises the events from the quest packet handlers.
+`sync_quests` now matches them:
+
+* a Started packet whose quest is hidden (`quest_contexts.detail_id` 5) raises only
+  `QUEST_HIDDEN_READY` when it is already ready (status 3), with no `QUEST_CONTEXT_UPDATED`
+  "started", no condition event and no started jingle; every started task quest (6) raises
+  `QUEST_TASK_STARTED` (`FUN_3937b5b0`; no 1.2 script registers the task-started event, but the
+  native raises it);
+* an Updated packet that leaves a task quest ready raises `QUEST_TASK_READY`; a hidden quest raises
+  only `QUEST_HIDDEN_READY` when ready, and skips the normal "updated", objective and "dropped"
+  events (`FUN_3937bdf0` jumps past them);
+* a Completed packet for a hidden quest raises `QUEST_HIDDEN_COMPLETE` (`FUN_3937bb60`);
+* at world entry, and after every completion, the first active hidden quest that is ready raises
+  `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).
+
+All four carry the quest id as the only argument. The original scripts then drive the windows:
+`quest_context_hidden_report.alb` calls `ShowHiddenQuestReport(qtype)` on the ready event and
+`HideHiddenQuestReport()` on the complete event, and `quest_context_task.alb` opens its report from
+`QUEST_TASK_READY` (its report registers that handler on the first open; the task marker's OnClick
+opens the journal or the report). The module tests load the World stage: the real
+`hiddenQuestReport` widget is hidden before `QUEST_HIDDEN_READY`, shown after it, and hidden again
+on `QUEST_HIDDEN_COMPLETE`; the task report is created hidden, a PROGRESS->READY transition through
+`sync_quests` raises `QUEST_TASK_READY` and shows it, and the marker's OnClick opens
+`taskQuest.journal`.
+
+The getters these windows read that were still stubs now follow the natives:
+
+* `X2Quest:GetFirstObjectiveCount(qtype)` (`FUN_394a4c30`): the amount of the first Progress
+  component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). The act types `FUN_397d3440`
+  does not handle count 0, and a missing quest/Progress component/counted act answers 0.
+* `X2Quest:GetObjectiveComponentCount(qtype)` (`FUN_394a4ae0`): the template's Progress components
+  (not the objectives of the step the quest is at).
+
+### Score and linked quests
+
+* `X2Quest:IsScoreQuest(qtype)` (`FUN_397d3600`) is `quest_contexts.score > 0`.
+* `GetScoreQuestDoneScore` (`FUN_3949cc10`) is that `score` (0 without one).
+* `GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`) multiplies each Progress
+  component's counter by its first counted act's amount for act types 0, 1, 2, 4, 5 and 0x2b; an
+  inactive or unknown quest answers 0. The native does not test `score`, so a quest with those acts
+  can answer above 0 without being a score quest (the scripts only ask after `IsScoreQuest`).
+* `GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`) is the `quest_names` row with
+  `quest_name_kind_id` 2, else the empty string. `quest_contexts.name` is not used.
+* `GetLinkedQuestSummary` (`FUN_394a4dc0`) is the first Progress component's
+  `quest_component_texts` kind-4 text, else the first Ready component's, or nil. The native copies
+  the text (`FUN_3901aa10`) and expands its macros (`FUN_39435050`) before pushing the result, so
+  the getter returns the expanded text (for example `@NPC_NAME(614)` becomes the NPC's name).
+* `GetLinkedQuestObjectives` (`FUN_394a4fc0`) is an array of `{ obj, count }`, one row per Progress
+  component with a counted act; `count` is `FUN_397d3440`'s amount. A quest with no Progress
+  components lists each Ready component with the locale's `report_alias` / `talk_report_npc` /
+  `find_report_doodad` text (category 6) and count 0; a matching locale key is required, as in the
+  native. An unknown quest answers nil. The objective text is the act alias, else the component's
+  kind-4 text, else the act description: the native formats the act through `FUN_392d9640` and
+  `objective_ptn`, whose alias substitution is not recovered, so the text is approximate.
+
+### Main-quest cutscene replay
+
+`X2Quest:GetMainQuestCutSceneReplayList()` (`FUN_39378e10` -> `FUN_393781a0`) returns nil when there
+is nothing to replay, else an array of `{ name, cinema }`. The native keeps a vector of
+(quest, cinema) pairs: `FUN_3937b540` appends a completed main quest's component cinemas whose
+`cinemas.replay` is set, once per component. `FUN_3937c940` clears and rebuilds it from the
+completed blocks on `SCCompletedQuests`, then sorts by `quest_contexts.chapter_idx` and `quest_idx`
+(`FUN_39377f30` compares the quest context's `+0x08` then `+0x24`; the stable order keeps a quest's
+components in component order). A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
+`FUN_3937b2d0` push_back) is appended unsorted until the next rebuild. The Bevy getter reads the
+same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. When a
+component has no `quest_components.cinema_id`, `FUN_393780a0` falls back to the component's skill:
+the first `CinemaEffect` in `skill_effects` -> `effects.actual_id` -> `cinema_effects.cinema_id` ->
+`cinemas`, with the same `cinemas.replay` filter (quest 3556's component 17120 and skill 17610
+resolve to `sl_ha_024`).
+
+The Past tab (`quest_list/tab_past.alb`) lists `%d. <name>` and its replay button calls
+`X2Player:PlayCinema(<cinema>)`. `FUN_39495550` ignores the empty name, then `FUN_391e2a70` loads
+`worlds/main_world/cinemas/<name>.xml` and sends `CSStartedCinema` (0x0cf). Bevy's `play_cinema`
+uses the same `CinemaPlayer` as a quest movie (camera tracks, input block) and does not mark it
+played, so the same movie may be replayed; while a movie is already running it does nothing, like
+the native's early return. That shared player also sends `CSCompletedCinema` (0x0ce) at the end, as
+a quest movie does; the native replay path shows only the 0x0cf send, so the completion report for
+a replay is an inference, not captured.
+
+### Server-shown quest areas
+
+`SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /
+`i64` y, `f32` z and `f32` radius. `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) appends
+`{type, position, radius}` to `DAT_3a173d80` (`FUN_393833f0` push_back, no replace). There is no
+debug-cvar gate: `FUN_393822f0` draws every frame a red (204, 49, 49, 255) sphere of that radius
+and a white `"stype: %u"` label: `FUN_3963b590(type)` reads the `spheres` table (`+0x9db4`) and only
+a found record (its first field, the id) gets a label. Bevy keeps the same append-only list (capped
+at 256) and, only with the `--quest-area-geometry` dev flag (the server never sends 0x1af),
+converts the position with `aa_world::cry_to_bevy`, draws the sphere, and puts the white label on
+the HUD layer in screen coordinates (`hud/quest_areas.rs`, scale `2^-44` from `FUN_3961de30`).
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

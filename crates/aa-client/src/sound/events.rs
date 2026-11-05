@@ -119,7 +119,13 @@ pub(super) fn game_sounds(
                 }
                 heard.level = *level;
             }
-            Event::QuestStarted(q) => out.quest(packs, data, "started", q.template_id),
+            // `FUN_3937b5b0`'s hidden branch returns before `FUN_39378580`, so a hidden quest's
+            // start has no jingle (its ready event has its own script sound).
+            Event::QuestStarted(q) => {
+                if !data.quest_hidden(q.template_id) {
+                    out.quest(packs, data, "started", q.template_id);
+                }
+            }
             // finished objectives (status READY) are an update, not a sound: the jingle is the hand in
             Event::QuestUpdated(q) => match q.status {
                 status::FAILED => out.quest(packs, data, "failed", q.template_id),
