@@ -111,6 +111,9 @@ pub struct RemoteUnit {
     /// Ground speed of the last movement sample (m/s): a glider's tier is chosen from it (the movement's own stance is FLY
     /// and its air time leaves [`Motion`] empty).
     speed: f32,
+    /// A movement of this air time had the take-off bit (`actor_flags::JUMP_START`); [`move_units`] hands it to the unit's
+    /// [`super::anim::AirStart`] when the played-back pose leaves the ground.
+    take_off: bool,
 }
 
 /// A remote unit's walk on a ship deck: the ship and a walking track in the hull frame (the
@@ -190,7 +193,7 @@ impl RemoteUnit {
         let rotation = if parent.is_some() { cry_rot_to_bevy(game_rotation) } else { Quat::from_rotation_y(unit.yaw()) };
         Self { obj_id: unit.obj_id, model_id: unit.model_id, track: Track::new(pos, unit.yaw()), vehicle: None, pos, facing: unit.yaw(),
             rotation, game_rotation, deck: None, parent, hang: None, hanging: None, climb_up: 0.0,
-            scale: unit_scale(unit), character: unit.is_character(), combat: false, casting: true, speed: 0.0 }
+            scale: unit_scale(unit), character: unit.is_character(), combat: false, casting: true, speed: 0.0, take_off: false }
     }
 
     /// The same committed movement clock is used with and without a render tree.
@@ -257,7 +260,7 @@ impl RemoteUnit {
         Self { obj_id, model_id: 0, track: Track::new(pos, 0.0), vehicle: None, pos, facing: 0.0,
             rotation: Quat::from_rotation_y(0.0), game_rotation: Quat::from_rotation_z(0.0), deck: None, parent: None,
             hang: None, hanging: None, climb_up: 0.0,
-            scale: 1.0, character: true, combat: false, casting: false, speed: 0.0 }
+            scale: 1.0, character: true, combat: false, casting: false, speed: 0.0, take_off: false }
     }
 
     /// The drawn pose for an example/test reader: Bevy-space position and rotation.
@@ -297,6 +300,7 @@ impl RemoteUnit {
         self.rotation = Quat::from_rotation_y(facing);
         self.game_rotation = Quat::from_rotation_z(facing);
         self.speed = 0.0;
+        self.take_off = false;
     }
 }
 
@@ -1289,7 +1293,12 @@ pub(super) fn spawn_unit(commands: &mut Commands, cry: &mut CryAssets, clips: &C
                 cry.finish_model(m);
             }
             let _t = aa_cry::prof::scope("unit.spawn_creature");
-            creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?
+            let root = creature::spawn(commands, cry, clips, &file, cdf.as_deref(), transform).ok_or_else(|| format!("{file} cannot be spawned (no skeleton model or unreadable)"))?;
+            // a mate jumps (Space under its driver) and is shown taking off
+            if matches!(unit.kind, aa_net::model::UnitKind::Mate { .. }) {
+                commands.entity(root).insert(super::anim::AirStart::default());
+            }
+            root
         }
         UnitBuild::Vehicle {
             pieces,
@@ -1482,6 +1491,9 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                 if seats.as_mut().is_some_and(|seats| seats.remote_report_after_release(*obj_id, message_id.id, view.announced_after)) {
                     unit.reset_track(report.pos, report.yaw);
                 }
+                // a jump's first packet (actor flags 0x08 standing, 0x0c moving) is kept until its air time is played back;
+                // a packet on the ground ends it
+                unit.take_off = movement.actor_flags & actor_flags::JUMP_START != 0 || (unit.take_off && report.airborne);
                 // Hanging: actor flag 0x40 and the climb data block. A ladder on a moving hull also
                 // carries the supporting-object block (0x60), so its primary position is hull-local
                 // and the pose is composed with the drawn hull like a deck walker.
@@ -1898,7 +1910,7 @@ pub fn move_units(
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
     mut views: ResMut<Views>,
-    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>, Option<&mut super::anim::AirStart>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     sinks: Query<&super::vehicle::WreckSink>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
@@ -1918,7 +1930,7 @@ pub fn move_units(
         }
     }
     let measure = smoothness_wanted();
-    for (entity, mut unit, mut transform, motion) in &mut query {
+    for (entity, mut unit, mut transform, motion, air_start) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
         // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
         // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position. A
@@ -1947,7 +1959,16 @@ pub fn move_units(
             *transform = placed;
         }
         if let Some(mut m) = motion {
-            let moving = pose.speed > remote::STANDING && !airborne;
+            // a mate (spawned with `AirStart`) is shown in the air like a character, and keeps its speed there so its riders
+            // keep their gait; its air time began with a take-off when a movement since the last ground had the bit
+            let mate = air_start.is_some();
+            if let Some(mut start) = air_start {
+                let rising = airborne && if m.airborne { start.0 } else { std::mem::take(&mut unit.take_off) };
+                if start.0 != rising {
+                    start.0 = rising;
+                }
+            }
+            let moving = pose.speed > remote::STANDING && (!airborne || mate);
             let local_dir = if !moving {
                 Vec2::ZERO
             } else if unit.character {
@@ -1958,7 +1979,7 @@ pub fn move_units(
             *m = Motion {
                 speed: if moving { pose.speed } else { 0.0 },
                 local_dir,
-                airborne: airborne && unit.character,
+                airborne: airborne && (unit.character || mate),
                 climb: unit.hanging.map(|kind| super::anim::ClimbPose { kind, up: unit.climb_up, exiting: false, angle_deg: 0.0 }),
             };
         }
@@ -2110,7 +2131,7 @@ mod lifecycle_tests {
         let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, model_id: 0, track, vehicle: None, pos, facing: 1.0,
             rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None, parent: None,
             hang: None, hanging: None, climb_up: 0.0,
-            scale: 1.0, character: true, combat: true, casting: false, speed: 0.0 }).id();
+            scale: 1.0, character: true, combat: true, casting: false, speed: 0.0, take_off: false }).id();
         app.world_mut().resource_mut::<Views>().units.insert(7, View { entity: Some(entity), ..View::default() });
         app.world_mut().write_message(NetEvent(Event::UnitDeath { obj_id: 7 }));
         app.update();
@@ -2397,6 +2418,85 @@ mod display_tests {
         let mut plain = Movement::unit(Pos::new(0.0, 0.0, 0.0), 0.0, 0);
         plain.direction = 32;
         assert!((report_of(&plain).yaw - 32.0 * std::f32::consts::TAU / 128.0).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod mate_jump_tests {
+    use super::*;
+    use super::super::anim::AirStart;
+    use aa_net::{Event, NetEvent, Pos};
+
+    /// One 10 Hz packet of a unit running east at 9 m/s: `x` m along, `z` m up, with the packet's movement and actor flags.
+    fn packet(i: u32, z: f32, flags: u8, actor: u8) -> Movement {
+        let mut m = Movement::unit(Pos::new(0.9 * i as f32, 0.0, z), 0.0, 100 * i);
+        m.flags = flags;
+        m.actor_flags = actor;
+        m
+    }
+
+    /// A remote mate's jump as its driver's client sends it (`player::control_player`): the take-off (move flag JUMPING,
+    /// actor flags 0x0c), the air (0x10), the landing (0x14), then the run (0x04). The mate is shown in the air with its
+    /// speed and its take-off ([`AirStart`]); a later fall has no take-off. A character fed the same packets is airborne
+    /// with no speed, as before.
+    #[test]
+    fn a_remote_mate_jumps_with_its_speed_and_its_take_off() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped (move_units probes the terrain)");
+            return;
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .insert_resource(TerrainQuery::new("__mate_jump_test_world__"))
+            .add_systems(Update, (receive_moves, move_units).chain());
+        let mate = app.world_mut().spawn((RemoteUnit { character: false, ..RemoteUnit::fixture(7, Vec3::ZERO) }, Transform::default(), Motion::default(), AirStart::default())).id();
+        let rider = app.world_mut().spawn((RemoteUnit::fixture(8, Vec3::ZERO), Transform::default(), Motion::default())).id();
+        for (obj_id, entity) in [(7, mate), (8, rider)] {
+            app.world_mut().resource_mut::<Views>().units.insert(obj_id, View { entity: Some(entity), ..View::default() });
+        }
+        // the 1.3 m, gravity 30 horse jump: 0.59 s in the air
+        let arc = |t: f32| (8.83 * t - 15.0 * t * t).max(0.0);
+        let mut packets = vec![];
+        for i in 0..10 {
+            packets.push(packet(i, 0.0, move_flags::MOVING, actor_flags::STANDING_ON_SOLID));
+        }
+        packets.push(packet(10, 0.0, move_flags::JUMPING, actor_flags::JUMP_START | actor_flags::STANDING_ON_SOLID));
+        for i in 11..16 {
+            packets.push(packet(i, arc((i - 10) as f32 * 0.1), move_flags::MOVING, actor_flags::JUMPING));
+        }
+        packets.push(packet(16, 0.0, move_flags::MOVING, actor_flags::LANDING));
+        for i in 17..25 {
+            packets.push(packet(i, 0.0, move_flags::MOVING, actor_flags::STANDING_ON_SOLID));
+        }
+        // walking off a 3 m ledge: no take-off
+        for i in 25..30 {
+            packets.push(packet(i, 3.0 - (i - 25) as f32 * 0.5, move_flags::MOVING, 0));
+        }
+        let mut frames = vec![];
+        for movement in packets {
+            for obj_id in [7, 8] {
+                app.world_mut().write_message(NetEvent(Event::UnitMoved { obj_id, movement: movement.clone() }));
+            }
+            for _ in 0..5 {
+                app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.02));
+                app.update();
+                let world = app.world();
+                frames.push((*world.get::<Motion>(mate).unwrap(), world.get::<AirStart>(mate).unwrap().0, *world.get::<Motion>(rider).unwrap()));
+            }
+        }
+        let jump = &frames[50..90];
+        assert!(jump.iter().any(|(m, start, _)| m.airborne && *start), "the mate takes off");
+        for (m, start, character) in jump.iter().filter(|(m, ..)| m.airborne) {
+            assert!(*start, "the whole air time began with the take-off");
+            assert!(m.speed > 5.0 && m.local_dir == Vec2::Y, "the mate keeps its speed in the air: {m:?}");
+            assert!(character.airborne && character.speed == 0.0, "a character in the air, as before: {character:?}");
+        }
+        assert!(frames[110..125].iter().all(|(m, start, _)| !m.airborne && !*start), "back on the ground");
+        let fall = &frames[127..];
+        assert!(fall.iter().any(|(m, ..)| m.airborne), "the ledge fall is in the air");
+        assert!(fall.iter().all(|(_, start, _)| !*start), "with no take-off");
     }
 }
 

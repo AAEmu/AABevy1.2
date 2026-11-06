@@ -104,8 +104,11 @@ pub struct ClipSet {
     walk: [Option<BoundClip>; 8],
     /// The sprint tier of the run group (`fist_mo_normal_run.lmg`): what a unit whose buffs have `sprint_motion` runs with (Dash).
     sprint: SprintClips,
-    /// The old single air clip (`fist_mo_relaxed_jump_s_loop`): a model without it has no jump at all.
+    /// The old single air clip (`fist_mo_relaxed_jump_s_loop`), or a mount's (`fist_mo_jump_f_loop`, [`ClipSet::creature_jump`]):
+    /// a model without either has no jump at all.
     jump: Option<BoundClip>,
+    /// The jump is the horse graph's ([`JumpKind::Creature`]): the model's `.cal` has the mount clips, not the humanoid ones.
+    creature_jump: bool,
     /// The jump clips by `.cal` name ([`super::jump::clip_names`]), bound when the set loads (relaxed, walking, Dash) or the
     /// first time a unit of the model jumps with its weapon out; `None` for a name the model lacks.
     jumps: Arc<std::sync::Mutex<std::collections::HashMap<String, Option<BoundClip>>>>,
@@ -263,7 +266,15 @@ impl ClipSet {
         let dirs = |prefix: &str| -> [Option<BoundClip>; 8] { std::array::from_fn(|i| bind(&format!("{prefix}_{}", DIRS[i]))) };
         let run = dirs("fist_mo_normal_run");
         let walk = dirs("fist_mo_normal_walk");
-        let jump = bind("fist_mo_relaxed_jump_s_loop");
+        // a mount's `.cal` (`global_horse.cal`) has no humanoid jump: its air clip is the horse graph's
+        let (jump, creature_jump) = match bind("fist_mo_relaxed_jump_s_loop") {
+            Some(clip) => (Some(clip), false),
+            None => {
+                let clip = bind(jump::CREATURE_AIR);
+                let creature = clip.is_some();
+                (clip, creature)
+            }
+        };
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let sprint = SprintClips::load(rig, &cal, clips, "fist_mo_normal_run");
@@ -275,6 +286,7 @@ impl ClipSet {
             walk,
             sprint,
             jump,
+            creature_jump,
             jumps: Default::default(),
             run_clip_speed,
             walk_clip_speed,
@@ -282,7 +294,15 @@ impl ClipSet {
             climb: Default::default(),
         };
         // a jump's clips are bound before the first jump: binding loads the file, and a take-off is shorter than a hitch
-        if set.jump.is_some() {
+        if set.creature_jump {
+            for back in [false, true] {
+                for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
+                    for dir in JUMP_DIRS {
+                        set.jump_clip(rig, clips, phase, dir, JumpKind::Creature { back });
+                    }
+                }
+            }
+        } else if set.jump.is_some() {
             for kind in [JumpKind::Relaxed, JumpKind::Walk, JumpKind::Sprint] {
                 for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
                     for dir in JUMP_DIRS {
@@ -311,7 +331,6 @@ impl ClipSet {
     pub fn can_move(&self) -> bool {
         self.run[0].is_some() || self.walk[0].is_some()
     }
-
     /// The climb clips of the model, bound the first time a unit of it hangs (the `.cal` names only
     /// the exit clips, so they are bound by path; see [`super::ladder::LadderClips`]).
     pub(super) fn climb_clips(&self, rig: &Rig, clips: &ClipLibrary) -> Option<Arc<super::ladder::LadderClips>> {
@@ -442,8 +461,9 @@ enum State {
 
 const JUMP_DIRS: [JumpDir; 9] = [JumpDir::S, JumpDir::F, JumpDir::B, JumpDir::L, JumpDir::R, JumpDir::Fl, JumpDir::Fr, JumpDir::Bl, JumpDir::Br];
 
-/// What the local player's input says of its jump, written by [`super::player::control_player`]: other units are seen from
-/// their movement only (their air time is a fall, played from the air clip).
+/// What the local player's input says of its jump, written by [`super::player::control_player`]; the mate it drives jumps on
+/// it too. Other units are seen from their movement only: a character's air time is a fall, played from the air clip, and a
+/// mate's begins with the take-off when its movement had one ([`AirStart`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct LocalJump {
     /// The air time began with a take-off (Space), not a fall off a ledge.
@@ -461,6 +481,12 @@ pub struct LocalJump {
     /// A freefall ([`super::jump::freefall`]): the fall clip replaces the air clip.
     pub freefall: bool,
 }
+
+/// A remote mate's air time began with a take-off (the movement's `JUMP_START` actor flag), written by
+/// [`super::units::move_units`]: its jump plays the take-off, a fall the air clip. Only units spawned with it (the mates) are
+/// shown airborne apart from the characters; the mate the player drives takes its take-off from [`LocalJump`].
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AirStart(pub bool);
 
 /// Index into [`DIRS`] of the 8-way direction closest to `local_dir` (x right, y forward).
 pub fn direction_index(local_dir: Vec2) -> usize {
@@ -480,15 +506,16 @@ pub fn direction_index(local_dir: Vec2) -> usize {
 
 /// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed. A unit with its weapon out ([`Drawn`]) stands
 /// and runs in the stance of the weapon until it puts it away; walking stays the peaceful walk.
+#[allow(clippy::type_complexity)]
 pub fn drive_locomotion(
     time: Res<Time>,
     library: Res<ClipLibrary>,
     local_jump: Option<Res<LocalJump>>,
-    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatIdle>), (Without<Dead>, Without<super::seating::SeatPose>)>,
+    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatIdle>, Has<Driven>, Option<&AirStart>), (Without<Dead>, Without<super::seating::SeatPose>)>,
 ) {
     let now = time.elapsed_secs_f64();
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();
-    for (mut animator, mut loco, motion, acting, drawn, wield, local, fighting) in &mut units {
+    for (mut animator, mut loco, motion, acting, drawn, wield, local, fighting, driven, air_start) in &mut units {
         if !animator.starts_enabled() { continue; }
         // a ladder owns the clip; `drive_climb` plays it
         if motion.climb.is_some() {
@@ -535,22 +562,42 @@ pub fn drive_locomotion(
         let base_speed = if local && local_jump.speed_mul > 0.05 { motion.speed / local_jump.speed_mul } else { motion.speed };
         let walk = moving && base_speed < (WALK_SPEED + RUN_SPEED) * 0.5;
         let sprinting = moving && !walk && local && local_jump.sprint_motion;
-        // a jump: its phase by 1.2's graph (`super::jump`), the share of the playing clip deciding when a phase may end
+        // a jump: its phase by 1.2's graph (`super::jump`), the share of the playing clip deciding when a phase may end. The
+        // player's keys jump the player and the mate it drives (`sub_390CCAB0` hands the unit's jump to its riders); another
+        // unit's take-off is its movement's ([`AirStart`])
+        let own = local || driven;
+        let creature = loco.clips.creature_jump;
         let jumping = if loco.clips.jump.is_some() {
-            let (rising, asked) = if local { (local_jump.rising, local_jump.dir) } else { (false, if moving { motion.local_dir } else { Vec2::ZERO }) };
+            let (rising, asked) = if own {
+                (local_jump.rising, local_jump.dir)
+            } else {
+                (air_start.is_some_and(|a| a.0), if moving { motion.local_dir } else { Vec2::ZERO })
+            };
             let progress = match loco.state {
                 State::Jump(..) => animator.current.as_ref().map_or(1.0, |c| if c.clip.clip.duration > 0.0 { c.time / c.clip.clip.duration } else { 1.0 }),
                 // something else played over the phase (it was invalidated): the phase counts as played
                 _ => 1.0,
             };
-            loco.jump
-                .step(motion.airborne, rising, JumpDir::of(asked.x, asked.y), progress)
-                .map(|p| jump::in_freefall(p, local && local_jump.freefall))
+            let dir = match loco.jump.phase {
+                // the horse graph's landings do not leave for a changed request (`leave_request_changed` empty, :812-872)
+                Some((JumpPhase::Land, d)) if creature && !motion.airborne => d,
+                _ => JumpDir::of(asked.x, asked.y),
+            };
+            loco.jump.step(motion.airborne, rising, dir, progress).map(|p| jump::in_freefall(p, own && local_jump.freefall))
         } else {
             loco.jump = JumpTrack::default();
             None
         };
-        let kind = if local && local_jump.sprint {
+        let kind = if creature {
+            // the side of a phase with no direction asked: the one the jump went to so far
+            let back = match (loco.state, jumping) {
+                (State::Jump(_, JumpDir::S, JumpKind::Creature { back }), _) => back,
+                (State::Jump(_, d, _), _) => d.backward(),
+                (_, Some((_, d))) => d.backward(),
+                _ => false,
+            };
+            JumpKind::Creature { back }
+        } else if local && local_jump.sprint {
             JumpKind::Sprint
         } else if local && local_jump.walking {
             JumpKind::Walk
@@ -774,6 +821,100 @@ mod tests {
         step(&mut app, 0.8);
         assert_eq!(rear_until(&app), None);
         assert_eq!(playing(&app), idle);
+    }
+
+    /// A mount's `.cal` (`global_horse.cal`, included by the horse, wildboar and pangolin) binds the horse graph's jump instead
+    /// of the humanoid one. A remote horse that takes off ([`AirStart`]) plays `fist_mo_jump_f_start`, the air clip and the
+    /// running landing, then runs; a fall plays the air clip with no take-off; the mate the player drives jumps backward
+    /// from [`LocalJump`] and lands standing on `fist_mo_jump_b_end` (needs `AA_PAK`).
+    #[test]
+    fn a_mount_jumps_with_the_horse_graphs_clips() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        let library = ClipLibrary::default();
+        for model in ["animals/horse/horse", "animals/wildboar/wildboar_grey/wildboar_grey", "animals/pangolin/pangolin_red/pangolin_red"] {
+            let (chr, cal) = (format!("objects/characters/{model}.chr"), format!("objects/characters/{model}.cal"));
+            let set = shared_clip_set(&chr, &cal, &library).unwrap_or_else(|| panic!("{model}: no clips"));
+            assert!(set.creature_jump, "{model}: the horse graph's jump");
+            let rig = aa_anim::pose::shared_rig(&chr).expect("the rig");
+            for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
+                for (dir, back) in [(JumpDir::F, false), (JumpDir::Br, false), (JumpDir::S, false), (JumpDir::S, true)] {
+                    let kind = JumpKind::Creature { back };
+                    let clip = set.jump_clip(&rig, &library, phase, dir, kind).expect("a clip");
+                    let want = format!("{}.caf", jump::clip_names(phase, dir, kind)[0]);
+                    assert_eq!(clip_file(&clip).as_deref(), Some(want.as_str()), "{model} {phase:?} {dir:?}");
+                }
+            }
+        }
+
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let set = shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &library).expect("the horse clips");
+        let rig = aa_anim::pose::shared_rig(HORSE).expect("the horse rig");
+        fn tick(time: Res<Time>, mut animators: Query<&mut Animator>) {
+            for mut animator in &mut animators {
+                animator.update(time.delta_secs());
+            }
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<LocalJump>().insert_resource(library).add_systems(Update, (tick, drive_locomotion).chain());
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let horse = app.world_mut().spawn((Animator::new(rig.clone(), Vec::new()), loco, Motion::default(), AirStart::default())).id();
+        let step = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        };
+        let playing = |app: &App, e: Entity| {
+            let animator = app.world().get::<Animator>(e).unwrap();
+            animator.current.as_ref().and_then(|p| clip_file(&p.clip)).map_or(String::new(), |f| f.to_string())
+        };
+        let run = Motion { speed: 9.0, local_dir: Vec2::Y, ..Motion::default() };
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = run;
+        step(&mut app, 0.1);
+        let running = playing(&app, horse);
+        assert!(running.contains("run"), "{running}");
+
+        // the take-off, held to 0.98 of its length, then the air clip, then the landing on the run
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..run };
+        app.world_mut().get_mut::<AirStart>(horse).unwrap().0 = true;
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_start.caf");
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+        }
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = run;
+        app.world_mut().get_mut::<AirStart>(horse).unwrap().0 = false;
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_land.caf");
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+        }
+        assert_eq!(playing(&app, horse), running);
+        // a fall off a ledge: no take-off
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..run };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+
+        // the driven mate jumps backward on the keys and lands with none held: the standing landing of its side
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let driven = app.world_mut().spawn((Animator::new(rig, Vec::new()), loco, Motion::default(), Driven)).id();
+        *app.world_mut().resource_mut::<LocalJump>() = LocalJump { rising: true, dir: Vec2::NEG_Y, ..LocalJump::default() };
+        *app.world_mut().get_mut::<Motion>(driven).unwrap() = Motion { speed: 3.0, local_dir: Vec2::NEG_Y, airborne: true, climb: None };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, driven), "fist_mo_jump_b_start.caf");
+        *app.world_mut().resource_mut::<LocalJump>() = LocalJump::default();
+        *app.world_mut().get_mut::<Motion>(driven).unwrap() = Motion::default();
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+            if playing(&app, driven) != "fist_mo_jump_b_start.caf" {
+                break;
+            }
+        }
+        assert_eq!(playing(&app, driven), "fist_mo_jump_b_end.caf");
     }
 
     #[test]

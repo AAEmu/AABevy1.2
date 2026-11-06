@@ -32,7 +32,7 @@
 //! the unit views, puts the UI cameras back to what the login screens need and gives the world its anchor back, so the
 //! cells unload. The character list is then built again by `login`.
 
-mod anim;
+pub(crate) mod anim;
 pub(crate) mod cam_fov;
 mod jump;
 pub(crate) mod ladder;

@@ -54,6 +54,31 @@ character `.cal` (`ba_relaxed_idle`, `mo_normal_*`, jump and fall clips for play
 A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 * the mount is another unit, drawn like any creature (model, gait clips by its own speed);
+* **the mount's jump** (`jump::JumpKind::Creature`, played by `anim::drive_locomotion`): every rideable mate's
+  `actor_models.animation_graph` is `horse_full_body.xml`, and every rideable species' `.cal` includes `global_horse.cal`,
+  which names `fist_mo_jump_[f|b]_{start,loop,end,land}` (:220-239; l and r are commented out) and no humanoid
+  `fist_mo_relaxed_jump_*`. `ClipSet::load` takes `fist_mo_jump_f_loop` as such a model's air clip and marks the set a
+  creature jump. The graph's chain (:808-1060): take-off `fist_mo_jump_[dir]_start` (`JumpMain`, Action `jumpMP01`, 0.1 s
+  blend, held to 0.98 of its length), air `_loop` (`JumpLoop`, 0.1), landing with a direction `_land` (`JumpEnd`, 0.2,
+  then `Jump to Move`) or with none `fist_mo_jump_f_end` / `_b_end` (then `Jump to Idle`; their blend is empty, taken as
+  0.2), freefall `fist_mo_jump_freefall` = `fist_mo_jump_f_loop` (0.2). l, r, fl and fr play the f clips and bl, br the b
+  clips (the pelvis turn is not drawn); the graph has no `s` state, so a phase with no direction takes the side the jump
+  went to. Unlike the player's, its landings do not leave for a changed request (`leave_request_changed` empty). The
+  horse's take-off is 0.83 s, longer than its 0.59 s in the air, so on flat ground the landing follows the take-off
+  without the air clip. The walking variants (`_start_walk`, `_f_loop_walk`: Action `jumpMP02`, which `sub_39153FF0`
+  x2game12.c:271855 sends when the actor's walk flag 0x1000 is set) play the same clips with other blends and are not
+  told apart. The horse, wildboar and pangolin sets are checked against the pak (`anim` test); all 11 rideable species
+  folders carry the clips.
+  * The mate the player drives takes its take-off, direction and freefall from the player's `LocalJump`;
+    `mount::drive_mount` writes its `Motion.airborne` from the mover (in the air and not swimming) and keeps its speed.
+  * A remote mate (spawned with `anim::AirStart`): `units::move_units` shows it in the air as it does a character, keeps
+    its speed there so its riders keep their gait (it went idle mid-air before), and sets `AirStart` for an air time
+    whose packets since the ground had the take-off bit (`actor_flags::JUMP_START` 0x08; the driver sends 0x0c, then 0x10
+    in the air and 0x14 at the landing). The bit is kept on `RemoteUnit` until the played-back pose leaves the ground (the
+    track's `Report` is unchanged). Such an air time plays the take-off, a fall the air clip. The server relays a mate's
+    `CSMoveUnit` flags as they are, but the 1.2 path from a remote unit's packet to its +680 jump call is not traced:
+    using the take-off bit is **inferred**.
+  * `examples/mount_jump.rs` scripts a remote mate's jump on the Lilyut horse (model 139) and takes a shot mid-air;
 * the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
   body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
   plays the original player's mounted states (`player_full_body.xml`; the graph `Vehicle`/`VehicleSeat` comes from
