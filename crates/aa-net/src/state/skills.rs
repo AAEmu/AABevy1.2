@@ -11,6 +11,7 @@ use web_time::Instant;
 mod native_timers;
 pub use native_timers::{NativeCooldown, NativeCooldownOrigin};
 
+use crate::mate::MateEvent;
 use crate::session::Event;
 use crate::skill::{Cooldown, SkillTarget, COOLDOWN_LIMIT};
 
@@ -107,6 +108,9 @@ resource! {
         /// `SCSkillFired` stamps it; an interrupted cast leaves none. Keyed per slave: stepping off
         /// and back on keeps the slave's running timer.
         pub mount_last_used: HashMap<(u32, u32), Instant>,
+        /// When a mate's `SCMateState` cooldown triples run out, keyed like `mount_last_used`
+        /// (`sub_39899D40` seeds the unit's cooldown container; `sub_39899E50` counts it down).
+        pub mount_seeded: HashMap<(u32, u32), Instant>,
         /// When a mount/slave last started any skill and which one (its global cooldown, which the
         /// server starts when it accepts the cast).
         pub mount_last_cast: HashMap<u32, (Instant, u32)>,
@@ -178,12 +182,17 @@ impl Skills {
         cooldown_ms: u32,
         now: Instant,
     ) -> Option<(Duration, Duration)> {
-        let used = *self.mount_last_used.get(&(caster, skill_id))?;
         let total = Duration::from_millis(u64::from(cooldown_ms));
-        total
-            .checked_sub(now.saturating_duration_since(used))
-            .filter(|left| !left.is_zero())
-            .map(|left| (left, total))
+        let own = self.mount_last_used.get(&(caster, skill_id)).and_then(|used| {
+            total.checked_sub(now.saturating_duration_since(*used)).filter(|left| !left.is_zero())
+        });
+        let seeded = self
+            .mount_seeded
+            .get(&(caster, skill_id))
+            .map(|end| end.saturating_duration_since(now))
+            .filter(|left| !left.is_zero());
+        let left = own.max(seeded)?;
+        Some((left, total.max(left)))
     }
 
     /// Received-only `(remaining, total)` for a skill and its native ordered tag list.
@@ -494,6 +503,16 @@ impl Skills {
                     return latched;
                 }
             }
+            Event::Mate(MateEvent::State { obj_id, dynamic }) => {
+                self.mount_seeded.retain(|&(caster, _), _| caster != *obj_id);
+                for (skill, remaining) in dynamic.cooldowns() {
+                    self.mount_seeded.insert(
+                        (*obj_id, skill),
+                        now + Duration::from_millis(u64::from(remaining)),
+                    );
+                }
+                return true;
+            }
             Event::UnitsRemoved(ids) => {
                 let before = self.casting.len();
                 let lost_context = self.obj_id != 0 && ids.contains(&self.obj_id);
@@ -511,6 +530,7 @@ impl Skills {
                     .retain(|&(caster, _), _| !ids.contains(&caster));
                 self.mount_last_cast
                     .retain(|caster, _| !ids.contains(caster));
+                self.mount_seeded.retain(|&(caster, _), _| !ids.contains(&caster));
                 let pruned = timers != self.mount_last_used.len() + self.mount_last_cast.len();
                 return self.casting.len() != before || lost_context || pruned;
             }
@@ -603,6 +623,7 @@ impl PartialEq for Skills {
             && self.casting == o.casting
             && self.last_used == o.last_used
             && self.mount_last_used == o.mount_last_used
+            && self.mount_seeded == o.mount_seeded
             && self.mount_last_cast == o.mount_last_cast
             && self.last_cast == o.last_cast
             && self.last_cast_skill == o.last_cast_skill
@@ -818,6 +839,21 @@ mod tests {
         // NPC and other-unit casters are not stamped.
         s.apply(&fired(999, 9, 77));
         assert!(!s.mount_last_used.contains_key(&(77, 999)));
+    }
+
+    #[test]
+    fn a_mate_state_triple_seeds_the_mount_cooldown_and_counts_down() {
+        use crate::mate::DynamicUnitState;
+        let mut s = skills();
+        let dynamic = DynamicUnitState { skills: vec![[17092, 9, 30_000]], tags: Vec::new() };
+        s.apply(&Event::Mate(MateEvent::State { obj_id: 20, dynamic }));
+        let now = Instant::now();
+        let (left, total) = s.mount_cooldown_at(20, 17092, 10_000, now).unwrap();
+        assert!(left > Duration::from_secs(29) && total >= left, "seeded remaining outlasts the table length");
+        assert!(s.mount_cooldown_at(20, 17092, 10_000, now + Duration::from_secs(31)).is_none());
+        assert!(s.mount_cooldown_at(21, 17092, 10_000, now).is_none());
+        s.apply(&Event::Mate(MateEvent::State { obj_id: 20, dynamic: DynamicUnitState::default() }));
+        assert!(s.mount_cooldown_at(20, 17092, 10_000, now).is_none(), "a new state replaces the old list");
     }
 
     #[test]

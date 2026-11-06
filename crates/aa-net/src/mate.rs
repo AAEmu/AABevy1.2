@@ -146,7 +146,8 @@ pub struct MateSpawn {
     pub skills: [u32; MATE_SKILL_SLOTS],
 }
 
-/// Exact native list entries. Triple field meanings are deliberately not inferred.
+/// Exact native list entries. The unit cooldown container (`sub_39899D40`) stores the skill triples as
+/// `{skill_id = wire[0], remaining = wire[2], other = wire[1]}`; the tag triples are kept raw.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DynamicUnitState {
     pub skills: Vec<[u32; 3]>,
@@ -154,6 +155,11 @@ pub struct DynamicUnitState {
 }
 
 impl DynamicUnitState {
+    /// `(skill_id, remaining_ms)` of each skill triple (wire fields 0 and 2; `sub_39899E50` counts the latter down).
+    pub fn cooldowns(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.skills.iter().map(|t| (t[0], t[2]))
+    }
+
     fn read_list(r: &mut Reader) -> Result<Vec<[u32; 3]>> {
         let count = r.i32()?;
         if count < 0 || count as usize > MAX_DYNAMIC_ENTRIES || count as usize > r.remaining() / 12

@@ -1845,7 +1845,21 @@ mate attachment, including another owner's/passenger seat. PetState is a string,
 any seat on the same owned pet. GetMountSkill returns BOOL learned/needdiver and NUMBER skillUsable;
 required level is source-proven skills.ability_level. Live capture 2026-10-28: skillUsable is1 only
 while mounted (0 on foot); the target_type_id6 display-usability bypass (3933b7a7) stays ready in
-either state. The server's cooldowns are not modeled locally.
+either state.
+
+Pet slot cooldowns and auto-use (2026-11-06). `sub_3933c3b0` (x2game12.c:681096) answers a slot's cooldown as the
+larger of the mount skill's and its first `mount_attached_skills` rider skill's (`sub_3989a3e0`); the cast sends
+without a local cooldown refusal (`FUN_3933e630`), so it is display only. `HUD.pet_slot` sets `cd_end` / `cd_total`
+from `cooldown::mount_display_at` (the slave bar's estimate, which also holds the `SCMateState` seed, see
+docs/aa-net.md) against `cooldown::display_at` of the rider skill, and the pet `AAUI.SlotContent` wrapper turns them
+into the slot's `cooldown`. A right click on a pet slot (`AAUI.UseSlot`, `HUD.pet_toggle_auto`) never casts: it
+runs the slot and level checks and then, as `sub_3933c750` / `sub_3933bbf0` do, flips the slot's auto-use byte and
+fires 282 `PET_AUTO_SKILL_CHANGED`, or fires 283 `FAILED_TO_SET_PET_AUTO_SKILL` and changes nothing.
+`X2Mate:GetAutoStartMountSkill(i)` returns that byte (starts 1, reset with the pet). Capture-pending: the meaning of
+mate field `+52 >= 2` is not traced, so a mate with no driver seat is taken as eligible and a ridable mount as not
+(inferred); action 3 is mapped to the right button (inferred); the spawn fields `+24` / `+28` default is not
+modeled; the auto-used skills are not cast (needs the battle-pet AI). The rider skill's cooldown is the player's
+own and is not seat-selected beyond the first attach row.
 
 Rename uses the original dialog and sends the current mate timeline, with character/object/TL/
 stored-mate identity checked again at dispatch. Receipt remains name authority. Passive requests

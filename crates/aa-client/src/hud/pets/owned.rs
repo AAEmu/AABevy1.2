@@ -17,6 +17,8 @@ pub(super) struct Tables {
 struct Skill {
     combat: u32,
     first_seat: Option<u32>,
+    /// The first `mount_attached_skills` rider skill: its cooldown joins the slot's (`sub_3933c3b0`).
+    rider: Option<u32>,
     level: i32,
     target_type: u32,
 }
@@ -43,10 +45,12 @@ impl Tables {
             out.levels.push((any_int(row, 0)? as u32, any_int(row, 1)? as i32));
         }
         let mut first = HashMap::new();
+        let mut rider = HashMap::new();
         let mut query = conn.prepare("SELECT id,attach_point_id,mount_skill_id,skill_id FROM mount_attached_skills")?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
             first.entry(any_int(row, 2)? as u32).or_insert(any_int(row, 1)? as u32);
+            rider.entry(any_int(row, 2)? as u32).or_insert(any_int(row, 3)? as u32);
         }
         let mut query =
             conn.prepare("SELECT m.id,m.skill_id,s.ability_level,s.target_type_id FROM mount_skills m INNER JOIN skills s ON s.id=m.skill_id ORDER BY m.id")?;
@@ -58,6 +62,7 @@ impl Tables {
                 Skill {
                     combat: any_int(row, 1)? as u32,
                     first_seat: first.get(&id).copied(),
+                    rider: rider.get(&id).copied(),
                     level: any_int(row, 2)? as i32,
                     target_type: any_int(row, 3)? as u32,
                 },
@@ -170,6 +175,8 @@ pub(super) struct View {
     /// The teleport counter when the HUD last refreshed ([`crate::ingame::teleport::Teleport::jumps`]): a jump
     /// between the walk's start and this frame cancels it (capture-pending, A1b).
     pub(super) teleports: u64,
+    /// Slots whose auto-use byte (`+96 + 8 * raw slot`) a toggle cleared; the byte starts at 1 (`sub_3933ac10`).
+    auto_off: [bool; aa_net::mate::MATE_SKILL_SLOTS],
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
     casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
@@ -302,6 +309,7 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         data.pets.owned.local_state = None;
         data.pets.owned.commanded_skill = 0;
         data.pets.owned.casts.clear();
+        data.pets.owned.auto_off = [false; aa_net::mate::MATE_SKILL_SLOTS];
     }
     data.pets.owned.current = next;
     data.pets.owned.pet_pos = (|| {
@@ -732,11 +740,14 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set(
         "GetAutoStartMountSkill",
-        lua.create_function(move |_, _: MultiValue| {
-            Ok(if state.borrow().pets.owned.current.is_some() {
-                MultiValue::from_iter([Value::Boolean(false)])
-            } else {
-                MultiValue::new()
+        lua.create_function(move |_, (_, index): (Value, usize)| {
+            let data = state.borrow();
+            let raw = data.pets.owned.current.as_ref().zip(data.game.get()).and_then(|(pet, game)| {
+                displayed(&game.pets.owned, pet, index).map(|(raw, _)| raw)
+            });
+            Ok(match (data.pets.owned.current.is_some(), raw) {
+                (false, _) => MultiValue::new(),
+                (true, raw) => MultiValue::from_iter([Value::Boolean(raw.is_some_and(|raw| !data.pets.owned.auto_off[raw]))]),
             })
         })?,
     )?;
@@ -794,7 +805,25 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             out.set("learned", i32::from(pet.level) >= skill.level)?;
             out.set("canUse", usable(skill, pet))?;
             out.set("type", "pet_skill")?;
+            if let Some((end, total)) = slot_cooldown(&data, game, pet, skill) {
+                out.set("cd_end", end as f64)?;
+                out.set("cd_total", i64::from(total))?;
+            }
             Ok(Some(out))
+        })?,
+    )?;
+    // A right click on a pet slot (`AAUI.UseSlot`): the toggle raises 282 or 283 and never casts.
+    let state = bridge.clone();
+    hud.set(
+        "pet_toggle_auto",
+        lua.create_function(move |lua, slot: usize| {
+            let result = toggle_auto(&mut state.borrow_mut(), slot);
+            match result {
+                Some(true) => aa_ui::lua::fire_ui_event(lua, "PET_AUTO_SKILL_CHANGED", Vec::new()),
+                Some(false) => aa_ui::lua::fire_ui_event(lua, "FAILED_TO_SET_PET_AUTO_SKILL", Vec::new()),
+                None => {}
+            }
+            Ok(())
         })?,
     )?;
     hud.set("pet_target", {
@@ -814,7 +843,13 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         AAUI.SlotContent=function(kind,index)
           if kind==ISLOT_PET_ACTION then
             local slot=HUD.pet_slot(index)
-            if slot then slot.tooltip=X2Mate:GetMountSkill(index) end
+            if slot then
+              slot.tooltip=X2Mate:GetMountSkill(index)
+              if slot.cd_end then
+                local remain=slot.cd_end-HUD.now_ms()
+                if remain>0 then slot.cooldown={remain=remain,total=math.max(slot.cd_total,remain)} end
+              end
+            end
             return slot
           end
           return content(kind,index)
@@ -905,6 +940,34 @@ fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, 
             (skill.first_seat.is_none() || skill.first_seat == Some(context) || (context == 0 && skill.first_seat == Some(1))).then_some((raw, skill))
         })
         .nth(index.checked_sub(1)?)
+}
+
+/// `sub_3933c3b0`: a pet slot's cooldown is the larger of the mount skill's own (the slave bar's estimate plus the
+/// `SCMateState` seed) and its first rider skill's (the player's cooldown); display only, since the cast sends
+/// without a local cooldown refusal (`FUN_3933e630`). Returns the slot's `(end ms, total ms)`.
+fn slot_cooldown(data: &HudData, game: &super::super::data::GameData, pet: &Pet, skill: &Skill) -> Option<(u64, u32)> {
+    let now = web_time::Instant::now();
+    let mount = super::super::cooldown::mount_display_at(game, &data.cooldowns, pet.object, skill.combat, now);
+    let rider = skill.rider.and_then(|id| super::super::cooldown::display_at(game, &data.cooldowns, id, now));
+    let best = [mount, rider].into_iter().flatten().max_by_key(|&(left, _)| left);
+    super::super::panels::cooldown_slot(best, data.start)
+}
+
+/// `sub_3933c750` for a displayed slot: the slot and level checks of the cast, then a mate that may auto-use flips the
+/// slot's byte (`Some(true)`, event 282) and any other fails (`Some(false)`, event 283). Mate field `+52 >= 2` is not
+/// traced; a mate with no driver seat is taken as eligible (inferred). `None` is a slot the bar does not show.
+fn toggle_auto(data: &mut HudData, slot: usize) -> Option<bool> {
+    let (pet, game) = data.pets.owned.current.as_ref().zip(data.game.get())?;
+    let (raw, skill) = displayed(&game.pets.owned, pet, slot)?;
+    if i32::from(pet.level) < skill.level {
+        return None;
+    }
+    let eligible = !game.pets.owned.seats.get(&pet.model).is_some_and(|s| s.0);
+    if eligible {
+        let off = &mut data.pets.owned.auto_off[raw];
+        *off = !*off;
+    }
+    Some(eligible)
 }
 
 /// `FUN_3933c340`'s display state: a shown row is usable only while riding (live capture 2026-10-28: on foot every

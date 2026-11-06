@@ -49,6 +49,7 @@ fn displayed_skills_preserve_received_order_and_first_seat_only() {
             Skill {
                 combat: id + 100,
                 first_seat: seat,
+                rider: None,
                 level: 1,
                 target_type: 0,
             },
@@ -90,6 +91,7 @@ fn casting_pet(level: u8, driving: bool) -> HudData {
         Skill {
             combat: 700,
             first_seat: Some(1),
+            rider: None,
             level: 10,
             target_type: 4,
         },
@@ -99,6 +101,7 @@ fn casting_pet(level: u8, driving: bool) -> HudData {
         Skill {
             combat: 800,
             first_seat: None,
+            rider: None,
             level: 1,
             target_type: 6,
         },
@@ -108,6 +111,7 @@ fn casting_pet(level: u8, driving: bool) -> HudData {
         Skill {
             combat: 900,
             first_seat: Some(0),
+            rider: None,
             level: 1,
             target_type: 0,
         },
@@ -290,6 +294,7 @@ fn mount_skill_display_is_usable_only_while_riding() {
     let skill = |target_type| Skill {
         combat: 1,
         first_seat: Some(1),
+        rider: None,
         level: 1,
         target_type,
     };
@@ -309,6 +314,7 @@ fn captured_pet() -> HudData {
             Skill {
                 combat,
                 first_seat: Some(1),
+                rider: None,
                 level,
                 target_type: 0,
             },
@@ -519,6 +525,7 @@ fn local_modes_use_attackable_and_active_command_duplicate_guards() {
         Skill {
             combat: 110,
             first_seat: None,
+            rider: None,
             level: 1,
             target_type: 0,
         },
@@ -1865,4 +1872,72 @@ fn original_mountmate_says_target_is_too_far() -> Result<(), Box<dyn std::error:
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+/// Mount skill 7 (combat 700, rider 7001) and the seatless 8 (combat 800), on a mate that rides at level 30.
+fn cooling_pet(mountable: bool) -> HudData {
+    use super::super::super::data::{GameData, SkillInfo};
+    let mut game = GameData::default();
+    for (mount, combat, first_seat, rider) in [(7, 700, Some(1), Some(7001)), (8, 800, None, None)] {
+        game.pets.owned.skills.insert(mount, Skill { combat, first_seat, rider, level: 1, target_type: 0 });
+    }
+    for id in [700, 800, 7001] {
+        game.skills.insert(id, SkillInfo { cooldown_ms: 20_000, ..default() });
+    }
+    game.pets.owned.seats.insert(5, (mountable, false));
+    let mut data = HudData::default();
+    data.game.0.set(game).ok();
+    data.pets.owned.current = Some(Pet {
+        spawn: MateSpawn { tl_id: 12, skills: [7, 8, 0, 0, 0, 0, 0, 0, 0, 0], ..default() },
+        object: 201,
+        model: 5,
+        level: 30,
+        driving: true,
+        ..default()
+    });
+    data
+}
+
+fn slot_left(data: &HudData, slot: usize) -> Option<u64> {
+    let (pet, game) = data.pets.owned.current.as_ref().zip(data.game.get())?;
+    let (_, skill) = displayed(&game.pets.owned, pet, slot)?;
+    let (end, _) = slot_cooldown(data, game, pet, skill)?;
+    Some(end.saturating_sub(crate::hud::panels::now_ms(data.start)))
+}
+
+#[test]
+fn a_pet_slot_shows_the_mate_state_seed_and_a_longer_rider_cooldown() {
+    let mut data = cooling_pet(true);
+    assert_eq!(slot_left(&data, 1), None, "no cooldown yet");
+    let dynamic = aa_net::mate::DynamicUnitState { skills: vec![[700, 0, 15_000]], tags: Vec::new() };
+    data.cooldowns.apply(&aa_net::Event::Mate(aa_net::mate::MateEvent::State { obj_id: 201, dynamic }));
+    let left = slot_left(&data, 1).expect("the seeded mount cooldown shows");
+    assert!((14_500..=15_400).contains(&left), "{left}");
+    assert_eq!(slot_left(&data, 2), None, "another mount skill is unaffected");
+    let now = web_time::Instant::now();
+    data.cooldowns.native_skill_cooldowns.push(aa_net::state::NativeCooldown {
+        cooldown: aa_net::Cooldown { id: 7001, remaining_ms: 40_000, total_ms: 60_000 },
+        updated_at: now,
+        origin: aa_net::state::NativeCooldownOrigin::Snapshot,
+        reset: false,
+    });
+    let left = slot_left(&data, 1).expect("the rider cooldown outlasts the mount's");
+    assert!((39_500..=40_400).contains(&left), "{left}");
+    assert_eq!(use_skill(&mut data, 1, 0), Ok(()), "the cooldown is display only");
+}
+
+#[test]
+fn right_click_toggles_auto_use_on_an_eligible_pet_and_fails_on_a_ridable_mount() {
+    let mut data = cooling_pet(false);
+    assert_eq!(toggle_auto(&mut data, 2), Some(true));
+    assert!(data.pets.owned.auto_off[1], "the slot's byte flipped");
+    assert_eq!(toggle_auto(&mut data, 2), Some(true));
+    assert!(!data.pets.owned.auto_off[1]);
+    assert_eq!(toggle_auto(&mut data, 3), None, "a slot the bar does not show");
+    data.pets.owned.current.as_mut().unwrap().level = 0;
+    assert_eq!(toggle_auto(&mut data, 2), None, "the level check of the cast applies");
+    let mut ridable = cooling_pet(true);
+    assert_eq!(toggle_auto(&mut ridable, 2), Some(false));
+    assert!(ridable.pets.owned.auto_off.iter().all(|off| !off), "a failed toggle changes nothing");
+    assert!(ridable.pets.owned.casts.is_empty());
 }
