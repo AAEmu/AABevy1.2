@@ -249,8 +249,22 @@ mod tests {
         }
     }
 
-    /// Every `ship_models.normal` prefab of the game database has a floor under its `$driver` helper and a
-    /// passenger point (within 1.5 m below it); prints the ships that do not (needs `AA_PAK` and `AA_DB`).
+    /// The `ship_models.normal` prefabs the 1.2 pak cannot give a deck: the caravel and ray parts
+    /// (`caravel_body.cgf`, `ray.cgf`, `caravel_helms.cgf`) are not in the pak, `galleon02.xml` is missing,
+    /// `boxship_old.xml` has no `_6f` / `_2f` prefab, and the woodpiece is floating debris (`galleon_item03.cgf`,
+    /// no hull).
+    const NO_DECK: [&str; 6] = [
+        "prefab://prefabs/ship.xml/caravel.ship_body",
+        "prefab://prefabs/ship.xml/ray.ship_body",
+        "prefab://prefabs/galleon02.xml/galleon02.galleon_step10_normal",
+        "prefab://prefabs/boxship_old.xml/boxship_old.boxship_old_normal_6f",
+        "prefab://prefabs/boxship_old.xml/boxship_old.boxship_old_normal_2f",
+        "prefab://prefabs/galleon.xml/galleon.woodpiece01",
+    ];
+
+    /// Every `ship_models.normal` prefab of the game database other than [`NO_DECK`] has a floor, and every one
+    /// with a floor has a `$driver` helper with that floor within 1.5 m below it (as every `$passenger*` helper);
+    /// prints the ships without a floor (needs `AA_PAK` and `AA_DB`).
     #[test]
     fn every_ship_prefab_has_a_deck_under_its_seats_when_the_data_is_present() {
         if !aa_cry::pak_available() {
@@ -262,7 +276,7 @@ mod tests {
         };
         let mut st = db.prepare("SELECT DISTINCT normal FROM ship_models WHERE normal IS NOT NULL").unwrap();
         let normals: Vec<String> = st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
-        let (mut empty, mut seatless, mut checked) = (Vec::new(), Vec::new(), 0);
+        let (mut empty, mut seatless, mut driverless) = (Vec::new(), Vec::new(), Vec::new());
         for normal in normals {
             let parts = prefab::load(&normal);
             let Some(floor) = ShipFloor::load(&normal) else {
@@ -280,7 +294,9 @@ mod tests {
                     }
                 }
             }
-            checked += seats.len();
+            if !seats.iter().any(|(name, _)| name == "driver") {
+                driverless.push(normal.clone());
+            }
             for (name, at) in seats {
                 let under = floor.height(at.x, at.y, at.z + 0.5);
                 if under.is_none_or(|h| at.z - h > 1.5) {
@@ -290,6 +306,10 @@ mod tests {
         }
         eprintln!("ships without a floor: {empty:#?}
 seats without a floor within 1.5 m: {seatless:#?}");
-        assert!(checked > 0 && seatless.is_empty(), "{seatless:#?}");
+        let uncovered: Vec<&String> =
+            empty.iter().filter(|n| !NO_DECK.iter().any(|k| k.eq_ignore_ascii_case(n))).collect();
+        assert!(uncovered.is_empty(), "ships without a floor: {uncovered:#?}");
+        assert!(driverless.is_empty(), "ships with a floor but no $driver helper: {driverless:#?}");
+        assert!(seatless.is_empty(), "{seatless:#?}");
     }
 }

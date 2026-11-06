@@ -1437,19 +1437,30 @@ character's view of the type-3 hull (interpolation and velocity scale).
 salvaged older own-ship work (`test/ships` deck floor): `ship/floor.rs` takes
 the upward-facing triangles of every hull and deck brush of the model's
 `ship_models.normal` prefab, merged, in the ship frame (cry: x right, y forward, z up).
-The brushes are picked by name (`is_deck_part`): `*_body*.cgf` (smallboat, galleon,
-boardship, middleship, `fishboat_body_stepNN`), the hulls named like the prefab file
-(`boxship`, `boxship_old`, `cruise_a` with its `_add*` pieces, `soloship_a`,
-`speedboat_a`, `fishboat`, `coupleduckship`) and `*_helms.cgf` raised helms. Animated
-`.chr` / `.cga` parts, decoration (barrels, sandbags, shields), rope, sails, flags,
-cannons, anchors, rudders, ladders, damage variants and the `box.cgf` helper are left
-out, so a barrel top or mast is never a floor. 1.2 itself walks on the CryPhysics of
+The brushes are picked by name (`is_deck_part`): `*_body*.cgf` (smallboat, middleship,
+the galleons' and boardships' `*_body` / `*_body_test`, `galleon_test_body`), the hulls
+named like the prefab file (`boxship`, `boxship_old`, `cruise_a` with its `_add04`-`_add08`
+pieces, `soloship_a`, `speedboat_a`, `fishboat`, `coupleduckship`) and `*_helms.cgf` raised
+helms. Animated `.chr` / `.cga` parts (the fishboat's stern `fishboat.chr`, the duck
+boat's `coupleduckship_foot.chr`), decoration (barrels, sandbags, shields, chairs, chain
+boxes, cannonballs), rope, sails, flags, cannons, anchors, rudders, ladders, damage
+variants, the `box.cgf` buoyancy boxes and the `*item*` pieces are left out, so a barrel
+top or mast is never a floor. The `*item*` pieces are the galleon's bow piece
+(`galleon_item01`) and the pirate galleon's bow and stern pieces
+(`galleon_pirate_item01` / `_item03`): a 1 m height sweep finds only scattered surfaces
+on them, not a deck. 1.2 itself walks on the CryPhysics of
 the whole prefab and its collision set is not decoded: the name rule is inferred from
-the prefab sweep (capture-pending). A pak- and DB-gated test checks every
-`ship_models.normal` prefab: each `$driver` / `$passenger*` helper has a floor within
-1.5 m below it. Not covered: the caravel and ray (their `caravel_body.cgf` / `ray.cgf`
-are not in the 1.2 pak), `galleon02`, `boxship_old` `_6f` / `_2f` and the `woodpiece`
-debris (no prefab in the pak).
+the prefab sweep (capture-pending). Still approximate: the cruise ship's `_add*` pieces
+are breakable superstructure (they have `_damage` variants) whose tops stand 2.5-10 m
+over the hull deck, and `_add06` hangs outboard (x +-11-13 m) down to z -1.9 m of the ship
+frame; no minimum height above the waterline is applied, so its underside, like
+every hull's outer skin, can be a floor. A pak- and DB-gated test checks every
+`ship_models.normal` prefab: each one outside the uncovered list below has a floor, a
+`$driver` helper, and every `$driver` / `$passenger*` helper (only the rowboat and the
+duck boat have a `$passenger0`) has that floor within 1.5 m below it. Not covered: the
+caravel and ray (`caravel_body.cgf`, `caravel_helms.cgf` and `ray.cgf` are not in the
+1.2 pak), `galleon02` (no `galleon02.xml`), `boxship_old` `_6f` / `_2f` (no such prefab
+in `boxship_old.xml`) and the `woodpiece01` debris (`galleon_item03.cgf`, no hull).
 Boarding is automatic while the player stands within `DECK_STEP` (1.5 m) of
 that floor; a dead (the `Dead` component or, as on foot, the stats' death
 flag that arrives first), skill-moved, seated or mounted player is left to
