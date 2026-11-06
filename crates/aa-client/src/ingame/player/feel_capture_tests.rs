@@ -690,7 +690,9 @@ fn a_driven_mount_jumps_with_its_own_height_and_gravity() {
         return;
     }
     let horse = MountSpeed::default();
-    assert!(close(horse.jump_speed(), 8.832, 0.001));
+    // `control_player` gives the rider's `ActorParams` the mount's row while it drives
+    let launch = ActorParams { jump_height: horse.jump_height, gravity: horse.gravity, ..ActorParams::default() }.jump_speed();
+    assert!(close(launch, 8.832, 0.001));
     let mut f = Feel::new();
     f.mount(horse);
     f.hold("moveforward");

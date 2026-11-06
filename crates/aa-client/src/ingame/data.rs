@@ -125,11 +125,6 @@ impl Default for MountSpeed {
 }
 
 impl MountSpeed {
-    /// Vertical speed of the mount's jump: `v = sqrt(2 g h)` (8.83 m/s for a horse, 7.21 with gravity 20).
-    pub fn jump_speed(&self) -> f32 {
-        (2.0 * self.gravity * self.jump_height).sqrt()
-    }
-
     /// The speed for a pressed direction (x right, y forward, unit length): backward and walking take their factors.
     pub fn of(&self, local_dir: Vec2, walking: bool) -> f32 {
         if local_dir == Vec2::ZERO {
@@ -2107,11 +2102,9 @@ mod tests {
         let Some(db) = Db::open() else { return };
         let horse = db.mount_speed(139);
         assert_eq!(horse, MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0, jump_height: 1.3, gravity: 30.0 });
-        assert!((horse.jump_speed() - 8.832).abs() < 1e-3, "{}", horse.jump_speed());
         let donkey = db.mount_speed(953);
         assert!((donkey.run - 7.2).abs() < 1e-5);
         assert_eq!((donkey.jump_height, donkey.gravity), (1.3, 20.0));
-        assert!((donkey.jump_speed() - 7.211).abs() < 1e-3, "{}", donkey.jump_speed());
     }
 
     /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.

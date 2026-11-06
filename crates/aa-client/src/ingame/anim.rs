@@ -645,6 +645,7 @@ const REAR_BLEND: f32 = 0.2;
 /// (horse_full_body.xml :567-574, links :1528, :1657-1658). The graph enters it only from `Idle Start`, so a mount that
 /// moves, jumps or acts does not rear, and one already rearing ignores the signal (`sub_3912B330` skips a graph in a
 /// `jump_in_place` state). A model whose `.cal` lacks the clip stays in its idle.
+#[allow(clippy::type_complexity)]
 pub fn rear_driven_mate(
     time: Res<Time>,
     library: Res<ClipLibrary>,
