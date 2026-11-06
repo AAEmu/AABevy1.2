@@ -1591,9 +1591,12 @@ pub fn track_local_mount(
                 .as_deref()
                 .and_then(|db| db.turret_limits(model))
                 .is_some_and(|limits| limits.velocity > 0.0);
+            // the mate's swim level scales with the unit, as its drawn body does (`MountSpeed::at_scale`)
+            let scale = net.by_id.get(&a.obj_id).map_or(1.0, |u| if u.scale > 0.0 { u.scale } else { 1.0 });
             let speed = db
                 .as_deref()
-                .map_or_else(MountSpeed::default, |db| db.mount_speed(model));
+                .map_or_else(MountSpeed::default, |db| db.mount_speed(model))
+                .at_scale(scale);
             // A slave attached to another slave (a cannon on a ship) carries parent-local packet
             // positions: it must never drive as a mount. A cannon is a turret; any other parented
             // slave is a passenger here (`cart::drive_cart` also refuses one).
@@ -4646,6 +4649,46 @@ mod child_seat_tests {
             "the first CSMoveUnit is {pos:?}, not the world seat {expected:?} (local {local:?})"
         );
         assert!(pos.distance(local) > 1000.0, "the local offset was sent");
+    }
+
+    /// The real `track_local_mount` on the driver's seat of a mate drawn at 0.9 (a snow lion's `npcs.scale`): its swim level
+    /// is 0.9 times the actor's (`sub_39113EE0` multiplies by the entity scale), at 1 it is the actor's.
+    #[test]
+    fn a_scaled_mate_swims_at_its_scaled_level() {
+        use aa_net::session::PlayerSpawn;
+        use aa_net::state::Player;
+
+        for scale in [1.0, 0.9] {
+            let mut mate = crate::ingame::seating::fixture_unit(9, 42, None);
+            mate.kind = UnitKind::Mate { tl_id: 1, template_id: 1, owner_id: 1 };
+            mate.scale = scale;
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .init_resource::<SendState>()
+                .init_resource::<ClipLibrary>()
+                .init_resource::<MountReason>()
+                .init_resource::<LocalMount>()
+                .insert_resource(Player::default())
+                .insert_resource(Views::default())
+                .insert_resource(Units::default())
+                .insert_resource(TerrainQuery::fixture_flat("test", 0.0))
+                .insert_resource(WorldCollision::new("test", TerrainQuery::fixture_flat("test", 0.0)))
+                .add_message::<NetEvent>()
+                .add_systems(Update, track_local_mount);
+            app.world_mut().resource_mut::<Units>().by_id.insert(9, mate);
+            let mut player_unit = crate::ingame::seating::fixture_unit(1, 42, None);
+            player_unit.attached_to = Some(Attachment { obj_id: 9, point: 1, reason: 1 });
+            app.world_mut().resource_mut::<Player>().spawn = Some(PlayerSpawn { obj_id: 1, state: Default::default(), unit: player_unit });
+            app.world_mut().spawn((
+                LocalPlayer { obj_id: 1 },
+                Mover { pos: Vec3::ZERO, facing: 0.0, vz: 0.0, grounded: true, velocity: Vec3::ZERO, swim: None, wading: 0.0 },
+                Transform::default(),
+            ));
+            app.update();
+            let (_, speed) = app.world().resource::<LocalMount>().driving().expect("on the mate's driver seat");
+            let level = MountSpeed::default().swim_level * scale;
+            assert!((speed.swim_level - level).abs() < 1e-5, "scale {scale}: swim level {} for {level}", speed.swim_level);
+        }
     }
 }
 

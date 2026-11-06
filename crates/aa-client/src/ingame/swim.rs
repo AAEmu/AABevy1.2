@@ -143,7 +143,8 @@ impl ActorParams {
 /// How far over its feet an actor's swim level is (m): the depth of water it starts to swim in and how far under the
 /// surface its origin floats. `CActor::UpdateSwimStats` (`sub_39120300`, x2game12.c:239714-239774) takes
 /// `relativeWaterLevel = pos.z + vfunc108 - surface`; `vfunc108` is `sub_39113EE0` (slot 27 of the actor vtables in
-/// `x2game_unpacked.dll` `.rdata`), `this+116 x scale`, which `sub_39113150` (x2game12.c:229875-229923) sets to `swimHeight`
+/// `x2game_unpacked.dll` `.rdata`), `this+116 x scale` (this is the unscaled level: a mount's scale is applied by
+/// [`super::data::MountSpeed::at_scale`]), which `sub_39113150` (x2game12.c:229875-229923) sets to `swimHeight`
 /// plus the bind-pose height of the first of six predefined bones the skeleton has, else 0.8 of its box's top plus 0.2 of
 /// its bottom. `IsSwimming` (`sub_39114060`, x2game12.c:230678-230690) then wants water at least that deep. Which six bones is CryAnimation's (not in
 /// the dumps): the Nuian male's [`SWIM_LEVEL_BONE`] (1.116 m) plus its 0.2 is 1.32 m, the 1.3 m a player floats at, so the

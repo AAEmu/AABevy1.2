@@ -151,6 +151,12 @@ impl MountSpeed {
         }
         self.swim * super::swim::back_factor(local_dir)
     }
+
+    /// The same for a mount drawn at `scale` (its unit's scale, `npcs.scale`: 0.9 for a snow lion, 0.8 for a tare): 1.2's
+    /// swim level `vfunc108` (`sub_39113EE0`, x2game12.c:230585-230589) is the actor's level times its entity scale.
+    pub fn at_scale(self, scale: f32) -> MountSpeed {
+        MountSpeed { swim_level: self.swim_level * scale, ..self }
+    }
 }
 
 /// The third person camera distances of a vehicle or ship model: `models.camera_distance` and

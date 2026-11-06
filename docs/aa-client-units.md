@@ -182,8 +182,8 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   with the actor model's walk and backward factors; Space with a direction held jumps the mount with its own jump height and
   gravity (`docs/aa-client-movement.md`, "Speeds and jumping"), and the mate and its rider play their jump clips
   ("the mount's jump" and "jump" above). In water deeper than its swim level (`MountSpeed::swim_level`: `swim_height` plus
-  its spine, 2.14 m for the Lilyut horse) the mount swims at the surface at its swim stance's speed (`game_stances.max_speed`
-  of stance 3: 1.8 m/s for the horse) and its packets carry stance `SWIM` (`docs/aa-client-movement.md`, "Swimming"); the
+  its spine, times the mate's unit scale: 2.14 m for the Lilyut horse) the mount swims at the surface at its swim stance's
+  speed (`game_stances.max_speed` of stance 3: 1.8 m/s for the horse) and its packets carry stance `SWIM` (`docs/aa-client-movement.md`, "Swimming"); the
   mate plays its land gait and the rider its seat clips meanwhile. A get-off there leaves the rider swimming at the surface
   (`player::afloat`; the get-off pose in water is capture-pending). The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the

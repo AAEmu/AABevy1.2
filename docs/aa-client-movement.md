@@ -123,16 +123,21 @@ as the player instead of waiting for cells around a different saved spawn.
   the skeleton has (else 0.8 of its box's top plus 0.2 of its bottom). `IsSwimming` (`sub_39114060`, :230678-230690) wants the bottom
   depth (`this+108`, surface minus the "actor bottom level ray" hit, `sub_39111DA0`) at least that level, and 1.3 times it within a
   second of leaving the water; the swim mode holds `relativeWaterLevel` at 0, so the same level is the floating depth. The six bones are
-  CryAnimation's enum (not in the dumps): `swim::swim_level` takes `Bip01 Spine`, since the Nuian male's spine (1.116 m) plus his 0.2 is
-  1.32 m, the 1.3 m above. The player keeps `height - swim_height` (2 cm off for the Nuian male; other races not checked); a mount uses
-  the decompiled form (below). The 1.3 x re-entry rule and the entity scale are not applied.
+  joint ids of CryAnimation's (`x2game_unpacked.dll` `.rdata`: `unk_399ABCD0` lists 19 ids, 0-7, 9, 8, 14, 52, 25, 12, 17, 51, 24, 45,
+  46, and `dword_399ABCB8` tries its entries 18, 17, 5, 4, 3, 2, so ids 46, 45, 5, 4, 3, 2 in that order); their names are resolved
+  inside CryAnimation, not in the dumps. `swim::swim_level` takes `Bip01 Spine`, since the Nuian male's spine (1.116 m) plus his 0.2 is
+  1.32 m, the 1.3 m above; if the ids run up the spine the first one found is a higher bone (his `Bip01 Spine3` would give 1.57 m), so
+  the bone is unverified. The player keeps `height - swim_height` (2 cm off for the Nuian male; other races not checked); a mount uses
+  the decompiled form (below), times its unit's scale (`MountSpeed::at_scale`, set by `mount::track_local_mount`). The 1.3 x re-entry
+  rule is not applied.
 * Mounts swim too: the mate is a `CActor` and `UpdateSwimStats` is generic. A driven mount (`LocalMount::driving`) swims in water deeper
   than its `MountSpeed::swim_level` (`Db::mount_speed`: `swim_height` + the bind-pose height of its `Bip01 Spine`, `swim::swim_level`; a
-  Lilyut horse 0.3 + 1.843 = 2.14 m, a donkey 1.39, a snow lion 2.15, the polar bear 1.55) and floats with its origin that far under the
-  surface (the horse's back about 0.3 m under, its head out). It moves at the swim stance's `game_stances.max_speed` (stance 3: horse 1.8
-  m/s, white horse 1.9, snow lion 2.2, donkey 4.0; the player's row is the 3.0 of `BASE_SPEED`), x 0.8 backwards, with its land inertia
-  (`mount_velocity`), and walks again `LEAVE_MARGIN` shallower. Its packets are the swimming ones as the mate's `CSMoveUnit` (stance
-  `SWIM`, no ground flag, the swim cadence). X, Space and the camera pitch do not move it up or down, and no jump leaves the water
+  Lilyut horse 0.3 + 1.843 = 2.14 m, a donkey 1.39, a snow lion 2.15, the polar bear 1.55, each times the mate's unit scale: a snow lion
+  summoned at `npcs.scale` 0.9 swims at 1.94 m) and floats with its origin that far under the surface (the horse's back about 0.3 m
+  under, its head out). It moves at the swim stance's `game_stances.max_speed` (stance 3: horse 1.8 m/s, white horse 1.9, snow lion 2.2,
+  donkey 4.0; the player's row is the 3.0 of `BASE_SPEED`), x 0.8 backwards, with its land inertia (`mount_velocity`; assumed, the swim
+  mode `sub_3912CE00` smooths its own velocity and was not traced for a mount), and walks again `LEAVE_MARGIN` shallower. Its packets
+  are the swimming ones as the mate's `CSMoveUnit` (stance `SWIM`, no ground flag, the swim cadence). X, Space and the camera pitch do not move it up or down, and no jump leaves the water
   (unverified: whether a ridden mount can dive was not traced). No wading slowdown on land (`cl_shallowWaterSpeedMulPlayer` is players
   only). The rider keeps its seat clips (`drive_swim` skips a `Rider`; the horse graph's Driver states have no swim state); the mate
   plays its land gait until its swim clips are wired (`ag_horse.txt:211-327`, `Stance=swim`). Capture-pending: the depth a ridden horse
