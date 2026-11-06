@@ -76,12 +76,14 @@ fn path(raw: &str) -> Option<String> {
     p.contains('.').then_some(p)
 }
 
-/// The parts of prefab `name` in the text of its xml file.
+/// The parts of prefab `name` in the text of its xml file (the tests' entry; the game reads them through [`load`]).
+#[cfg(test)]
 pub fn parts_of(xml: &str, name: &str) -> Vec<Part> {
     named_parts_of(xml, name).into_iter().map(|(_, part)| part).collect()
 }
 
-/// [`parts_of`] with each object's editor `Name` (empty when it has none): a ship's `rudder` brush is found by it.
+/// The parts of prefab `name` in the text of its xml file, each with its object's editor `Name` (empty when it has
+/// none): a ship's `rudder` brush is found by it.
 pub fn named_parts_of(xml: &str, name: &str) -> Vec<(String, Part)> {
     let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
     let tail = &xml[from..];
