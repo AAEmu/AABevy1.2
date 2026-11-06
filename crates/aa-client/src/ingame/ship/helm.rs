@@ -251,12 +251,13 @@ pub fn attach_ship_helms(
     }
 }
 
-/// Copies the steering and throttle the ship's movement controller draws into its [`ShipHelm`].
+/// Copies the steering and throttle the ship's movement controller draws into its [`ShipHelm`]. A unit without
+/// vehicle samples (none yet, or its track was dropped on death or resurrection) is `sub_390B2420`'s no-sample
+/// branch, which writes 0 and 0: the helm must not keep the last steering of a dropped track.
 pub fn follow_ship_helms(mut ships: Query<(&RemoteUnit, &mut ShipHelm)>) {
     for (remote, mut helm) in &mut ships {
-        if let Some((steering, throttle)) = remote.helm()
-            && (helm.steering, helm.throttle) != (steering, throttle)
-        {
+        let (steering, throttle) = remote.helm().unwrap_or((0.0, 0.0));
+        if (helm.steering, helm.throttle) != (steering, throttle) {
             helm.steering = steering;
             helm.throttle = throttle;
         }

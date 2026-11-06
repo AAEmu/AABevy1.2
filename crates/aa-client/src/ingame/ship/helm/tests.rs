@@ -116,6 +116,29 @@ fn the_throttle_sign_picks_the_clip_and_its_size_the_speed() {
 }
 
 #[test]
+fn a_ship_without_vehicle_samples_releases_its_helm() {
+    // death and resurrection drop the unit's vehicle track: sub_390B2420's no-sample branch writes 0 / 0, so the
+    // rudder and the throttle clips must not hold the last steering of the dropped track
+    let unit = crate::ingame::seating::fixture_unit(1, 393, None);
+    let mut app = App::new();
+    app.add_systems(Update, follow_ship_helms);
+    let ship = app
+        .world_mut()
+        .spawn((
+            RemoteUnit::announced(&unit),
+            ShipHelm {
+                steering: 1.0,
+                throttle: 0.5,
+                ..default()
+            },
+        ))
+        .id();
+    app.update();
+    let helm = *app.world().get::<ShipHelm>(ship).unwrap();
+    assert_eq!((helm.steering, helm.throttle), (0.0, 0.0));
+}
+
+#[test]
 fn the_rudder_part_follows_its_ships_steering() {
     let mut app = App::new();
     app.add_systems(Update, turn_rudders);
