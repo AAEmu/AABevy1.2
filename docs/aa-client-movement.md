@@ -116,6 +116,39 @@ as the player instead of waiting for cells around a different saved spawn.
   clips are authored with the body 1.3 m over the origin, `fist_mo_swim_f` lies horizontally with the pelvis at 1.34 m, `fist_ba_idle_swim` treads water
   upright with the head at 1.83 m). Stops below 1.1 m (`LEAVE_MARGIN` hysteresis). The depth threshold is the part not traced in the binary
   (`CActor::UpdateSwimStats` keeps the same `relativeWaterLevel`): change `ActorParams::swim_depth` when a capture of the real client says otherwise.
+* The swim level, decompiled (2026-11-06): `UpdateSwimStats` (`sub_39120300`, x2game12.c:239714-239774) takes `relativeWaterLevel =
+  pos.z + vfunc108 - surface`. `vfunc108` is `sub_39113EE0` (slot 27 of the four actor vtables in `x2game_unpacked.dll` `.rdata`, the
+  same slot table as `UpdateSwimStats` at 107): `this+116 x` the entity scale, and `sub_39113150` (:229875-229923) sets `this+116` to
+  `swimHeight` (`actor_models.swim_height`, loaded at :235676-235679) **plus** the bind-pose height of the first of six predefined bones
+  the skeleton has (else 0.8 of its box's top plus 0.2 of its bottom). `IsSwimming` (`sub_39114060`, :230678-230690) wants the bottom
+  depth (`this+108`, surface minus the "actor bottom level ray" hit, `sub_39111DA0`) at least that level, and 1.3 times it within a
+  second of leaving the water; the swim mode holds `relativeWaterLevel` at 0, so the same level is the floating depth. The six bones are
+  CryAnimation's enum (not in the dumps): `swim::swim_level` takes `Bip01 Spine`, since the Nuian male's spine (1.116 m) plus his 0.2 is
+  1.32 m, the 1.3 m above. The player keeps `height - swim_height` (2 cm off for the Nuian male; other races not checked); a mount uses
+  the decompiled form (below). The 1.3 x re-entry rule and the entity scale are not applied.
+* Mounts swim too: the mate is a `CActor` and `UpdateSwimStats` is generic. A driven mount (`LocalMount::driving`) swims in water deeper
+  than its `MountSpeed::swim_level` (`Db::mount_speed`: `swim_height` + the bind-pose height of its `Bip01 Spine`, `swim::swim_level`; a
+  Lilyut horse 0.3 + 1.843 = 2.14 m, a donkey 1.39, a snow lion 2.15, the polar bear 1.55) and floats with its origin that far under the
+  surface (the horse's back about 0.3 m under, its head out). It moves at the swim stance's `game_stances.max_speed` (stance 3: horse 1.8
+  m/s, white horse 1.9, snow lion 2.2, donkey 4.0; the player's row is the 3.0 of `BASE_SPEED`), x 0.8 backwards, with its land inertia
+  (`mount_velocity`), and walks again `LEAVE_MARGIN` shallower. Its packets are the swimming ones as the mate's `CSMoveUnit` (stance
+  `SWIM`, no ground flag, the swim cadence). X, Space and the camera pitch do not move it up or down, and no jump leaves the water
+  (unverified: whether a ridden mount can dive was not traced). No wading slowdown on land (`cl_shallowWaterSpeedMulPlayer` is players
+  only). The rider keeps its seat clips (`drive_swim` skips a `Rider`; the horse graph's Driver states have no swim state); the mate
+  plays its land gait until its swim clips are wired (`ag_horse.txt:211-327`, `Stance=swim`). Capture-pending: the depth a ridden horse
+  starts to swim at and its wire stance.
+* Getting off a swimming mount: the get-off placement (`mount::DismountMove`) falls to the rider's floating height over water at least
+  `ActorParams::swim_depth` deep (`player::afloat`), not to the bed, and at its end the rider swims on (`Mover::swim` is set where
+  `swim::should_swim` says so) instead of standing up on the bed and floating up from it. 1.2's get-off (`sub_3909B4A0`,
+  x2game12.c:139279) resets the actor's swim and fall fields (+353, +120, +92), so its swim stats are taken again; the get-off pose in
+  the water is capture-pending.
+* Swim speed buffs: the own buffs' `SwimSpeedMul` rows (`unit_modifiers` attribute 66, 47 buffs) scale the swim velocity
+  (`sprint::swim_multiplier`, `Sprint::swim_speed_mul`), and the ridden mount's buffs its swim speed (`Sprint::mount_swim_speed_mul`).
+  Their flat rows are percent, summed on 100, not per mille: 1.2's tooltip shows `swim_speed_mul` as `value %` and `move_speed_mul` as
+  `value x 0.1 %` (`tooltip.lua` `GetCalculatedAddModifierValue`). The flippers (buff 2416, +30) swim at 3.9 m/s, buff 5752 (+100) at
+  6.0, 1373 (a percent row of 200) at 9.0. That the client scales the swim speed by it (as it does the run speed by `MoveSpeedMul`) is
+  inferred, not traced; the items' rows (24715-24717, +4/+8/+12) and attribute 139 (underwater swim speed, no buff rows) are not
+  applied. A dive's vertical speed stays capped at 3.0 m/s.
 * Direction: the swim movement mode (`FUN_3912ce00`) rotates the request by the view quaternion at `param_2 + 0x2d0`
   (`x2game.dll.c:230934-230966`) and takes its z as the vertical, so the vertical is part of the direction rather than buoyancy: **W / S
   follow the camera pitch** - look down and swim forward to dive, look up to rise, and a level camera keeps the depth while moving. X
