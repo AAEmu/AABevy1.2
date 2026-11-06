@@ -1059,6 +1059,22 @@ impl Db {
         })
     }
 
+    /// Whether a slave template names a despawn portal group (`slaves.portal_despawn_fx_id`). `FUN_393497C0`
+    /// (`OnSlaveDespawn`) plays that group when the row has one and the prefab's `_despawn_effect` entities
+    /// (`FUN_391091A0`) when it does not. About half of the vehicle and ship rows have none.
+    pub fn slave_has_despawn_portal(&self, template_id: u32) -> bool {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT portal_despawn_fx_id FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+            .is_some_and(|fx| fx > 0)
+    }
+
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
     /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
     /// `unit_modifiers` rows, then one summed percent multiplier on that sum.

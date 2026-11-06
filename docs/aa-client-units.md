@@ -580,15 +580,28 @@ poller never returns 5: dying is entered by the death path below.
   (`FUN_39109120`, x2game.dll.c:206810) when the state worsens (`old < new`, also 1 -> 6), and on every
   entry to dying: `FUN_390e7910(5,1)` passes 1, so the 6 -> 5 route of an HP-0 update followed by the
   death packet plays the dying prefab's effects too. The dead prefab's one-shots are not replayed on the
-  following 5 -> 6 when the poller already showed 6 for this death. `_despawn_effect` has no traced caller
-  and is left out. The spawn-time filter is exactly
-  `FUN_390eaf40`'s lists: type-5 particles named `exhaust` (the +0x2c0 list), `splash_l` / `splash_r`
-  (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the ship's speed and angular velocity, which
-  this slice does not draw. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
+  following 5 -> 6 when the poller already showed 6 for this death. The speed-driven emitters are
+  type-5 particles named exactly `exhaust` (`FUN_390eaf40`'s list at +0x2c0) and `splash_l` / `splash_r`
+  (the pair list at +0x2f0, with a side flag); `ShipUnitModel::UpdateExhaustEffect` (`FUN_390c78d0`) scales
+  them every frame. They are spawned silent as `SpeedEmitter`s (active or not: the prefab splashes are
+  authored inactive and the native update drives them anyway) and `drive_speed_emitters` sets
+  `Effect::count_scale` on `ShipModel` roots: exhaust `clamp(|velocity| / (ship_models.velocity * 0.5), 0, 1)`,
+  splash `clamp(yaw_rate * side * 6.0, 0, 1)` with `+1` for `splash_l` (yaw rate is positive to the left), so
+  they show nothing at rest. The native struct (`sub_390FED20`) takes the value in three channels whose
+  meaning (count, size, alpha) is not decoded: the count is **approximate**, a live capture of a galleon under
+  way would settle it. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
   objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
   inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2 active `_spawn` + 2 active named
-  particles (`caravel_cruise_pool`, `airship_smoke`); only the exact speed-driven names are filtered, the
-  other active authored emitters stay. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
+  particles (`caravel_cruise_pool`, `airship_smoke`); the other active authored emitters stay as they are.
+  **`SCSlaveDespawn`** (`OnSlaveDespawn` `FUN_393497C0`, x2game12.c:693183) for a slave whose model kind is 2,
+  3 or 4 reads the slave row: with a despawn portal group (`slaves.portal_despawn_fx_id`) it plays that group
+  (`FUN_390CA280`, not drawn: capture-pending); without one it plays the prefab's `_despawn_effect*`
+  particles (`FUN_391091A0`, x2game12.c:221330, prefix match, active flag ignored; it also clears the local
+  owned-slave entry, which the slave HUD state handles). `play_despawn_effects` does the prefab case once per packet and spawns the effects in
+  the world at the prefab anchors, not under the root, so the `SCUnitsRemoved` that follows does not cut
+  them. Test prefab: the rowboat (slave 15, model 129, `smallboat_a`); the coupleduckship and soloship
+  bodies carry one too. The sentinel for "no group" (`dword_3A168AA0`) is taken to be a null / 0 row
+  (**inferred**). The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
   `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
   Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
   (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A
@@ -648,7 +661,7 @@ death") is the evidence for the ship half of S15; the prefabs are the game's own
   end pose and carries the 25 % prefab's fire (**inferred**; the client has no death timestamp for it).
   `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
 
-Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
+Left out: the despawn portal group of `SCSlaveDespawn`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed
 only once the idle branch lands). Combat effects anchored to a body bone (`super::attachments`) go away
 with the old parts on a swap; re-anchoring them by bone name is not implemented.
@@ -1112,10 +1125,34 @@ mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
 A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
 bridge deck over its river bed.
 
-Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps) and full wheeled
+Out of scope: bumps from rocks and bushes (the `g3` case's 0.3 m bumps; walls, trees and large rocks
+stop the cart, see World collision below) and full wheeled
 physics for the nine car models. Remote carts' tilt now comes from the received type-2
 quaternion (S8 below). Pending live checks: the server's echo/correction of a tilted type-2
 pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a slope.
+
+#### World collision (`cart.rs`, `step_colliding`)
+
+1.2's land vehicle is a CryPhysics entity with proxy collision (`vehicle_models.use_proxy_collision`,
+`max_climb_ang`, `susp_stroke`), so static brushes stop it. The exact response is **not traced**
+(no capture; AAEmu has no vehicle-versus-unit code), so this is an inferred stand-in for static geometry only:
+
+* Two capsules, one at each axle centre (the means of the front and rear wheel-contact pairs of the
+  model's own layout), are slid against `WorldCollision::slide` from where the axle was to where the step
+  would put it, with the on-foot `STEP_UP` (surfaces lower than 0.5 m above the body do not push).
+  Radius is half the model's track clamped to 0.4..1.0 m (`body_radius`), height `BODY_HEIGHT` 1.6 m
+  (no model bounds are read: **approximate**, a capsule pair is not the box body).
+* The more limiting axle's correction moves the whole body; the heading is kept. The speed is scaled by
+  twice the share of the wanted move that survived (capped at 1): head-on stops the cart, a wall 60 degrees
+  or more off the heading leaves the speed alone and the cart slides along it (tangent kept). Reversing is
+  the same with the rear axle.
+* `drive_cart` only slides once `ready_around(pos, 24 m)` says the cells are built; before that the cart drives
+  through as before. Units, players and other vehicles are not collided (no evidence).
+* The sent pose is the slid pose, so the server's echo agrees; a server that disagrees falls into the existing
+  2 m / 0.35 rad resync. The heading is not rotated out of a wall, so turning hard against one can still
+  clip it (pending a capture of the real response).
+* Tests: synthetic walls (head-on, behind, 45 degrees, open ground bit-identical to `step_grounded`) and a
+  pak-backed drive at a real near-vertical face by Lutesong Harbor (skips without `AA_PAK`).
 
 #### Wheels and spindle (S6/S7 step 3)
 

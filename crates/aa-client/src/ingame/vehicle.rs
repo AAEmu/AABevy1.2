@@ -28,7 +28,7 @@
 //! floats up out of the sea with the captured bow-up buoyancy rise (inferred; see [`SummonEmergence`]), clipped at
 //! the sea surface. A vehicle that merely streams into view later has no creation packet, so it plays none.
 //!
-//! Left out: the speed-driven exhaust and splash emitters (`FUN_390c78d0`), propeller spin, turrets.
+//! Left out: propeller spin, turrets.
 //! Combat effects anchored to a body
 //! bone (`super::attachments`) go away with the old parts on a swap: re-anchoring them by bone name is
 //! not implemented (they are a skill's own one-shot effects, not the vehicle's prefab emitters).
@@ -1591,20 +1591,79 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
     commands.entity(root).insert(SeatHelpers(helpers));
 }
 
-/// The prefab's speed-driven emitters. `FUN_390eaf40` collects the type-5 particles named exactly `splash_l`,
-/// `splash_r` (the bubble list at +0x2f0) and `exhaust` (the list at +0x2c0); `FUN_390c78d0` scales them from
-/// the ship's speed and angular velocity. This slice does not draw them, so a swap leaves them out instead of
-/// showing a wake at a standstill. Other active prefab particles are ordinary authored emitters.
-fn is_speed_emitter(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    matches!(
-        name.as_str(),
-        "exhaust" | "splash_l" | "splash_r" | "bubble"
-    )
+/// A prefab emitter driven by the ship's motion. `FUN_390eaf40` collects the type-5 particles named exactly
+/// `exhaust` (the list at +0x2c0) and `splash_l` / `splash_r` (the pair list at +0x2f0, with a side flag);
+/// `FUN_390c78d0` (`ShipUnitModel::UpdateExhaustEffect`) sets their scale every frame, so they are invisible at
+/// rest. [`drive_speed_emitters`] does that from the root's [`VehicleMotion`].
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub enum SpeedEmitter {
+    Exhaust,
+    /// `+1` for `splash_l`, `-1` for `splash_r`: the side the turn rate counts for.
+    Splash(f32),
 }
 
-fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placement::PlacedEffect, one_shot: bool) -> Entity {
-    let mut command = commands.spawn((
+impl SpeedEmitter {
+    fn named(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "exhaust" => Some(Self::Exhaust),
+            "splash_l" => Some(Self::Splash(1.0)),
+            "splash_r" => Some(Self::Splash(-1.0)),
+            _ => None,
+        }
+    }
+}
+
+/// `UpdateExhaustEffect`'s exhaust factor: `clamp(|velocity| / (ship_models.velocity * 0.5), 0, 1)`.
+pub fn exhaust_scale(speed: f32, max_speed: f32) -> f32 {
+    if max_speed <= 0.0 {
+        return 0.0;
+    }
+    (speed / (max_speed * 0.5)).clamp(0.0, 1.0)
+}
+
+/// `UpdateExhaustEffect`'s splash factor: `clamp(angular_velocity.z * side * 6.0, 0, 1)`; `yaw_rate` is positive to
+/// the left, `side` is `+1` for `splash_l` and `-1` for `splash_r`.
+pub fn splash_scale(yaw_rate: f32, side: f32) -> f32 {
+    (yaw_rate * side * 6.0).clamp(0.0, 1.0)
+}
+
+/// Scales the ship's [`SpeedEmitter`]s from its motion. The native scale struct (`sub_390FED20`) takes the value in
+/// all three channels; which one means count, size or alpha is not decoded, so this drives the particle count
+/// (**approximate**). Only `ShipModel` roots drive them; a land vehicle's stay at zero.
+pub fn drive_speed_emitters(
+    book: Option<Res<super::sounds::SoundBook>>,
+    roots: Query<(&VehicleMotion, &RemoteUnit)>,
+    mut emitters: Query<(&SpeedEmitter, &ChildOf, &mut aa_fx::Effect)>,
+    mut max_speeds: Local<HashMap<u32, Option<f32>>>,
+) {
+    let Some(book) = book else {
+        return;
+    };
+    for (kind, parent, mut effect) in &mut emitters {
+        let Ok((motion, remote)) = roots.get(parent.parent()) else {
+            continue;
+        };
+        let max_speed = *max_speeds.entry(remote.model_id).or_insert_with(|| {
+            book.is_ship(remote.model_id)
+                .then(|| book.vehicle_max_speed(remote.model_id))
+                .flatten()
+        });
+        let Some(max_speed) = max_speed else {
+            continue;
+        };
+        let scale = match *kind {
+            SpeedEmitter::Exhaust => exhaust_scale(motion.velocity.length(), max_speed),
+            SpeedEmitter::Splash(side) => splash_scale(motion.yaw_rate, side),
+        };
+        if effect.count_scale != scale {
+            effect.count_scale = scale;
+        }
+    }
+}
+
+/// The effect and its place relative to the prefab root. A one-shot is not primed.
+fn effect_parts(effect: &aa_world::placement::PlacedEffect, one_shot: bool) -> (aa_fx::Effect, Transform) {
+    (
         aa_fx::Effect {
             scale: effect.scale,
             speed_scale: effect.speed_scale,
@@ -1619,11 +1678,24 @@ fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placem
             rotation: cry_rot_to_bevy(effect.rot),
             ..default()
         },
-        VehicleEffect,
-    ));
+    )
+}
+
+fn spawn_effect(commands: &mut Commands, root: Entity, effect: &aa_world::placement::PlacedEffect, one_shot: bool) -> Entity {
+    let (fx, transform) = effect_parts(effect, one_shot);
+    let mut command = commands.spawn((fx, transform, VehicleEffect));
     let entity = command.id();
     command.insert(ChildOf(root));
     entity
+}
+
+/// A speed emitter: it lives as long as the ship, starts silent and is scaled by [`drive_speed_emitters`].
+fn spawn_speed_emitter(commands: &mut Commands, root: Entity, effect: &aa_world::placement::PlacedEffect, kind: SpeedEmitter) {
+    let (mut fx, transform) = effect_parts(effect, false);
+    fx.count_scale = 0.0;
+    fx.prime = false;
+    fx.despawn_when_finished = false;
+    commands.spawn((fx, transform, VehicleEffect, kind, ChildOf(root)));
 }
 
 /// Whether a swap plays the new prefab's one-shot `_spawn_effect*` elements (`FUN_39109120`). The Die path
@@ -1637,7 +1709,9 @@ fn plays_state_effects(old: u8, state: u8, dead_effect_played: bool) -> bool {
 /// Spawns the particle entities of a damage variant: its active standing effects (damaged fire, dead
 /// smoke) and, when [`plays_state_effects`] says so, its `_spawn_effect*` and `_dead_effect` bursts
 /// (`FUN_39109120`). A unit that arrives already dead only gets the standing smoke, not the explosion. The
-/// `_despawn_effect` trigger has no traced call site and is left out.
+/// `exhaust` / `splash_l` / `splash_r` emitters are spawned silent as [`SpeedEmitter`]s, active or not (the
+/// prefab's splashes are authored inactive, the native update drives them anyway). `_despawn_effect` is played by
+/// [`play_despawn_effects`], not here.
 pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str, worsening: bool) {
     if !variant.to_ascii_lowercase().starts_with("prefab://") {
         return;
@@ -1653,10 +1727,55 @@ pub fn spawn_state_effects(commands: &mut Commands, root: Entity, variant: &str,
         if name.starts_with("_dead_effect") && !worsening {
             continue;
         }
-        if name.starts_with("_despawn_effect") || !named.active || is_speed_emitter(&name) {
+        if name.starts_with("_despawn_effect") {
+            continue;
+        }
+        if let Some(kind) = SpeedEmitter::named(&name) {
+            spawn_speed_emitter(commands, root, &named.effect, kind);
+            continue;
+        }
+        if !named.active {
             continue;
         }
         spawn_effect(commands, root, &named.effect, false);
+    }
+}
+
+/// `SCSlaveDespawn` (`OnSlaveDespawn`, `FUN_393497C0`) for a vehicle or ship: when its slave row names no despawn
+/// portal group, the current prefab's `_despawn_effect*` particles play once (`FUN_391091A0`, whatever their
+/// active flag). They are spawned in the world at the prefab's anchors, not under the root, because the
+/// `SCUnitsRemoved` that follows takes the root and its children away. A row with a despawn portal group plays
+/// that group instead, which is not drawn (capture-pending).
+pub fn play_despawn_effects(
+    mut commands: Commands,
+    events: Option<MessageReader<NetEvent>>,
+    db: Option<Res<Db>>,
+    units: Option<Res<Units>>,
+    roots: Query<(&RemoteUnit, &VehicleDamage, &GlobalTransform)>,
+) {
+    let (Some(mut events), Some(db), Some(units)) = (events, db, units) else {
+        return;
+    };
+    for NetEvent(event) in events.read() {
+        let Event::Slave(SlaveEvent::Despawn { obj_id }) = event else {
+            continue;
+        };
+        let Some((_, damage, global)) = roots.iter().find(|(remote, ..)| remote.obj_id == *obj_id) else {
+            continue;
+        };
+        let Some(unit) = units.by_id.get(obj_id) else {
+            continue;
+        };
+        if db.slave_has_despawn_portal(unit.kind.template_id()) || !damage.variant.to_ascii_lowercase().starts_with("prefab://") {
+            continue;
+        }
+        for named in super::data::prefab_effects_named(&damage.variant) {
+            if !named.name.to_ascii_lowercase().starts_with("_despawn_effect") {
+                continue;
+            }
+            let (fx, local) = effect_parts(&named.effect, true);
+            commands.spawn((fx, global.mul_transform(local).compute_transform()));
+        }
     }
 }
 
@@ -3284,12 +3403,117 @@ mod tests {
         );
         assert!(dead.iter().any(|e| e.name == "_dead_effect" && e.active));
         // the exact names `FUN_390eaf40` collects; a prefab's other active emitters are not speed-driven
-        assert!(is_speed_emitter("exhaust"));
-        assert!(is_speed_emitter("splash_l"));
-        assert!(is_speed_emitter("splash_r"));
-        assert!(!is_speed_emitter("_spawn"));
-        assert!(!is_speed_emitter("caravel_cruise_pool"));
-        assert!(!is_speed_emitter("airship_smoke"));
+        assert_eq!(SpeedEmitter::named("exhaust"), Some(SpeedEmitter::Exhaust));
+        assert_eq!(SpeedEmitter::named("splash_l"), Some(SpeedEmitter::Splash(1.0)));
+        assert_eq!(SpeedEmitter::named("Splash_R"), Some(SpeedEmitter::Splash(-1.0)));
+        assert_eq!(SpeedEmitter::named("_spawn"), None);
+        assert_eq!(SpeedEmitter::named("caravel_cruise_pool"), None);
+        assert_eq!(SpeedEmitter::named("airship_smoke"), None);
+    }
+
+    #[test]
+    fn the_speed_emitters_scale_with_speed_and_turn_rate() {
+        // exhaust: full at half the ship's top speed
+        assert_eq!(exhaust_scale(0.0, 10.0), 0.0);
+        assert_eq!(exhaust_scale(2.5, 10.0), 0.5);
+        assert_eq!(exhaust_scale(5.0, 10.0), 1.0);
+        assert_eq!(exhaust_scale(9.0, 10.0), 1.0);
+        assert_eq!(exhaust_scale(3.0, 0.0), 0.0);
+        // splash: the side the ship turns toward (yaw rate is positive to the left)
+        assert_eq!(splash_scale(0.0, 1.0), 0.0);
+        assert!((splash_scale(0.05, 1.0) - 0.3).abs() < 1e-6);
+        assert_eq!(splash_scale(0.05, -1.0), 0.0);
+        assert_eq!(splash_scale(-0.05, -1.0), splash_scale(0.05, 1.0));
+        assert_eq!(splash_scale(1.0, 1.0), 1.0);
+    }
+
+    /// The Eznan Cutter's prefab splashes are spawned silent as `SpeedEmitter`s and follow the root's turn rate;
+    /// a land vehicle's emitters stay silent.
+    #[test]
+    fn a_ships_splash_emitters_follow_its_turn_rate() {
+        use super::super::sounds::SoundBook;
+        let Some((mut app, _db, root)) = vehicle_app(21, 393) else { return };
+        app.insert_resource(SoundBook::open());
+        app.add_systems(Update, drive_speed_emitters);
+        let variant = app.world().get::<VehicleDamage>(root).unwrap().variant.clone();
+        {
+            let mut state = SystemState::<Commands>::new(app.world_mut());
+            let mut commands = state.get_mut(app.world_mut()).unwrap();
+            spawn_state_effects(&mut commands, root, &variant, false);
+            state.apply(app.world_mut());
+        }
+        let emitters = |app: &mut App| -> Vec<(SpeedEmitter, f32)> {
+            app.world_mut()
+                .query::<(&SpeedEmitter, &aa_fx::Effect)>()
+                .iter(app.world())
+                .map(|(kind, effect)| (*kind, effect.count_scale))
+                .collect()
+        };
+        let at_rest = emitters(&mut app);
+        assert!(at_rest.iter().any(|(kind, _)| *kind == SpeedEmitter::Splash(1.0)), "splash_l");
+        assert!(at_rest.iter().any(|(kind, _)| *kind == SpeedEmitter::Splash(-1.0)), "splash_r");
+        assert!(at_rest.iter().all(|(_, scale)| *scale == 0.0), "silent at rest");
+        // turning left at 0.1 rad/s: only the left splash shows
+        app.world_mut().entity_mut(root).insert(VehicleMotion {
+            yaw_rate: 0.1,
+            ..VehicleMotion::at(&Transform::default())
+        });
+        app.update();
+        for (kind, scale) in emitters(&mut app) {
+            match kind {
+                SpeedEmitter::Splash(side) if side > 0.0 => assert_eq!(scale, 0.6),
+                _ => assert_eq!(scale, 0.0, "{kind:?}"),
+            }
+        }
+        // under way the exhaust follows the speed
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(1000.0, 0.0, 0.0);
+        app.update();
+        let at_speed = emitters(&mut app);
+        assert!(at_speed.iter().filter(|(kind, _)| *kind == SpeedEmitter::Exhaust).all(|(_, scale)| *scale == 1.0));
+    }
+
+    /// `OnSlaveDespawn`: a slave row without a despawn portal plays the prefab's `_despawn_effect` once, in the
+    /// world; one with a portal group (the Eznan Cutter) plays no prefab particle.
+    #[test]
+    fn a_slave_despawn_plays_the_prefab_despawn_effect_once() {
+        let despawn = |app: &mut App| {
+            app.world_mut()
+                .write_message(NetEvent(Event::Slave(SlaveEvent::Despawn { obj_id: 7 })));
+            app.update();
+        };
+        let world_effects = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&aa_fx::Effect, (Without<ChildOf>, Without<SummonPortalEffect>)>()
+                .iter(app.world())
+                .count()
+        };
+        // the rowboat (slave 15, model 129): smallboat_a carries an inactive `_despawn_effect`
+        let Some((mut app, _db, root)) = vehicle_app(15, 129) else { return };
+        app.add_plugins(bevy::transform::TransformPlugin);
+        app.world_mut().entity_mut(root).insert(Transform::from_xyz(5.0, 0.0, 0.0));
+        app.add_systems(Update, play_despawn_effects);
+        app.update();
+        assert_eq!(world_effects(&mut app), 0, "nothing before the packet");
+        despawn(&mut app);
+        assert_eq!(world_effects(&mut app), 1);
+        let at = app
+            .world_mut()
+            .query_filtered::<&Transform, (With<aa_fx::Effect>, Without<ChildOf>)>()
+            .single(app.world())
+            .unwrap()
+            .translation;
+        assert!(at.x > 3.0, "placed at the root, not at the origin: {at:?}");
+        // another unit's despawn does nothing
+        app.world_mut()
+            .write_message(NetEvent(Event::Slave(SlaveEvent::Despawn { obj_id: 99 })));
+        app.update();
+        assert_eq!(world_effects(&mut app), 1);
+        // a row with a despawn portal group plays that group instead
+        let Some((mut app, db, _root)) = vehicle_app(21, 393) else { return };
+        assert!(db.slave_has_despawn_portal(21));
+        app.add_systems(Update, play_despawn_effects);
+        despawn(&mut app);
+        assert_eq!(world_effects(&mut app), 0);
     }
 
     /// The Red Farm Hauler (slave 146, model 1553, `vehicle_models` 65) is the owner's destroyed vehicle:

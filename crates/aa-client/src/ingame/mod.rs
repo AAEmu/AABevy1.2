@@ -77,7 +77,7 @@ pub(crate) mod seating;
 mod ship;
 pub(crate) mod shipyard;
 mod skill_motion;
-mod sounds;
+pub(crate) mod sounds;
 mod stealth;
 mod swim;
 pub(crate) mod teleport;
@@ -257,6 +257,8 @@ impl Plugin for InGamePlugin {
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
+                    vehicle::drive_speed_emitters.after(vehicle::track_motion),
+                    vehicle::play_despawn_effects.before(units::sync_views),
                     (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
