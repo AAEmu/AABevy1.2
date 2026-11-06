@@ -11,8 +11,8 @@
 //! | `combat` | 10 | the fight lasts (and 8 s after it): the zone music is silent for the battle track |
 //! | `underwater` | 8 | the camera is below the surface of the sea or a pond: ambience 10 % and every effect low-passed at 300 Hz to 2 kHz |
 //! | `low_health` | 8 | the character is alive with health strictly between 0 and a fifth (`3907b221..3907b266`) |
-//! | `falling` | 8 | the character is in a free fall |
-//! | `gliding` | 8 | the character flies on a glider: ambience, footsteps and monster voices at 20 % under a 2 kHz low-pass, music 80 % |
+//! | `falling` | 8 | the character is in a free fall and no glider moves it |
+//! | `gliding` | 8 | the own gliding buff holds the glider open: ambience, footsteps and monster voices at 20 % under a 2 kHz low-pass, music 80 % |
 //! | `driving` | 8 | the character steers a vehicle or a mount |
 //! | `indoor` | 2 | the listener is inside a hall / room / cave reverb volume: the outdoor ambience goes, the inside ambience comes |
 //! | `default` | 1 | always in game, the mix nothing else claims |
@@ -23,8 +23,11 @@
 //! mood is removed (2 s); [`drive_moods`] does the same, the sound coming from the most specific pack of the place that has
 //! the item. The zone music keeps playing under the mix and is heard again when the mood ends.
 //!
-//! `gliding` is inferred from an active flight (`Gliding::flying`, like `falling`): its pack item (`x2vehicles:glider:run_soundmood`,
-//! pack 101 item 2016) is in the zone packs, but the decompile does not show who adds the mood. The original's `flyng`, `moving`, `dancing`, `menu`,
+//! `gliding` and `falling` are the original's (see [`flight_moods`]): the gliding buff adds sound mood 6 and its end removes it
+//! (`ClientBuffMan::ApplyAttrs` `39389440` / `39389D60`), and the freefall's move mode adds mood 10, which the glider's move mode
+//! replaces (`39113D40`). The ids name the run-time table at `39AC3318`, whose names are not read: 6 = `gliding` and 10 =
+//! `falling` follow from the triggers. Its sound is `sounds/x2vehicles:glider:run_soundmood` (sound 2016, the `gliding` item of
+//! every `soundmood_*` pack). The original's `flyng`, `moving`, `dancing`, `menu`,
 //! `quest_camera`, `siege_period` and `machinima_default` are not raised: their triggers are not known. `indoor` is
 //! inferred from the reverb preset the player stands in (the `ReverbVolume` entities of halls, rooms and caves), which is
 //! the only indoor information the data gives.
@@ -42,7 +45,7 @@ use super::ui::Gate;
 use super::zone::ZonePacks;
 use super::{Packs, log_enabled};
 use crate::Screen;
-use crate::ingame::glide::Gliding;
+use crate::ingame::glide::{Active, Gliding, Phase};
 use crate::ingame::{LocalJump, LocalMount};
 
 /// The reverb presets of enclosed places.
@@ -114,6 +117,20 @@ fn select(i: &Inputs) -> Vec<&'static str> {
     moods
 }
 
+/// `(falling, gliding)` for the local flight (`Gliding::active`), whether the glider or its end clip is still shown, and the
+/// freefall. 1.2 keeps one move mode on the actor (`+0x1C1`): `CActor::UpdateInAir` (`3911C780`) sets the freefall's 1, and
+/// `39113D40` adds sound mood 10 (`falling`) in mode 1 and removes it in any other, so the glider's 4 (`3911FC80`, when the
+/// buff opens it) and its slide's 5 end the fall's mood. The buff's own mood 6 (`gliding`) comes with the buff
+/// (`ClientBuffMan::ApplyAttrs` `39389440`) and goes at its end (`39389D60`, with the fold): here the flight before its
+/// slide, which starts once the buff has been gone for `glide::BUFF_GRACE`.
+fn flight_moods(flight: Option<&Active>, shown: bool, freefall: bool) -> (bool, bool) {
+    // `LocalJump::freefall` is not updated while the glider moves the character (the value from before the flight),
+    // nor on the frame the flight ends, which the end clip covers
+    let falling = freefall && !shown && flight.is_none();
+    let gliding = flight.is_some_and(|a| matches!(a.flight.phase, Phase::Open | Phase::Gliding));
+    (falling, gliding)
+}
+
 #[derive(Default)]
 pub(super) struct Sent {
     moods: Vec<&'static str>,
@@ -161,8 +178,11 @@ pub(super) fn drive_moods(
         input.fighting = now < sent.combat_until;
         input.combat_music = gate.0.options.lock().unwrap_or_else(|e| e.into_inner()).combat_music;
         input.health = stats.as_deref().map(PlayerStats::hp_fraction);
-        input.falling = jump.as_deref().is_some_and(|j| j.freefall);
-        input.gliding = gliding.as_deref().is_some_and(Gliding::flying);
+        (input.falling, input.gliding) = flight_moods(
+            gliding.as_deref().and_then(|g| g.active.as_ref()),
+            gliding.as_deref().is_some_and(Gliding::shown),
+            jump.as_deref().is_some_and(|j| j.freefall),
+        );
         input.driving = mount.as_deref().is_some_and(|m| m.driving().is_some());
         if let (Some(water), Some(ear)) = (&water, ears.iter().next()) {
             let p = ear.translation();
@@ -282,7 +302,34 @@ mod tests {
     #[test]
     fn a_flight_raises_the_gliding_mood() {
         assert_eq!(select(&Inputs { gliding: true, ..game() }), ["gliding", "default"]);
-        assert_eq!(select(&Inputs { falling: true, gliding: true, ..game() }), ["falling", "gliding", "default"]);
         assert!(select(&Inputs { gliding: true, ..default() }).is_empty(), "not in game");
+    }
+
+    #[test]
+    fn the_glider_replaces_the_fall_and_its_mood_goes_with_the_buff() {
+        use crate::ingame::glide::{Flight, GlideParams, Pose};
+        let mut active = Active {
+            flight: Flight::start(GlideParams::EXPERIMENTAL),
+            buff_id: 1029,
+            buff_index: 1,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        };
+        // a free fall without a glider
+        assert_eq!(flight_moods(None, false, true), (true, false));
+        // the glider opened out of a free fall: its move mode ends the fall's mood (the freefall flag is the stale one)
+        assert_eq!(flight_moods(Some(&active), true, true), (false, true));
+        active.flight.phase = Phase::Gliding;
+        assert_eq!(flight_moods(Some(&active), true, true), (false, true));
+        // the buff is gone and the glider slides: neither mood
+        active.flight.phase = Phase::Sliding;
+        assert_eq!(flight_moods(Some(&active), true, true), (false, false));
+        // the end clip after the flight still holds the stale fall back
+        assert_eq!(flight_moods(None, true, true), (false, false));
+        assert_eq!(flight_moods(None, false, false), (false, false));
     }
 }

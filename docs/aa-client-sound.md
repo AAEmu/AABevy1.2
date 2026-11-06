@@ -90,8 +90,8 @@ the whole mix, `soundmoods.xml`):
 | `combat` | `PlayerStats.in_combat` and 8 s after, with the "use combat sound" option |
 | `underwater` | the listener is below the surface of a water body |
 | `low_health` | alive with health strictly above zero and below a fifth; native `3907b221..3907b266`, f32 constant at `3999dd34` |
-| `falling` | `LocalJump.freefall` |
-| `gliding` | `Gliding::flying()` (an active flight; inferred, see below) |
+| `falling` | `LocalJump.freefall` while no glider (nor its end clip) is shown |
+| `gliding` | the local flight before its slide (the own gliding buff is on), see below |
 | `driving` | `LocalMount::driving()` |
 | `indoor` | the reverb preset under the listener is `x2_hall_1` / `x2_room_1` / `x2_cave_1` at weight 1 |
 | `default` | always in game |
@@ -99,12 +99,25 @@ the whole mix, `soundmoods.xml`):
 Not raised (no known trigger or no data): `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
 `machinima_default`.
 
-`gliding` (priority 8, pack 101 item 2016 `x2vehicles:glider:run_soundmood`) follows the flight: the pack item and the mix are in
-the data, but the decompile does not show who adds the mood, so tying it to `Gliding::flying()` is inferred (capture-pending).
-The glider `.cal`s name a `$SoundEventDatabase` whose `fist_ac_gliding_start.caf` / `_end.caf` fire `x2vehicles:glider:start`
-(0.02 s) and `:end` (0.33 s), but the item model plays only `loop` and `endloop` (`FUN_3911d6c0`, `glide.rs::Pose::glider_clip`)
-and the character's databases have no gliding events, so nothing in the decompiled path plays those two sounds; they are
-capture-pending and not wired.
+`gliding` (priority 8; its sound `sounds/x2vehicles:glider:run_soundmood`, sound 2016, is the `gliding` item of every
+`soundmood_*` pack) follows the gliding buff: `ClientBuffMan::ApplyAttrs` (`39389440`) calls `AddSoundMood(6)` when a buff with
+the gliding flag (desc `+0x84`) lands on the local player (or the unit it controls), and the buff's end (`39389D60`) folds the
+glider and calls `RemoveSoundMood(6)`. `falling` is the actor's move mode (`+0x1C1`): `CActor::UpdateInAir` (`3911C780`) sets
+the freefall's 1 and `39113D40` adds mood 10 in mode 1 and removes it in any other, so the glider (mode 4, `3911FC80`) and its
+slide (mode 5) end the fall's mood. The mood table (`39AC3318`, 72-byte entries) is filled at run time and its names were not
+read: 6 = `gliding` and 10 = `falling` follow from these triggers. `moods::flight_moods` raises `gliding` for the flight in
+its `Open` / `Gliding` phases (the slide starts once the buff has been gone for `BUFF_GRACE`, 0.2 s after the original) and
+keeps `falling` down while the glider or its 0.5 s end clip is shown, since `LocalJump.freefall` is not updated while the
+glider moves the character. Still approximate: a gliding buff that stays listed without a flight (after a death, a mount or
+a teleport) keeps the original's mood but not this one, and after a fold in the air `falling` comes back with the end clip's
+end rather than when the fall is fast again.
+
+The glider `.cal`s name a `$SoundEventDatabase` whose `fist_ac_gliding_start.caf` / `_end.caf` (the `.cal`'s `start` and `end`)
+fire `x2vehicles:glider:start` (0.02 s) and `:end` (0.33 s); the character's databases (nuian, ferre, dwarf, warborn) have no
+gliding events. `end` is played by nothing found: the fold plays `endloop` (`3911D6C0(0)`, and `ChangeBackpackVisual`
+`39360BB0` outside move mode 4). `start` is played by `ChangeBackpackVisual` on the back-slot model while the actor is in move
+mode 4, which the equipment refresh (`39362D20`, after `3911D6C0(1)`'s `loop`) and `391219C0(1)` reach; whether that runs at
+every opening is not settled, and `glide.rs` plays `loop` for the opening. Neither sound is wired (capture-pending).
 
 A mood with an item in the zone's pack (`combat`, `death`, `low_health`, `falling`, `gliding`, `quest_camera`, `siege_period`;
 the other moods have none in any of the 72 packs) has a sound. The original (`SoundMoodManager::AddSoundMood`,
