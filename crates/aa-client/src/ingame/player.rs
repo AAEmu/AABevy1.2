@@ -369,6 +369,15 @@ fn swim_floor(support: Option<f32>, hole: Option<bool>, current: f32) -> f32 {
     support.unwrap_or(if hole == Some(true) { current - SWIM_FLOOR_CLEARANCE } else { f32::NEG_INFINITY })
 }
 
+/// Where a fall ends over `ground` with `water` (its surface) there: at the floating height `surface - swim_depth` when the
+/// water is at least `swim_depth` deep (the body swims there, [`swim::should_swim`]), else on the ground.
+fn afloat(ground: f32, water: Option<(f32, aa_world::WaterKind)>, swim_depth: f32) -> f32 {
+    match water {
+        Some((surface, _)) if surface - ground >= swim_depth => ground.max(surface - swim_depth),
+        _ => ground,
+    }
+}
+
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn control_player(
@@ -468,11 +477,13 @@ pub fn control_player(
     {
         let dt = time.delta_secs().min(0.1);
         let handed_off = step.handed_off();
-        let gravity = actor.copied().unwrap_or_default().gravity;
+        let actor = actor.copied().unwrap_or_default();
+        // over water the rider swims in, the get-off ends floating at the surface, not on the bed under it
+        let floor = |p: Vec3| afloat(floor_at(&terrain, &collision, p, STEP_UP), water.water_at(p), actor.swim_depth());
         let done = step.step(
             dt,
-            gravity,
-            |p| floor_at(&terrain, &collision, p, STEP_UP),
+            actor.gravity,
+            floor,
             |p, delta| collision.slide(p, delta, RADIUS, HEIGHT, STEP_UP).pos,
         );
         // after 100 ms the normal movement pipeline reports the placement, not the unmount controller
@@ -486,9 +497,21 @@ pub fn control_player(
         mover.velocity = Vec3::ZERO;
         state.autorun = AutoRun::default();
         if done {
-            mover.grounded = true;
+            // the swim stats are taken again at the get-off (`sub_3909B4A0` resets the actor's swim/fall fields): in deep
+            // water the rider swims on from where it floats
+            let ground = floor_at(&terrain, &collision, mover.pos, STEP_UP);
+            let wet = water.water_at(mover.pos).map(|(surface, kind)| Wet { surface, kind, depth: (surface - ground).max(0.0) });
+            mover.swim = wet.filter(|_| swim::should_swim(false, mover.pos.z, wet, actor.swim_depth())).map(|w| Swim {
+                surface: w.surface,
+                kind: w.kind,
+                local_dir: Vec2::ZERO,
+                speed: 0.0,
+                vertical: 0.0,
+                deep: false,
+                hold: 0.0,
+            });
+            mover.grounded = mover.swim.is_none();
             mover.vz = 0.0;
-            mover.swim = None;
             mover.velocity = Vec3::ZERO;
             state.send_now();
             // `track_local_mount` drops the component on its next run (this system is at Bevy's 16-parameter limit)
@@ -2429,6 +2452,31 @@ mod dive_tests {
                 assert!(m.grounded && (m.pos.z - beach_bed(127.5)).abs() < 0.02, "the horse stands on the bed: {:?}", m.pos);
             }
         }
+    }
+
+    #[test]
+    fn a_get_off_over_deep_water_leaves_the_rider_swimming_at_the_surface() {
+        use crate::ingame::mount::DismountMove;
+        let (terrain, water) = beach();
+        // the seat of a horse that floats over 7 m of water: the rider's origin 0.6 m over the surface
+        let seat = Vec3::new(100.0, 110.0, 100.6);
+        let mut f = SwimApp::fixture(terrain, water, seat);
+        f.app.world_mut().entity_mut(f.player).insert(DismountMove::fixture(seat));
+        let rest = 100.0 - ActorParams::default().swim_depth();
+        let mut lowest = f32::INFINITY;
+        for _ in 0..90 {
+            f.tick(DT);
+            lowest = lowest.min(f.mover().pos.z);
+            if f.app.world().get::<DismountMove>(f.player).is_some_and(DismountMove::done) {
+                // `mount::track_local_mount` drops it on its next run
+                f.app.world_mut().entity_mut(f.player).remove::<DismountMove>();
+            }
+        }
+        assert!(lowest >= rest - 0.01, "the get-off sank to {lowest} under the floating height {rest}");
+        let m = f.mover();
+        assert!(m.swim.is_some() && !m.grounded, "the rider does not swim after the get-off: {:?}", m.pos);
+        assert!((m.pos.z - rest).abs() < 0.05, "the rider floats at {} for {rest}", m.pos.z);
+        assert_eq!(f.moves().last().expect("the placement is reported").stance, stance::SWIM);
     }
 
     #[test]

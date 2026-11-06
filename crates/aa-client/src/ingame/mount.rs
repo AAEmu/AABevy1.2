@@ -1304,7 +1304,8 @@ impl DismountMove {
     }
 
     /// Advances the move: the request velocity for the controller window, gravity and the floor, then the root motion.
-    /// `floor` and `slide` are the player controller's own ground and capsule queries.
+    /// `floor` and `slide` are the player controller's own ground and capsule queries; over water the rider swims in,
+    /// `floor` is its floating height (`player::afloat`), so a get-off from a swimming mount stops at the surface.
     pub(crate) fn step(
         &mut self,
         dt: f32,
