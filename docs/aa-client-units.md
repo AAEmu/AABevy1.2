@@ -1434,8 +1434,21 @@ character's view of the type-3 hull (interpolation and velocity scale).
 `ingame/ship/deck.rs` puts the local player on the hull floor of any
 `UnitKind::Slave` whose `models.sub_type` is `ShipModel`. The floor is the
 salvaged older own-ship work (`test/ships` deck floor): `ship/floor.rs` takes
-the upward-facing triangles of the hull brush (`*_body.cgf`) of the model's
-`ship_models.normal` prefab, in the ship frame (cry: x right, y forward, z up).
+the upward-facing triangles of every hull and deck brush of the model's
+`ship_models.normal` prefab, merged, in the ship frame (cry: x right, y forward, z up).
+The brushes are picked by name (`is_deck_part`): `*_body*.cgf` (smallboat, galleon,
+boardship, middleship, `fishboat_body_stepNN`), the hulls named like the prefab file
+(`boxship`, `boxship_old`, `cruise_a` with its `_add*` pieces, `soloship_a`,
+`speedboat_a`, `fishboat`, `coupleduckship`) and `*_helms.cgf` raised helms. Animated
+`.chr` / `.cga` parts, decoration (barrels, sandbags, shields), rope, sails, flags,
+cannons, anchors, rudders, ladders, damage variants and the `box.cgf` helper are left
+out, so a barrel top or mast is never a floor. 1.2 itself walks on the CryPhysics of
+the whole prefab and its collision set is not decoded: the name rule is inferred from
+the prefab sweep (capture-pending). A pak- and DB-gated test checks every
+`ship_models.normal` prefab: each `$driver` / `$passenger*` helper has a floor within
+1.5 m below it. Not covered: the caravel and ray (their `caravel_body.cgf` / `ray.cgf`
+are not in the 1.2 pak), `galleon02`, `boxship_old` `_6f` / `_2f` and the `woodpiece`
+debris (no prefab in the pak).
 Boarding is automatic while the player stands within `DECK_STEP` (1.5 m) of
 that floor; a dead (the `Dead` component or, as on foot, the stats' death
 flag that arrives first), skill-moved, seated or mounted player is left to
