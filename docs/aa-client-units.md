@@ -1137,8 +1137,9 @@ pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a
 
 #### World collision (`cart.rs`, `step_colliding`)
 
-1.2's land vehicle is a CryPhysics entity with proxy collision (`vehicle_models.use_proxy_collision`,
-`max_climb_ang`, `susp_stroke`), so static brushes stop it. The exact response is **not traced**
+1.2's land vehicle is a CryPhysics entity, so static brushes stop it. `vehicle_models` carries the physics
+flags, but `use_proxy_collision` is true only for rows 2, 5, 59, 62 and 64: the Farm Wagon (row 38) has it
+false, `max_climb_ang` 45 and `susp_stroke` 0, so its body shape is not a proxy. The exact response is **not traced**
 (no capture; AAEmu has no vehicle-versus-unit code), so this is an inferred stand-in for static geometry only:
 
 * Two capsules, one at each axle centre (the means of the front and rear wheel-contact pairs of the
