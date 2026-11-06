@@ -61,6 +61,19 @@ first 103 ms packet and 8.85 by 0.5 s, and a release coasts 12.65 -> 8.3 -> 0.7 
 `v = 0` stop packet. The position step is the frame's mean speed while the packet carries the new carried one, as the capture's first coast row
 does (position 10.65, velocity 8.39); the velocity direction lags a turn instead of snapping.
 
+Space on the driver's seat jumps the mount. 1.2's input code (`sub_39404D50`, x2game12.c:859926) sets the jump request on the
+controlled unit, the mate, and every actor copies its own `jumpHeight` (`sub_390CB440`, :174729-174739), so the take-off is
+`sqrt(2 g h)` from the mount's row (`MountSpeed::jump_height` / `gravity`, `Db::mount_speed`): the Lilyut horse (actor 42) has
+1.3 m and gravity 30, 8.83 m/s and 0.59 s in the air; most other mounts (actors 205, 210, 493, 699, 704) have gravity 20,
+7.21 m/s; the elk (674) 30. A fall off a ledge uses the same gravity; the get-off hop keeps the player's. The ground step
+(`sub_3912B330`, :245828-245920) builds the jump vector only with a move request (`|x|` or `|y|` over 0.1); standing, it signals
+`em_jump_in_place` and leaves the vector at 0, so a standing Space rears the mount instead of lifting it (`docs/aa-client-units.md`,
+"Owned mounts"). The packets are the on-foot ones as the mate's `CSMoveUnit`: the take-off JUMPING with actor 0x0c and the launch
+speed, MOVING or 0 in the air, the landing actor 0x14 (the 0x80 fall block from 20 m/s). The take-off sets `PlayerInput::jumped`,
+so it cancels a cast as on foot. In the air the mount steers on with its carried velocity (`mount_velocity`). Capture-pending:
+the mate's take-off and landing flags (taken from the on-foot capture; no mounted jump was captured), whether the mount keeps its
+steering inertia in the air (not traced), and the mounted jump clips (the mate rises in its run clip).
+
 The own buffs' `MoveSpeedMul` rows scale the run and walk speed (`sprint::speed_multiplier`: Dash at level 1 is x 1.384, 7.47 m/s); the run clip
 plays faster with it. A buff with `sprint_motion` (Dash) runs with the second tier of the run group instead: 1.2's `fist_mo_normal_run.lmg`
 lists the run and then `fist_mo_sprint_run_f`, `_fl`, `_fr`, `_l`, `_r` (and the run's own back clips), read from the model's own group

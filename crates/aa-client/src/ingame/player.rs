@@ -16,8 +16,9 @@
 //! Swimming ([`super::swim`]): water deeper than [`ActorParams::swim_depth`] (1.3 m) over the ground makes the character swim
 //! at the surface; the packets then carry the swim stance and no ground flag.
 //!
-//! Riding ([`super::mount`]): on the driver's seat of its own mate the keys move the mount at the mount's speed (no jumping, no
-//! swimming) and the packets carry the mate's object id; a passenger is carried along.
+//! Riding ([`super::mount`]): on the driver's seat of its own mate the keys move the mount at the mount's speed and Space jumps
+//! it with its own jump height and gravity while a direction is held (no swimming); the packets carry the mate's object id; a
+//! passenger is carried along.
 
 use aa_anim::pose::Rig;
 use aa_anim::{Cal, CharacterAssets, ClipLibrary, spawn_character_with_facial};
@@ -427,8 +428,8 @@ pub fn control_player(
     if deck || std::mem::take(&mut state.deck_exit) {
         return;
     }
-    // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, no jumping
-    // or swimming, and the packets name the mount
+    // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, its jump,
+    // no swimming, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
     // `AA_DISMOUNT_TRACE=1`: the local rider's position every 100 ms for 1.5 s after a detach, with the mount it left
     // and the mount's facing, so a replay can measure the landing in the mount's frame.
@@ -542,6 +543,11 @@ pub fn control_player(
     let Ok(mut orbit) = cameras.single_mut() else { return };
     let camera_pitch = orbit.pitch;
     let actor = actor.copied().unwrap_or_default();
+    // a driven mount jumps and falls with its own actor row (`MountSpeed::jump_height` / `gravity`), not the rider's
+    let actor = match driving {
+        Some((_, speed)) => ActorParams { jump_height: speed.jump_height, gravity: speed.gravity, ..actor },
+        None => actor,
+    };
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
     // the first step waits for the collision around the character (a deck or a house is not there before it is built)
@@ -584,8 +590,10 @@ pub fn control_player(
     // auto-run (NumLock): W, S or both mouse buttons end it once they were let go
     state.autorun.update(tapped("autorun"), held.forward || held.back || (left_mouse && right_mouse));
     let (fwd, strafe, turn) = resolve_keys(MoveKeys { forward: held.forward || state.autorun.on, ..held }, left_mouse, right_mouse, state.last_turn);
+    // 1.2's input code (`sub_39404D50`) sets the jump request on the controlled unit, the mate while driving; holding Space
+    // only swims up, which a mount does not
     let jump_held = pressed("jump", 'J') && driving.is_none();
-    let jump_tapped = state.jump_tapped(&dev, t, tapped("jump")) && driving.is_none();
+    let jump_tapped = state.jump_tapped(&dev, t, tapped("jump"));
     let vertical = jump_held as i32 as f32 - key("down", 'X');
 
     // Read movement/character-yaw intent before HoldPosition prevents motion. A
@@ -776,7 +784,10 @@ pub fn control_player(
         }
     }
     if mover.swim.is_none() {
-        if mover.grounded && jump_tapped {
+        // a mount's ground step (`sub_3912B330`, x2game12.c:245828-245920) builds the jump vector only for a move request;
+        // standing, it signals `em_jump_in_place` and sets no vertical speed
+        let launch = jump_tapped && (driving.is_none() || local_dir != Vec2::ZERO);
+        if mover.grounded && launch {
             mover.vz = actor.jump_speed();
             mover.grounded = false;
             jumped = true;

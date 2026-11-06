@@ -103,10 +103,14 @@ pub struct MountSpeed {
     pub inertia: f32,
     /// `actor_models.game_inertia_accel`: response rate (1/s) for a move request; 0 means no inertia.
     pub accel: f32,
+    /// `actor_models.game_jump_height` (m) and `physics_living_gravity` (m/s^2): every actor copies its own `jumpHeight`
+    /// (`sub_390CB440`, x2game12.c:174729-174739), so a driven mount jumps and falls with its row, not the rider's.
+    pub jump_height: f32,
+    pub gravity: f32,
 }
 
 impl Default for MountSpeed {
-    /// A horse's.
+    /// A horse's (the Lilyut horse, actor model 42).
     fn default() -> Self {
         MountSpeed {
             run: 9.0,
@@ -114,11 +118,18 @@ impl Default for MountSpeed {
             backward: 0.2,
             inertia: 4.0,
             accel: 11.0,
+            jump_height: 1.3,
+            gravity: 30.0,
         }
     }
 }
 
 impl MountSpeed {
+    /// Vertical speed of the mount's jump: `v = sqrt(2 g h)` (8.83 m/s for a horse, 7.21 with gravity 20).
+    pub fn jump_speed(&self) -> f32 {
+        (2.0 * self.gravity * self.jump_height).sqrt()
+    }
+
     /// The speed for a pressed direction (x right, y forward, unit length): backward and walking take their factors.
     pub fn of(&self, local_dir: Vec2, walking: bool) -> f32 {
         if local_dir == Vec2::ZERO {
@@ -1265,11 +1276,19 @@ impl Db {
         let speed = l
             .conn
             .query_row(
-                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier, a.game_inertia, a.game_inertia_accel FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
+                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier, a.game_inertia, a.game_inertia_accel, a.game_jump_height, a.physics_living_gravity FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
                 params![model_id],
                 |r| {
                     let f = |i: usize, default: f32| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.map_or(default, |v| v as f32)) };
-                    Ok(MountSpeed { run: f(0, d.run)?, walk: f(1, d.walk)?, backward: f(2, d.backward)?, inertia: f(3, d.inertia)?, accel: f(4, d.accel)? })
+                    Ok(MountSpeed {
+                        run: f(0, d.run)?,
+                        walk: f(1, d.walk)?,
+                        backward: f(2, d.backward)?,
+                        inertia: f(3, d.inertia)?,
+                        accel: f(4, d.accel)?,
+                        jump_height: f(5, d.jump_height)?,
+                        gravity: f(6, d.gravity)?,
+                    })
                 },
             )
             .unwrap_or(d);
@@ -2081,12 +2100,18 @@ mod tests {
         assert_eq!(horse.of(Vec2::ZERO, false), 0.0);
     }
 
-    /// The Lilyut horse (model 139) and the donkey (953) as the database has them.
+    /// The Lilyut horse (model 139, actor 42) and the donkey (953, actor 429) as the database has them: the horse jumps
+    /// 1.3 m under gravity 30 (8.83 m/s), the donkey under 20 (7.21 m/s).
     #[test]
     fn the_database_holds_the_mount_speeds() {
         let Some(db) = Db::open() else { return };
-        assert_eq!(db.mount_speed(139), MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0 });
-        assert!((db.mount_speed(953).run - 7.2).abs() < 1e-5);
+        let horse = db.mount_speed(139);
+        assert_eq!(horse, MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0, jump_height: 1.3, gravity: 30.0 });
+        assert!((horse.jump_speed() - 8.832).abs() < 1e-3, "{}", horse.jump_speed());
+        let donkey = db.mount_speed(953);
+        assert!((donkey.run - 7.2).abs() < 1e-5);
+        assert_eq!((donkey.jump_height, donkey.gravity), (1.3, 20.0));
+        assert!((donkey.jump_speed() - 7.211).abs() < 1e-3, "{}", donkey.jump_speed());
     }
 
     /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.
