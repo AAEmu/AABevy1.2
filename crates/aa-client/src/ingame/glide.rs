@@ -2378,8 +2378,8 @@ mod tests {
         assert!(step.speed > 0.0, "{step:?}");
     }
 
-    /// The sweep of every glider item: the row resolves, the `.cal` binds the four clips the glider plays, the stowed
-    /// look and a missing `endloop` clip are listed. `AA_PAK` / `AA_DB` needed.
+    /// The sweep of every glider item: the row resolves, the `.cal` binds every clip the flying glider plays, the stowed
+    /// look and an `endloop` clip found only in the `.dbh` are listed. `AA_PAK` / `AA_DB` needed.
     #[test]
     fn every_glider_item_resolves_and_binds_its_clips() {
         if !aa_cry::pak_available() {
@@ -2412,23 +2412,48 @@ mod tests {
                 failures.push(format!("{id} {}: no .cal or rig for {chr}", glider.model));
                 continue;
             };
-            for name in ["start", "loop", "sliding"] {
+            // every clip a flying glider plays (`Pose::glider_clip`; the opening plays "loop", `FUN_3911d6c0(1)`)
+            let flying = [
+                Pose::Start,
+                Pose::Idle,
+                Pose::Fast,
+                Pose::Slow,
+                Pose::Left,
+                Pose::Right,
+                Pose::FrontLeft,
+                Pose::FrontRight,
+                Pose::BackLeft,
+                Pose::BackRight,
+                Pose::Slide,
+            ];
+            for pose in flying {
+                let (name, _) = pose.glider_clip();
                 if bind_clip(&rig, &cal, &library, name).is_none() {
-                    failures.push(format!("{id} {}: clip {name} does not bind", glider.model));
+                    failures.push(format!("{id} {}: clip {name} ({pose:?}) does not bind", glider.model));
                 }
             }
-            // 17 items name an `endloop` in the `.cal` whose `.caf` is not in the pak (kite, butterfly, kraken, sloth, ...):
-            // the closing glider plays nothing there, as a missing clip does in the original
-            if bind_clip(&rig, &cal, &library, "endloop").is_none() {
-                println!("glider sweep: {id} {} has no endloop clip", glider.model);
+            // `FUN_3911d6c0(0)` plays "endloop" as the glider closes. For 17 items (kite, butterfly, kraken, sloth, ...) the
+            // loose `.caf` is not in the pak, but the `.cal`'s `$TracksDBH` track database holds it, so 1.2 has it; aa-anim
+            // reads loose `.caf` only (no `.dbh` decoder), so here the closing glider keeps its last clip (a known gap)
+            let (end, _) = Pose::End.glider_clip();
+            if bind_clip(&rig, &cal, &library, end).is_none() {
+                let path = cal.animation(end).map(|entry| entry.path.clone()).unwrap_or_default();
+                let in_dbh = !path.is_empty()
+                    && cal
+                        .tracks_dbh
+                        .as_deref()
+                        .and_then(|dbh| aa_cry::read(dbh).ok())
+                        .is_some_and(|bytes| bytes.windows(path.len()).any(|w| w.eq_ignore_ascii_case(path.as_bytes())));
+                if !in_dbh {
+                    failures.push(format!("{id} {}: no {end} clip, neither loose nor in the .dbh", glider.model));
+                }
+                println!("glider sweep: {id} {} plays no {end}: {path} is only in the .dbh", glider.model);
             }
             if db.backpack(id).is_none() {
                 println!("glider sweep: {id} {} has no stowed look (asset2_id 0): nothing is drawn on the back", glider.model);
             }
         }
-        assert!(failures.is_empty(), "glider sweep:
-{}", failures.join("
-"));
+        assert!(failures.is_empty(), "glider sweep:\n{}", failures.join("\n"));
     }
 
     /// What the generic buff effect path finds for the 55 gliding buffs: their `fx_group_id` items, and whether each particle
@@ -3103,21 +3128,133 @@ mod tests {
         if !aa_cry::pak_available() {
             return;
         }
+        let Some(db) = Db::open() else { return };
+        let glider = db.glider(14677).expect("glider item 14677");
+        assert!(glider.model.ends_with("glider_bx.chr"), "{}", glider.model);
+        let Some(mut app) = flying_glider_app(db, 14677) else { return };
+        let normal = glider_wing_normal(app.world_mut()).expect("the glider model was spawned");
+        let degrees = from_level(normal);
+        println!("glider wing normal {normal:?}, {degrees:.1} deg from level");
+        assert!(
+            degrees < 10.0,
+            "the glider wing stands up: its plane is {degrees:.1} deg from horizontal"
+        );
+    }
+
+    /// The same level check for every distinct opened model of the glider items (`Db::glider_items`), each on the
+    /// `item_glider` bone in the gliding idle clip as [`show_glider`] draws it: the span lies level across the facing
+    /// and the plane is far from on edge. The axes come from the spread of all the model's skinned vertices: the
+    /// three-vertex [`glider_wing_normal`] only fits a canopy like `glider_bx` (on the dragon / kraken wings its tips and
+    /// top give no plane at all).
+    #[test]
+    fn every_glider_model_opens_level_on_the_item_glider_bone() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let mut seen: Vec<String> = Vec::new();
+        let mut standing = Vec::new();
+        for id in db.glider_items() {
+            let Some(glider) = db.glider(id) else { continue };
+            if seen.contains(&glider.model) {
+                continue;
+            }
+            seen.push(glider.model.clone());
+            let Some(db) = Db::open() else { return };
+            let Some(mut app) = flying_glider_app(db, id) else { return };
+            let (normal, span) = glider_spread_axes(app.world_mut())
+                .unwrap_or_else(|| panic!("the glider model of item {id} was spawned"));
+            let three = glider_wing_normal(app.world_mut()).map(from_level);
+            let degrees = from_level(normal);
+            // the character faces Bevy -Z: the span must lie across it, level (no roll)
+            let roll = span.y.abs().asin().to_degrees();
+            println!(
+                "glider wing: {id} {} plane {degrees:.1} deg from level, span {roll:.1} deg, normal {normal:.2} \
+                 (three vertices: {three:.1?})",
+                glider.model
+            );
+            // The span is the reliable axis. The plane's pitch also follows the model's shape (the dragon / kraken
+            // wings' raised neck and tail tip it 18.5 deg, glider_c 15 deg), so it only has to be far from on edge.
+            if roll >= 10.0 || span.x.abs() < 0.9 || degrees >= 30.0 {
+                standing.push(format!("{id} {}: plane {degrees:.1} deg, span {span:.2}", glider.model));
+            }
+        }
+        assert!(
+            standing.is_empty(),
+            "glider models whose wing stands up:\n{}",
+            standing.join("\n")
+        );
+    }
+
+    /// Degrees between a plane with this normal and the level (Bevy XZ) plane; 90 for a zero normal.
+    fn from_level(normal: Vec3) -> f32 {
+        normal.normalize_or_zero().dot(Vec3::Y).abs().acos().to_degrees()
+    }
+
+    /// The drawn glider's plane normal and span: the axes along which its skinned vertices (every skinned mesh, posed by
+    /// the animated joints) spread least and most, from their covariance by power iteration.
+    fn glider_spread_axes(world: &mut World) -> Option<(Vec3, Vec3)> {
+        let (path, rig, bones) = {
+            let mut query = world.query_filtered::<(Entity, &Animator), With<GliderModel>>();
+            let (entity, animator) = query.iter(world).next()?;
+            let name = world.get::<Name>(entity)?.as_str().to_string();
+            (name, animator.rig.clone(), animator.bones.clone())
+        };
+        let geometry = aa_cry::Model::load(&path).ok()?;
+        let mut points = Vec::new();
+        for mesh in &geometry.meshes {
+            let Some(skin) = mesh.skin.as_ref() else { continue };
+            for (vertex, position) in mesh.positions.iter().enumerate() {
+                let mut out = Vec3::ZERO;
+                for k in 0..4 {
+                    let weight = skin.weights[vertex][k];
+                    if weight == 0.0 {
+                        continue;
+                    }
+                    let joint = skin.joints[vertex][k] as usize;
+                    let inverse = bevy::math::Affine3A::from_mat4(rig.skeleton.bones.get(joint)?.inverse_bind());
+                    let global = world.get::<GlobalTransform>(*bones.get(joint)?)?;
+                    out += weight * (global.affine() * inverse).transform_point3(*position);
+                }
+                points.push(out);
+            }
+        }
+        if points.len() < 3 {
+            return None;
+        }
+        let mean = points.iter().copied().sum::<Vec3>() / points.len() as f32;
+        let mut covariance = Mat3::ZERO;
+        for p in &points {
+            let d = *p - mean;
+            covariance += Mat3::from_cols(d * d.x, d * d.y, d * d.z);
+        }
+        let largest = |m: Mat3| {
+            let mut v = Vec3::new(0.577, 0.577, 0.577);
+            for _ in 0..200 {
+                v = (m * v).normalize_or_zero();
+            }
+            v
+        };
+        let first = largest(covariance);
+        let lambda = first.dot(covariance * first);
+        let rest = covariance - Mat3::from_cols(first * first.x, first * first.y, first * first.z) * lambda;
+        let second = largest(rest);
+        Some((first.cross(second).normalize_or_zero(), first))
+    }
+
+    /// A Nuian male in the gliding idle clip with item `item`'s glider opened on its `item_glider` bone, after 1 s of
+    /// [`drive_glide`] / [`show_glider`]. `None` when the character's rig or clips cannot be loaded.
+    fn flying_glider_app(db: Db, item: u32) -> Option<App> {
         use aa_anim::pose::shared_rig;
         use aa_net::model::{Equipment, Item};
         use aa_net::state::Inventory;
         use bevy::transform::TransformPlugin;
 
-        let Some(db) = Db::open() else { return };
         let model = "objects/characters/nuian/male/nude/nu_m_base.chr";
-        let glider = db.glider(14677).expect("glider item 14677");
-        assert!(glider.model.ends_with("glider_bx.chr"), "{}", glider.model);
-        let Some(rig) = shared_rig(model).ok() else { return };
+        let rig = shared_rig(model).ok()?;
         let clips = ClipLibrary::default();
         let cal = format!("{}.cal", model.trim_end_matches(".chr"));
-        let Some(set) = super::super::anim::shared_clip_set(model, &cal, &clips) else {
-            return;
-        };
+        let set = super::super::anim::shared_clip_set(model, &cal, &clips)?;
 
         let mut app = App::new();
         app.init_resource::<Time>()
@@ -3131,8 +3268,8 @@ mod tests {
             .add_systems(Update, (drive_glide, show_glider).chain());
         let mut equipment = Equipment::default();
         equipment.slots[slot::BACKPACK] = Some(Item {
-            id: 14677,
-            template_id: 14677,
+            id: u64::from(item),
+            template_id: item,
             count: 1,
             ..default()
         });
@@ -3140,18 +3277,20 @@ mod tests {
         inventory.equipment = equipment;
         let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
         flight.elapsed = 3.0;
-        let mut gliding = Gliding::default();
-        gliding.active = Some(Active {
-            flight,
-            buff_id: 1029,
-            buff_index: 1,
-            pose: Pose::Idle,
-            touched: false,
-            touched_for: 0.0,
-            missing: 0.0,
-            water: false,
-            deck: None,
-        });
+        let gliding = Gliding {
+            active: Some(Active {
+                flight,
+                buff_id: 1029,
+                buff_index: 1,
+                pose: Pose::Idle,
+                touched: false,
+                touched_for: 0.0,
+                missing: 0.0,
+                water: false,
+                deck: None,
+            }),
+            ..Default::default()
+        };
         app.insert_resource(gliding)
             .insert_resource(inventory)
             .insert_resource(db);
@@ -3195,13 +3334,7 @@ mod tests {
             app.update();
         }
 
-        let normal = glider_wing_normal(app.world_mut()).expect("the glider model was spawned");
-        let degrees = normal.dot(Vec3::Y).abs().acos().to_degrees();
-        println!("glider wing normal {normal:?}, {degrees:.1} deg from level");
-        assert!(
-            degrees < 10.0,
-            "the glider wing stands up: its plane is {degrees:.1} deg from horizontal"
-        );
+        Some(app)
     }
 
     #[test]

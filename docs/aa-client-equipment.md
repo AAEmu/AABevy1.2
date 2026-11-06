@@ -85,20 +85,32 @@ shield (30060), the 2H blade, the dragon staff (28905) and mace (35524) and mirr
 
 `cargo test -p aa-client --bin aa-client glide -- --nocapture` runs `every_glider_item_resolves_and_binds_its_clips` over
 `Db::glider_items()` (type-2 rows whose item casts a skill, 36 now): `Db::glider` resolves, `glide::glider_cal` finds the `.cal`
-(a `.cdf` goes through its `model`; `glider_blue2.cdf` resolves too), the rig loads and `start`, `loop` and `sliding` bind. Result:
-every item passes those. `endloop` (the clip the closing glider plays, `FUN_3911d6c0`) does not bind for 17 items (kite, butterfly,
-kraken, sloth, blue2/3/5, silver, silver_black, dragon, reddragon, red C and Korea): their `.cal` names
-`fist_ac_gliding_endloop.caf` but the pak has no such file under `animations/env/<model>/`. Nothing plays there, as in the original
-for a missing clip; `show_glider` now logs it once per pose (`glide: the glider model has no "endloop" clip`) instead of only
-remembering the failure. The test prints those items and the two without a stowed look.
+(a `.cdf` goes through its `model`; `glider_blue2.cdf` resolves too), the rig loads and every clip a flying glider plays binds
+(`Pose::glider_clip`: `loop`, which the opening plays too, `front`, `back`, `left`, `right`, `sliding`). Result: every item passes.
+`endloop` (the clip the closing glider plays, `FUN_3911d6c0(0)`, `3911D6C0`) does not bind for 17 items (kite, butterfly, kraken,
+sloth, blue2/3/5, silver, silver_black, dragon, reddragon, red C and Korea): their `.cal` names `fist_ac_gliding_endloop.caf` and no
+loose file of that name is under `animations/env/<dir>/`, but the `.cal`'s `$TracksDBH` track database
+(`animations/env/<dir>/<dir>.dbh`, controller chunks v0x902 / 0x903) holds it: every one of the 10 glider `.dbh` lists
+`fist_ac_gliding_endloop.caf`, so the original has the closing clip for all 36 items (the engine finds a `$TracksDBH` clip by
+its `.caf` name; not seen in a capture). aa-anim reads loose `.caf` only (no `.dbh` decoder;
+`docs/aa-anim.md`'s "the loose `.caf` carry the same data" does not hold here), so for those 17 the closing glider keeps its last
+clip: a known gap, not 1.2 behaviour. The test asserts the clip is in the `.dbh` and prints the items; `show_glider` and
+`draw_remote_gliders` log a clip that does not bind (`glide: the glider model has no "endloop" clip`) once per pose change instead of
+only remembering it.
 
-The wing plane stays the `the_glider_wing_stays_level_on_the_item_glider_bone` check (Experimental Glider, 2 deg from level on the
-`item_glider` bone); the other models share that bone and the CryEngine-space attachment, so no per-model plane check was added.
+Wing plane: `every_glider_model_opens_level_on_the_item_glider_bone` opens each of the 27 distinct models on a Nuian male's
+`item_glider` bone in the gliding idle clip (`show_glider`'s path) and measures the skinned vertices' spread. The span lies level
+across the facing on all 27 (0.7-1.5 deg roll), nothing stands on edge. The plane's pitch is 1-9 deg on 23 models and 15-18.5 deg
+on four: glider_c (15.3) and the dragon / reddragon / kraken model (18.5). Whether that is their shape (a raised neck, a long tail)
+or a nose-up flight pose is capture-pending. The three-vertex check of `the_glider_wing_stays_level_on_the_item_glider_bone`
+(Experimental Glider, 2 deg) only fits a canopy: on the dragon wings its tips and top give no plane.
 `AA_GLIDER_SHEET=1 cargo run -p aa-client --example glider_look -- --mute --offscreen-shot shots/aa-client/glider_sheet.png --shot-after 4`
-draws the seven distinct non-`glider_bx` models (kraken, lv_b, sp_white, b_blue, dragon, blue5, b_violet) in two rows from above:
-all spawn and spread their wings level (30 fps). The sheet is the bare models, not on a character.
+draws eight of the 26 distinct non-`glider_bx` models (kraken, b_lv_c, c, sp_pink, kite, dragon, green, c_korea) in two rows
+from above, bare (`creature::spawn`, not on a character's `item_glider` bone): all eight spawn (30 fps). Seen from above they
+show their front outline, so the sheet shows the models' shapes, not their flight attitude (that is the test above).
 
 `every_gliding_buff_flies_ten_seconds_of_every_key_without_nan` starts `Flight` from all 55 gliding buffs and steps
 10 s of every W/S/A/D combination: no NaN, the opening ends, and a buff with `gliding_rotate_speed` 0 never turns (`turn_rate` 0, no
 stuck state). 21 of the 55 buffs have no glider item (quest wings, prison-break glider, 'Glide' skills): their flight runs the same
-`Flight`; only the glider model is not drawn for them, since `show_glider` draws the equipped backpack's glider.
+`Flight`, and `show_glider` draws whatever glider the back slot holds (nothing when it is empty); what 1.2 draws for those buffs
+with a glider equipped is not checked.

@@ -657,12 +657,12 @@ The black ring of Crippling Mire is `psychokinesis_launch_form_end` (`AA_COMBAT_
 **Where `bip01` is (real captures, bevycombat on the real client, `data/extract/aa-client-combat/real/`)**: x2game's id 0 is the joint `bip01`, which every clip puts on the ground, so the beams (23 of 30) and the flying shots (src 0: 143 homing and 65 ballistic classes) would leave the feet. The real client does not: Arc Lightning's launch disc hangs at the caster's waist to chest (about 1.2 m, ahead of the torso in the lunge), the Absorb Lifeforce beam runs at chest height from the hand side, the Flamebolt fireball leaves at shoulder height. Which engine detail makes the joint report there (an unextracted root offset or the bind pose, 1.04 m) is not known, so `src_bone_names` sends id 0, 14 to 18 and the unknown ids to `Bip01 Hit` (1.1 to 1.4 m above the unit, follows the pose), the rest of the table is x2game's. The fx items of bone 0 (1,352: auras, rings) stay on the origin: no capture shows one, the real client's launch disc is the only item known to sit on `bip01`. The real beams look different from ours in colour and shape (Arc Lightning is a blue swirl disc and thin strands, ours white strands only: aa-fx), the placement was compared by height only.
 
 **Gliding effects** (`the_gliding_buffs_effect_groups_resolve_in_the_particle_libraries`, prints the table): the 55 gliding buffs
-carry 9 particle effects and all resolve in their `libs/particles` library: `abillity_skill_table_m.system_skill.gliding_skill` (46 buffs,
-events 0..5, the held wind effect of fx group 731), `pegasus_wing_buff` (6747) and `pegasus_wing_black_buff` (7076), the quest wings
+carry 8 particle effects and all resolve in their `libs/particles` library: `abillity_skill_table_m.system_skill.gliding_skill` (46 buffs,
+events 0..5: the 44 of fx group 731 and Lucius' wings of group 679), `pegasus_wing_buff` (6747) and `pegasus_wing_black_buff` (7076), the quest wings
 `X2_EFFECTS_P.doodad.quest_freedom_wing` / `_dot` (1940, 8283), `quest_albatross_wing` (1392), `X2_EFFECTS.doodad_effect.quest_astra_wing_dot` (1443) and
 `prefab.shrine_goddess` (8271). Lucius' wings (1371, 1514) add the `FxChr` `glider_a.chr`, which is not in the pak: that item
 draws nothing (see the `FxChr` note below). The buff effect path (`buffs::spawn_fx`) plays all of these like any buff effect: the gliding flag only stops the
-start animations. Whether the wind effect is visible in flight is capture-pending (no screenshot of a 1.2 flight).
+start animations. What `gliding_skill` looks like in flight (a trail, wind or nothing visible) is capture-pending (no screenshot of a 1.2 flight).
 
 **Character effects** (`FxChr`, 12 items: Summon Crows' crows, the pet net, Golem's hand, the whip, the glider): `FxItem::chr`, spawned as
 `aa_fx::ChrEffect` instead of `Effect` in `spawn_effect` / `ground_effect`, on the bone like a particle item, `life` = the held limit
