@@ -747,7 +747,9 @@ with the old parts on a swap; re-anchoring them by bone name is not implemented.
   and 12). Once the controller has reset (5 s without a sample, `sub_390AFF70` clears the arrival time) the
   no-sample branch of `sub_390B2420` writes 0 and 0. So every ship, including the one this client steers, shows the
   server's echo, not the local request. `VehicleTrack::display` carries both (the timeout now zeroes them) and
-  `RemoteUnit::helm` hands them to `ShipHelm`, which `helm::attach_ship_helms` puts on every `ShipModel` root.
+  `RemoteUnit::helm` hands them to `ShipHelm`, which `helm::attach_ship_helms` puts on every `ShipModel` root. A
+  unit whose vehicle track was dropped (death and resurrection reset it) has no samples and gets 0 and 0, as that
+  no-sample branch writes.
 * **Rudder (`UpdateRudder`, `sub_390C7410`, :170604).** `sub_390C7330` takes the first model element named
   `rudder` (`sub_39104630`, any element type, exact name) and keeps its authored local matrix; every frame the
   rudder's matrix is that matrix times `RotZ(model+0x35c)`. The steering is used **as radians**: full helm (127)
@@ -776,7 +778,8 @@ with the old parts on a swap; re-anchoring them by bone name is not implemented.
 * **Throttle clips (`UpdateThrottleAnim`, `sub_390DB700`, :185523).** Only when a character element has `run_f`,
   `run_b` or `idle` (`sub_390C20E0`). Each frame whose throttle differs from the last (model+0x3a0, -1 at load) plays
   `run_f` (> 0), `run_b` (< 0) or `idle` (0), looped, 0.5 s blend, at speed `|throttle|` (1 for idle); a same-sign
-  change sets the native "keep going" flag, so the port only retimes the playing clip then. Among the rigged ship
+  change adds flag `0x8` to the play flags (`0x5082` -> `0x508A`), and the port reads that as "keep the playing
+  clip", so it only retimes it then (see below). Among the rigged ship
   parts only the duck boat's `coupleduckship_foot.chr` (all three) and the boarding ship's telescope (`idle`) have
   them: `helm::ThrottleClips` binds them in `vehicle::add_parts`.
 
@@ -787,6 +790,13 @@ feet (`--model 1287 --view duck --throttle 1`: the feet move between frames, at 
 
 Approximate or capture-pending:
 
+* **The same-sign throttle change.** Flag `0x8` is `CA_TRANSITION_TIMEWARPING` in the CryEngine 3 flag set and
+  `CA_ALLOW_ANIM_RESTART` (`0x100`) is never set, so a running `run_f` is not restarted; that the new speed still
+  applies to it is inferred, not captured. The parameter block's layer field is 1, so 1.2 plays the throttle clip on
+  layer 1 over the idle; the port replaces the base clip, which looks the same while the clip covers the same bones.
+* **The own ship** shows the server's echo (the setters' only callers are the network controller); not checked live.
+* **The rudder axis and sign** (cry Z of the part, aft edge to starboard on a positive helm) were checked visually on
+  the galleon only.
 * **The wheel option** (`dword_39AE6C90`, an object filled at run time) was not read; 7.0 is the value 1.2 uses while
   it is null. A capture of a galleon helm turning (time to full lock, 405 degrees) would confirm it.
 * **The helmsman clips** behind `dword_39AC38BC` / `C0` / `C4` are hashes in the image data whose names were not
