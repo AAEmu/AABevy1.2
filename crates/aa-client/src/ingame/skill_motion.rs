@@ -153,6 +153,8 @@ pub struct SkillMove {
     /// Only actual admitted kind1/2/4 controller producers set this. Blink and
     /// impulse approximations do not establish native actor+58 activity.
     controller_kind: Option<u32>,
+    /// Fall speed of a dash that ran off a ledge (m/s).
+    fall: f32,
 }
 
 /// `Floating` skill controller of a buff (`value1` mm up, at `value2` mm/s): the unit rises, hangs while the buff lasts and falls
@@ -172,7 +174,7 @@ struct Hover {
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, fall: 0.0 }
     }
 
     /// A settled skill move for the deck tests: only its presence matters there.
@@ -213,6 +215,23 @@ impl SkillMove {
     /// Seconds until the move is over.
     fn remaining(&self) -> f32 {
         (self.flight.eta - self.t).max(0.0) + self.recover
+    }
+
+    /// The height of a dash over `floor` (from `z`): 1.2 runs it as held-forward movement (`390A8EE0` hands the actor's movement
+    /// controller a forward request), so it keeps to the ground and runs off a ledge into a fall.
+    fn run_height(&mut self, z: f32, floor: f32, dt: f32) -> f32 {
+        if !floor.is_finite() {
+            return z;
+        }
+        if self.fall == 0.0 && z - floor <= STEP_UP {
+            return floor;
+        }
+        self.fall += path::GRAVITY * dt;
+        let z = (z - self.fall * dt).max(floor);
+        if z <= floor {
+            self.fall = 0.0;
+        }
+        z
     }
 }
 
@@ -258,8 +277,9 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
         blocked = pushed.blocked && reached.distance(xy) > 0.2;
         xy = reached;
     }
-    let floor = floor_at(terrain, collision, Vec3::new(xy.x, xy.y, pos.z.max(want.z)), STEP_UP);
-    let mut z = want.z;
+    let dash = mv.controller_kind == Some(4);
+    let floor = floor_at(terrain, collision, Vec3::new(xy.x, xy.y, if dash { pos.z } else { pos.z.max(want.z) }), STEP_UP);
+    let mut z = if dash { mv.run_height(pos.z, floor, dt) } else { want.z };
     if floor.is_finite() {
         z = z.max(floor);
     }
@@ -654,7 +674,7 @@ impl Starter<'_, '_, '_, '_, '_> {
         let target = reference_unit.and_then(|u| self.roster.point(u)).or(at);
         let flight = match c.kind {
             2 => path::leap_end(c, who.pos, who.yaw, target).and_then(|end| path::leap(c, who.pos, end, 1.0)),
-            4 => path::dash(c, who.pos, who.yaw),
+            4 => path::dash(c, who.pos, who.yaw, path::DASH_SPEED),
             _ => None,
         };
         let Some(flight) = flight else {
@@ -981,6 +1001,33 @@ mod tests {
         assert!(frames <= 30, "{frames} frames for 0.4 s");
         assert!(Vec2::new(pos.x - end.x, pos.y - end.y).length() < 0.3, "{pos} vs {end}");
         assert!(mv.landed);
+    }
+
+    /// A dash is running, not a flight: east of the spawn the ground falls about 3 m over its 16 m, and it stays on the ground.
+    #[test]
+    fn a_dash_keeps_to_the_ground() {
+        let terrain = TerrainQuery::new("main_world");
+        let collision = WorldCollision::new("main_world", terrain.clone());
+        let (x, y) = (15480.0f32, 15282.0f32);
+        let Some(z) = terrain.height_at(x, y) else { return };
+        let mut v = [0; 13];
+        v[0] = 3000;
+        let c = Controller { id: 6585, kind: 4, v, start_anim: 0 };
+        let from = Vec3::new(x, y, z);
+        let mut mv = SkillMove::new(path::dash(&c, from, -std::f32::consts::FRAC_PI_2, path::DASH_SPEED).unwrap(), Kind::Dash, false);
+        mv.controller_kind = Some(4);
+        let mut pos = from;
+        for _ in 0..240 {
+            let step = advance(&mut mv, pos, 1.0 / 60.0, &terrain, &collision);
+            let ground = terrain.height_at(step.pos.x, step.pos.y).unwrap();
+            assert!((step.pos.z - ground).abs() < 0.3 && !step.airborne, "{} over {ground}", step.pos.z);
+            pos = step.pos;
+            if step.done {
+                break;
+            }
+        }
+        assert!(mv.landed && (pos.x - x - path::DASH_SPEED * 3.0).abs() < 0.2, "{pos}");
+        assert!(z - pos.z > 1.0, "downhill: {z} -> {}", pos.z);
     }
 
     #[test]
