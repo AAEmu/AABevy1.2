@@ -3483,11 +3483,14 @@ the player is attached (`player+0x3af0`) refuses with 102 `SLAVE_UNBIND_FIRST` w
 `CANNOT_INTERACT_WHILE_MOUNTING` otherwise, except `source_mount_mate` skills (`desc +0x14C`, column 0x62) on a mate.
 If the option object `dword_39ADB2A0` (vfunc +8) returns 1 the messages are skipped and, within 3.0 m of the doodad
 (`sub_39093800`), the mate is left with `CSUnMountMate` reason 9 (`sub_39361E80(9)`) or the slave unbound
-(`sub_39345AA0`), and the use goes on.
+(`sub_39345AA0`); in or out of the 3 m the function returns 1 and the use goes on. `FUN_393b3ec0` (the bar / key use)
+runs the gate before its range check, so a refused use never walks; `FUN_393b7440` (a pick from the interaction list)
+walks first and gates after its range check.
 
-`hud/doodad.rs` runs `use_gate` in `execute`, before the labor and attachment checks, with the state from
-`HudData.snapshot.dead`, `Gliding::flying()`, a `Ladder` on the player and `LocalMount` / the spawn's `attached_to`
-(`LocalSeat.cart` = slave). The flags come from `Tables::mount_flags` (`skills.source_mount`, `source_mount_mate`; 1741
+`hud/doodad.rs` runs `use_gate` in `execute` before the labor and attachment checks, and for a bar use out of reach
+before `defer_action` starts the walk. The state comes from `HudData.snapshot.dead`, `Gliding::flying()`, a `Ladder`
+on the player and `LocalMount` / the spawn's `attached_to`; the unit is a slave when the seat is a cart, a ship or a
+turret (`LocalSeat.cart || ship || turret`, all `UnitKind::Slave`). The flags come from `Tables::mount_flags` (`skills.source_mount`, `source_mount_mate`; 1741
 skills have `source_mount` t only, 45 both, 10 `source_mount_mate` only); a skill missing from the table is left to the
 server. Refusals go through `ShowError` (an `ErrorMessageType`, as 102 is elsewhere) and send no `CSStartSkill`.
 
@@ -3499,8 +3502,11 @@ worn backpack is a glider too raises 543 `CANNOT_CHANGE_BACKPACK_IN_GLIDING` dur
 Approximate / capture-pending:
 
 * The auto-dismount option `dword_39ADB2A0` is not identified: `hud::doodad::View.auto_dismount` defaults off, so the message
-  branch runs. When on, only the mate (`unmount`, reason 9) is wired; the slave unbind is not. Out of 3 m nothing is sent
-  (the native client walks to the doodad first, as the existing pending-use walk does).
+  branch runs. When on, only the mate (`unmount`, reason 9) is wired; the slave unbind is not. Out of 3 m the use goes
+  on still mounted, as natively. A bar use between the 2.1 m reach and 3 m walks first and dismounts on arrival, where
+  the native client dismounts before the walk.
+* The right-click path (`right_click`) still walks to an out-of-reach doodad before the gate runs on arrival; which native
+  path a right click takes is not traced.
 * The hanging refusal also requires `*(doodad+128) == dword_39AC785C` natively (not identified); any ladder grab refuses.
-* The mounted-attachment kind is taken from `LocalSeat.cart`; a spawn attached without a `LocalMount` counts as a mate.
+* A spawn attached without a `LocalMount` counts as a mate.
 * Local NPC interactions (`Command::Interact`, `hud/api.rs`) are not on this path and are unchanged.
