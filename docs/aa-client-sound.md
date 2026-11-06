@@ -91,12 +91,20 @@ the whole mix, `soundmoods.xml`):
 | `underwater` | the listener is below the surface of a water body |
 | `low_health` | alive with health strictly above zero and below a fifth; native `3907b221..3907b266`, f32 constant at `3999dd34` |
 | `falling` | `LocalJump.freefall` |
+| `gliding` | `Gliding::flying()` (an active flight; inferred, see below) |
 | `driving` | `LocalMount::driving()` |
 | `indoor` | the reverb preset under the listener is `x2_hall_1` / `x2_room_1` / `x2_cave_1` at weight 1 |
 | `default` | always in game |
 
-Not raised (no known trigger or no data): `gliding`, `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
+Not raised (no known trigger or no data): `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
 `machinima_default`.
+
+`gliding` (priority 8, pack 101 item 2016 `x2vehicles:glider:run_soundmood`) follows the flight: the pack item and the mix are in
+the data, but the decompile does not show who adds the mood, so tying it to `Gliding::flying()` is inferred (capture-pending).
+The glider `.cal`s name a `$SoundEventDatabase` whose `fist_ac_gliding_start.caf` / `_end.caf` fire `x2vehicles:glider:start`
+(0.02 s) and `:end` (0.33 s), but the item model plays only `loop` and `endloop` (`FUN_3911d6c0`, `glide.rs::Pose::glider_clip`)
+and the character's databases have no gliding events, so nothing in the decompiled path plays those two sounds; they are
+capture-pending and not wired.
 
 A mood with an item in the zone's pack (`combat`, `death`, `low_health`, `falling`, `gliding`, `quest_camera`, `siege_period`;
 the other moods have none in any of the 72 packs) has a sound. The original (`SoundMoodManager::AddSoundMood`,

@@ -12,6 +12,7 @@
 //! | `underwater` | 8 | the camera is below the surface of the sea or a pond: ambience 10 % and every effect low-passed at 300 Hz to 2 kHz |
 //! | `low_health` | 8 | the character is alive with health strictly between 0 and a fifth (`3907b221..3907b266`) |
 //! | `falling` | 8 | the character is in a free fall |
+//! | `gliding` | 8 | the character flies on a glider: ambience, footsteps and monster voices at 20 % under a 2 kHz low-pass, music 80 % |
 //! | `driving` | 8 | the character steers a vehicle or a mount |
 //! | `indoor` | 2 | the listener is inside a hall / room / cave reverb volume: the outdoor ambience goes, the inside ambience comes |
 //! | `default` | 1 | always in game, the mix nothing else claims |
@@ -22,7 +23,8 @@
 //! mood is removed (2 s); [`drive_moods`] does the same, the sound coming from the most specific pack of the place that has
 //! the item. The zone music keeps playing under the mix and is heard again when the mood ends.
 //!
-//! The original's `gliding` (no glider in the 1.2 data the client has), `flyng`, `moving`, `dancing`, `menu`,
+//! `gliding` is inferred from an active flight (`Gliding::flying`, like `falling`): its pack item (`x2vehicles:glider:run_soundmood`,
+//! pack 101 item 2016) is in the zone packs, but the decompile does not show who adds the mood. The original's `flyng`, `moving`, `dancing`, `menu`,
 //! `quest_camera`, `siege_period` and `machinima_default` are not raised: their triggers are not known. `indoor` is
 //! inferred from the reverb preset the player stands in (the `ReverbVolume` entities of halls, rooms and caves), which is
 //! the only indoor information the data gives.
@@ -40,6 +42,7 @@ use super::ui::Gate;
 use super::zone::ZonePacks;
 use super::{Packs, log_enabled};
 use crate::Screen;
+use crate::ingame::glide::Gliding;
 use crate::ingame::{LocalJump, LocalMount};
 
 /// The reverb presets of enclosed places.
@@ -67,6 +70,7 @@ struct Inputs {
     /// Health 0 to 1.
     health: Option<f32>,
     falling: bool,
+    gliding: bool,
     driving: bool,
     underwater: bool,
     indoor: bool,
@@ -95,6 +99,9 @@ fn select(i: &Inputs) -> Vec<&'static str> {
     }
     if i.falling {
         moods.push("falling");
+    }
+    if i.gliding {
+        moods.push("gliding");
     }
     if i.driving {
         moods.push("driving");
@@ -131,6 +138,7 @@ pub(super) fn drive_moods(
     reverb: Option<Res<ListenerReverb>>,
     water: Option<Res<WaterQuery>>,
     jump: Option<Res<LocalJump>>,
+    gliding: Option<Res<Gliding>>,
     mount: Option<Res<LocalMount>>,
     ears: Query<&GlobalTransform, With<SpatialListener>>,
     mut sent: Local<Sent>,
@@ -154,6 +162,7 @@ pub(super) fn drive_moods(
         input.combat_music = gate.0.options.lock().unwrap_or_else(|e| e.into_inner()).combat_music;
         input.health = stats.as_deref().map(PlayerStats::hp_fraction);
         input.falling = jump.as_deref().is_some_and(|j| j.freefall);
+        input.gliding = gliding.as_deref().is_some_and(Gliding::flying);
         input.driving = mount.as_deref().is_some_and(|m| m.driving().is_some());
         if let (Some(water), Some(ear)) = (&water, ears.iter().next()) {
             let p = ear.translation();
@@ -268,5 +277,12 @@ mod tests {
     fn falling_driving_and_diving_are_moods() {
         let all = Inputs { falling: true, driving: true, underwater: true, ..game() };
         assert_eq!(select(&all), ["underwater", "falling", "driving", "default"]);
+    }
+
+    #[test]
+    fn a_flight_raises_the_gliding_mood() {
+        assert_eq!(select(&Inputs { gliding: true, ..game() }), ["gliding", "default"]);
+        assert_eq!(select(&Inputs { falling: true, gliding: true, ..game() }), ["falling", "gliding", "default"]);
+        assert!(select(&Inputs { gliding: true, ..default() }).is_empty(), "not in game");
     }
 }
