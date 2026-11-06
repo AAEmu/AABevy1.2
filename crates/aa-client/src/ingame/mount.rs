@@ -21,7 +21,7 @@ use aa_net::{Event, NetEvent, Pos};
 use aa_world::{TerrainQuery, WorldCollision, coords::{bevy_to_cry, cry_rot_to_bevy, cry_to_bevy}};
 use bevy::prelude::*;
 
-use super::anim::{Locomotion, Motion, bind_clip};
+use super::anim::{Locomotion, Motion, Swimming, bind_clip};
 use super::camera::OrbitCamera;
 use super::data::{AttachPointStrings, Db, MountSpeed};
 use super::player::{HEIGHT, LocalPlayer, Mover, RADIUS, STEP_UP, SendState, floor_at, placement};
@@ -355,6 +355,15 @@ struct RiderDurations {
 struct MountMotion {
     speed: f32,
     airborne: bool,
+}
+
+impl MountMotion {
+    /// What a rider takes from its mount's `Motion`. A swimming mount ([`Swimming`]) gives it PseudoSpeed 0, so it sits in
+    /// its idle: `X2::ActorUnitModel::Update` (`sub_390DCC80`, x2game12.c:186796-186815) copies the mount graph's
+    /// PseudoSpeed to the rider's, and 0 instead while the mount's `Stance` is `swim`.
+    fn of(motion: Option<&Motion>, swimming: bool) -> MountMotion {
+        motion.map_or_else(MountMotion::default, |m| MountMotion { speed: if swimming { 0.0 } else { m.speed }, airborne: m.airborne })
+    }
 }
 
 #[cfg(test)]
@@ -1087,6 +1096,7 @@ pub fn pose_riders(
             Option<&Animator>,
             Option<&super::vehicle::SeatHelpers>,
             Option<&Motion>,
+            Has<Swimming>,
         ),
         Without<Rider>,
     >,
@@ -1102,7 +1112,7 @@ pub fn pose_riders(
         }
         let mounted = views.unit_entity(rider.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
         let (pos, facing, mount_motion, tempo, rotation) = match mounted {
-            Some((e, (mount, mount_animator, helpers, motion))) => {
+            Some((e, (mount, mount_animator, helpers, motion, swimming))) => {
                 let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
                 let world = seat_world(
                     e,
@@ -1121,7 +1131,7 @@ pub fn pose_riders(
                 (
                     bevy_to_cry(world),
                     facing,
-                    motion.map_or_else(MountMotion::default, |m| MountMotion { speed: m.speed, airborne: m.airborne }),
+                    MountMotion::of(motion, swimming),
                     mount_animator.map_or(1.0, |a| a.speed),
                     rider_rotation(&rider.seat, helpers, mount_rotation),
                 )
@@ -1790,17 +1800,19 @@ pub fn track_local_mount(
 }
 
 /// The mate the player drives stands where the player's mover is and plays its gait for the mover's speed, and its jump while the
-/// mover is in the air (the speed is kept there, so its riders keep their gait); a passenger's mover goes with the mount, and a
-/// ship driver's goes with the server-placed hull.
-#[allow(clippy::type_complexity)]
+/// mover is in the air (the speed is kept there, so its riders keep their gait), or its swim clips while the mover swims
+/// ([`Swimming`], by the pressed direction); a passenger's mover goes with the mount, and a ship driver's goes with the
+/// server-placed hull.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn drive_mount(
+    mut commands: Commands,
     seat: Res<LocalMount>,
     views: Res<Views>,
     net: Res<Units>,
     transforms: Query<&Transform, Without<Driven>>,
     parents: Query<&ChildOf>,
     mut player: Query<&mut Mover, With<LocalPlayer>>,
-    mut driven: Query<(&mut RemoteUnit, &mut Transform, Option<&mut Motion>), (With<Driven>, Without<LocalPlayer>)>,
+    mut driven: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>, Option<&mut Swimming>), (With<Driven>, Without<LocalPlayer>)>,
 ) {
     let (Some(s), Ok(mut mover)) = (seat.0, player.single_mut()) else { return };
     // a cart's driver is moved by `cart::drive_cart`; a ship's hull is placed by the server, and its driver's mover
@@ -1825,7 +1837,7 @@ pub fn drive_mount(
         }
         return;
     }
-    let Some((mut unit, mut transform, motion)) = entity.and_then(|e| driven.get_mut(e).ok()) else { return };
+    let Some((entity, mut unit, mut transform, motion, swimming)) = entity.and_then(|e| driven.get_mut(e).ok()) else { return };
     unit.pos = mover.pos;
     unit.facing = mover.facing;
     *transform = placement(unit.pos, unit.facing, unit.scale());
@@ -1833,7 +1845,30 @@ pub fn drive_mount(
         let speed = mover.velocity.truncate().length();
         let moving = speed > 0.3;
         let airborne = !mover.grounded && mover.swim.is_none();
-        *motion = Motion { speed: if moving { speed } else { 0.0 }, local_dir: if moving { Vec2::Y } else { Vec2::ZERO }, airborne, climb: None };
+        // on land the mate runs forward; swimming, its clip follows the request (the graph's `SwimControl`), which is zero
+        // while it coasts with no key held
+        let local_dir = match mover.swim {
+            Some(swim) if moving => swim.local_dir,
+            _ if moving => Vec2::Y,
+            _ => Vec2::ZERO,
+        };
+        *motion = Motion { speed: if moving { speed } else { 0.0 }, local_dir, airborne, climb: None };
+    }
+    // the mate's `waterLevel` against its own swim level (the mover floats it at 0)
+    match (mover.swim, swimming) {
+        (Some(swim), swimming) => {
+            let level = mover.pos.z + s.speed.swim_level - swim.surface;
+            match swimming {
+                Some(mut swimming) => swimming.level = level,
+                None => {
+                    commands.entity(entity).insert(Swimming { level });
+                }
+            }
+        }
+        (None, Some(_)) => {
+            commands.entity(entity).remove::<Swimming>();
+        }
+        (None, None) => {}
     }
 }
 
@@ -1864,6 +1899,7 @@ pub fn pose_local_rider(
             Option<&Animator>,
             Option<&super::vehicle::SeatHelpers>,
             Option<&Motion>,
+            Has<Swimming>,
         ),
         (With<RemoteUnit>, Without<LocalPlayer>),
     >,
@@ -1877,7 +1913,7 @@ pub fn pose_local_rider(
     }
     let mounted = views.unit_entity(s.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
     let (pos, mount_motion, tempo, rotation) = match mounted {
-        Some((e, (mount, mount_animator, helpers, motion))) => {
+        Some((e, (mount, mount_animator, helpers, motion, swimming))) => {
             let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
             let shown = super::units::current_transform(e, &transforms, &parents);
             let mount_rotation = shown.map_or(Quat::from_rotation_y(mover.facing), |t| t.rotation);
@@ -1892,7 +1928,7 @@ pub fn pose_local_rider(
                     &parents,
                     &mut missing,
                 )),
-                motion.map_or_else(MountMotion::default, |m| MountMotion { speed: m.speed, airborne: m.airborne }),
+                MountMotion::of(motion, swimming),
                 mount_animator.map_or(1.0, |a| a.speed),
                 // the native driver's quaternion is the mount's world rotation: tilt the rider
                 // with its mount (a creature mount is yaw-only), including a ship parent's yaw.
@@ -4073,6 +4109,69 @@ mod child_seat_tests {
             mover.pos
         );
         assert!(mover.pos.distance(local) > 1.0, "the local offset was used");
+    }
+
+    /// The mate the player drives swims with its mover: [`Swimming`] at its `waterLevel` (0 floating at its swim level, -1.5
+    /// a metre and a half under it) with the pressed direction for its clip, a coast with no key held asks for nothing, and
+    /// it leaves the water with the mover. Its rider takes PseudoSpeed 0 in the water (`MountMotion::of`).
+    #[test]
+    fn the_driven_mate_swims_with_its_mover() {
+        use crate::ingame::swim::Swim;
+        let mut app = App::new();
+        app.init_resource::<Views>()
+            .init_resource::<Units>()
+            .insert_resource(LocalMount(Some(LocalSeat {
+                mount: 9,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: false,
+                speed: MountSpeed::default(),
+                lift: 0.0,
+            })))
+            .add_systems(Update, drive_mount);
+        let unit = crate::ingame::seating::fixture_unit(9, 139, None);
+        let mate = app.world_mut().spawn((RemoteUnit::announced(&unit), Transform::default(), Motion::default(), Driven)).id();
+        app.world_mut().resource_mut::<Views>().fixture_actor(&unit, Some(mate));
+        let (surface, level) = (100.0, MountSpeed::default().swim_level);
+        let swim = |local_dir: Vec2| Swim { surface, kind: aa_world::WaterKind::Sea, local_dir, speed: 1.8, vertical: 0.0, deep: false, hold: 0.0 };
+        let player = app
+            .world_mut()
+            .spawn((
+                LocalPlayer { obj_id: 1 },
+                Mover { pos: Vec3::new(10.0, 10.0, surface - level), facing: 0.0, vz: 0.0, grounded: false, velocity: Vec3::new(1.8, 0.0, 0.0), swim: Some(swim(Vec2::X)), wading: 0.0 },
+            ))
+            .id();
+        app.update();
+        let state = |app: &App| (*app.world().get::<Motion>(mate).unwrap(), app.world().get::<Swimming>(mate).map(|s| s.level));
+        let (motion, swimming) = state(&app);
+        assert!((motion.speed - 1.8).abs() < 1e-5 && motion.local_dir == Vec2::X && !motion.airborne, "{motion:?}");
+        assert!(swimming.is_some_and(|l| l.abs() < 1e-4), "floating at its level: {swimming:?}");
+        assert_eq!(MountMotion::of(Some(&motion), true), MountMotion { speed: 0.0, airborne: false }, "the rider idles");
+        assert_eq!(MountMotion::of(Some(&motion), false).speed, motion.speed);
+
+        // it coasts with no key held, a metre and a half under its level
+        {
+            let mut mover = app.world_mut().get_mut::<Mover>(player).unwrap();
+            mover.swim = Some(swim(Vec2::ZERO));
+            mover.pos.z -= 1.5;
+        }
+        app.update();
+        let (motion, swimming) = state(&app);
+        assert!(motion.speed > 1.0 && motion.local_dir == Vec2::ZERO, "{motion:?}");
+        assert!(swimming.is_some_and(|l| (l + 1.5).abs() < 1e-4), "{swimming:?}");
+
+        // out of the water at a run
+        {
+            let mut mover = app.world_mut().get_mut::<Mover>(player).unwrap();
+            mover.swim = None;
+            mover.grounded = true;
+            mover.velocity = Vec3::new(9.0, 0.0, 0.0);
+        }
+        app.update();
+        let (motion, swimming) = state(&app);
+        assert!(motion.local_dir == Vec2::Y && swimming.is_none(), "{motion:?} {swimming:?}");
     }
 
     fn tick(app: &mut App, dt: f32) {
