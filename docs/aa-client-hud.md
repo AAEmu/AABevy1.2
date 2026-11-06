@@ -3472,3 +3472,35 @@ helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 
 `cargo run -p aa-client --example options_hang -- --headless --mute` boots the real World-stage HUD,
 raises `open_config`, opens the original Options frame and fails if the open plus the next tick take
 more than 3 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.
+
+## Local doodad-use gate and glider back slot (2026-11-06)
+
+`FUN_393b3d50` (`x2game12.c:784121`, called from the doodad-use paths `FUN_393b3ec0` and `FUN_393b7440`) refuses a doodad
+use before any packet. `sub_39428370` raises the alert and does not return, so each refusal is the only message:
+dead 332 (`player+0x3c26`), gliding 334 (buff list holds the gliding record `off_3999CFDC`), hanging 223; then a skill
+with `source_mount` (`desc +0x14B`, `skills.source_mount`, loader `39731870` column 0x61) passes. Any other use while
+the player is attached (`player+0x3af0`) refuses with 102 `SLAVE_UNBIND_FIRST` when the unit is a slave and 222
+`CANNOT_INTERACT_WHILE_MOUNTING` otherwise, except `source_mount_mate` skills (`desc +0x14C`, column 0x62) on a mate.
+If the option object `dword_39ADB2A0` (vfunc +8) returns 1 the messages are skipped and, within 3.0 m of the doodad
+(`sub_39093800`), the mate is left with `CSUnMountMate` reason 9 (`sub_39361E80(9)`) or the slave unbound
+(`sub_39345AA0`), and the use goes on.
+
+`hud/doodad.rs` runs `use_gate` in `execute`, before the labor and attachment checks, with the state from
+`HudData.snapshot.dead`, `Gliding::flying()`, a `Ladder` on the player and `LocalMount` / the spawn's `attached_to`
+(`LocalSeat.cart` = slave). The flags come from `Tables::mount_flags` (`skills.source_mount`, `source_mount_mate`; 1741
+skills have `source_mount` t only, 45 both, 10 `source_mount_mate` only); a skill missing from the table is left to the
+server. Refusals go through `ShowError` (an `ErrorMessageType`, as 102 is elsewhere) and send no `CSStartSkill`.
+
+`hud/drag.rs` (`FUN_394e41f0`): wearing a glider (`item_backpacks.backpack_type_id` 2) in the back slot while the
+worn backpack is a glider too raises 543 `CANNOT_CHANGE_BACKPACK_IN_GLIDING` during a flight and sends no `SwapItems`
+(bag move and equip alike). The decompile limits it to glider for glider; a worn backpack of another kind raises 315
+`BACKPACK_OCCUPIED` first, flying or not, which is not checked here (the server answers it).
+
+Approximate / capture-pending:
+
+* The auto-dismount option `dword_39ADB2A0` is not identified: `hud::doodad::View.auto_dismount` defaults off, so the message
+  branch runs. When on, only the mate (`unmount`, reason 9) is wired; the slave unbind is not. Out of 3 m nothing is sent
+  (the native client walks to the doodad first, as the existing pending-use walk does).
+* The hanging refusal also requires `*(doodad+128) == dword_39AC785C` natively (not identified); any ladder grab refuses.
+* The mounted-attachment kind is taken from `LocalSeat.cart`; a spawn attached without a `LocalMount` counts as a mate.
+* Local NPC interactions (`Command::Interact`, `hud/api.rs`) are not on this path and are unchanged.
