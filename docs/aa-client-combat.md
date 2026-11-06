@@ -777,7 +777,10 @@ the graphs and the data say what it plays:
 the clip itself. The rider loop keeps playing underneath (`Rider::step`'s `Animator::play` leaves the layer alone). The `.cal`
 (clips, anim events, layer sounds) comes from the unit's `Character`, as `Rider::bind` reads it. The action ends like any layered
 one (`end_actions`, `release_layers`); a hit reaction is skipped only while another action plays (a rider has no run of its
-own); `anim_rules` (`rejects`) needs locomotion and does not judge a rider's clips.
+own); `anim_rules` (`rejects`) needs locomotion and does not judge a rider's clips. A buff pose is one of these actions too: the
+stun's `ride_ub` (`all_re_combat_stun_ub`, 192 stun buffs) and a knockdown's throw play on the upper body, and `buffs.rs` skips
+the whole body start-and-loop chain (`play_once_then`) for a seated rider (`Stage::seated`), so the rider loop is still the base
+clip when the buff goes.
 
 **The mount's own skills** need nothing of their own: `SCSkillStarted` / `SCSkillFired` name the mate (caster kind 3) and the
 generic path plays the clips on its `RemoteUnit`. Back Kick 11369 (start 18 `all_co_sk_shout`, fire 20 `all_co_sk_lowkick`, cast
@@ -787,7 +790,8 @@ goes on. `global_horse.cal` has no `_ub` variant of either, so the clips themsel
 
 Tests: `skills.rs` `a_rider_reads_the_ride_ub_column`; `combat.rs` `a_seated_rider_plays_its_skills_on_the_upper_body` (seated by
 `mount::start_stop_riding`; the layer is `onehand_co_horse_attack_r_slash.caf` / `onehand_co_sk_shielddefense_mub.caf`, the rider
-loop stays the base clip, the layer and `Acting` end with the clip) and `the_driven_horse_plays_its_own_skill_and_keeps_galloping`.
+loop stays the base clip, the layer and `Acting` end with the clip), `a_buff_pose_leaves_the_rider_loop_alone` (stun 63 and
+knockdown 1172 on a seated rider) and `the_driven_horse_plays_its_own_skill_and_keeps_galloping`.
 Example: `cargo run -p aa-client --example rider_attack -- --mute --shot shots/aa-client/rider_attack.png --shot-after 6` (a Nuian
 man on the Lilyut horse, seated by the mount systems, 11013 fired every second through combat's own plugin; `AA_RIDER_ANIM=394`
 for Mounted Defense): the slash turns his torso and swings the right arm back while the legs keep the riding idle.
@@ -796,7 +800,8 @@ for Mounted Defense): the slash turns his torso and swings the right arm back wh
 
 * "`ride_ub`, else the clip itself on the upper body" is read from the graph and the data, not from the native selector. A clip
   with no `ride_ub` and no upper body state of its name (`all_co_sk_lowkick` on a player) probably plays nothing on a 1.2 rider;
-  ours plays it through the mask.
+  ours plays it through the mask. That includes a knockdown's `all_re_combat_knockback_start` and stand-up and a `ragdoll`
+  buff's `dead_0x` on a seated rider (whether 1.2 throws a rider off or shows nothing is capture-pending).
 * A galloping horse's Back Kick: `horse_upper_body.xml` maps `all_co_sk_shout` to `all_co_sk_shout_ub`, which `global_horse.cal`
   does not list, and has no lowkick state (only `horse_full_body.xml`'s `Skill Start -> all_co_sk_lowkick`, `IdleOneShotNoLookIk`).
   Whether the 1.2 horse shows nothing or stops for the kick while it runs is capture-pending; ours keeps galloping with the clips

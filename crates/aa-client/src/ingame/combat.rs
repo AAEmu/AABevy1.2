@@ -957,6 +957,12 @@ impl Stage<'_, '_> {
         candidates.into_iter().find(|n| self.clip(unit, n).is_some()).unwrap_or_else(|| base.to_string())
     }
 
+    /// The unit sits on a mount: `mount::seat` took its locomotion, and its base clip is the rider loop of `mount::Rider`, which
+    /// only `Rider::step` may change (its actions are upper body layers, see [`Stage::play`]).
+    fn seated(&self, unit: Entity) -> bool {
+        matches!(self.actors.get(unit), Ok((_, None, ..))) && self.riders.contains(unit)
+    }
+
     /// The unit's animation name table: its locomotion's, else (a seated rider has none) its character's, as `Rider::bind` reads it.
     fn cal(&self, unit: Entity) -> Option<Arc<aa_anim::Cal>> {
         match self.actors.get(unit).ok()? {
@@ -999,7 +1005,7 @@ impl Stage<'_, '_> {
         // (its legs are the rider loop of `mount::Rider`, which keeps playing under the layer)
         let (mask, exit, riding) = {
             let (animator, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
-            let riding = loco.is_none() && self.riders.contains(unit);
+            let riding = self.seated(unit);
             // a hit reaction never interrupts an action or a run (a rider's run is the mount's)
             let running = !riding && motion.is_some_and(|m| m.speed > 0.3);
             if dead || (loco.is_none() && !riding) || (kind == Act::Hurt && (acting.is_some() || running)) {
@@ -3308,6 +3314,79 @@ mod tests {
             assert!(app.world().get::<Acting>(entity).is_none(), "no action is left on the rider");
             assert!(!app.world().get::<Animator>(entity).unwrap().has_layer(), "the layer ended with {clip}");
             assert_eq!(base(&app), riding);
+        }
+    }
+
+    /// A buff pose on a seated rider: the stun 63 (`all_re_combat_stun`, whose row's `ride_ub` is `all_re_combat_stun_ub`) and
+    /// the knockdown 1172 (`knock_down`, thrown with `all_re_combat_knockback_start`). The pose plays on the upper body like any
+    /// other action of the rider; the whole body start-and-loop chain a standing unit gets (`play_once_then`) must not replace
+    /// the rider loop, which is still the base clip when the buff is gone (needs `AA_PAK` and `AA_DB`).
+    #[test]
+    fn a_buff_pose_leaves_the_rider_loop_alone() {
+        let (Some(book), Some(db), Ok(game)) = (SkillBook::open(), crate::ingame::data::Db::open(), aa_anim::GameDb::open()) else {
+            eprintln!("no database: skipped");
+            return;
+        };
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        let assets = aa_anim::CharacterDesc::default_for(&game, aa_anim::Race::Nuian, aa_anim::Gender::Male).and_then(|d| d.resolve(&game)).expect("a Nuian man");
+        let rig = shared_rig(&assets.skeleton).expect("his rig");
+        let cal = Cal::shared(&assets.cal).expect("his .cal");
+        let clips = ClipLibrary::default();
+        let set = ClipSet::load(&rig, cal.clone(), &clips).expect("his clips");
+        let ride_loop = bind_clip(&rig, &cal, &clips, "horse_ba_relaxed_idle").expect("the rider idle");
+        let mut rider = crate::ingame::seating::fixture_unit(7, 42, None);
+        rider.attached_to = Some(aa_net::model::Attachment { obj_id: 9, point: 1, reason: 1 });
+        rider.buffs.clear();
+        let mut horse = crate::ingame::seating::fixture_unit(9, 43, None);
+        horse.model_id = 139;
+        let mut units = Units::default();
+        units.by_id.insert(7, rider.clone());
+        units.by_id.insert(9, horse);
+        let mut app = clip_app(book, clips, units);
+        app.insert_resource(db).insert_resource(State::new(crate::Screen::InGame)).init_resource::<framehold::Frameholds>().add_systems(
+            Update,
+            (
+                crate::ingame::mount::start_stop_riding,
+                framehold::observe,
+                framehold::sync,
+                buffs::ensure_visuals,
+                handle_events,
+                framehold::sync_after_receipts,
+                buffs::reconcile_buffs,
+                end_actions,
+                release_layers,
+            )
+                .chain(),
+        );
+        app.world_mut().spawn((LocalPlayer { obj_id: 100 }, GlobalTransform::default()));
+        let character = aa_anim::Character { assets: Arc::new(assets), model_root: Entity::PLACEHOLDER, parts: Vec::new() };
+        let entity = app
+            .world_mut()
+            .spawn((RemoteUnit::announced(&rider), Animator::new(rig, Vec::new()), character, Locomotion::new(set), Motion::default(), Transform::default(), GlobalTransform::default()))
+            .id();
+        tick(&mut app, 0.1, Some(Event::UnitSpawned(Box::new(rider.clone()))));
+        assert!(app.world().get::<crate::ingame::mount::Rider>(entity).is_some() && app.world().get::<Locomotion>(entity).is_none(), "seated without locomotion");
+        app.world_mut().get_mut::<Animator>(entity).unwrap().play(ride_loop, true, 0.0);
+        let base = |app: &App| app.world().get::<Animator>(entity).unwrap().current.as_ref().map(|p| Arc::as_ptr(&p.clip.clip));
+        let riding = base(&app);
+        for (index, id) in [(1, 63), (2, 1172)] {
+            let buff = aa_net::buff::Buff { buff_id: id, index, kind: aa_net::buff::BuffKind::Unknown, ..default() };
+            tick(&mut app, 0.1, Some(Event::BuffCreated { obj_id: 7, buff }));
+            assert!(app.world().get::<Acting>(entity).is_some(), "buff {id} poses the rider");
+            assert!(app.world().get::<Animator>(entity).unwrap().has_layer(), "buff {id} is a layer");
+            assert_eq!(base(&app), riding, "buff {id} keeps the rider loop under its pose");
+            tick(&mut app, 0.1, Some(Event::BuffRemoved { obj_id: 7, index }));
+            // the knockdown's stand-up plays out before the rider is free again
+            for _ in 0..40 {
+                app.world_mut().get_mut::<Animator>(entity).unwrap().update(0.1);
+                tick(&mut app, 0.1, None);
+            }
+            assert!(app.world().get::<Acting>(entity).is_none(), "buff {id}: no action is left on the rider");
+            assert!(!app.world().get::<Animator>(entity).unwrap().has_layer(), "buff {id}: its layer is gone");
+            assert_eq!(base(&app), riding, "buff {id}: the rider loop is the base clip after the buff");
         }
     }
 
