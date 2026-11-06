@@ -137,8 +137,11 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
 * **Rearing:** Space on a standing mount (no move request) does not lift it: 1.2's ground step (`sub_3912B330`,
   x2game12.c:245905-245920) then calls the unit's +680 with 0, which sends the graph Signal `em_jump_in_place`
-  (`sub_39153FF0`) unless the graph is already in a `jump_in_place` state, and sets no jump vector. `control_player` writes
-  `mount::MountRear` (no vertical speed, no packet, no `PlayerInput::jumped`, so a cast goes on). The mate
+  (`sub_39153FF0`) unless the graph is already in a `jump_in_place` state, and sets no jump vector. It still sets the
+  mover's two jump bytes as the moving branch does (`*(WORD *)(a1 + 152) = 0x0101`, :245915), so the write-back
+  (`sub_3912AC50`, :245385-245405) raises the unit's `jumped` event and its jumping byte (+353): to the movement code the
+  rear is a jump without a vector. `control_player` writes `mount::MountRear` (no vertical speed, no packet, no
+  `PlayerInput::jumped`, so a cast goes on); that is a choice, not traced (see the open points below). The mate
   (`anim::rear_driven_mate`) plays `fist_em_jump_in_place` once (`horse_full_body.xml` `em_jump_in_place` :567 ->
   `em_jump_in_place_anim` :573, `IdleOneShotNoLookIk`, 0.2 s blend; 2.77 s for the horse) when it stands, entered from
   `Idle Start` only (:1528) and back to `Idle End` (:1658); a model whose `.cal` lacks the clip stays in its idle. The rider
@@ -319,9 +322,10 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * Whether pose 0 mounts (donkeys, elks, yatas), the boat/car poses and the other kinds really use these states; the
   graph's own `Enter` states were followed where present. Not captured (only a horse was mounted).
 * The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
-* The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet, how other clients see
-  the rear, whether movement input cuts it short and whether it cancels a cast (the code says no) need a capture of a
-  standing Space on a mount.
+* The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet (1.2 marks the unit
+  jumped and jumping, "Rearing" above, so a JUMPING packet is plausible), how other clients see the rear, whether
+  movement input cuts it short and whether it cancels a cast (the code says no, although 1.2 raises the same `jumped`
+  event as for a jump) need a capture of a standing Space on a mount.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
 * Getting off a vehicle seat (a `$` helper: the wagon's bench, a carriage's back seat): the remake skips the 1.5 m
