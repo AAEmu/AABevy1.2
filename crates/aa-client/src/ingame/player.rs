@@ -636,7 +636,8 @@ pub fn control_player(
         dev.scripted(t, 'H')
             || (!typing && (keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight))),
     );
-    let swim_aim = swim::aimed_velocity(local_dir, camera_pitch);
+    // the own buffs' `SwimSpeedMul` (flippers: 1.3)
+    let swim_aim = swim::aimed_velocity(local_dir, camera_pitch, sprint.as_ref().map_or(1.0, |s| s.swim_speed_mul));
     let local_vel = if swimming {
         // 1.2's swim takes the 3-D request: forward/back follow the camera pitch
         Vec2::new(swim_aim.x, swim_aim.y)

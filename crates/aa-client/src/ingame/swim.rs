@@ -189,15 +189,19 @@ pub fn should_swim(swimming: bool, feet: f32, wet: Option<Wet>, enter: f32) -> b
 /// `param_2 + 0x2d0` (x2game.dll.c:230934-230966) and takes its z as the vertical, so forward/back follow the camera:
 /// looking down and pressing forward dives, looking up and pressing forward surfaces. The pressed direction is normalised
 /// and then scaled by the swim speed, so the total speed stays at the clips' 3.0 m/s (2.4 backwards, `swim_back_speed_mul`);
-/// strafing stays horizontal.
-pub fn aimed_velocity(dir: Vec2, pitch: f32) -> Vec3 {
+/// strafing stays horizontal. `speed_mul` is the own buffs' `SwimSpeedMul` ([`super::sprint::Sprint::swim_speed_mul`]).
+pub fn aimed_velocity(dir: Vec2, pitch: f32, speed_mul: f32) -> Vec3 {
     let d = dir.normalize_or_zero();
     if d == Vec2::ZERO {
         return Vec3::ZERO;
     }
-    let speed = if d.y < -0.1 { BASE_SPEED * BACK_MUL } else { BASE_SPEED };
     let (sin, cos) = pitch.sin_cos();
-    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * speed
+    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * back_factor(d) * BASE_SPEED * speed_mul
+}
+
+/// `swim_back_speed_mul` for a pressed direction (x right, y forward): backwards and diagonally backwards swim slower.
+pub fn back_factor(dir: Vec2) -> f32 {
+    if dir.y < -0.1 { BACK_MUL } else { 1.0 }
 }
 
 /// The fraction of 1.2's surface hold at a desired vertical speed `desired_vz` and height `z` for a body whose floating
@@ -379,7 +383,7 @@ mod tests {
 
     #[test]
     fn swim_speed_depends_on_the_direction() {
-        let flat = |dir| aimed_velocity(dir, 0.0).truncate();
+        let flat = |dir| aimed_velocity(dir, 0.0, 1.0).truncate();
         assert_eq!(flat(Vec2::ZERO), Vec2::ZERO);
         assert!((flat(Vec2::Y).length() - 3.0).abs() < 1e-5);
         assert!((flat(Vec2::X).length() - 3.0).abs() < 1e-5);
@@ -389,20 +393,20 @@ mod tests {
 
     #[test]
     fn swimming_follows_the_camera_pitch() {
-        let aimed = aimed_velocity(Vec2::Y, 0.0);
+        let aimed = aimed_velocity(Vec2::Y, 0.0, 1.0);
         assert!((aimed - Vec3::new(0.0, 3.0, 0.0)).length() < 1e-5);
-        let down = aimed_velocity(Vec2::Y, -45f32.to_radians());
+        let down = aimed_velocity(Vec2::Y, -45f32.to_radians(), 1.0);
         assert!((down.length() - 3.0).abs() < 1e-5, "{down:?}");
         assert!((down.y - 2.1213).abs() < 1e-3 && (down.z + 2.1213).abs() < 1e-3, "{down:?}");
-        let up = aimed_velocity(Vec2::Y, 45f32.to_radians());
+        let up = aimed_velocity(Vec2::Y, 45f32.to_radians(), 1.0);
         assert!(up.z > 2.12 && (up.y - 2.1213).abs() < 1e-3, "{up:?}");
         // backwards follows the camera the other way, at the back speed
-        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians());
+        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians(), 1.0);
         assert!((back.length() - 2.4).abs() < 1e-5 && back.z > 1.69, "{back:?}");
         // strafing stays horizontal at the full speed whatever the pitch
-        let side = aimed_velocity(Vec2::X, -60f32.to_radians());
+        let side = aimed_velocity(Vec2::X, -60f32.to_radians(), 1.0);
         assert!((side - Vec3::X * 3.0).length() < 1e-5, "{side:?}");
-        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0), Vec3::ZERO);
+        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0, 1.0), Vec3::ZERO);
     }
 
     const DT: f32 = 1.0 / 60.0;
@@ -421,7 +425,7 @@ mod tests {
     #[test]
     fn a_gentle_course_stays_at_the_surface_and_a_steep_one_dives() {
         let (rest, up10, down10, down45) = (98.7f32, 10f32.to_radians(), -10f32.to_radians(), -45f32.to_radians());
-        let course = |pitch: f32| aimed_velocity(Vec2::Y, pitch).z;
+        let course = |pitch: f32| aimed_velocity(Vec2::Y, pitch, 1.0).z;
         // +10 degrees at the floating height must not push the body out of the water
         assert_eq!(wanted_vz(0.0, Some(course(up10)), rest, rest, DT, &mut 1.0), 0.0);
         assert!(wanted_vz(0.0, Some(course(up10)), rest + 0.1, rest, DT, &mut 1.0) <= 0.0, "the course lifted the body above rest");
