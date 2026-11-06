@@ -945,6 +945,40 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
   `control_player` returns early while a `SkillMove` runs; `camera.rs` `follow_player` adds the lag; `units.rs` `is_character` / `latest`;
   `remote.rs` `Track::latest`; `mod.rs` the plugin. `AA_SKILL_MOTION_LOG=1` logs every move.
 
+### Skill controllers of the mate the player drives
+
+Twelve Leap and eight Dash npc mount skills carry `skills.skill_controller_id` and no plot: Elegant Leap 17399 -> 7175 (50 degrees,
+25 m/s, 800 ms, 25 m along the facing, start anim 19 `all_co_sk_leapattack`, end anim 48 `all_ac_stop`), Haphazard Jump 21175 -> 7176
+(18 m), Drop Back 17391 -> 6750 (12 m back, `controller_camera`), Overrun 17388 -> 6586 (to 1 m short of the target, end anim 46),
+Dash 17152 / Breakthrough 11309 / Ram 22491 -> kind 4 3000 ms, Zebra Charge 21172 1000 ms, La Mancha's Call 19087 7000 ms. The rider
+skills a mount chains (`mount_attached_skills` 15506 / 17475 / 17476) have no controller.
+
+* **1.2.** Skill fire (`0x3939B010`, `x2game12.c:763380`) calls `StartSkillController` (virtual +0x90 of the caster's actor +0x3be8)
+  with the skill's controller unless the caster is rooted (+0x3A72) and the controller is not a Leap. `0x390CA700`
+  (`x2game12.c:173533`) runs kinds 1/2/3/4/6/7 only when that object's virtual +4 returns 1, and the owned mate's is the
+  `ActorUnitModel` (vtable `0x399A4F68`, virtual +4 `0x390E54D0` returns 1; `GetSpeedInfo` needs the same object, `docs/aa-net.md`). So
+  the 1.2 client moves its own driven mount and reports it as the mate's movement. The AAEmu server runs no controller for a mate
+  (its skill controller needs an NPC caster), so nothing else would move it.
+* **The client.** `SCSkillFired` names the mate as the caster. `Roster::runner` resolves a controller of the mate that
+  `LocalMount::driving` names (the driver's seat of a mate: not a passenger, cart, ship or turret seat) to the local player's mover,
+  which `mount::drive_mount` copies to the mate every frame (`drive_local` runs before it). The `SkillMove` carries the mate's id
+  (`unit`), and `drive_local` reports the move as `CSMoveUnit` with that id: the same body as the player's (jump / fall state, every
+  100 ms, a standing report at the end). `control_player` yields to the move as on foot (keys locked, the ride's carried speed reset).
+  The rooted check is the mate's buffs. Leaving the seat ends the move with no further report. A floating controller of a buff on the
+  mate runs the same way.
+* **Dash (kind 4)** holds forward at the mover's run speed: a mate's run speed (`LocalSeat.speed.run`, a horse 9 m/s: 27 m in 3 s),
+  else the character's 5.4 m/s. It is held-forward movement in 1.2 (`390A8EE0` hands the movement controller a forward request), so
+  it keeps to the ground (down a slope too) and falls off a ledge under the mover's gravity (a mate's `physics_living_gravity`
+  from `MountSpeed`, a horse 30; a character 25), as a buff's float does when it ends; a Leap keeps its arc.
+* **Clips.** `combat` plays the controller's `start_anim` on the caster, the mate (`all_co_sk_leapattack` for the leaps); the rider
+  plays its riding clips for the gait `drive_mount` gives the mate.
+* **Approximate / capture-pending.** Not captured from the 1.2 client: the leap seen from the saddle (the mate's mid-air pose is the
+  mounted-jump work), the controllers' `end_anim` (`all_ac_stop`, `all_co_sk_stop`: not played), the controller camera of Drop Back,
+  and whether a Dash (which locks only input counter 0) lets the rider steer. Elegant Leap goes
+  31 m/s, over the server's 27.5 m/s mount speed check (`sus.rs`), which only logs. Tests: `skill_motion/mount_tests.rs` (Elegant Leap
+  25 m, every 100 ms a report that names the mate and none for the player, the Dash 27 m on the ground, a passenger starts nothing,
+  leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`.
+
 ### Not done
 
 * `SCUnitImpulse` (0x79) is decoded by aa-net; the client still needs a rendering/physics consumer. Vehicle and rider skills use it.
