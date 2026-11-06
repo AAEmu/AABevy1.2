@@ -72,7 +72,8 @@ controlled unit, the mate, and every actor copies its own `jumpHeight` (`sub_390
 speed, MOVING or 0 in the air, the landing actor 0x14 (the 0x80 fall block from 20 m/s). The take-off sets `PlayerInput::jumped`,
 so it cancels a cast as on foot. In the air the mount steers on with its carried velocity (`mount_velocity`). Capture-pending:
 the mate's take-off and landing flags (taken from the on-foot capture; no mounted jump was captured), whether the mount keeps its
-steering inertia in the air (not traced), and the mounted jump clips (the mate rises in its run clip).
+steering inertia in the air (not traced). The mate plays the horse graph's jump clips and its rider the take-off and landing
+(`docs/aa-client-units.md`, "Mounts").
 
 The own buffs' `MoveSpeedMul` rows scale the run and walk speed (`sprint::speed_multiplier`: Dash at level 1 is x 1.384, 7.47 m/s); the run clip
 plays faster with it. A buff with `sprint_motion` (Dash) runs with the second tier of the run group instead: 1.2's `fist_mo_normal_run.lmg`

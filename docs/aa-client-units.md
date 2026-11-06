@@ -104,6 +104,20 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     run-to-idle one, :14555; whether the real client leaves early is unverified). PseudoSpeed is not m/s: 1.2 sets it to 1.0
     at an actor's full run (the Dash controller, `docs/research/re-skills.md`), so `gait()` divides the mount's speed by its
     `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified;
+  * **jump:** 1.2 hands a unit's jump to its riders (`sub_390CCAB0`, x2game12.c:175297-175317: the unit's +680 calls +680
+    on every attached actor, then sends `jumpMP01` to its own graph). `Horse_Driver_Jump_Start` (:1502; Action `jumpMP01`,
+    `VehicleSeat` 0..10, so passengers too; `JumpLoop`) plays `horse_mo_jump_f_start` once and holds its last frame;
+    `Horse_Driver_Jump_Land` (:1498; `JumpEnd`, 0.2 s, `leave_actual_changed` / `leave_request_changed`) plays
+    `horse_mo_jump_f_land`, then the idles, the walk or the run (:14579-14581) with no gait one-shot. `Horse Move to Jump`
+    is linked only from the walk, the run, their one-shots and the landing (:14546-14578), so an idle or rearing rider
+    stays as it is. Pangolin (:1721 / :1729) and elephant (:1410 / `elephant_Driver_Jump_Land` :5272) use the horse
+    pair; lion (:1634 / :1641), bear (:1324 / :1332) and wildboar (:1877 / :1885) the lion pair (`global_player.cal`
+    names only these two; the s/l/r/b variants and the loops are commented out). `Rider::step` takes the mount's
+    `MountMotion { speed, airborne }` from its `Motion`: the frame the mount leaves the ground is the take-off, so a
+    ledge fall while running plays it too (**approximate**: 1.2 calls +680 only for a jump; a remote unit's take-off is
+    not known to the rider). The landing holds to 0.8 of its length (`stayInStateUntil`) unless the gait changes first;
+    a posed vehicle seat ignores the jump. The take-off's blend is empty in the graph and taken as the other states'
+    0.2. The rider graph has no `jumpMP02` state, so a walking-mode jump may keep the rider in its gait (unverified);
   * **get-off:** `SCUnitDetached` plays `fist_ac_horse_l_getoff_start` / `_loop` / `_end` (:11733-11747; every kind's
     `jump_*` states use the horse's left clips, links :17356-17359), then restores the on-foot locomotion. The clips' own
     lengths pace it (the research notes 0.67 / 0.83 s are unverified);
@@ -111,7 +125,11 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     (:1684-1745) and elephant (:1383-1427). Bear and elephant share the horse idle/walk, wildboar the lion's; the get-on
     clips are `fist_ac_lion_*` (lion, wildboar), `fist_ac_bear_*` (bear) and `fist_ac_horse_*` (horse, pangolin, elephant).
     Pose 0 (donkeys, elks, yatas) keeps the horse set; the boat/car poses 5..8 have no `Enter`/`Exit` states in the graph
-    and keep the old loop-only rider;
+    and keep the old loop-only rider. Pose 5, the submarine and porpoise mates (`ocom_submarine_*`, `porpoise_*`: models
+    1428, 1433-1435, 1441, 1457, 1458, 1500, 1501), has one clip state under `InSubmarine` (:1566),
+    `submarine_DriverIdle` (:13869): its rider sits in `lion_ba_relaxed_idle` at any speed, with no walk, run or jump
+    clip (the state's `SelectWhen` also names Action `ac_cooking`, apparently a slip in the graph; the seat offset is
+    unchecked);
   * the `_FIST_MO_RIDER_*_RUN` / `_IDLETORUN` graph names are `.cal` locomotion groups; `bind_rider_clip` takes the
     group's `_f` example nearest the forward direction (0,1), not the first one (the horse run group lists the idle-to-run
     clip first), e.g. `horse_mo_normal_run_f`. The elephant's `Elephant_*` group (:1383-1427) has no idle-to-run / run-to-idle
@@ -127,7 +145,8 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 * the rider's on-foot `Locomotion` is stashed and given back after the get-off clips.
 
 `AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
-appear next to the player and run a circle at 5 m/s.
+appear next to the player and run a circle at 5 m/s. `AA_FAKE_MOUNT=jump` adds a jump every 3 s, sent as a driver's client
+sends it (take-off 0x0c, air 0x10, landing 0x14, the horse's 1.3 m arc at gravity 30).
 The offset between the seat bone and the rider's origin is a first guess, not checked against the real client.
 
 ### Owned mounts (the local player)
@@ -157,7 +176,8 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   own movement). The speed is the mount's relaxed stance run speed (`game_stances.ai_move_speed_run`, stance 2: 9 m/s for the
   Lilyut horse, 7.2 for a donkey; `Db::mount_speed`) times the `MoveSpeedMul` of the mate's buffs (`Sprint::mount_speed_mul`),
   with the actor model's walk and backward factors; Space with a direction held jumps the mount with its own jump height and
-  gravity (`docs/aa-client-movement.md`, "Speeds and jumping"); no swimming while mounted. The mate's unit is marked
+  gravity (`docs/aa-client-movement.md`, "Speeds and jumping"), and the mate and its rider play their jump clips
+  ("the mount's jump" and "jump" above); no swimming while mounted. The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
 * **Rearing:** Space on a standing mount (no move request) does not lift it: 1.2's ground step (`sub_3912B330`,
@@ -346,7 +366,11 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
   folder; the code uses that path and therefore crossfades directly. Not captured.
 * Whether pose 0 mounts (donkeys, elks, yatas), the boat/car poses and the other kinds really use these states; the
   graph's own `Enter` states were followed where present. Not captured (only a horse was mounted).
-* The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
+* The mounted jump is built from the graphs and not captured. To check: the packets of a mate's jump as another client
+  sees them (the take-off bit is assumed to pass the server's relay), the mount's landing with no key held (`_f_end` /
+  `_b_end` select on `RequestedMoveDir4LH` f..r / b..br, and the graph has no `s` for them), the empty blends of the
+  `_end` states and of the rider's take-off, whether a ledge fall while running plays the rider's take-off, and a
+  walking-mode (`jumpMP02`) jump. `AA_FAKE_MOUNT=jump` on the lane server shows a remote horse and its rider jumping.
 * The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet (1.2 marks the unit
   jumped and jumping, "Rearing" above, so a JUMPING packet is plausible), how other clients see the rear, whether
   movement input cuts it short and whether it cancels a cast (the code says no, although 1.2 raises the same `jumped`
