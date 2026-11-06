@@ -138,6 +138,7 @@ pub struct CartController {
 
 impl CartController {
     /// A Farm Wagon controller (the captured fit); [`Self::with_params`] takes another model's.
+    #[cfg(test)]
     pub fn new(pos: Pos, yaw: f32) -> Self {
         Self::with_params(pos, yaw, CartParams::WAGON)
     }

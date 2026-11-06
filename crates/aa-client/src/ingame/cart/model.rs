@@ -108,10 +108,13 @@ impl CartParams {
     }
 }
 
+/// Four wheel contacts, wheelbase and track.
+type Layout = ([(f32, f32); 4], f32, f32);
+
 /// The four contacts (front right, front left, rear right, rear left), wheelbase and track of a set of
 /// wheel mounts: the mounts split at the middle of their length into a front and a rear axle, and the
 /// widest pair of each is the contact pair. `None` when there is no axle pair to span a plane.
-fn layout(mounts: &[Vec3]) -> Option<([(f32, f32); 4], f32, f32)> {
+fn layout(mounts: &[Vec3]) -> Option<Layout> {
     let lo = mounts.iter().map(|m| m.y).fold(f32::MAX, f32::min);
     let hi = mounts.iter().map(|m| m.y).fold(f32::MIN, f32::max);
     let mid = (lo + hi) * 0.5;
