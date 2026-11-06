@@ -73,11 +73,13 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     `mount::drive_mount` writes its `Motion.airborne` from the mover (in the air and not swimming) and keeps its speed.
   * A remote mate (spawned with `anim::AirStart`): `units::move_units` shows it in the air as it does a character, keeps
     its speed there so its riders keep their gait (it went idle mid-air before), and sets `AirStart` for an air time
-    whose packets since the ground had the take-off bit (`actor_flags::JUMP_START` 0x08; the driver sends 0x0c, then 0x10
-    in the air and 0x14 at the landing). The bit is kept on `RemoteUnit` until the played-back pose leaves the ground (the
-    track's `Report` is unchanged). Such an air time plays the take-off, a fall the air clip. The server relays a mate's
-    `CSMoveUnit` flags as they are, but the 1.2 path from a remote unit's packet to its +680 jump call is not traced:
-    using the take-off bit is **inferred**.
+    whose packets since the ground had the take-off bit (`actor_flags::JUMP_START` 0x08; the driver sends 0x0c, then 0
+    in the air and 0x14 at the landing, as `player::control_player` does from the on-foot capture). The bit is kept on
+    `RemoteUnit` until the played-back pose leaves the ground (the track's `Report` is unchanged). Such an air time plays
+    the take-off, a fall the air clip. The server relays a mate's `CSMoveUnit` flags as they are, but the 1.2 path from a
+    remote unit's packet to its +680 jump call is not traced: using the take-off bit is **inferred**. A remote mate's
+    direction is always forward (a non-character's `Motion.local_dir`), so its backward jump plays the f clips
+    (**approximate**).
   * `examples/mount_jump.rs` scripts a remote mate's jump on the Lilyut horse (model 139) and takes a shot mid-air;
 * the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
   body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
@@ -146,7 +148,7 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 `AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
 appear next to the player and run a circle at 5 m/s. `AA_FAKE_MOUNT=jump` adds a jump every 3 s, sent as a driver's client
-sends it (take-off 0x0c, air 0x10, landing 0x14, the horse's 1.3 m arc at gravity 30).
+sends it (actor flags: take-off 0x0c, air 0, landing 0x14; the horse's 1.3 m arc at gravity 30).
 The offset between the seat bone and the rider's origin is a first guess, not checked against the real client.
 
 ### Owned mounts (the local player)

@@ -1916,8 +1916,8 @@ pub fn pose_local_rider(
 /// player appear beside the player, the rider is attached to the horse, and the horse runs a circle at 5 m/s, reported ten
 /// times a second like the walkthrough's circle. `AA_FAKE_MOUNT=still` parks the horse 4 m from the player instead (for a
 /// close look at the seat). `AA_FAKE_MOUNT=jump` runs the circle with a jump every 3 s, sent as a driver's client sends it:
-/// the take-off (move flag JUMPING, actor flags 0x0c), the air (0x10) and the landing (0x14), on the Lilyut horse's 1.3 m
-/// arc at gravity 30.
+/// the take-off (move flag JUMPING, actor flags 0x0c), the air (actor flags 0) and the landing (0x14), on the Lilyut
+/// horse's 1.3 m arc at gravity 30.
 pub fn fake_mount(time: Res<Time>, player: Res<Player>, mut units: ResMut<Units>, mut events: MessageWriter<NetEvent>, mut state: Local<Option<(f32, f32)>>) {
     const HORSE: u32 = 9_000_001;
     const RIDER: u32 = 9_000_002;
@@ -1975,7 +1975,8 @@ pub fn fake_mount(time: Res<Time>, player: Res<Player>, mut units: ResMut<Units>
             movement.flags = move_flags::JUMPING;
             movement.actor_flags = actor_flags::JUMP_START | actor_flags::STANDING_ON_SOLID;
         }
-        (true, true) => movement.actor_flags = actor_flags::JUMPING,
+        // in the air the sender clears the actor byte (`player::control_player`, the on-foot capture)
+        (true, true) => movement.actor_flags = 0,
         (true, false) => movement.actor_flags = actor_flags::LANDING,
         (false, false) => {}
     }

@@ -2436,9 +2436,9 @@ mod mate_jump_tests {
     }
 
     /// A remote mate's jump as its driver's client sends it (`player::control_player`): the take-off (move flag JUMPING,
-    /// actor flags 0x0c), the air (0x10), the landing (0x14), then the run (0x04). The mate is shown in the air with its
-    /// speed and its take-off ([`AirStart`]); a later fall has no take-off. A character fed the same packets is airborne
-    /// with no speed, as before.
+    /// actor flags 0x0c), the air (actor flags 0), the landing (0x14), then the run (0x04). The mate is shown in the air
+    /// with its speed and its take-off ([`AirStart`]); a later fall has no take-off. A character fed the same packets is
+    /// airborne with no speed, as before.
     #[test]
     fn a_remote_mate_jumps_with_its_speed_and_its_take_off() {
         if !aa_cry::pak_available() {
@@ -2464,7 +2464,7 @@ mod mate_jump_tests {
         }
         packets.push(packet(10, 0.0, move_flags::JUMPING, actor_flags::JUMP_START | actor_flags::STANDING_ON_SOLID));
         for i in 11..16 {
-            packets.push(packet(i, arc((i - 10) as f32 * 0.1), move_flags::MOVING, actor_flags::JUMPING));
+            packets.push(packet(i, arc((i - 10) as f32 * 0.1), move_flags::MOVING, 0));
         }
         packets.push(packet(16, 0.0, move_flags::MOVING, actor_flags::LANDING));
         for i in 17..25 {
