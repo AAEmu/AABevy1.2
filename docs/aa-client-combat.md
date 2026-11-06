@@ -977,7 +977,8 @@ skills a mount chains (`mount_attached_skills` 15506 / 17475 / 17476) have no co
   and whether a Dash (which locks only input counter 0) lets the rider steer. Elegant Leap goes
   31 m/s, over the server's 27.5 m/s mount speed check (`sus.rs`), which only logs. Tests: `skill_motion/mount_tests.rs` (Elegant Leap
   25 m, every 100 ms a report that names the mate and none for the player, the Dash 27 m on the ground, a passenger starts nothing,
-  leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`.
+  leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`. Still to do on the lane server: the owned horse,
+  Elegant Leap from the pet bar with `AA_SKILL_MOTION_LOG=1`, and a `--shot` mid-leap.
 
 ### Not done
 
