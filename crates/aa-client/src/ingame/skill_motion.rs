@@ -162,6 +162,8 @@ pub struct SkillMove {
     unit: Option<u32>,
     /// Fall speed of a dash that ran off a ledge (m/s).
     fall: f32,
+    /// The mover's gravity (m/s^2): a mate falls with its own.
+    gravity: f32,
 }
 
 /// `Floating` skill controller of a buff (`value1` mm up, at `value2` mm/s): the unit rises, hangs while the buff lasts and falls
@@ -181,7 +183,7 @@ struct Hover {
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, unit: None, fall: 0.0 }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, unit: None, fall: 0.0, gravity: path::GRAVITY }
     }
 
     /// A settled skill move for the deck tests: only its presence matters there.
@@ -219,6 +221,16 @@ impl SkillMove {
             || (self.controller_kind == Some(1) && self.hover.is_some_and(|h| !h.released))
     }
 
+    /// The move runs for the mate the local player drives (if `who` stands in for one): its reports name the mate, and it falls
+    /// with the mate's gravity.
+    fn carried(mut self, who: &Who) -> SkillMove {
+        if let Some((mate, speed)) = who.mate {
+            self.unit = Some(mate);
+            self.gravity = speed.gravity;
+        }
+        self
+    }
+
     /// Seconds until the move is over.
     fn remaining(&self) -> f32 {
         (self.flight.eta - self.t).max(0.0) + self.recover
@@ -233,7 +245,7 @@ impl SkillMove {
         if self.fall == 0.0 && z - floor <= STEP_UP {
             return floor;
         }
-        self.fall += path::GRAVITY * dt;
+        self.fall += self.gravity * dt;
         let z = (z - self.fall * dt).max(floor);
         if z <= floor {
             self.fall = 0.0;
@@ -254,6 +266,7 @@ struct Stepped {
 
 /// Moves `mv` on by `dt` from `pos`: along its path, stopped by walls, never under the floor.
 fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, collision: &WorldCollision) -> Stepped {
+    let gravity = mv.gravity;
     if let Some(h) = &mut mv.hover {
         if !h.released {
             let z = (pos.z + h.speed * dt).min(h.top);
@@ -261,7 +274,7 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
             return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity: Vec3::new(0.0, 0.0, vz), done: false, airborne: true };
         }
         // the buff is gone: the unit falls to the floor
-        h.fall += path::GRAVITY * dt;
+        h.fall += gravity * dt;
         let floor = floor_at(terrain, collision, pos, STEP_UP);
         let z = pos.z - h.fall * dt;
         let landed = floor.is_finite() && z <= floor;
@@ -681,9 +694,7 @@ impl Starter<'_, '_, '_, '_, '_> {
         if log() {
             info!("skill motion: controller {} lifts unit {mover} {:.1} m at {:.1} m/s", c.id, c.v[0] as f32 * 0.001, c.v[1] as f32 * 0.001);
         }
-        let mut movement = SkillMove::float(who.pos, index, c);
-        movement.unit = who.mate.map(|(mate, _)| mate);
-        self.commands.entity(who.entity).insert(movement);
+        self.commands.entity(who.entity).insert(SkillMove::float(who.pos, index, c).carried(&who));
     }
 
     /// `mover` runs controller `c` towards `reference` (a unit, else the spot `at`, else itself).
@@ -714,9 +725,8 @@ impl Starter<'_, '_, '_, '_, '_> {
             info!("skill motion: controller {} moves unit {mover} {:.1} m in {:.2} s ({:.1} m/s, lift {:.2} m)", c.id, flight.dist, flight.eta, flight.hs, flight.lift());
         }
         let kind = if caster { Kind::Dash } else { Kind::Pull };
-        let mut movement = SkillMove::new(flight, kind, c.rotates());
+        let mut movement = SkillMove::new(flight, kind, c.rotates()).carried(&who);
         movement.controller_kind = Some(c.kind);
-        movement.unit = who.mate.map(|(mate, _)| mate);
         self.commands.entity(who.entity).insert(movement);
     }
 
@@ -1067,6 +1077,19 @@ mod tests {
         }
         assert!(mv.landed && (pos.x - x - path::DASH_SPEED * 3.0).abs() < 0.2, "{pos}");
         assert!(z - pos.z > 1.0, "downhill: {z} -> {}", pos.z);
+    }
+
+    #[test]
+    fn a_dash_off_a_ledge_falls_with_the_movers_gravity() {
+        let mut mv = SkillMove::fixture();
+        // within a step of the floor it keeps to it
+        assert_eq!(mv.run_height(0.4, 0.0, 0.1), 0.0);
+        // 2 m over it, a horse (gravity 30) falls 0.3 m in the first 0.1 s and faster after
+        mv.gravity = 30.0;
+        assert!((mv.run_height(2.0, 0.0, 0.1) - 1.7).abs() < 1e-4);
+        assert!((mv.run_height(1.7, 0.0, 0.1) - 1.1).abs() < 1e-4);
+        assert_eq!(mv.run_height(1.1, 0.0, 0.5), 0.0, "it lands on the floor");
+        assert_eq!(mv.fall, 0.0);
     }
 
     #[test]

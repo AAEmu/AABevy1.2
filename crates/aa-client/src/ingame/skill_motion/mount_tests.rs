@@ -148,7 +148,7 @@ fn a_mount_leap_moves_the_driven_mate_and_reports_move_unit() {
     ride.fire(ELEGANT_LEAP);
     let first = ride.tick();
     let movement = ride.app.world().get::<SkillMove>(ride.player).expect("the leap runs on the player's mover");
-    assert_eq!(movement.unit, Some(MATE));
+    assert_eq!((movement.unit, movement.gravity), (Some(MATE), MountSpeed::default().gravity));
     assert!(movement.controller_activity());
     assert!(ride.app.world().get::<SkillMove>(ride.mate).is_none(), "drive_mount places the mate, not a move of its own");
     assert!(ride.app.world().resource::<PlayerInput>().moving, "the keys are locked while the controller runs");
