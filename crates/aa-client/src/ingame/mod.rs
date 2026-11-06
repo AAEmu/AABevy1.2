@@ -74,7 +74,7 @@ pub(crate) mod quest_depth_of_field;
 pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
-mod ship;
+pub(crate) mod ship;
 pub(crate) mod shipyard;
 mod skill_motion;
 mod sounds;

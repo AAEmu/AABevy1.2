@@ -56,6 +56,7 @@ use super::cart::{YAW_RATE_PER_STEER, wrap_angle};
 use super::combat::Dead;
 use super::data::{Db, VehicleLook, model_file};
 use super::housing::prefab::{self, Part};
+use super::ship::helm;
 use super::units::RemoteUnit;
 
 /// `_DAT_399a440c` (0x399a440c = 0.52359879): the largest spindle angle, 30 degrees.
@@ -923,7 +924,7 @@ fn mounts(model: &aa_cry::mesh::Model) -> Vec<(usize, Affine3A)> {
 /// placed on them; the drive reads its ground-contact probes off these (`cart::model`).
 pub(super) fn wheel_mounts(look: &VehicleLook) -> Vec<Vec3> {
     let mut out = Vec::new();
-    for part in body_parts(look) {
+    for (_, part) in body_parts(look) {
         if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {
             out.extend(mounts(&model).into_iter().map(|(_, mount)| Vec3::from((affine(&part) * mount).translation)));
         }
@@ -950,6 +951,8 @@ struct Placed {
     wheel: Option<usize>,
     /// The lever arms when this body part carries `Bone_spindle`.
     spindle: Option<SpindleArms>,
+    /// The body element `UpdateRudder` turns ([`helm::RUDDER`]).
+    rudder: bool,
 }
 
 fn spindle_arms(model: &aa_cry::mesh::Model) -> Option<SpindleArms> {
@@ -1019,7 +1022,7 @@ fn part_helpers(part: &Part, model: &aa_cry::mesh::Model) -> HashMap<String, Aff
 #[cfg(test)]
 pub(super) fn body_helpers(look: &VehicleLook) -> HashMap<String, Affine3A> {
     let mut helpers = HashMap::new();
-    for part in body_parts(look) {
+    for (_, part) in body_parts(look) {
         if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {
             helper_nodes(&model, affine(&part), &mut helpers);
         }
@@ -1027,20 +1030,24 @@ pub(super) fn body_helpers(look: &VehicleLook) -> HashMap<String, Affine3A> {
     helpers
 }
 
-fn body_parts(look: &VehicleLook) -> Vec<Part> {
+/// The body parts of `look` with their prefab object names (none for a single model).
+fn body_parts(look: &VehicleLook) -> Vec<(String, Part)> {
     if look.normal.to_ascii_lowercase().starts_with("prefab://") {
-        prefab::load(&look.normal)
+        prefab::load_named(&look.normal)
     } else {
         model_file(&look.normal)
             .map(|model| {
-                vec![Part {
-                    model,
-                    material: None,
-                    pos: Vec3::ZERO,
-                    rot: Quat::IDENTITY,
-                    scale: Vec3::ONE,
-                    animation: None,
-                }]
+                vec![(
+                    String::new(),
+                    Part {
+                        model,
+                        material: None,
+                        pos: Vec3::ZERO,
+                        rot: Quat::IDENTITY,
+                        scale: Vec3::ONE,
+                        animation: None,
+                    },
+                )]
             })
             .unwrap_or_default()
     }
@@ -1048,12 +1055,19 @@ fn body_parts(look: &VehicleLook) -> Vec<Part> {
 
 /// The parts `look` is drawn with (body, then wheels) and the spindle arms of the body that has `Bone_spindle`.
 fn assemble(look: &VehicleLook) -> Vec<Placed> {
+    // `sub_390C7330` takes the first element named `rudder` (`sub_39104630`, any element type)
+    let mut rudder_found = false;
     let mut out: Vec<Placed> = body_parts(look)
         .into_iter()
-        .map(|part| Placed {
-            part,
-            wheel: None,
-            spindle: None,
+        .map(|(name, part)| {
+            let rudder = !rudder_found && name.eq_ignore_ascii_case(helm::RUDDER);
+            rudder_found |= rudder;
+            Placed {
+                part,
+                wheel: None,
+                spindle: None,
+                rudder,
+            }
         })
         .collect();
     if look.wheels.iter().any(Option::is_some) {
@@ -1080,6 +1094,7 @@ fn assemble(look: &VehicleLook) -> Vec<Placed> {
                     },
                     wheel: Some(slot),
                     spindle: None,
+                    rudder: false,
                 });
             }
         }
@@ -1149,6 +1164,8 @@ pub struct Piece {
     helpers: HashMap<String, Affine3A>,
     /// Unit-space model bounds (cry axes) of this piece, for the summon emergence extent.
     bounds: Option<(Vec3, Vec3)>,
+    /// The body's `rudder` element.
+    rudder: bool,
 }
 
 enum PieceModel {
@@ -1189,6 +1206,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                  part,
                  wheel,
                  spindle,
+                 rudder,
              }| {
                 // a `.cdf` is a creature wrapper (several dying prefabs use one): creature::spawn reads it
                 // as a rigged model, not a static mesh
@@ -1231,6 +1249,7 @@ pub fn prepare(loader: &CryLoader, look: &VehicleLook) -> Vec<Piece> {
                     spindle,
                     helpers,
                     bounds,
+                    rudder,
                 })
             },
         )
@@ -1387,6 +1406,20 @@ impl Plugin for VehiclePlugin {
                 )
                     .chain(),
             )
+            // the ship's rudder, wheel and throttle clips follow the steering and throttle its movement
+            // controller draws (`ShipUnitModel::Update`)
+            .add_systems(
+                Update,
+                (
+                    helm::attach_ship_helms.after(super::units::sync_views),
+                    helm::follow_ship_helms.after(super::units::move_units),
+                    helm::mark_helm_wheels,
+                    helm::turn_rudders,
+                    helm::turn_helm_wheels,
+                    helm::play_throttle_anims.after(start_vehicle_idle),
+                )
+                    .chain(),
+            )
             // the spindle turns the animated pose, not the bind pose: run after the clips write the bones
             .add_systems(
                 PostUpdate,
@@ -1520,6 +1553,7 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
         spindle,
         helpers: piece_helpers,
         bounds: _,
+        rudder,
     } in pieces
     {
         // the body parts come first: a same-named helper on a wheel part never takes the driver's seat
@@ -1581,11 +1615,20 @@ pub fn add_parts(commands: &mut Commands, cry: &mut CryAssets, clips: &ClipLibra
                         stopped: bodies.authored == Some(false),
                     });
                 }
+                // a ship part with `idle` / `run_f` / `run_b` follows the throttle (`UpdateThrottleAnim`)
+                if let Some(bodies) = &spawned
+                    && let Some(throttle) = helm::ThrottleClips::bind(&part.model, clips)
+                {
+                    commands.entity(bodies.root).insert(throttle);
+                }
                 spawned.map(|spawned| spawned.root)
             }
         };
         if let Some(e) = entity {
             commands.entity(e).insert((ChildOf(root), VehiclePart));
+            if rudder {
+                commands.entity(e).insert(helm::Rudder { base: placed.rotation });
+            }
         }
     }
     commands.entity(root).insert(SeatHelpers(helpers));
@@ -2188,6 +2231,27 @@ mod tests {
         assert_eq!(wheel_slot("wheel"), None);
         assert_eq!(wheel_slot("bone_steeringwheel"), None);
         assert_eq!(wheel_slot("wheel_l"), None);
+    }
+
+    #[test]
+    fn a_ship_body_marks_its_first_rudder_element() {
+        if !aa_cry::pak_available() {
+            return; // no client pak
+        }
+        let rudders = |normal: &str| -> Vec<String> {
+            let look = VehicleLook { normal: normal.into(), wheels: [None, None] };
+            assemble(&look).into_iter().filter(|p| p.rudder).map(|p| p.part.model).collect()
+        };
+        // the galleon prefab names several brushes `rudder` across its variants; its normal look has one
+        assert_eq!(
+            rudders("prefab://Prefabs/galleon.xml/galleon.step_10galleon_normal"),
+            ["objects/env/06_unit/01_ship/galleon/galleon_rudder.cgf"]
+        );
+        assert_eq!(rudders("prefab://prefabs/boxship.xml/boxship.boxship_normal").len(), 1);
+        assert_eq!(rudders("prefab://prefabs/fishboat.xml/fishboat.fishboat_body").len(), 1);
+        // the cruise ship names its rudders `cruise_a_rudder_1`, and the rowboat has none: "has no rudder"
+        assert!(rudders("prefab://Prefabs/cruise.xml/cruise.cruise_a").is_empty());
+        assert!(rudders("prefab://prefabs/smallboat.xml/smallboat.smallboat_a").is_empty());
     }
 
     #[test]

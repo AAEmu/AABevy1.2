@@ -287,6 +287,11 @@ impl RemoteUnit {
         self.character
     }
 
+    /// The steering and throttle (-1..=1) the vehicle controller draws, `None` before its first type-2/3 movement.
+    pub(crate) fn helm(&self) -> Option<(f32, f32)> {
+        self.vehicle.as_ref().map(|track| track.display()).map(|pose| (pose.steering, pose.throttle))
+    }
+
     /// Where the newest movement report put the unit.
     pub(super) fn latest(&self) -> Vec3 {
         self.vehicle.as_ref().map_or_else(|| self.track.latest(), |track| track.latest_pos())
