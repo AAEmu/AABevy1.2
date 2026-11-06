@@ -41,11 +41,38 @@ pub(super) fn row(id: u32, kind: u8) -> TrialCrimeRecord {
 pub(super) fn send(rt: Option<&UiRuntime>, state: &Shared, event: E) {
     dispatch_at(rt, state, &Event::Trial(event), Some(1_700_000_000));
 }
+fn bounty_row(id: u32, name: &[u8], level: u8, money: u64, crime_points: i16) -> aa_net::BountyRow {
+    aa_net::BountyRow {
+        player_id: id,
+        name: name.to_vec(),
+        level,
+        zone_id: -1,
+        x: 0,
+        y: 0,
+        z_bits: 0,
+        money,
+        crime_points,
+        raw_is_live: 1,
+        race: 1,
+        faction_id: 4,
+        arrest_count: 11,
+        accept_guilty_count: 12,
+        accept_trial_count: 13,
+        first_verdict_count: 14,
+        second_verdict_count: 15,
+        seconds: 16,
+    }
+}
 pub(super) fn selected(rt: Option<&UiRuntime>, state: &Shared) {
     state.borrow_mut().character_id = 47;
     let mut header = aa_net::model::CharacterState::default();
     header.character.id = 47;
-    dispatch_at(rt, state, &Event::CharacterSelected(Box::new(header)), Some(1_700_000_000));
+    dispatch_at(
+        rt,
+        state,
+        &Event::CharacterSelected(Box::new(header)),
+        Some(1_700_000_000),
+    );
     dispatch_at(
         rt,
         state,
@@ -74,7 +101,9 @@ pub(super) fn records(rt: Option<&UiRuntime>, state: &Shared) {
             raw_unknown: 0,
             total_count: 5,
             count: 5,
-            records: (0..5).map(|id| row(id + 1, [3, 2, 4, 1, 3][id as usize])).collect(),
+            records: (0..5)
+                .map(|id| row(id + 1, [3, 2, 4, 1, 3][id as usize]))
+                .collect(),
         }),
     );
     send(
@@ -101,12 +130,16 @@ pub(super) fn records(rt: Option<&UiRuntime>, state: &Shared) {
         },
     );
 }
-pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, PathBuf), Box<dyn std::error::Error>> {
+pub(super) fn runtime(
+    width: f32,
+    height: f32,
+) -> Result<(UiRuntime, Shared, PathBuf), Box<dyn std::error::Error>> {
     let (rt, state, path) = super::super::breath::fixture::runtime(width, height)?;
     selected(Some(&rt), &state);
     rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
     let args: Vec<String> = aa_dev::args();
     if args.iter().any(|arg| arg == "--bounty-empty") {
+        super::bounty::script(&rt.lua)?;
         dispatch_at(
             Some(&rt),
             &state,
@@ -117,7 +150,23 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
             }),
             Some(1_700_000_000),
         );
+    } else if args.iter().any(|arg| arg == "--bounty-rows") {
+        super::bounty::script(&rt.lua)?;
+        dispatch_at(
+            Some(&rt),
+            &state,
+            &Event::Bounty(aa_net::BountyEvent::List {
+                total: 2,
+                declared_count: 2,
+                rows: vec![
+                    bounty_row(50, b"Wanted One", 52, 12345, 7),
+                    bounty_row(51, b"Wanted Two", 55, 987654, 12),
+                ],
+            }),
+            Some(1_700_000_000),
+        );
     } else if args.iter().any(|arg| arg == "--bounty-setup") {
+        super::bounty::script(&rt.lua)?;
         dispatch_at(
             Some(&rt),
             &state,
@@ -129,8 +178,10 @@ pub(super) fn runtime(width: f32, height: f32) -> Result<(UiRuntime, Shared, Pat
             }),
             Some(1_700_000_000),
         );
-        // Explicit standalone original function probe: SET_BOUNTY has no original listener.
-        rt.lua.load("ShowSetupBountyWindow(50,'Received defendant',12345)").exec()?;
+        // Standalone probe of the original function; the shim also maps SET_BOUNTY to it.
+        rt.lua
+            .load("ShowSetupBountyWindow(50,'Received defendant',12345)")
+            .exec()?;
     } else if args.iter().any(|arg| arg == "--waiting") {
         send(Some(&rt), &state, E::SummonDefendant { trial_id: 9 });
         send(
@@ -183,7 +234,10 @@ pub(in crate::hud) fn run() {
     let (width, height) = aa_dev::DevArgs::from_env().size;
     let (rt, state, path) = runtime(width as f32, height as f32).unwrap();
     App::new()
-        .add_plugins((aa_dev::default_plugins("aa-client: original trial controls"), aa_dev::DevPlugin))
+        .add_plugins((
+            aa_dev::default_plugins("aa-client: original trial controls"),
+            aa_dev::DevPlugin,
+        ))
         .add_plugins(aa_ui::UiPlugin {
             config: Some(crate::login::host::ui_config()),
         })

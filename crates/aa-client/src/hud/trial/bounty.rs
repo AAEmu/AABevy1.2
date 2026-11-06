@@ -26,9 +26,21 @@ fn number(value: Option<&Value>) -> Option<f32> {
         _ => None,
     }
 }
+/// Load the Bevy-only repair of the original bulletin's unset globals before its events.
+/// The file returns early while `userTrial` is absent and once its metatable carries the shim,
+/// so every queueing path may call it.
+pub(super) fn script(lua: &Lua) -> mlua::Result<()> {
+    lua.load(include_str!("bounty.lua"))
+        .set_name("@bounty.lua")
+        .exec()
+}
 fn queue(data: &mut HudData, command: BountyCommand) {
     let owner = data.character_id;
-    if !data.disconnected && owner != 0 && data.trial.owner == Some(owner) && command.validate().is_ok() {
+    if !data.disconnected
+        && owner != 0
+        && data.trial.owner == Some(owner)
+        && command.validate().is_ok()
+    {
         data.trial.bounty.requests.push((owner, command));
     }
 }
@@ -67,7 +79,10 @@ pub(super) fn install(lua: &Lua, state: &Shared, texts: Arc<UiTexts>) -> mlua::R
                 }
                 out.raw_push(entry)?;
             }
-            Ok((out, unsigned(data.trial.bounty.current().by_id.len() as u32)))
+            Ok((
+                out,
+                unsigned(data.trial.bounty.current().by_id.len() as u32),
+            ))
         })?,
     )?;
     let s = state.clone();
@@ -86,7 +101,8 @@ pub(super) fn install(lua: &Lua, state: &Shared, texts: Arc<UiTexts>) -> mlua::R
     api.raw_set(
         "SendBountyUpdate",
         lua.create_function(move |_, args: MultiValue| {
-            if let (Some(kind), Some(Value::String(name)), Some(money)) = (number(args.get(1)), args.get(2), number(args.get(3)))
+            if let (Some(kind), Some(Value::String(name)), Some(money)) =
+                (number(args.get(1)), args.get(2), number(args.get(3)))
                 && let Ok(command) = BountyCommand::update_from_lua(kind, &name.as_bytes(), money)
             {
                 queue(&mut s.borrow_mut(), command);
@@ -107,11 +123,23 @@ fn emit(rt: &UiRuntime, notice: BountyNotice) -> mlua::Result<()> {
     let money = |value: i64| number(signed(value as i32));
     let (event, args) = match notice {
         BountyNotice::ToggleBulletin => ("TOGGLE_BOUNTY_BULLETIN", vec![]),
-        BountyNotice::Set { kind, name, money: amount } => (
+        BountyNotice::Set {
+            kind,
+            name,
+            money: amount,
+        } => (
             "SET_BOUNTY",
-            vec![number(unsigned(kind)), Value::String(text(&rt.lua, &name)?), money(amount)],
+            vec![
+                number(unsigned(kind)),
+                Value::String(text(&rt.lua, &name)?),
+                money(amount),
+            ],
         ),
-        BountyNotice::Done { kind, name, money: amount } => (
+        BountyNotice::Done {
+            kind,
+            name,
+            money: amount,
+        } => (
             "SET_BOUNTY_DONE",
             vec![
                 number(unsigned(kind)),
@@ -154,6 +182,9 @@ fn emit(rt: &UiRuntime, notice: BountyNotice) -> mlua::Result<()> {
             return Ok(());
         }
     };
+    if matches!(event, "TOGGLE_BOUNTY_BULLETIN" | "SET_BOUNTY") {
+        script(&rt.lua)?;
+    }
     aa_ui::lua::fire_ui_event(&rt.lua, event, args);
     Ok(())
 }
@@ -190,10 +221,12 @@ pub(super) fn flush(data: &mut HudData) -> Vec<aa_net::Command> {
     std::mem::take(&mut data.trial.bounty.requests)
         .into_iter()
         .filter_map(|(owner, command)| {
-            (data.trial.owner == Some(owner) && command.validate().is_ok()).then_some(aa_net::Command::Bounty {
-                character_id: owner,
-                command,
-            })
+            (data.trial.owner == Some(owner) && command.validate().is_ok()).then_some(
+                aa_net::Command::Bounty {
+                    character_id: owner,
+                    command,
+                },
+            )
         })
         .collect()
 }

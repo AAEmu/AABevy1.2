@@ -32,6 +32,13 @@ fn row(id: u32, amount: u64) -> BountyRow {
         seconds: 16,
     }
 }
+fn shown_row(id: u32, name: &[u8], level: u8, money: u64, crime_points: i16) -> BountyRow {
+    let mut row = row(id, money);
+    row.name = name.to_vec();
+    row.level = level;
+    row.crime_points = crime_points;
+    row
+}
 fn event(rt: Option<&UiRuntime>, state: &Shared, event: Event) {
     super::super::dispatch_at(rt, state, &event, Some(1_700_000_000));
 }
@@ -53,16 +60,25 @@ fn commands(state: &Shared) -> Vec<(u32, BountyCommand)> {
     super::super::flush(&mut state.borrow_mut())
         .into_iter()
         .map(|command| match command {
-            aa_net::Command::Bounty { character_id, command } => (character_id, command),
+            aa_net::Command::Bounty {
+                character_id,
+                command,
+            } => (character_id, command),
             other => panic!("unexpected command {other:?}"),
         })
         .collect()
 }
 
 #[test]
-fn original_getter_numeric_types_order_and_columns_match_the_executed_native_rows() -> Result<(), Box<dyn std::error::Error>> {
+fn original_getter_numeric_types_order_and_columns_match_the_executed_native_rows()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, state) = setup()?;
-    list(Some(&rt), &state, 2, vec![row(u32::MAX, 0x8000_0000), row(1, 0x1_0000_0001)]);
+    list(
+        Some(&rt),
+        &state,
+        2,
+        vec![row(u32::MAX, 0x8000_0000), row(1, 0x1_0000_0001)],
+    );
     rt.lua
         .load(
             r#"
@@ -77,13 +93,17 @@ fn original_getter_numeric_types_order_and_columns_match_the_executed_native_row
     "#,
         )
         .exec()?;
-    assert_eq!(state.borrow().trial.bounty.received.by_id[&1].money, 0x1_0000_0001);
+    assert_eq!(
+        state.borrow().trial.bounty.received.by_id[&1].money,
+        0x1_0000_0001
+    );
     assert!(commands(&state).is_empty());
     Ok(())
 }
 
 #[test]
-fn queued_bulletin_callbacks_observe_each_native_complete_map_before_later_mutation() -> Result<(), Box<dyn std::error::Error>> {
+fn queued_bulletin_callbacks_observe_each_native_complete_map_before_later_mutation()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, state) = setup()?;
     rt.lua
         .load(
@@ -117,7 +137,8 @@ fn queued_bulletin_callbacks_observe_each_native_complete_map_before_later_mutat
 }
 
 #[test]
-fn typed_weak_lua_controls_keep_raw_names_numeric_cvtt_and_stale_session_refusal() -> Result<(), Box<dyn std::error::Error>> {
+fn typed_weak_lua_controls_keep_raw_names_numeric_cvtt_and_stale_session_refusal()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, state) = setup()?;
     rt.lua
         .load(
@@ -133,7 +154,12 @@ fn typed_weak_lua_controls_keep_raw_names_numeric_cvtt_and_stale_session_refusal
     assert_eq!(
         commands(&state),
         [
-            (47, BountyCommand::RequestSetMoney { name: b"A".to_vec() }),
+            (
+                47,
+                BountyCommand::RequestSetMoney {
+                    name: b"A".to_vec()
+                }
+            ),
             (
                 47,
                 BountyCommand::Update {
@@ -154,14 +180,21 @@ fn typed_weak_lua_controls_keep_raw_names_numeric_cvtt_and_stale_session_refusal
     );
     assert!(state.borrow().trial.bounty.received.by_id.is_empty());
     rt.lua.load("X2Trial:SendBountyUpdate(1,'Old',99)").exec()?;
-    event(Some(&rt), &state, Event::Disconnected { message: "fixture".into() });
+    event(
+        Some(&rt),
+        &state,
+        Event::Disconnected {
+            message: "fixture".into(),
+        },
+    );
     super::super::fixture::selected(Some(&rt), &state);
     assert!(commands(&state).is_empty());
     Ok(())
 }
 
 #[test]
-fn actor_receipts_capture_actual_name_local_flag_and_duplicates_before_removal() -> Result<(), Box<dyn std::error::Error>> {
+fn actor_receipts_capture_actual_name_local_flag_and_duplicates_before_removal()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, state) = setup()?;
     rt.lua
         .load(
@@ -173,7 +206,14 @@ fn actor_receipts_capture_actual_name_local_flag_and_duplicates_before_removal()
     "#,
         )
         .exec()?;
-    send(None, &state, BountyEvent::UnitMoney { obj_id: 999, money: 3 });
+    send(
+        None,
+        &state,
+        BountyEvent::UnitMoney {
+            obj_id: 999,
+            money: 3,
+        },
+    );
     send(
         None,
         &state,
@@ -190,10 +230,31 @@ fn actor_receipts_capture_actual_name_local_flag_and_duplicates_before_removal()
             name: "New name\0tail".into(),
         },
     );
-    send(None, &state, BountyEvent::UnitMoney { obj_id: 100, money: -1 });
-    send(None, &state, BountyEvent::UnitMoney { obj_id: 100, money: -1 });
+    send(
+        None,
+        &state,
+        BountyEvent::UnitMoney {
+            obj_id: 100,
+            money: -1,
+        },
+    );
+    send(
+        None,
+        &state,
+        BountyEvent::UnitMoney {
+            obj_id: 100,
+            money: -1,
+        },
+    );
     event(None, &state, Event::UnitsRemoved(vec![100]));
-    send(None, &state, BountyEvent::UnitMoney { obj_id: 100, money: 5 });
+    send(
+        None,
+        &state,
+        BountyEvent::UnitMoney {
+            obj_id: 100,
+            money: 5,
+        },
+    );
     send(
         None,
         &state,
@@ -241,7 +302,8 @@ fn actor_receipts_capture_actual_name_local_flag_and_duplicates_before_removal()
 }
 
 #[test]
-fn original_empty_bulletin_and_standalone_setup_controls_queue_only_the_captured_request() -> Result<(), Box<dyn std::error::Error>> {
+fn original_empty_bulletin_and_standalone_setup_controls_queue_only_the_captured_request()
+-> Result<(), Box<dyn std::error::Error>> {
     let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
     super::super::fixture::selected(Some(&rt), &state);
     rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
@@ -250,14 +312,15 @@ fn original_empty_bulletin_and_standalone_setup_controls_queue_only_the_captured
     rt.lua
         .load("assert(userTrial.bountyBulletWnd:IsVisible());userTrial.bountyBulletWnd:Show(false)")
         .exec()?;
-    // An incomplete received chunk does not open the known-broken nonempty
-    // original bulletin (bounty_bullet.alb:115 reads undefined global listCtrl).
-    // Keep that original-script boundary explicit; do not install fake globals.
-    list(Some(&rt), &state, 2, vec![row(50, 12345)]);
-    // Exercise the actual original setup function; the absent native SET_BOUNTY
-    // listener is an explicit script-integration boundary, not an invented ACK.
+    // Seed one received row without a toggle (its total stays zero), so the setup request
+    // can prove that it does not mutate the received money.
+    list(Some(&rt), &state, 0, vec![row(50, 12345)]);
+    // Exercise the standalone original setup function as well; the SET_BOUNTY event
+    // connection is covered separately through the shim.
     rt.lua
-        .load("ShowSetupBountyWindow(50,'Wanted',12345);assert(userTrial.setupBountyWnd:IsVisible())")
+        .load(
+            "ShowSetupBountyWindow(50,'Wanted',12345);assert(userTrial.setupBountyWnd:IsVisible())",
+        )
         .exec()?;
     aa_ui::lua::flush(&rt.lua);
     crate::hud::expansion::fixture::click(&rt, "userTrial.setupBountyWnd.okButton")?;
@@ -273,6 +336,119 @@ fn original_empty_bulletin_and_standalone_setup_controls_queue_only_the_captured
         )]
     );
     assert_eq!(state.borrow().trial.bounty.received.by_id[&50].money, 12345);
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn shim_fills_nonempty_rows_reward_selection_done_and_repatches_after_reopen()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
+    super::super::fixture::selected(Some(&rt), &state);
+    rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
+    list(
+        Some(&rt),
+        &state,
+        2,
+        vec![
+            shown_row(50, b"First\0ignored", 40, 12345, 7),
+            shown_row(51, b"Second\0ignored", 41, 67890, 8),
+        ],
+    );
+    rt.lua
+        .load(
+            r#"
+        local wnd=userTrial.bountyBulletWnd
+        assert(wnd and wnd:IsVisible())
+        local page=wnd.pageListCtrl
+        assert(page:GetTotalDataCount()==2)
+        local items=page.listCtrl.items
+        local function cell(row,col)
+          local c=items[row].subItems[col]
+          if col==1 then return c:GetText() end
+          return c.label:GetText()
+        end
+        assert(cell(1,1)=='7' and cell(2,1)=='8')
+        assert(cell(1,2)=='First' and cell(2,2)=='Second')
+        assert(cell(1,3)=='40' and cell(2,3)=='41')
+        assert(cell(1,4)=='' and cell(2,4)=='')
+        assert(cell(1,5)=='12345' and cell(2,5)=='67890')
+    "#,
+        )
+        .exec()?;
+    rt.lua
+        .load("userTrial.bountyBulletWnd.pageListCtrl.listCtrl:Select(1)")
+        .exec()?;
+    aa_ui::lua::flush(&rt.lua);
+    crate::hud::expansion::fixture::click(&rt, "userTrial.bountyBulletWnd.bountyButton")?;
+    assert_eq!(
+        commands(&state),
+        [(
+            47,
+            BountyCommand::RequestSetMoney {
+                name: b"Second".to_vec()
+            }
+        )]
+    );
+    send(
+        Some(&rt),
+        &state,
+        BountyEvent::SetDone {
+            kind: 50,
+            name: b"First".to_vec(),
+            money: 999,
+            error: 0,
+        },
+    );
+    rt.lua
+        .load("assert(userTrial.bountyBulletWnd.pageListCtrl.listCtrl.items[1].subItems[5].label:GetText()=='999')")
+        .exec()?;
+    rt.lua
+        .load("oldWnd=userTrial.bountyBulletWnd;assert(oldWnd:IsVisible());oldWnd:Show(false)")
+        .exec()?;
+    aa_ui::lua::flush(&rt.lua);
+    rt.lua
+        .load("assert(userTrial.bountyBulletWnd==nil)")
+        .exec()?;
+    // total still matches the received map (two rows), so this raises the toggle again.
+    list(Some(&rt), &state, 2, vec![]);
+    rt.lua
+        .load(
+            r#"
+        local wnd=userTrial.bountyBulletWnd
+        assert(wnd ~= oldWnd and wnd:IsVisible())
+        assert(wnd.pageListCtrl:GetTotalDataCount()==2)
+        assert(wnd.pageListCtrl.listCtrl.items[2].subItems[2].label:GetText()=='Second')
+    "#,
+        )
+        .exec()?;
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn set_bounty_reply_opens_the_original_setup_window() -> Result<(), Box<dyn std::error::Error>> {
+    let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
+    super::super::fixture::selected(Some(&rt), &state);
+    send(
+        Some(&rt),
+        &state,
+        BountyEvent::SetPermitted {
+            kind: 50,
+            name: b"Wanted\0tail".to_vec(),
+            money: 12345,
+            raw_allowed: 1,
+        },
+    );
+    rt.lua
+        .load("local w=userTrial.setupBountyWnd;assert(w and w:IsVisible());assert(w.currentBounty~=nil)")
+        .exec()?;
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     if path.exists() {
         std::fs::remove_file(path)?;
