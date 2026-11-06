@@ -1,6 +1,8 @@
 //! The ship's speed-driven wake (`ShipUnitModel::UpdateExhaustEffect`, `FUN_390c78d0`): the Eznan Cutter's
-//! `splash_l` / `splash_r` and `exhaust` emitters are silent at rest and strengthen with the root's speed and
-//! turn rate (`ingame::vehicle::drive_speed_emitters`). The motion is synthetic, there is no server.
+//! active `exhaust` emitters (bow wave, side wash, wake) are silent at rest and strengthen with the root's speed
+//! (`ingame::vehicle::drive_speed_emitters`). Its `splash_l` / `splash_r` are authored inactive, so a turn shows no
+//! splash, as in 1.2. Only the game database is used (no sound database), as in a muted run. The motion is
+//! synthetic, there is no server.
 //!
 //! `cargo run -p aa-client --example ship_wake -- --mute --shot shots/aa-client/ship_wake_rest.png --shot-after 8`
 //! `cargo run -p aa-client --example ship_wake -- --speed 12 --turn 0.2 --mute --shot shots/aa-client/ship_wake_speed.png --shot-after 8`
@@ -118,7 +120,6 @@ fn main() -> AppExit {
             aa_world::pipelines::build,
         ))
         .insert_resource(db)
-        .insert_resource(ingame::sounds::SoundBook::open())
         .add_systems(Startup, (sea, scene))
         .add_systems(Update, (set_motion, ingame::vehicle::drive_speed_emitters).chain())
         .run()

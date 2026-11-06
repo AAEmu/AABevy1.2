@@ -587,11 +587,18 @@ poller never returns 5: dying is entered by the death path below.
   following 5 -> 6 when the poller already showed 6 for this death. The speed-driven emitters are
   type-5 particles named exactly `exhaust` (`FUN_390eaf40`'s list at +0x2c0) and `splash_l` / `splash_r`
   (the pair list at +0x2f0, with a side flag); `ShipUnitModel::UpdateExhaustEffect` (`FUN_390c78d0`) scales
-  them every frame. They are spawned silent as `SpeedEmitter`s (active or not: the prefab splashes are
-  authored inactive and the native update drives them anyway) and `drive_speed_emitters` sets
-  `Effect::count_scale` on `ShipModel` roots: exhaust `clamp(|velocity| / (ship_models.velocity * 0.5), 0, 1)`,
-  splash `clamp(yaw_rate * side * 6.0, 0, 1)` with `+1` for `splash_l` (yaw rate is positive to the left), so
-  they show nothing at rest. The native struct (`sub_390FED20`) takes the value in three channels whose
+  them every frame. The active ones are spawned silent as `SpeedEmitter`s and `drive_speed_emitters` sets
+  `Effect::count_scale` on `ShipModel` roots (from `Db`, so a muted run without the sound database draws them
+  too): exhaust `clamp(|velocity| / (ship_models.velocity * 0.5), 0, 1)`, splash
+  `clamp(yaw_rate * side * 6.0, 0, 1)`, so they show nothing at rest. The side is the pair's flag:
+  `FUN_390eaf40` stores 0 for `splash_l` and 1 for `splash_r` (`0x390eb0e6` / `0x390eb121`), and the update
+  turns flag 0 into -1.0 and flag 1 into +1.0 (`0x390c7ad3`, constants `0x3999cc1c` / `0x3999c488`). A left
+  turn (positive yaw rate, game `angular_velocity.z`) therefore raises `splash_r` (`caravel_water_rihgt`, the
+  outer side) and a right turn `splash_l`. An inactive speed emitter is left out like any inactive emitter:
+  `ParticleEffectPrefabObject::Load` creates the emitter only when `bActive` is set (x2game12.c:221889), and
+  `sub_390FED20` scales only an existing one (`[this+0x40]`, `0x390fed23`). Every prefab `splash_l` /
+  `splash_r` is authored inactive and no traced caller starts them, so 1.2 shows no turn splash and neither do
+  we; only the active `exhaust` emitters (on the galleon: bow wave, side wash and wake) follow the speed. The native struct (`sub_390FED20`) takes the value in three channels whose
   meaning (count, size, alpha) is not decoded: the count is **approximate**, a live capture of a galleon under
   way would settle it. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
   objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
@@ -605,7 +612,8 @@ poller never returns 5: dying is entered by the death path below.
   the world at the prefab anchors, not under the root, so the `SCUnitsRemoved` that follows does not cut
   them. Test prefab: the rowboat (slave 15, model 129, `smallboat_a`); the coupleduckship and soloship
   bodies carry one too. The sentinel for "no group" (`dword_3A168AA0`) is taken to be a null / 0 row
-  (**inferred**). The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
+  (**inferred**). Every slave row whose prefabs carry a `_despawn_effect` (15, 55, 91 rowboats, 102, 103) has a
+  null `portal_despawn_fx_id`, so with the shipped data the portal check never suppresses one. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
   `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
   Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
   (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A

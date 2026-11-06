@@ -77,7 +77,7 @@ pub(crate) mod seating;
 mod ship;
 pub(crate) mod shipyard;
 mod skill_motion;
-pub(crate) mod sounds;
+mod sounds;
 mod stealth;
 mod swim;
 pub(crate) mod teleport;
