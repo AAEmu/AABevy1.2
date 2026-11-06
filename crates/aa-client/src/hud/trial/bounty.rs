@@ -26,6 +26,12 @@ fn number(value: Option<&Value>) -> Option<f32> {
         _ => None,
     }
 }
+/// Load the Bevy-only repair of the original bulletin's unset globals before its events.
+/// The file returns early while `userTrial` is absent and once its metatable carries the shim,
+/// so every queueing path may call it.
+pub(super) fn script(lua: &Lua) -> mlua::Result<()> {
+    lua.load(include_str!("bounty.lua")).set_name("@bounty.lua").exec()
+}
 fn queue(data: &mut HudData, command: BountyCommand) {
     let owner = data.character_id;
     if !data.disconnected && owner != 0 && data.trial.owner == Some(owner) && command.validate().is_ok() {
@@ -154,6 +160,9 @@ fn emit(rt: &UiRuntime, notice: BountyNotice) -> mlua::Result<()> {
             return Ok(());
         }
     };
+    if matches!(event, "TOGGLE_BOUNTY_BULLETIN" | "SET_BOUNTY") {
+        script(&rt.lua)?;
+    }
     aa_ui::lua::fire_ui_event(&rt.lua, event, args);
     Ok(())
 }
