@@ -1957,18 +1957,27 @@ pub fn pose_local_rider(
 /// times a second like the walkthrough's circle. `AA_FAKE_MOUNT=still` parks the horse 4 m from the player instead (for a
 /// close look at the seat). `AA_FAKE_MOUNT=jump` runs the circle with a jump every 3 s, sent as a driver's client sends it:
 /// the take-off (move flag JUMPING, actor flags 0x0c), the air (actor flags 0) and the landing (0x14), on the Lilyut
-/// horse's 1.3 m arc at gravity 30.
-pub fn fake_mount(time: Res<Time>, player: Res<Player>, mut units: ResMut<Units>, mut events: MessageWriter<NetEvent>, mut state: Local<Option<(f32, f32)>>) {
+/// horse's 1.3 m arc at gravity 30. `AA_FAKE_MOUNT=swim` swims the circle as a driver's client sends a swimming mount:
+/// stance `SWIM`, no ground flag, at the horse's swim speed (1.8 m/s), its origin the horse's swim level (2.14 m) under
+/// the surface where there is water (the circle, 8 m round a point 3 m east of the player, lies in 5-10 m of sea at
+/// `--pos 15675,15360`).
+pub fn fake_mount(
+    time: Res<Time>,
+    player: Res<Player>,
+    water: Option<Res<aa_world::WaterQuery>>,
+    mut units: ResMut<Units>,
+    mut events: MessageWriter<NetEvent>,
+    mut state: Local<Option<(f32, f32)>>,
+) {
     const HORSE: u32 = 9_000_001;
     const RIDER: u32 = 9_000_002;
     const RADIUS: f32 = 8.0;
-    const SPEED: f32 = 5.0;
-    if std::env::var("AA_FAKE_MOUNT").is_err() {
-        return;
-    }
+    let Ok(mode) = std::env::var("AA_FAKE_MOUNT") else { return };
+    let swim = mode == "swim";
+    let speed = if swim { MountSpeed::default().swim } else { 5.0 };
     let Some(spawn) = &player.spawn else { return };
     let now = time.elapsed_secs();
-    let still = std::env::var("AA_FAKE_MOUNT").is_ok_and(|v| v == "still");
+    let still = mode == "still";
     let centre = Pos::new(spawn.unit.pos.x + if still { 4.0 } else { RADIUS + 3.0 }, spawn.unit.pos.y, spawn.unit.pos.z);
     let (started, last_sent) = *state.get_or_insert_with(|| {
         let mut horse = spawn.unit.clone();
@@ -1997,17 +2006,24 @@ pub fn fake_mount(time: Res<Time>, player: Res<Player>, mut units: ResMut<Units>
         return;
     }
     let t = if still { 0.0 } else { now - started };
-    let angle = t * SPEED / RADIUS;
+    let angle = t * speed / RADIUS;
     // the jump's height over the circle at a time on its clock: 8.83 m/s up, gravity 30, 0.59 s in the air
-    let jumping = std::env::var("AA_FAKE_MOUNT").is_ok_and(|v| v == "jump");
+    let jumping = mode == "jump";
     let air = |t: f32| (jumping && t > 3.0).then(|| t % 3.0).filter(|p| *p < 0.59).map(|p| 8.83 * p - 15.0 * p * p);
     let lift = air(t);
-    let pos = Pos::new(centre.x + RADIUS * angle.cos() - RADIUS, centre.y + RADIUS * angle.sin(), centre.z + lift.unwrap_or(0.0).max(0.0));
-    let yaw = (SPEED * angle.sin()).atan2(SPEED * angle.cos());
+    let mut pos = Pos::new(centre.x + RADIUS * angle.cos() - RADIUS, centre.y + RADIUS * angle.sin(), centre.z + lift.unwrap_or(0.0).max(0.0));
+    if swim && let Some((surface, _)) = water.as_deref().and_then(|w| w.water_at(Vec3::new(pos.x, pos.y, pos.z))) {
+        pos.z = surface - MountSpeed::default().swim_level;
+    }
+    let yaw = (speed * angle.sin()).atan2(speed * angle.cos());
     let mut movement = Movement::unit(pos, yaw, (t * 1000.0) as u32);
     if !still {
-        movement.velocity = [(-yaw.sin() * SPEED * 1024.0) as i16, (yaw.cos() * SPEED * 1024.0) as i16, 0];
+        movement.velocity = [(-yaw.sin() * speed * 1024.0) as i16, (yaw.cos() * speed * 1024.0) as i16, 0];
         movement.delta_movement = [0, 127, 0];
+    }
+    if swim {
+        movement.stance = aa_net::model::stance::SWIM;
+        movement.actor_flags = 0;
     }
     let was_up = last_sent > 0.0 && air(last_sent - started).is_some();
     match (was_up, lift.is_some()) {
