@@ -146,8 +146,9 @@ pub struct MateSpawn {
     pub skills: [u32; MATE_SKILL_SLOTS],
 }
 
-/// Exact native list entries. The unit cooldown container (`sub_39899D40`) stores the skill triples as
-/// `{skill_id = wire[0], remaining = wire[2], other = wire[1]}`; the tag triples are kept raw.
+/// Exact native list entries. The unit cooldown container (`sub_39899D40`) appends the skill triples as
+/// `{skill_id = wire[0], remaining = wire[2], total = wire[1]}` (`sub_3989A290` answers `+4` / `+8` as the
+/// remaining / total pair); the tag triples are kept raw.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DynamicUnitState {
     pub skills: Vec<[u32; 3]>,
@@ -155,9 +156,10 @@ pub struct DynamicUnitState {
 }
 
 impl DynamicUnitState {
-    /// `(skill_id, remaining_ms)` of each skill triple (wire fields 0 and 2; `sub_39899E50` counts the latter down).
-    pub fn cooldowns(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
-        self.skills.iter().map(|t| (t[0], t[2]))
+    /// `(skill_id, remaining_ms, total_ms)` of each skill triple (wire fields 0, 2 and 1; `sub_39899E50` counts the
+    /// remaining time down).
+    pub fn cooldowns(&self) -> impl Iterator<Item = (u32, u32, u32)> + '_ {
+        self.skills.iter().map(|t| (t[0], t[2], t[1]))
     }
 
     fn read_list(r: &mut Reader) -> Result<Vec<[u32; 3]>> {
