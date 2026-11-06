@@ -21,11 +21,11 @@ use aa_net::model::{Movement, Unit, actor_flags, alertness, move_flags, stance};
 use aa_net::state::{Doodads, Units};
 use aa_net::{Event, NetEvent};
 use aa_world::coords::cry_rot_to_bevy;
-use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
+use aa_world::{TerrainQuery, WaterQuery, bevy_to_cry, cry_to_bevy};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
-use super::anim::{Locomotion, Motion};
+use super::anim::{Locomotion, Motion, Swimming};
 use super::creature;
 use super::data::Db;
 use super::doodad_visual::DoodadVisual;
@@ -209,7 +209,7 @@ impl RemoteUnit {
             self.combat = false;
             self.speed = 0.0;
             return (
-                remote::Pose { pos: pose.pos, yaw: self.facing, speed: 0.0, heading: Vec2::ZERO, airborne: false, combat: false },
+                remote::Pose { pos: pose.pos, yaw: self.facing, speed: 0.0, heading: Vec2::ZERO, airborne: false, combat: false, swimming: false },
                 false,
             );
         }
@@ -217,8 +217,8 @@ impl RemoteUnit {
         let mut pos = pose.pos;
         let ground = terrain.ground_at(pos.x, pos.y).map(|ground| ground.height);
         let airborne = pose.airborne && ground.is_none_or(|g| pos.z - g > 0.25);
-        // a hanger's packet point is its real point; the terrain must not snap it down
-        if self.hanging.is_none() && !airborne && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
+        // a hanger's packet point is its real point, and a swimmer's (it floats over the bed): the terrain must not snap it
+        if self.hanging.is_none() && !airborne && !pose.swimming && let Some(g) = ground.filter(|g| (pos.z - g).abs() < GROUND_SNAP) { pos.z = g; }
         self.pos = pos;
         self.combat = pose.combat;
         self.speed = pose.speed;
@@ -1390,7 +1390,8 @@ fn report_of(m: &Movement) -> Report {
             || (m.actor_flags & (actor_flags::STANDING_ON_SOLID | actor_flags::STANDING_ON_OBJECT | actor_flags::HANGING_FROM_OBJECT) == 0
                 && !matches!(m.stance, stance::SWIM | stance::CO_SWIM | stance::FLY)));
     let combat = m.flags & move_flags::IN_COMBAT != 0 || m.alertness == alertness::COMBAT;
-    Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.display_yaw(), server_ms: m.time, airborne, combat }
+    let swimming = matches!(m.stance, stance::SWIM | stance::CO_SWIM);
+    Report { pos: Vec3::new(pos.x, pos.y, pos.z), yaw: m.display_yaw(), server_ms: m.time, airborne, combat, swimming }
 }
 
 /// A ship-local deck report: the primary position and direction are relative to the support
@@ -1553,6 +1554,7 @@ pub fn receive_moves(mut commands: Commands, mut events: MessageReader<NetEvent>
                         server_ms: movement.time,
                         airborne: false,
                         combat: false,
+                        swimming: false,
                     };
                     let mut track = match unit.deck.take() {
                         Some(deck) if deck.ship == ship => deck.track,
@@ -1908,14 +1910,18 @@ const TURN_RATE: f32 = 8.0;
 const GROUND_SNAP: f32 = 1.0;
 
 /// Moves the displayed units along their tracks: the position the server reported, turned to face where the server says,
-/// set on the terrain, and the speed and direction of travel handed to the locomotion clips ([`Motion`]). Riders sit on their
-/// mounts and the mate the player drives goes with the player ([`super::mount`]).
-#[allow(clippy::type_complexity)]
+/// set on the terrain, and the speed and direction of travel handed to the locomotion clips ([`Motion`], and [`Swimming`]
+/// while the movement's stance swims). Riders sit on their mounts and the mate the player drives goes with the player
+/// ([`super::mount`]).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn move_units(
+    mut commands: Commands,
     time: Res<Time>,
     terrain: Res<TerrainQuery>,
+    water: Option<Res<WaterQuery>>,
+    db: Option<Res<Db>>,
     mut views: ResMut<Views>,
-    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>, Option<&mut super::anim::AirStart>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
+    mut query: Query<(Entity, &mut RemoteUnit, &mut Transform, Option<&mut Motion>, Option<&mut super::anim::AirStart>, Option<&mut Swimming>), (Without<Rider>, Without<Driven>, Without<super::seating::Seated>)>,
     sinks: Query<&super::vehicle::WreckSink>,
     timers: Option<Res<aa_world::profile::Timers>>,
     mut smoothness: Local<Smoothness>,
@@ -1935,7 +1941,7 @@ pub fn move_units(
         }
     }
     let measure = smoothness_wanted();
-    for (entity, mut unit, mut transform, motion, air_start) in &mut query {
+    for (entity, mut unit, mut transform, motion, air_start, swimming) in &mut query {
         // a deck walk is placed by `place_deck_riders`; the deck itself, not the `DeckRider` marker, decides, so a
         // walker whose deck a `reset_track` cleared moves here again. An attached slave is placed once as a child of
         // its parent root; the hierarchy follows the parent, so it is never re-placed from its local packet position. A
@@ -1987,6 +1993,28 @@ pub fn move_units(
                 airborne: airborne && (unit.character || mate),
                 climb: unit.hanging.map(|kind| super::anim::ClimbPose { kind, up: unit.climb_up, exiting: false, angle_deg: 0.0 }),
             };
+            // a mate's `waterLevel` is its own swim level against the surface, as `CActor::UpdateSwimStats` takes it for
+            // every actor; a character's swim clips are not played here, so its level is left at 0
+            match (pose.swimming, swimming) {
+                (true, swimming) => {
+                    let level = if mate {
+                        let swim_level = db.as_deref().map_or_else(|| super::data::MountSpeed::default().swim_level, |db| db.mount_speed(unit.model_id).swim_level) * unit.scale;
+                        water.as_deref().and_then(|w| w.water_at(unit.pos)).map_or(0.0, |(surface, _)| unit.pos.z + swim_level - surface)
+                    } else {
+                        0.0
+                    };
+                    match swimming {
+                        Some(mut s) => s.level = level,
+                        None => {
+                            commands.entity(entity).insert(Swimming { level });
+                        }
+                    }
+                }
+                (false, Some(_)) => {
+                    commands.entity(entity).remove::<Swimming>();
+                }
+                (false, None) => {}
+            }
         }
     }
     if measure {
@@ -2132,7 +2160,7 @@ mod lifecycle_tests {
         app.init_resource::<Time>().init_resource::<Views>().add_message::<NetEvent>().add_systems(Update, receive_moves);
         let pos = Vec3::new(3.0, 4.0, 5.0);
         let mut track = Track::new(pos, 1.0);
-        track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true });
+        track.push(0.0, Report { pos: pos + Vec3::X, yaw: 1.0, server_ms: 100, airborne: false, combat: true, swimming: false });
         let entity = app.world_mut().spawn(RemoteUnit { obj_id: 7, model_id: 0, track, vehicle: None, pos, facing: 1.0,
             rotation: Quat::from_rotation_y(1.0), game_rotation: Quat::from_rotation_z(1.0), deck: None, parent: None,
             hang: None, hanging: None, climb_up: 0.0,
@@ -2502,6 +2530,79 @@ mod mate_jump_tests {
         let fall = &frames[127..];
         assert!(fall.iter().any(|(m, ..)| m.airborne), "the ledge fall is in the air");
         assert!(fall.iter().all(|(_, start, _)| !*start), "with no take-off");
+    }
+}
+
+#[cfg(test)]
+mod swim_tests {
+    use super::*;
+    use super::super::anim::AirStart;
+    use aa_net::{Event, NetEvent, Pos};
+
+    /// The movement's swim stance reaches the track: `SWIM` and `CO_SWIM` swim, and with no ground flag they are not in the air.
+    #[test]
+    fn a_swim_stance_reports_a_swimmer() {
+        let mut m = Movement::unit(Pos::new(1.0, 2.0, 3.0), 0.0, 0);
+        assert!(!report_of(&m).swimming);
+        m.actor_flags = 0;
+        for s in [stance::SWIM, stance::CO_SWIM] {
+            m.stance = s;
+            let report = report_of(&m);
+            assert!(report.swimming && !report.airborne, "stance {s}: {report:?}");
+        }
+    }
+
+    /// A mate and a character swimming 0.5 m over the bed keep the packet's height (the terrain snap would pull them onto
+    /// it); the mate is [`Swimming`] at its `waterLevel` (the packet's z plus the horse's swim level minus the surface), the
+    /// character at 0. Back in the relaxed stance on the ground both stand on the terrain and swim no more.
+    #[test]
+    fn a_swimming_unit_floats_over_the_bed() {
+        let terrain = TerrainQuery::fixture_flat("__swim_test__", 100.0);
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .add_message::<NetEvent>()
+            .insert_resource(WaterQuery::fixture_sea("__swim_test__", 102.0, terrain.clone()))
+            .insert_resource(terrain)
+            .add_systems(Update, (receive_moves, move_units).chain());
+        let at = Vec3::new(500.0, 500.0, 100.5);
+        let mate = app.world_mut().spawn((RemoteUnit { character: false, ..RemoteUnit::fixture(7, at) }, Transform::default(), Motion::default(), AirStart::default())).id();
+        let character = app.world_mut().spawn((RemoteUnit::fixture(8, at), Transform::default(), Motion::default())).id();
+        for (obj_id, entity) in [(7, mate), (8, character)] {
+            app.world_mut().resource_mut::<Views>().units.insert(obj_id, View { entity: Some(entity), ..View::default() });
+        }
+        let run = |app: &mut App, stance: u8, actor: u8| {
+            for i in 0..10 {
+                let mut m = Movement::unit(Pos::new(at.x + 0.18 * i as f32, at.y, at.z), 0.0, 100 * i);
+                m.stance = stance;
+                m.actor_flags = actor;
+                for obj_id in [7, 8] {
+                    app.world_mut().write_message(NetEvent(Event::UnitMoved { obj_id, movement: m.clone() }));
+                }
+                for _ in 0..5 {
+                    app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.02));
+                    app.update();
+                }
+            }
+        };
+        run(&mut app, stance::SWIM, 0);
+        let world = app.world();
+        for entity in [mate, character] {
+            let unit = world.get::<RemoteUnit>(entity).unwrap();
+            assert!((unit.pos.z - 100.5).abs() < 1e-4, "a swimmer was snapped to the bed: {}", unit.pos.z);
+            assert!(!world.get::<Motion>(entity).unwrap().airborne);
+        }
+        let level = world.get::<Swimming>(mate).expect("the mate swims").level;
+        let want = 100.5 + super::super::data::MountSpeed::default().swim_level - 102.0;
+        assert!((level - want).abs() < 1e-4, "waterLevel {level}, not {want}");
+        assert_eq!(world.get::<Swimming>(character), Some(&Swimming { level: 0.0 }));
+
+        run(&mut app, stance::RELAXED, actor_flags::STANDING_ON_SOLID);
+        let world = app.world();
+        for entity in [mate, character] {
+            assert!(world.get::<Swimming>(entity).is_none(), "still swimming on the ground");
+            assert!((world.get::<RemoteUnit>(entity).unwrap().pos.z - 100.0).abs() < 1e-4, "a walker 0.5 m over the terrain stands on it");
+        }
     }
 }
 

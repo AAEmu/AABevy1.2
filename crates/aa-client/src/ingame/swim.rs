@@ -336,6 +336,66 @@ impl SwimClips {
     }
 }
 
+/// The horse graph's `waterLevel` under which a mount swims with its `_deep` clips: `horse_full_body.xml` selects the
+/// `_deep` states on `waterLevel` -1000..-1.01 and the others on -1..1000 (`data/extract/mounts/ag_horse.txt` :274-325).
+/// `waterLevel` is `CActor::UpdateSwimStats`' `relativeWaterLevel` (`sub_39120300`, x2game12.c:239760-239772, written to
+/// the graph input `this + 2222`): the origin plus the swim level ([`swim_level`]) minus the surface, 0 for a body
+/// floating at its level.
+pub const MOUNT_DEEP_LEVEL: f32 = -1.01;
+/// The blend into a mount's swim clip (s): `TransitionTime` 0.5 of the `SwimIdle` and `SwimMovement` templates
+/// (`libs/animationgraphtemplates/swimidle.xml`, `swimmovement.xml`; the latter ignores the states' own `transition_time`).
+pub const MOUNT_SWIM_BLEND: f32 = 0.5;
+
+/// The horse graph's swim set (`horse_full_body.xml` :753-761, :1061-1255; every rideable `.cal` includes
+/// `global_horse.cal`, which names the clips at :100 and :265-277): `fist_ba_idle_swim`, and `fist_mo_swim_{f,b,l,r}` with
+/// their `_deep` variants. The graph's diagonals play the f or b clip turned at the pelvis (`pelvis_rotation` 45 / 40), and
+/// `fist_mo_swim_up` / `_down` are `fist_ba_idle_swim.caf` in the `.cal`. The horse's clips are in place (no `Bip01` travel)
+/// with the pelvis at 1.71 m, as in its standing idle, so they are played at their own pace.
+#[derive(Clone)]
+pub struct MountSwimClips {
+    idle: BoundClip,
+    /// By [`mount_swim_side`]: f, b, l, r.
+    swim: [Option<BoundClip>; 4],
+    deep: [Option<BoundClip>; 4],
+}
+
+/// The sides of the horse graph's swim clips, the order of [`MountSwimClips`].
+const MOUNT_SIDES: [&str; 4] = ["f", "b", "l", "r"];
+
+impl MountSwimClips {
+    /// Binds the swim clips of a mount's `.cal`; `None` when the model has no swim idle or no forward swim.
+    pub fn load(rig: &Rig, cal: &Cal, clips: &ClipLibrary) -> Option<MountSwimClips> {
+        let bind = |name: &str| bind_clip(rig, cal, clips, name);
+        let idle = bind("fist_ba_idle_swim")?;
+        let sides = |suffix: &str| -> [Option<BoundClip>; 4] { std::array::from_fn(|i| bind(&format!("fist_mo_swim_{}{suffix}", MOUNT_SIDES[i]))) };
+        let (swim, deep) = (sides(""), sides("_deep"));
+        swim[0].as_ref()?;
+        Some(MountSwimClips { idle, swim, deep })
+    }
+
+    /// The clip for a mount swimming to `side` ([`mount_swim_side`]; `None`: no move request, the swim idle) at the graph's
+    /// `waterLevel` `level`: the `_deep` clip under [`MOUNT_DEEP_LEVEL`], else the surface one. A side the model lacks
+    /// swims forward (the wildboar and the riding lions have only some of them).
+    pub fn pick(&self, side: Option<usize>, level: f32) -> &BoundClip {
+        let Some(i) = side else { return &self.idle };
+        let deep = if level < MOUNT_DEEP_LEVEL { self.deep[i].as_ref().or(self.deep[0].as_ref()) } else { None };
+        deep.or(self.swim[i].as_ref()).or(self.swim[0].as_ref()).unwrap_or(&self.idle)
+    }
+}
+
+/// The side of the horse graph's swim clip for a move request (x right, y forward): f, b, l or r as in [`MountSwimClips`].
+/// The graph boxes `SwimControlX` / `Y` at 0.3 / 0.4 (:1061-1245), and the swim mode (`sub_3912CE00`, x2game12.c:246966)
+/// lifts any forward or backward share to 1.1, so only a pure strafe is l or r; fl and fr swim f, bl and br swim b.
+pub fn mount_swim_side(local_dir: Vec2) -> usize {
+    if local_dir.y.abs() > 0.001 {
+        if local_dir.y > 0.0 { 0 } else { 1 }
+    } else if local_dir.x < 0.0 {
+        2
+    } else {
+        3
+    }
+}
+
 /// Metres per second the root bone travels in a forward clip.
 fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
     let root = rig.skeleton.bones.get(rig.root).map(|b| b.controller_id);
@@ -408,6 +468,16 @@ mod tests {
         assert!(should_swim(false, 99.9, wet(6.0), enter));
         // thrown high out of the water
         assert!(!should_swim(true, 101.0, wet(6.0), enter));
+    }
+
+    /// The horse graph's swim sides: any forward or backward share swims f or b (the diagonals' clips), only a pure strafe
+    /// swims l or r.
+    #[test]
+    fn a_mount_swims_diagonally_with_its_forward_or_back_clip() {
+        let side = |x: f32, y: f32| MOUNT_SIDES[mount_swim_side(Vec2::new(x, y).normalize())];
+        assert_eq!([side(0.0, 1.0), side(-1.0, 1.0), side(1.0, 1.0), side(0.99, 0.1)], ["f"; 4]);
+        assert_eq!([side(0.0, -1.0), side(-1.0, -1.0), side(1.0, -1.0)], ["b"; 3]);
+        assert_eq!([side(-1.0, 0.0), side(1.0, 0.0)], ["l", "r"]);
     }
 
     #[test]
