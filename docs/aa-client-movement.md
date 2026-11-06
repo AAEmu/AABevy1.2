@@ -139,8 +139,9 @@ as the player instead of waiting for cells around a different saved spawn.
   mode `sub_3912CE00` smooths its own velocity and was not traced for a mount), and walks again `LEAVE_MARGIN` shallower. Its packets
   are the swimming ones as the mate's `CSMoveUnit` (stance `SWIM`, no ground flag, the swim cadence). X, Space and the camera pitch do not move it up or down, and no jump leaves the water
   (unverified: whether a ridden mount can dive was not traced). No wading slowdown on land (`cl_shallowWaterSpeedMulPlayer` is players
-  only). The rider keeps its seat clips (`drive_swim` skips a `Rider`; the horse graph's Driver states have no swim state); the mate
-  plays its land gait until its swim clips are wired (`ag_horse.txt:211-327`, `Stance=swim`). Capture-pending: the depth a ridden horse
+  only). The rider keeps its seat clips (`drive_swim` skips a `Rider`; the horse graph's Driver states have no swim state) and sits
+  in its idle, since 1.2 gives the rider of a swimming mount PseudoSpeed 0; the mate plays the horse graph's swim clips
+  (`ag_horse.txt:211-327`, `Stance=swim`; `docs/aa-client-units.md`, "the mount's swim"). Capture-pending: the depth a ridden horse
   starts to swim at and its wire stance.
 * Getting off a swimming mount: the get-off placement (`mount::DismountMove`) falls to the rider's floating height over water at least
   `ActorParams::swim_depth` deep (`player::afloat`), not to the bed, and at its end the rider swims on (`Mover::swim` is set where

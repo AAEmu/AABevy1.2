@@ -32,8 +32,14 @@ immediately, even when no movement follows. Ship steering requests carry no posi
   when it stands. Players strafe: `remote::local_dir(heading, yaw)` is the direction of travel in the unit's own frame, which
   picks the forward, backward and strafe clips of `drive_locomotion`; NPCs always run forward.
 * **Ground.** The server's z is replaced by `TerrainQuery::height_at` when it is within 1 m of it and the unit is not airborne.
-  A jumping or falling player keeps the server's z.
+  A jumping or falling player keeps the server's z, and so does a swimmer: a report whose stance is `SWIM` or `CO_SWIM`
+  (`remote::Report::swimming`, carried to the played-back `Pose`) floats over the bed, so a unit swimming in shallow water
+  is no longer pulled onto it.
 * `Motion { speed, local_dir, airborne }` is written for `anim::drive_locomotion`, which owns the walk, run, jump and fall clips.
+  While the stance swims, `move_units` also puts `anim::Swimming { level }` on the unit (and takes it off with the next
+  stance): a mate's `level` is the graph's `waterLevel`, its packet z plus its swim level (`MountSpeed::swim_level` x its
+  unit scale) minus the water surface (`WaterQuery`); a character's is 0, since its swim clips belong to the on-foot
+  swimming (a remote character still runs on the water, as before).
   The transform is touched only when the pose changed (a standing unit costs nothing).
 
 ## Clips
@@ -83,6 +89,33 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
   * A new direction in the air that keeps the air clip (f to l, r, fl, fr or none; b to bl, br or none) plays it on
     instead of from its start: only `JumpMain` sets `AllowAnimRestart` (`jumpmain.xml`), `JumpLoop` does not.
   * `examples/mount_jump.rs` scripts a remote mate's jump on the Lilyut horse (model 139) and takes a shot mid-air;
+* **the mount's swim** (`swim::MountSwimClips`, played by `anim::drive_locomotion` while the unit is `anim::Swimming`): the
+  horse graph's swim states select on `Stance` swim (`ag_horse.txt` :211-327, `horse_full_body.xml` :753-761 and
+  :1061-1255), and `global_horse.cal` names `fist_ba_idle_swim` (:100) and `fist_mo_swim_{f,b,l,r}` with their `_deep`
+  clips (:265-277). `ClipSet::load` binds them for a model without the humanoid jump (the monster graph's swim is
+  `fist_mo_swim_idle`, a character's is `swim::drive_swim`'s). The pak has them in the horse, donkey, pangolin, pegasus,
+  yata, elephant, polar bear and snow lion folders; the wildboar and the riding lions have only some (a missing side
+  swims forward). What plays:
+  * no move request (`SwimControlX/Y/Z` within 0.3): `fist_ba_idle_swim` (`SwimIdle`), at any depth; the `up` / `down`
+    states (Z beyond 0.96) are the same file in the `.cal`;
+  * a request: the side's clip (`SwimMovement`). The swim mode (`sub_3912CE00`, x2game12.c:246966-246973) lifts any
+    forward or backward share of the request to 1.1, so fl and fr swim `fist_mo_swim_f`, bl and br `fist_mo_swim_b` (the
+    graph turns their pelvis by 45 / 40 degrees, which is not drawn: **approximate**), and only a pure strafe swims l or
+    r. A new request with the same clip plays it on;
+  * `_deep` under `waterLevel` -1.01 (the shallow states want -1..1000). `waterLevel` is `CActor::UpdateSwimStats`'
+    `relativeWaterLevel` (`sub_39120300`, x2game12.c:239760-239772, the graph input at `this + 2222`), 0 for a body
+    floating at its swim level, so a mount at the surface never plays them;
+  * both templates blend in over 0.5 s (`swimidle.xml`, `swimmovement.xml`: `TransitionTime` 0.5; the states' own
+    `transition_time` is unused) and loop at the clip's own pace: the horse's swim clips are in place with the pelvis at
+    1.71 m, as in its standing idle (`data/extract/mounts/cafroot.py`), so the body's depth is the origin's. Leaving the
+    water picks the land clip again.
+
+  The move states also want `PseudoSpeed` 0.2..2; the code takes the land threshold (0.3 m/s) instead, since the swim
+  PseudoSpeed scale is not known (**approximate**). The mate the player drives swims with its mover (`mount::drive_mount`:
+  `Swimming` at its own `waterLevel`, the pressed direction as its `local_dir`, zero while it coasts with no key held);
+  a remote mate swims forward (a non-character's `local_dir`). The swim death (`swim_death_animation`, `dead_swim_start`)
+  is not played. `examples/mount_swim.rs` scripts a swimming horse under a water plane (`shots/aa-client/mount_swim.png`:
+  idle, forward, a strafe to the right, forward; 290-360 fps in the debug build);
 * the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
   body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
   plays the original player's mounted states (`player_full_body.xml`; the graph `Vehicle`/`VehicleSeat` comes from
@@ -107,7 +140,10 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     at their end, so a speed change during one is taken up then (the graph also links the idle-to-run state to the
     run-to-idle one, :14555; whether the real client leaves early is unverified). PseudoSpeed is not m/s: 1.2 sets it to 1.0
     at an actor's full run (the Dash controller, `docs/research/re-skills.md`), so `gait()` divides the mount's speed by its
-    `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified;
+    `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified. On a swimming mount
+    the rider sits in its idle: `X2::ActorUnitModel::Update` (`sub_390DCC80`, x2game12.c:186796-186815) copies the mount
+    graph's PseudoSpeed to the rider's and puts 0 instead while the mount's `Stance` is `swim`, so `MountMotion::of`
+    hands the rider speed 0 while its mount is `Swimming` (riding into the water at a run plays the run-to-idle);
   * **jump:** 1.2 hands a unit's jump to its riders (`sub_390CCAB0`, x2game12.c:175297-175317: the unit's +680 calls +680
     on every attached actor, then sends `jumpMP01` to its own graph). `Horse_Driver_Jump_Start` (:1502; Action `jumpMP01`,
     `VehicleSeat` 0..10, so passengers too; `JumpLoop`) plays `horse_mo_jump_f_start` once and holds its last frame;
@@ -150,7 +186,10 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 `AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
 appear next to the player and run a circle at 5 m/s. `AA_FAKE_MOUNT=jump` adds a jump every 3 s, sent as a driver's client
-sends it (actor flags: take-off 0x0c, air 0, landing 0x14; the horse's 1.3 m arc at gravity 30).
+sends it (actor flags: take-off 0x0c, air 0, landing 0x14; the horse's 1.3 m arc at gravity 30). `AA_FAKE_MOUNT=swim` swims the
+circle as a driver's client sends a swimming mount: stance `SWIM` (2), no ground flag, the horse's 1.8 m/s, its origin 2.14 m
+under the water surface where `WaterQuery` finds water (the circle, 8 m round a point 3 m east of the player, lies in 5-10 m of
+sea at `--pos 15675,15360`).
 The offset between the seat bone and the rider's origin is a first guess, not checked against the real client.
 
 ### Owned mounts (the local player)
@@ -184,7 +223,7 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   ("the mount's jump" and "jump" above). In water deeper than its swim level (`MountSpeed::swim_level`: `swim_height` plus
   its spine, times the mate's unit scale: 2.14 m for the Lilyut horse) the mount swims at the surface at its swim stance's
   speed (`game_stances.max_speed` of stance 3: 1.8 m/s for the horse) and its packets carry stance `SWIM` (`docs/aa-client-movement.md`, "Swimming"); the
-  mate plays its land gait and the rider its seat clips meanwhile. A get-off there leaves the rider swimming at the surface
+  mate plays its swim clips ("the mount's swim" above) and the rider sits in its idle (PseudoSpeed 0, "riding" above). A get-off there leaves the rider swimming at the surface
   (`player::afloat`; the get-off pose in water is capture-pending). The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
@@ -379,6 +418,11 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
   `_b_end` select on `RequestedMoveDir4LH` f..r / b..br, and the graph has no `s` for them), the empty blends of the
   `_end` states and of the rider's take-off, whether a ledge fall while running plays the rider's take-off, and a
   walking-mode (`jumpMP02`) jump. `AA_FAKE_MOUNT=jump` on the lane server shows a remote horse and its rider jumping.
+* The mount's swim is built from the graph and the pak and not captured. To check: a remote horse swimming
+  (`AA_FAKE_MOUNT=swim` on the lane server with `--pos 15675,15360`, `--shot shots/aa-client/mount_swim_remote.png
+  --shot-after 8`, and the fps line), the own horse swimming (the depth it starts at, its wire stance), the rider's idle on a swimming mount, the
+  `PseudoSpeed` 0.2 threshold of the move states, the diagonals' pelvis turn, and whether another client's swimming mount
+  is ever deep (its driver floats it at its level).
 * The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet (1.2 marks the unit
   jumped and jumping, "Rearing" above, so a JUMPING packet is plausible), how other clients see the rear, whether
   movement input cuts it short and whether it cancels a cast (the code says no, although 1.2 raises the same `jumped`
