@@ -1075,6 +1075,21 @@ impl Db {
             .is_some_and(|fx| fx > 0)
     }
 
+    /// The top speed of a ship model (`ship_models.velocity`, m/s) through its `models` row: the denominator of
+    /// `UpdateExhaustEffect`'s exhaust factor (`FUN_390c78d0`). `None` for a model that is not a ship.
+    pub fn ship_max_speed(&self, model_id: u32) -> Option<f32> {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT s.velocity FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .ok()
+            .flatten()
+            .map(|v| v as f32)
+    }
+
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
     /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
     /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
@@ -1380,6 +1395,17 @@ impl Db {
             .ok();
         l.gliders.insert(item_id, glider.clone());
         glider
+    }
+
+    /// Every glider item template that casts a skill (`item_backpacks.backpack_type_id = 2`, `items.use_skill_id` set), by id.
+    pub fn glider_items(&self) -> Vec<u32> {
+        let l = self.lookups.lock().unwrap();
+        let read = l.conn.prepare(
+            "SELECT b.item_id FROM item_backpacks b JOIN items i ON i.id = b.item_id
+             WHERE b.backpack_type_id = 2 AND i.use_skill_id > 0 ORDER BY b.item_id",
+        );
+        read.and_then(|mut st| st.query_map([], |r| Ok(r.get::<_, i64>(0)? as u32))?.collect())
+            .unwrap_or_default()
     }
 
     /// The equip slot a skill is cast through (`skills.link_equip_slot_id` >= 0) and the backpack type the item there

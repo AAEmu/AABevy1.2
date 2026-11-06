@@ -1781,6 +1781,8 @@ pub fn show_glider(
         {
             animator.play(clip, looped, 0.15);
             animator.random_idle = None;
+        } else if play.cal.is_some() {
+            warn!("glide: the glider model has no {name:?} clip for {pose:?}");
         }
         play.playing = Some(pose);
     }
@@ -2043,7 +2045,8 @@ pub fn draw_remote_gliders(
                 glider_animator.random_idle = None;
                 play.playing = Some(pose);
             } else {
-                // a model without that clip: remember the failure for this pose, try the next pose only
+                // a model without that clip: say so once, remember the failure for this pose, try the next pose only
+                warn!("glide: the glider model has no {name:?} clip for {pose:?}");
                 play.failed = Some(pose);
             }
         }
@@ -2337,6 +2340,139 @@ mod tests {
             ("fist_ac_gliding_start", false)
         );
         assert_eq!(Pose::Start.glider_clip(), ("loop", true));
+    }
+
+    #[test]
+    fn every_gliding_buff_flies_ten_seconds_of_every_key_without_nan() {
+        let all = GlideParams::load_all();
+        if all.is_empty() {
+            return;
+        }
+        for (&id, &params) in &all {
+            for (forward, turn) in [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 1.0)] {
+                let mut flight = Flight::start(params);
+                let input = Input { forward, turn };
+                let mut turned = 0.0f32;
+                for _ in 0..600 {
+                    let step = flight.step(1.0 / 60.0, input, false);
+                    assert!(
+                        step.speed.is_finite() && step.vz.is_finite() && step.turn_rate.is_finite(),
+                        "buff {id} {input:?}: {step:?}"
+                    );
+                    turned += step.turn_rate.abs();
+                }
+                assert!(flight.phase != Phase::Open, "buff {id} stays in the opening after 10 s");
+                if params.rotate_speed == 0.0 {
+                    assert_eq!(turned, 0.0, "buff {id} has no turn rate but turns");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_turn_rate_flies_straight_and_keeps_the_speeds() {
+        let params = GlideParams { rotate_speed: 0.0, ..GlideParams::EXPERIMENTAL };
+        let mut flight = Flight::start(params);
+        let step = run(&mut flight, 3.0, Input { forward: 1.0, turn: 1.0 }, false);
+        assert_eq!(step.turn_rate, 0.0);
+        assert!(step.speed > 0.0, "{step:?}");
+    }
+
+    /// The sweep of every glider item: the row resolves, the `.cal` binds the four clips the glider plays, the stowed
+    /// look and a missing `endloop` clip are listed. `AA_PAK` / `AA_DB` needed.
+    #[test]
+    fn every_glider_item_resolves_and_binds_its_clips() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let items = db.glider_items();
+        if items.is_empty() {
+            return;
+        }
+        let library = ClipLibrary::default();
+        let mut failures = Vec::new();
+        for id in items {
+            let Some(glider) = db.glider(id) else {
+                failures.push(format!("{id}: Db::glider does not resolve"));
+                continue;
+            };
+            let chr = if glider.model.ends_with(".cdf") {
+                match aa_anim::Cdf::load(&glider.model) {
+                    Ok(cdf) => cdf.model,
+                    Err(e) => {
+                        failures.push(format!("{id} {}: cdf: {e}", glider.model));
+                        continue;
+                    }
+                }
+            } else {
+                glider.model.clone()
+            };
+            let (Some(cal), Ok(rig)) = (glider_cal(&glider.model), aa_anim::pose::shared_rig(&chr)) else {
+                failures.push(format!("{id} {}: no .cal or rig for {chr}", glider.model));
+                continue;
+            };
+            for name in ["start", "loop", "sliding"] {
+                if bind_clip(&rig, &cal, &library, name).is_none() {
+                    failures.push(format!("{id} {}: clip {name} does not bind", glider.model));
+                }
+            }
+            // 17 items name an `endloop` in the `.cal` whose `.caf` is not in the pak (kite, butterfly, kraken, sloth, ...):
+            // the closing glider plays nothing there, as a missing clip does in the original
+            if bind_clip(&rig, &cal, &library, "endloop").is_none() {
+                println!("glider sweep: {id} {} has no endloop clip", glider.model);
+            }
+            if db.backpack(id).is_none() {
+                println!("glider sweep: {id} {} has no stowed look (asset2_id 0): nothing is drawn on the back", glider.model);
+            }
+        }
+        assert!(failures.is_empty(), "glider sweep:
+{}", failures.join("
+"));
+    }
+
+    /// What the generic buff effect path finds for the 55 gliding buffs: their `fx_group_id` items, and whether each particle
+    /// effect resolves in its `libs/particles` library. Prints one line per effect group (`--nocapture`).
+    #[test]
+    fn the_gliding_buffs_effect_groups_resolve_in_the_particle_libraries() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let all = GlideParams::load_all();
+        let Some(book) = super::super::combat::skills::SkillBook::open() else { return };
+        if all.is_empty() {
+            return;
+        }
+        let mut ids: Vec<u32> = all.keys().copied().collect();
+        ids.sort_unstable();
+        let mut libraries: HashMap<String, Option<aa_fx::Library>> = HashMap::new();
+        let mut seen: HashMap<String, Vec<u32>> = HashMap::new();
+        for id in ids {
+            let Some(look) = book.buff(id) else {
+                seen.entry("(no effect group)".into()).or_default().push(id);
+                continue;
+            };
+            for item in look.fx.iter().filter(|item| !item.effect.is_empty() && !item.chr) {
+                let found = aa_fx::split_name(&item.effect).is_some_and(|(library, effect)| {
+                    libraries
+                        .entry(library.to_ascii_lowercase())
+                        .or_insert_with(|| aa_fx::Library::load(library).ok())
+                        .as_ref()
+                        .is_some_and(|lib| lib.get(effect).is_some())
+                });
+                let line = format!("{} events {}..{} {}", item.effect, item.start, item.end, if found { "resolves" } else { "NOT FOUND" });
+                seen.entry(line).or_default().push(id);
+            }
+            for item in look.fx.iter().filter(|item| item.chr) {
+                seen.entry(format!("{} (character effect)", item.effect)).or_default().push(id);
+            }
+        }
+        let mut lines: Vec<_> = seen.into_iter().collect();
+        lines.sort();
+        for (line, buffs) in &lines {
+            println!("gliding fx: {line}: {} buffs {buffs:?}", buffs.len());
+        }
+        assert!(lines.iter().all(|(line, _)| !line.contains("NOT FOUND")), "a gliding effect is missing from its library");
     }
 
     #[test]
