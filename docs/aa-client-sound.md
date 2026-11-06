@@ -122,9 +122,16 @@ the model moves (either velocity vector above 0.0003). The `engine` event's `spe
 `update_vehicle_engine_sounds` rewrites them only when the ratio changes. The tractor's pack has only `run` (so it is
 silent when parked), the speedcar's only `engine` (its `speed_car/run` event is the one with those parameters). Native
 stops the `run`/`yaw`/`pitch` handles in damage state 5 (dying) or 6 (dead) and does not update the `engine` handle
-there (it is not explicitly stopped). The Bevy client has no dying state yet (PR #69), so it gates on `Dead` (state 6)
-and removes both sounds there; a resurrection restores the engine. A muted run has no `SoundBook`/`Packs`, so nothing
-is resolved.
+there (it is not explicitly stopped). `update_vehicle_engine_sounds` reads `VehicleDamage.state` for that: in 5 or 6
+`run` (and a ship's `steering`) are removed and the engine sound stays frozen on its last parameters; a unit that
+appears dying never starts its engine; back in 1..4 the engine starts or updates again and `run` follows the motion.
+
+Ships (`ShipUnitModel::UpdateSound`, `sub_390C7BF0`, `x2game12.c:170960`): `run` plays only while the speed is above
+1.0 m/s (land vehicles keep 0.0003 on speed or yaw rate), and the pack's `steering` item (pack 144 galleon -> sound 33
+`x2vehicles:ship:turn`, 381 fishboat and 146 speedboat -> 2147; 145 smallboat has none) is a second loop that plays
+while the steering state (`this+213`, from `UpdateSteeringWheel`) is non-zero. Approximate (capture-pending): the Bevy
+motion has no helm state, so `steering` plays while `|yaw_rate|` is above 0.02 rad/s. A muted run has no
+`SoundBook`/`Packs`, so nothing is resolved.
 
 ## Checks (muted engine unless `--sound`)
 
