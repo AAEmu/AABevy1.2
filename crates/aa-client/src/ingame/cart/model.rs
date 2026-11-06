@@ -9,7 +9,8 @@
 //! * `top_speed = velocity` and `yaw_rate_per_steer = angVel` (model 38: 4.0 and 0.4, the capture);
 //! * `accel = 1 / lin_inertia` (model 38: 2.5, the captured slope) and `decel = 1 / lin_deaccel_inertia`.
 //!   **Inferred** for the other models: no capture shows their inertia at work. A model with no linear
-//!   inertia (the wheeled-simulation speedcars) takes the wagon's 1.6 s from rest to top speed.
+//!   inertia (the wheeled-simulation speedcars, and the catapult, ram and ballista rows) takes the wagon's
+//!   1.6 s from rest to top speed.
 
 use bevy::prelude::*;
 
@@ -95,7 +96,12 @@ impl CartParams {
         let top = if velocity > 0.0 { velocity } else { f64::from(wagon.top_speed) };
         let rate = |inertia: f64| if inertia > 0.0 { 1.0 / inertia } else { top / WAGON_RAMP_SECONDS };
         let accel = rate(lin_inertia) as f32;
-        let (contacts, wheelbase, track) = layout(mounts).unwrap_or((wagon.wheel_contacts, wagon.wheelbase, wagon.track));
+        // The wagon body's own mounts read back from the pak are WHEEL_CONTACTS plus float noise
+        // (0.8350314 for 0.8350, 1.6103804 for 1.6104): that body keeps the constants, so model 38
+        // drives the captured fit bit-exactly in game too.
+        let (contacts, wheelbase, track) = layout(mounts)
+            .filter(|(contacts, _, _)| !is_wagon_layout(contacts))
+            .unwrap_or((wagon.wheel_contacts, wagon.wheelbase, wagon.track));
         CartParams {
             top_speed: top as f32,
             yaw_rate_per_steer: if ang_vel > 0.0 { ang_vel as f32 } else { wagon.yaw_rate_per_steer },
@@ -110,6 +116,12 @@ impl CartParams {
 
 /// Four wheel contacts, wheelbase and track.
 type Layout = ([(f32, f32); 4], f32, f32);
+
+/// Whether `contacts` are the Farm Wagon's [`WHEEL_CONTACTS`] to within 1 mm (the constants are its mounts
+/// rounded to 0.1 mm; the next closest body, the battle food cart's, is 4.7 mm off at the front axle).
+fn is_wagon_layout(contacts: &[(f32, f32); 4]) -> bool {
+    contacts.iter().zip(WHEEL_CONTACTS).all(|(got, want)| (got.0 - want.0).abs() < 1e-3 && (got.1 - want.1).abs() < 1e-3)
+}
 
 /// The four contacts (front right, front left, rear right, rear left), wheelbase and track of a set of
 /// wheel mounts: the mounts split at the middle of their length into a front and a rear axle, and the
@@ -131,12 +143,36 @@ fn layout(mounts: &[Vec3]) -> Option<Layout> {
     (wheelbase > 0.1 && track > 0.1).then_some(([front_right, front_left, rear_right, rear_left], wheelbase, track))
 }
 
+/// `vehicle::wheel_mounts` of model 1008 (`vehicle_tractor.tractor_body`) as read from the pak.
+#[cfg(test)]
+pub(super) const WAGON_MOUNTS_FROM_THE_PAK: [Vec3; 4] = [
+    Vec3::new(0.8350314, 1.6103804, 0.45870528),
+    Vec3::new(-0.8430542, 1.6103828, 0.45870504),
+    Vec3::new(1.5294884, -2.5452678, 0.8455111),
+    Vec3::new(-1.5212425, -2.545268, 0.8455102),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn wagon_mounts() -> Vec<Vec3> {
         WHEEL_CONTACTS.iter().map(|&(x, y)| Vec3::new(x, y, 0.4)).collect()
+    }
+
+    /// The wagon's read-back mounts carry float noise; they still give the captured layout exactly.
+    #[test]
+    fn the_wagon_mounts_read_from_the_pak_keep_the_exact_fit() {
+        let p = CartParams::from_row(4.0, 0.4, 0.4, 0.4, &WAGON_MOUNTS_FROM_THE_PAK);
+        assert_eq!(p, CartParams::WAGON);
+        assert_eq!(p.centroid(), WHEEL_CENTROID);
+        // the battle food cart (model 1442) shares the rear axle but its front axle is 4.7 mm further forward
+        let mut food_cart = WAGON_MOUNTS_FROM_THE_PAK;
+        food_cart[0].y = 1.6151049;
+        food_cart[1].y = 1.6151074;
+        let p = CartParams::from_row(4.0, 0.4, 0.4, 0.4, &food_cart);
+        assert_ne!(p.wheel_contacts, WHEEL_CONTACTS);
+        assert!((p.wheelbase - 4.160374).abs() < 1e-4);
     }
 
     #[test]
@@ -211,12 +247,15 @@ mod tests {
     fn the_wagon_bodys_mounts_equal_the_constants() {
         let Some(db) = crate::ingame::data::Db::open() else { return };
         let Some(look) = db.vehicle_look(1008) else { return };
-        if vehicle::wheel_mounts(&look).is_empty() {
+        let mounts = vehicle::wheel_mounts(&look);
+        if mounts.is_empty() {
             return;
         }
-        let Some(p) = CartParams::load(1008, Some(&look)) else { return };
-        for (got, want) in p.wheel_contacts.iter().zip(WHEEL_CONTACTS) {
-            assert!((got.0 - want.0).abs() < 1e-3 && (got.1 - want.1).abs() < 1e-3, "{got:?} vs {want:?}");
+        for (got, want) in mounts.iter().zip(WAGON_MOUNTS_FROM_THE_PAK) {
+            assert!(got.distance(want) < 1e-4, "{got:?} vs {want:?}");
         }
+        let Some(p) = CartParams::load(1008, Some(&look)) else { return };
+        // the drive's own load path gives the captured fit bit-exactly
+        assert_eq!(p, CartParams::WAGON);
     }
 }

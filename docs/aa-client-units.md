@@ -1053,15 +1053,21 @@ Every driven land slave uses its own `vehicle_models` row, not the Farm Wagon's.
 reads the same row read-only (like `swim::ActorParams::load`) when `drive_cart` starts a drive,
 and the wheel contacts come from the body's `wheelN` / `wheel_type2N` mounts (`vehicle::wheel_mounts`,
 the reader the wheel visuals use): the mounts split at the middle of their length into a front and
-a rear axle and the widest pair of each is the contact pair. The wagon body's mounts reproduce
-`WHEEL_CONTACTS` to 1e-3 m (a test, skipped without `AA_PAK` / `AA_DB`).
+a rear axle and the widest pair of each is the contact pair. The wagon body's mounts read back as
+`WHEEL_CONTACTS` plus float noise (0.8350314 for 0.8350); a layout within 1 mm of the constants keeps
+them, so model 38 drives the captured fit bit-exactly in game, not only in the tests (a test, skipped
+without `AA_PAK` / `AA_DB`, checks the drive's own load path). The battle food cart 51 and the 8000001
+wagon have their own front axle / rear track and keep their own layout.
 
 * `top_speed = velocity`, `yaw_rate_per_steer = angVel` (wire `angVel.z` too). Data, exact for
-  model 38 (4.0, 0.4); Hauler 65 and 58 5.0, 30/33 3.5, 45-48/50/52 15.0, 54-56 17.0, 17/28/29 13.0 and 10.0.
+  model 38 (4.0, 0.4); Hauler 65, 58 and 33 5.0, 30/60 3.5, 45-48/50/52 15.0, 54-56 17.0, 17 13.0, 28/29 10.0.
 * `accel = 1 / lin_inertia`, `decel = 1 / lin_deaccel_inertia` (model 38: 0.4 gives the captured 2.5 m/s²).
   **Inferred** for every other model: only the wagon was captured. A model with no linear inertia
-  (the speed cars, `use_wheeled_vehicle_simulation`) takes the wagon's 1.6 s from rest to top speed.
-  Easing toward zero uses `decel`, speeding up or reversing `accel`.
+  takes the wagon's 1.6 s from rest to top speed: the speed cars (`use_wheeled_vehicle_simulation`), and
+  also the kinematic (non-wheeled-sim) catapult 1, ram 4 and ballista 6 / hook 13. Read as
+  `1 / lin_inertia`, a zero could instead mean no inertia at all (an instant change); capture-pending.
+  Easing toward zero uses `decel`, speeding up or reversing `accel` (S at speed brakes at `accel`, so a
+  model with `lin_deaccel_inertia < lin_inertia` coasts down faster than it brakes; also capture-pending).
 * A body with fewer than two axles of mounts (or no body model) keeps the wagon layout; a missing row keeps
   `CartParams::WAGON` altogether. `CartController::new` is the wagon, `with_params` takes a model's.
 * The speed cars really run the CryPhysics wheeled simulation (`wheeled_vehicle_*` columns), which is not

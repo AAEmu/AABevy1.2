@@ -915,16 +915,22 @@ fn the_wheelbase_of_the_model_sets_the_pitch() {
     assert!((controller.pitch - 0.5f32.atan()).abs() < 0.01, "pitch {}", controller.pitch);
 }
 
-/// Model 38 built from its row is the same controller as the wagon fit.
+/// Model 38 built from its row and its body's mounts as the drive reads them is the same controller
+/// as the wagon fit, also on uneven ground where the wheel layout sets the tilt and height.
 #[test]
 fn model_38_params_step_like_the_wagon_fit() {
-    let params = CartParams::from_row(4.0, 0.4, 0.4, 0.4, &[]);
-    let mut a = CartController::new(Pos::default(), 0.3);
-    let mut b = CartController::with_params(Pos::default(), 0.3, params);
+    let params = CartParams::from_row(4.0, 0.4, 0.4, 0.4, &super::model::WAGON_MOUNTS_FROM_THE_PAK);
+    let ground = |x: f32, y: f32| Some(100.0 + 0.2 * y + 0.05 * x + 0.3 * (0.4 * x).sin());
+    let mut a = CartController::new(Pos::new(0.0, 0.0, 100.0), 0.3);
+    let mut b = CartController::with_params(Pos::new(0.0, 0.0, 100.0), 0.3, params);
     for i in 0..200 {
-        let (throttle, steer) = if i < 120 { (1.0, 1.0) } else { (0.0, -1.0) };
-        a.step(1.0 / 22.5, throttle, steer);
-        b.step(1.0 / 22.5, throttle, steer);
+        let (throttle, steer) = match i {
+            0..120 => (1.0, 1.0),
+            120..160 => (-1.0, 0.0),
+            _ => (0.0, -1.0),
+        };
+        a.step_grounded(1.0 / 22.5, throttle, steer, ground);
+        b.step_grounded(1.0 / 22.5, throttle, steer, ground);
     }
     assert_eq!(a, b);
 }
