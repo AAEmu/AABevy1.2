@@ -802,14 +802,16 @@ fn a_driven_mount_falls_with_its_own_gravity() {
 }
 
 /// A mounted take-off sets `PlayerInput::jumped`, so `combat::cancel_on_move` ends the driver's casts as it does on foot
-/// (the fixture's skill and plot casts, one `StopCasting` each), once.
+/// (the fixture's skill and plot casts, one `StopCasting` each), once. A mount that moves off ends them on the move
+/// already (`PlayerInput::moving` from its first held frame), so this one is held in place (run speed 0, as against a
+/// wall): only the jump can end the cast.
 #[test]
 fn a_mount_jump_cancels_the_drivers_cast() {
     if !aa_cry::pak_available() || !aa_anim::db::GameDb::available() {
         return;
     }
     let mut f = Feel::new();
-    f.mount(MountSpeed::default());
+    f.mount(MountSpeed { run: 0.0, ..MountSpeed::default() });
     f.app
         .init_resource::<aa_anim::ClipLibrary>()
         .init_resource::<aa_net::state::Doodads>()
@@ -828,7 +830,8 @@ fn a_mount_jump_cancels_the_drivers_cast() {
     f.hold("moveforward");
     f.tap("jump");
     assert_eq!(stop_castings(&mut f, 1.0 / 60.0), 2, "the take-off ends the skill and the plot cast");
-    assert!(f.input().jumped && !f.mover().grounded);
+    let input = f.input();
+    assert!(input.jumped && !input.moving && !input.turned && !f.mover().grounded, "{input:?}");
     assert_eq!(stop_castings(&mut f, 0.1), 0, "a cancelled cast is not cancelled again");
 }
 
