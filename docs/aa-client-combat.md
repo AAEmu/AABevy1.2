@@ -750,6 +750,62 @@ only; the clips bound through `ingame::anim::bind_clip`, which is what locomotio
 tested (`cargo test -p aa-client --bin aa-client skilltrace`); the trace was written without a server, so the rows of a real fight are
 still to be looked at.
 
+## Mounted casters (riders and their mounts)
+
+**What 1.2 does.** The anims loader `397287E0` (`x2game12.c:1607422`) reads `SELECT id, category_id, hang_ub, loop, move_ub,
+name, relaxed_ub, ride_ub, swim_move_ub, swim_ub FROM anims` into a 36-byte desc (`hang_ub` at `+4`, `move_ub` `+12`, `name`
+`+16`, `relaxed_ub` `+20`, `ride_ub` `+24`, `swim_move_ub` `+28`, `swim_ub` `+32`), and `39156E50` (`InitAnimDescWrapperMap`)
+copies them into the anim desc wrapper (`ride_ub` at `+20`). The code that picks `ride_ub` for a seated unit was not located;
+the graphs and the data say what it plays:
+
+* `player_upper_body.xml` takes two signals for one clip: the variant (`onehand_co_sk_shielddefense_ub` ->
+  `onehand_co_sk_shielddefense_mub_anim`, the `.cal`'s `_mub`) and the plain name (`onehand_co_sk_shielddefense` -> `..._ub_anim`,
+  the clip itself on the upper body, `ub_one_shot_interruptable`). 116 of the 144 `ride_ub` values are states of it, and 103 rows
+  without one have their plain name there.
+* The riding states are upper body states: `onehand_co_horse_attack_l/r_slash` (from `Combat Skill Start`, `ub_one_shot_interruptable`),
+  `horse_co_sk_jousting` and `horse_ba_carrot` (`UpperBodyLoop`). `player_full_body.xml` has none of them.
+* Mounted Attack (Rider) 11013 fires 84 `onehand_co_horse_attack_r_slash`, whose row has no `ride_ub` (its `move_ub` / `hang_ub`
+  `..._ub` is not in the `.cal`): the rider plays the clip itself, on the upper body. Mounted Defense 11036 / 11037 fire 394,
+  `ride_ub` `onehand_co_sk_shielddefense_ub`. The hit, critical, dodge, parry, shield block and stun rows and the `fist_em_*`
+  emotes have a `ride_ub`.
+* Breakthrough, Overrun and Drop Back Rider (15506, 17476, 17475) fire 277 `horse_ac_spur_f`: no graph has a state for it and
+  `global_player.cal` lists no such clip (the pak has `animations/<race>/male/horse/horse_ac_spur_f.caf`), so the rider shows nothing.
+
+**What the client does** (`Stage::play`, `SkillBook::ride_clip`). `mount::seat` takes the rider's `Locomotion`; a unit with
+`mount::Rider` and no locomotion is seated, and `Stage::play` plays every action of it on its upper body (`BoneMask::upper_body`,
+`Animator::play_layer`, `UPPER_BODY_BLEND`), never on the whole body: the row's `ride_ub` (`_mub` first, `upper_candidates`), else
+the clip itself. The rider loop keeps playing underneath (`Rider::step`'s `Animator::play` leaves the layer alone). The `.cal`
+(clips, anim events, layer sounds) comes from the unit's `Character`, as `Rider::bind` reads it. The action ends like any layered
+one (`end_actions`, `release_layers`); a hit reaction is skipped only while another action plays (a rider has no run of its
+own); `anim_rules` (`rejects`) needs locomotion and does not judge a rider's clips.
+
+**The mount's own skills** need nothing of their own: `SCSkillStarted` / `SCSkillFired` name the mate (caster kind 3) and the
+generic path plays the clips on its `RemoteUnit`. Back Kick 11369 (start 18 `all_co_sk_shout`, fire 20 `all_co_sk_lowkick`, cast
+300 ms, fx group 502): standing, both play on the whole body; above 0.3 m/s the horse rig's `Bip01 Spine` subtree (spine, front
+legs, neck and head; the pelvis and hind legs stay with the run) is the upper body mask, so both play as a layer and the gallop
+goes on. `global_horse.cal` has no `_ub` variant of either, so the clips themselves go through the mask.
+
+Tests: `skills.rs` `a_rider_reads_the_ride_ub_column`; `combat.rs` `a_seated_rider_plays_its_skills_on_the_upper_body` (seated by
+`mount::start_stop_riding`; the layer is `onehand_co_horse_attack_r_slash.caf` / `onehand_co_sk_shielddefense_mub.caf`, the rider
+loop stays the base clip, the layer and `Acting` end with the clip) and `the_driven_horse_plays_its_own_skill_and_keeps_galloping`.
+Example: `cargo run -p aa-client --example rider_attack -- --mute --shot shots/aa-client/rider_attack.png --shot-after 6` (a Nuian
+man on the Lilyut horse, seated by the mount systems, 11013 fired every second through combat's own plugin; `AA_RIDER_ANIM=394`
+for Mounted Defense): the slash turns his torso and swings the right arm back while the legs keep the riding idle.
+
+**Approximate / capture-pending:**
+
+* "`ride_ub`, else the clip itself on the upper body" is read from the graph and the data, not from the native selector. A clip
+  with no `ride_ub` and no upper body state of its name (`all_co_sk_lowkick` on a player) probably plays nothing on a 1.2 rider;
+  ours plays it through the mask.
+* A galloping horse's Back Kick: `horse_upper_body.xml` maps `all_co_sk_shout` to `all_co_sk_shout_ub`, which `global_horse.cal`
+  does not list, and has no lowkick state (only `horse_full_body.xml`'s `Skill Start -> all_co_sk_lowkick`, `IdleOneShotNoLookIk`).
+  Whether the 1.2 horse shows nothing or stops for the kick while it runs is capture-pending; ours keeps galloping with the clips
+  on its front half.
+* `horse_full_body.xml` and `global_horse.cal` have `onehand_co_horse_attack_l/r_slash` (`animals/horse/onehand/`): the horse
+  probably plays the rider's attack with it. How the client hands the rider's clip to its mount was not found; not done.
+* Nothing was compared with a capture of a real rider; the lane server check (`AA_FAKE_MOUNT=still` with an 11013 on the rider) is
+  still to do.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,
@@ -777,8 +833,8 @@ still to be looked at.
 * Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
   starts at HIT plays when the damage lands (a miss does not shake). Nothing in the data asks for more: `fx_shake_cameras.range` is 0 in all 17 rows
   (the real client has no distance mode to read), so a remote caster's shake is left out on purpose.
-* Mounted and flying casters (the mount agent's: `mount.rs`). Swimming casters cast as on land (above); the clip plays over the swim pose, the real
-  client's blend of the two is not known.
+* Flying casters. Mounted casters: see "Mounted casters" above. Swimming casters cast as on land (above); the clip plays over
+  the swim pose, the real client's blend of the two (the `swim_ub` / `swim_move_ub` columns) is not known.
 * Doodad casters (a ship's cannon: the skill events name the doodad as the caster): `caster_entity` falls back to the `RemoteDoodad` entity, so the
   skill's effects and its projectile start on the doodad (its origin stands for every bone). Unit tested through the entity lookup only: the
   lane has no cannon, no real cast was seen.
