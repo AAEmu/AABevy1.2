@@ -507,6 +507,8 @@ struct Inner {
     anims: HashMap<u32, Option<Arc<str>>>,
     /// Clip name -> the `move_ub` clip of its `anims` row.
     upper: HashMap<String, Option<Arc<str>>>,
+    /// Clip name -> the `ride_ub` clip of its `anims` row.
+    ride: HashMap<String, Option<Arc<str>>>,
     /// Clip name -> `anims.loop`.
     loops: HashMap<String, bool>,
     /// Clip name -> `anims.category_id`.
@@ -543,6 +545,7 @@ impl SkillBook {
             plots: HashMap::new(),
             anims: HashMap::new(),
             upper: HashMap::new(),
+            ride: HashMap::new(),
             loops: HashMap::new(),
             categories: HashMap::new(),
             rules: None,
@@ -583,6 +586,12 @@ impl SkillBook {
     /// The upper body variant of clip `name` for a unit that moves (`move_ub` of its `anims` row), when it has one.
     pub fn upper_clip(&self, name: &str) -> Option<Arc<str>> {
         self.inner().upper_clip(name)
+    }
+
+    /// The upper body variant of clip `name` for a unit seated on a mount (`ride_ub` of its `anims` row, x2game's anim desc `+24`,
+    /// loader `397287E0`), when it has one.
+    pub fn ride_clip(&self, name: &str) -> Option<Arc<str>> {
+        self.inner().ride_clip(name)
     }
 
     /// The clip loops (`anims.loop`): the cast and channel poses.
@@ -662,6 +671,22 @@ fn num(r: &rusqlite::Row, i: usize) -> rusqlite::Result<f32> {
     Ok(r.get::<_, Option<f64>>(i)?.unwrap_or(0.0) as f32)
 }
 
+/// The variant column `column` (`move_ub`, `ride_ub`) of clip `name`'s `anims` row, cached in `cache`; `None` when it is empty.
+fn variant(conn: &Connection, cache: &mut HashMap<String, Option<Arc<str>>>, column: &'static str, name: &str) -> Option<Arc<str>> {
+    if let Some(v) = cache.get(name) {
+        return v.clone();
+    }
+    let found: Option<Arc<str>> = conn
+        .query_row(&format!("SELECT {column} FROM anims WHERE name = ?1"), params![name], |r| r.get::<_, Option<String>>(0))
+        .ok()
+        .flatten()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty() && n != "none")
+        .map(Arc::from);
+    cache.insert(name.to_string(), found.clone());
+    found
+}
+
 impl Inner {
     fn anim(&mut self, id: u32) -> Option<Arc<str>> {
         if id == 0 {
@@ -697,18 +722,11 @@ impl Inner {
     }
 
     fn upper_clip(&mut self, name: &str) -> Option<Arc<str>> {
-        if let Some(u) = self.upper.get(name) {
-            return u.clone();
-        }
-        let upper: Option<Arc<str>> = self
-            .conn
-            .query_row("SELECT move_ub FROM anims WHERE name = ?1", params![name], |r| r.get::<_, Option<String>>(0))
-            .ok()
-            .flatten()
-            .filter(|n| !n.is_empty() && n != "none")
-            .map(Arc::from);
-        self.upper.insert(name.to_string(), upper.clone());
-        upper
+        variant(&self.conn, &mut self.upper, "move_ub", name)
+    }
+
+    fn ride_clip(&mut self, name: &str) -> Option<Arc<str>> {
+        variant(&self.conn, &mut self.ride, "ride_ub", name)
     }
 
     fn clip_category(&mut self, name: &str) -> Option<u8> {
@@ -1379,6 +1397,22 @@ mod tests {
     fn upper_body_names() {
         assert_eq!(upper_candidates("bow_co_sk_launch_ub").collect::<Vec<_>>(), ["bow_co_sk_launch_mub", "bow_co_sk_launch_ub"]);
         assert_eq!(upper_candidates("fist_ac_x").collect::<Vec<_>>(), ["fist_ac_x"]);
+    }
+
+    /// `anims.ride_ub`, the seated rider's variant: Mounted Defense's 394 has one (its `_mub` clip), Mounted Attack's 84 has none
+    /// (the upper body graph plays the clip itself), the hit has its `_ub`, the jousting loop names itself.
+    #[test]
+    fn a_rider_reads_the_ride_ub_column() {
+        let Some(book) = book() else { return };
+        let ride = |id: u32| book.anim(id).and_then(|n| book.ride_clip(&n));
+        assert_eq!(book.anim(394).as_deref(), Some("onehand_co_sk_shielddefense"));
+        assert_eq!(ride(394).as_deref(), Some("onehand_co_sk_shielddefense_ub"));
+        assert_eq!(book.anim(84).as_deref(), Some("onehand_co_horse_attack_r_slash"));
+        assert_eq!(ride(84), None, "Mounted Attack (Rider) has no ride_ub");
+        assert_eq!(book.upper_clip("onehand_co_horse_attack_r_slash").as_deref(), Some("onehand_co_horse_attack_r_slash_ub"), "move_ub stays its own column");
+        assert_eq!(ride(14).as_deref(), Some("all_re_combat_hit_ub"));
+        assert_eq!(ride(537).as_deref(), Some("horse_co_sk_jousting"));
+        assert_eq!(book.ride_clip("no_such_clip"), None);
     }
 
     /// Shoot Arrow's groups hold a voice and a material flash that the client does not draw.
