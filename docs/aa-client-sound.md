@@ -128,10 +128,13 @@ appears dying never starts its engine; back in 1..4 the engine starts or updates
 
 Ships (`ShipUnitModel::UpdateSound`, `sub_390C7BF0`, `x2game12.c:170960`): `run` plays only while the speed is above
 1.0 m/s (land vehicles keep 0.0003 on speed or yaw rate), and the pack's `steering` item (pack 144 galleon -> sound 33
-`x2vehicles:ship:turn`, 381 fishboat and 146 speedboat -> 2147; 145 smallboat has none) is a second loop that plays
-while the steering state (`this+213`, from `UpdateSteeringWheel`) is non-zero. Approximate (capture-pending): the Bevy
-motion has no helm state, so `steering` plays while `|yaw_rate|` is above 0.02 rad/s. A muted run has no
-`SoundBook`/`Packs`, so nothing is resolved.
+`x2vehicles:ship:turn`, 381 fishboat and 146 speedboat -> 2147; 145 smallboat and 335 duckboat have none) is a second
+loop that plays while `this+213` is non-zero. `UpdateSteeringWheel` (`sub_390D2990`, `x2game12.c:179170`) sets it each
+frame: 1 or 2 while the helm wheel turns toward its target (the steering angle scaled, 7 by default, and quantised to
+45°), 0 once the wheel rests there; the smallboat, soloship and coupleduckship prefabs return early and keep 0. So the
+original plays the turn while the steering changes and is silent through a steady turn. Approximate (capture-pending):
+the Bevy motion has no helm wheel, so `steering` plays while `|yaw_rate|` is above 0.02 rad/s, through the whole
+turn. A muted run has no `SoundBook`/`Packs`, so nothing is resolved.
 
 ## Checks (muted engine unless `--sound`)
 

@@ -398,9 +398,10 @@ resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_
 are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
 for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
 parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
-state 5/6 and freezes the `engine` handle; the Bevy client gates on the damage state 5 (dying) or `Dead`
-(state 6) and removes both sounds there. A resurrection puts the engine back and
-`vehicle::resume_vehicle_idle` starts the idle again.
+state 5/6 and freezes the `engine` handle; `update_vehicle_engine_sounds` reads `VehicleDamage.state` the same way:
+in 5 or 6 it removes `run` (and a ship's `steering`, see [sound](aa-client-sound.md)) and leaves the engine on its last
+parameters, and a unit that appears dying or dead starts no engine until it is back in 1..4. A resurrection updates
+the engine again and `vehicle::resume_vehicle_idle` starts the idle again.
 
 `VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
 `combat::ensure_corpses` only looks for an `Animator` on the root that carries `Dead`; a prefab body keeps its

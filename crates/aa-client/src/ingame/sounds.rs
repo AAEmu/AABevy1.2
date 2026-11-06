@@ -985,6 +985,7 @@ impl VehicleSound {
 /// neither started nor updated there, but it is not explicitly stopped. The Farm Wagon's `sound_packs` 176
 /// `run_tractor` has no `engine` item and `run` -> sound 950 (`sounds/x2vehicles:trailer:run`); the speedcar's
 /// `run_speedcar` has the reverse (`engine` -> `sounds/x2vehicles:speed_car:run`, `run` with no sound).
+#[allow(clippy::type_complexity)]
 fn vehicle_engine_sounds(
     mut commands: Commands,
     units: Option<Res<Units>>,
@@ -1046,9 +1047,10 @@ fn write_vehicle_params(sound: &mut Sound, ratio: f32) {
     sound.params.push(("pitch2".into(), pitch));
 }
 
-/// A ship turns (the `steering` loop plays) above this yaw rate in rad/s. Native keys it on the helm's
-/// quantised steering state (`this+213`, set by `UpdateSteeringWheel`), which the Bevy motion does not carry
-/// (capture-pending); the yaw rate stands in.
+/// A ship turns (the `steering` loop plays) above this yaw rate in rad/s. Native keys it on `this+213`, which
+/// `UpdateSteeringWheel` (`sub_390D2990`) sets to 1 or 2 while the helm wheel turns toward its quantised steering
+/// target and to 0 once it rests there, so the original is silent through a steady turn. The Bevy motion has no
+/// helm wheel (capture-pending); the yaw rate stands in and plays through the whole turn.
 const STEERING_YAW_RATE: f32 = 0.02;
 
 /// A ship's `run` loop plays only above this speed in m/s (`ShipUnitModel::UpdateSound`, `sub_390C7BF0`).
@@ -1070,13 +1072,16 @@ fn update_vehicle_engine_sounds(
         if stopped != state.stopped {
             state.stopped = stopped;
             state.last_speed = f32::NAN;
+            if stopped {
+                // nothing starts them again while stopped, so this runs once per death
+                for handle in [state.run, state.steering].into_iter().flatten() {
+                    commands.entity(handle).remove::<Sound>();
+                }
+                state.run_playing = false;
+                state.steering_playing = false;
+            }
         }
         if stopped {
-            for handle in [state.run, state.steering].into_iter().flatten() {
-                commands.entity(handle).remove::<Sound>();
-            }
-            state.run_playing = false;
-            state.steering_playing = false;
             continue;
         }
         let (speed, yaw_rate) = motion.map_or((0.0, 0.0), |motion| (motion.velocity.length(), motion.yaw_rate));
@@ -1440,6 +1445,10 @@ mod tests {
         app.update();
         assert_eq!(vehicle_sound_events(&mut app, root).len(), 1);
         set_state(&mut app, root, 5);
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        // still moving, still dying: `run` stays off on the later frames too
+        app.update();
         app.update();
         assert!(vehicle_sound_events(&mut app, root).is_empty());
         set_state(&mut app, root, 2);
