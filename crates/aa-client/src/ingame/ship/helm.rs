@@ -225,11 +225,15 @@ impl ThrottleClips {
     }
 }
 
+/// The drawn vehicle roots that have no [`ShipHelm`] yet.
+type BareVehicles<'w, 's> =
+    Query<'w, 's, (Entity, &'static RemoteUnit), (With<VehicleMotion>, Without<ShipHelm>)>;
+
 /// Gives every drawn ship root its [`ShipHelm`] (the ship model's `normal` path decides the wheel).
 pub fn attach_ship_helms(
     mut commands: Commands,
     db: Option<Res<Db>>,
-    roots: Query<(Entity, &RemoteUnit), (With<VehicleMotion>, Without<ShipHelm>)>,
+    roots: BareVehicles,
     mut ships: Local<std::collections::HashMap<u32, Option<String>>>,
 ) {
     let Some(db) = db else { return };

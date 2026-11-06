@@ -199,15 +199,22 @@ fn only_the_doodad_at_the_helms_point_of_a_ship_is_its_wheel() {
             total_ms: 0.0,
             base_scale: 1.0,
         };
-        app.world_mut().spawn((RemoteDoodad { obj_id }, visual, ChildOf(parent)));
+        app.world_mut()
+            .spawn((RemoteDoodad { obj_id }, visual, ChildOf(parent)));
         model
     };
     let (wheel, repair, on_cart) = (drawn(1, ship), drawn(2, ship), drawn(1, cart));
     app.update();
-    let marked = app.world().get::<HelmWheel>(wheel).expect("the $helms doodad's model");
+    let marked = app
+        .world()
+        .get::<HelmWheel>(wheel)
+        .expect("the $helms doodad's model");
     assert_eq!((marked.ship, marked.base), (ship, base));
     assert!(app.world().get::<HelmWheel>(repair).is_none());
-    assert!(app.world().get::<HelmWheel>(on_cart).is_none(), "not under a ship root");
+    assert!(
+        app.world().get::<HelmWheel>(on_cart).is_none(),
+        "not under a ship root"
+    );
 }
 
 fn wheel_app(normal: &str, steering: f32) -> (App, Entity, [Entity; 2]) {

@@ -164,7 +164,7 @@ fn place_helm(
         let spawned = ingame::doodad_model::spawn(&mut commands, &mut cry, prepared);
         let doodad = commands
             .spawn((
-                Transform::from_translation(cry_to_bevy(translation.into())).with_rotation(cry_rot_to_bevy(rotation)),
+                Transform::from_translation(cry_to_bevy(translation)).with_rotation(cry_rot_to_bevy(rotation)),
                 Visibility::default(),
                 ChildOf(root),
             ))
