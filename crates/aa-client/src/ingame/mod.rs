@@ -167,6 +167,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
+            .add_message::<mount::MountRear>()
             .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::VehicleCamera>()
@@ -271,6 +272,13 @@ impl Plugin for InGamePlugin {
                     .run_if(world_screens),
             )
             .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)))
+            // a standing Space on the own mount rears it and its rider
+            .add_systems(
+                Update,
+                (mount::rear_local_rider.before(mount::pose_local_rider), anim::rear_driven_mate.before(anim::drive_locomotion))
+                    .after(player::control_player)
+                    .run_if(world_screens),
+            )
             // the camera log reads the frame as it is drawn: after the transforms are propagated and the projection is made
             .add_systems(
                 PostUpdate,

@@ -793,6 +793,13 @@ pub fn control_player(
             jumped = true;
             takeoff = true;
             state.took_off = true;
+        } else if mover.grounded
+            && jump_tapped
+            && let Some((mate, _)) = driving
+        {
+            // the standing mount rears in place (`mount::MountRear`): nothing moves and no packet goes out. Written through the
+            // commands: this system is at Bevy's parameter limit, and an app without the message only logs it
+            commands.write_message(super::mount::MountRear { mate });
         }
         if mover.grounded {
             // follow the slope, the stairs and the decks; walking off a ledge turns into a fall

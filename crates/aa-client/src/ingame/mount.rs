@@ -133,6 +133,25 @@ impl MountKind {
             MountKind::Elephant => None,
         }
     }
+
+    /// The rider's rear with a standing mount ([`MountRear`]): the `*_em_jump_in_place_anim` clip of `horse_em` (:11634),
+    /// `bear_em` (:4876), `pangolin_em` (:13636) and `elephant_em` (:5275), and `lion_em` (:13077) / `wildboar_em` (:14227).
+    fn rear(self) -> &'static str {
+        match self {
+            MountKind::Lion | MountKind::Wildboar => "lion_em_jump_in_place",
+            _ => "horse_em_jump_in_place",
+        }
+    }
+}
+
+/// A standing Space on the driver's seat: with no move request 1.2's ground step (`sub_3912B330`,
+/// x2game12.c:245905-245920) signals `em_jump_in_place` (`sub_39153FF0`) instead of building a jump vector, so the mate
+/// rears in place (`anim::rear_driven_mate`) and its rider with it ([`rear_local_rider`]). Local display only: whether
+/// the rear sends anything, and how other clients see it, is not captured.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MountRear {
+    /// The mate's object id.
+    pub mate: u32,
 }
 
 /// The get-on reason of an attach: `SCUnitAttached` 0x076 carries one `reason` byte (reader `FUN_397c60c0`). The
@@ -258,6 +277,8 @@ enum RiderClip {
     Run,
     IdleToRun,
     RunToIdle,
+    /// The rear with a standing mount ([`MountRear`]).
+    Rear,
     GetOffStart,
     GetOffLoop,
     GetOffEnd,
@@ -301,6 +322,7 @@ struct RiderDurations {
     get_on: Option<f32>,
     idle_to_run: Option<f32>,
     run_to_idle: Option<f32>,
+    rear: Option<f32>,
     get_off_start: Option<f32>,
     get_off_loop: Option<f32>,
     get_off_end: Option<f32>,
@@ -408,6 +430,20 @@ impl RiderAnim {
         }
     }
 
+    /// The rear with a standing mount ([`MountRear`]): the graph enters the `*_em_jump_in_place` states only from the
+    /// `*_DriverIdles_NullNode` hubs (horse :14565, lion :14617, bear :14368, wildboar :15287, pangolin :14700, elephant
+    /// :14475), so only from the idle gait and not during another one-shot (a second rear included). Like the gait
+    /// one-shots it plays its own length and the gait is chosen again at its end.
+    fn rear(&mut self) -> RideStep {
+        let Some(length) = self.durations.rear else { return RideStep::None };
+        if self.phase != RidePhase::Riding || self.transition || self.gait != Some(Gait::Idle) {
+            return RideStep::None;
+        }
+        self.transition = true;
+        self.left = length;
+        RideStep::Play(RiderClip::Rear)
+    }
+
     fn dismounting(&mut self, dt: f32) -> RideStep {
         if !self.entered {
             self.entered = true;
@@ -454,6 +490,7 @@ struct RiderClips {
     run: Option<BoundClip>,
     idle_to_run: Option<BoundClip>,
     run_to_idle: Option<BoundClip>,
+    rear: Option<BoundClip>,
     get_off_start: Option<BoundClip>,
     get_off_loop: Option<BoundClip>,
     get_off_end: Option<BoundClip>,
@@ -472,6 +509,7 @@ impl RiderClips {
             RiderClip::Run => self.run.as_ref(),
             RiderClip::IdleToRun => self.idle_to_run.as_ref(),
             RiderClip::RunToIdle => self.run_to_idle.as_ref(),
+            RiderClip::Rear => self.rear.as_ref(),
             RiderClip::GetOffStart => self.get_off_start.as_ref(),
             RiderClip::GetOffLoop => self.get_off_loop.as_ref(),
             RiderClip::GetOffEnd => self.get_off_end.as_ref(),
@@ -483,6 +521,7 @@ impl RiderClips {
             get_on: self.get_on.as_ref().map(|c| c.clip.duration),
             idle_to_run: self.idle_to_run.as_ref().map(|c| c.clip.duration),
             run_to_idle: self.run_to_idle.as_ref().map(|c| c.clip.duration),
+            rear: self.rear.as_ref().map(|c| c.clip.duration),
             get_off_start: self.get_off_start.as_ref().map(|c| c.clip.duration),
             get_off_loop: self.get_off_loop.as_ref().map(|c| c.clip.duration),
             get_off_end: self.get_off_end.as_ref().map(|c| c.clip.duration),
@@ -605,6 +644,9 @@ impl Rider {
         } else {
             None
         };
+        // the boat and car poses have no rider states; the submarine's `submarine_em_jump_in_place_anim` (:13884) names an
+        // `em_jump_in_place` the 1.2 `.cal` does not list
+        let rear = if states { bind(kind.rear()) } else { None };
         let get_on = if states {
             let reason = get_on_reason(reason.unwrap_or(1));
             bind(&get_on_clip(kind, reason)).or_else(|| bind(&get_on_clip(kind, 1)))
@@ -618,6 +660,7 @@ impl Rider {
             run,
             idle_to_run,
             run_to_idle,
+            rear,
             get_off_start: if states { bind(GET_OFF_START) } else { None },
             get_off_loop: if states { bind(GET_OFF_LOOP) } else { None },
             get_off_end: if states { bind(GET_OFF_END) } else { None },
@@ -663,20 +706,7 @@ impl Rider {
             .advance(dt, speed, self.run_speed, self.clips.run.is_some());
         match step {
             RideStep::None => {}
-            RideStep::Play(clip) => {
-                if let Some(bound) = self.clips.get(clip).cloned() {
-                    let file = super::anim::clip_file(&bound);
-                    debug!(
-                        "rider {} phase {:?} clip {:?} file {}",
-                        self.unit,
-                        self.anim.phase,
-                        clip,
-                        file.as_deref().unwrap_or("-")
-                    );
-                    animator.play(bound, clip.looping(), GAIT_BLEND);
-                    animator.random_idle = None;
-                }
-            }
+            RideStep::Play(clip) => self.play(animator, clip),
             RideStep::OnFoot => {
                 animator.speed = 1.0;
                 return true;
@@ -689,6 +719,26 @@ impl Rider {
             1.0
         };
         false
+    }
+
+    /// Rears with the mount ([`MountRear`]) when the rider stands in its idle gait ([`RiderAnim::rear`]).
+    fn rear(&mut self, animator: &mut Animator) {
+        if !animator.starts_enabled() {
+            return;
+        }
+        if let RideStep::Play(clip) = self.anim.rear() {
+            self.play(animator, clip);
+            animator.speed = 1.0;
+        }
+    }
+
+    /// Starts a rider clip with the graph's 0.2 s blend (the gait states' and `IdleOneShot`'s `transition_time`).
+    fn play(&self, animator: &mut Animator, clip: RiderClip) {
+        let Some(bound) = self.clips.get(clip).cloned() else { return };
+        let file = super::anim::clip_file(&bound);
+        debug!("rider {} phase {:?} clip {:?} file {}", self.unit, self.anim.phase, clip, file.as_deref().unwrap_or("-"));
+        animator.play(bound, clip.looping(), GAIT_BLEND);
+        animator.random_idle = None;
     }
 }
 
@@ -1682,6 +1732,19 @@ pub fn drive_mount(
     }
 }
 
+/// The local rider rears with the mate it drives ([`MountRear`]); its seat and clips stay `pose_local_rider`'s.
+pub fn rear_local_rider(
+    mut rears: MessageReader<MountRear>,
+    mut riders: Query<(&mut Rider, &mut Animator), With<LocalPlayer>>,
+) {
+    for rear in rears.read() {
+        let Ok((mut rider, mut animator)) = riders.single_mut() else { continue };
+        if rider.mount == rear.mate {
+            rider.rear(&mut animator);
+        }
+    }
+}
+
 /// Puts the local player on its mount's seat and plays the rider clips for the mount's gait.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn pose_local_rider(
@@ -2425,13 +2488,14 @@ mod tests {
         );
     }
 
-    /// A rider whose one-shots last 1 s (get-on), 0.6 / 0.45 s (the gait transition clips) and 0.67 / 0.5 / 0.83 s
-    /// (get-off).
+    /// A rider whose one-shots last 1 s (get-on), 0.6 / 0.45 s (the gait transition clips), 2.77 s (the rear, the
+    /// pak's `horse_em_jump_in_place`) and 0.67 / 0.5 / 0.83 s (get-off).
     fn durations() -> RiderDurations {
         RiderDurations {
             get_on: Some(1.0),
             idle_to_run: Some(0.6),
             run_to_idle: Some(0.45),
+            rear: Some(2.77),
             get_off_start: Some(0.67),
             get_off_loop: Some(0.5),
             get_off_end: Some(0.83),
@@ -3486,6 +3550,7 @@ mod tests {
             run: Some(bound("run", 1.0)),
             idle_to_run: d.idle_to_run.map(|s| bound("idle_to_run", s)),
             run_to_idle: d.run_to_idle.map(|s| bound("run_to_idle", s)),
+            rear: d.rear.map(|s| bound("rear", s)),
             get_off_start: d.get_off_start.map(|s| bound("get_off_start", s)),
             get_off_loop: d.get_off_loop.map(|s| bound("get_off_loop", s)),
             get_off_end: d.get_off_end.map(|s| bound("get_off_end", s)),
@@ -3509,6 +3574,68 @@ mod tests {
             .current
             .as_ref()
             .map_or("-", |p| p.clip.clip.name.as_str())
+    }
+
+    /// The rear (`*_em_jump_in_place_anim`) is entered from the idle gait only, plays its own length once and hands back
+    /// to the gait the speed asks for at its end.
+    #[test]
+    fn a_standing_rider_rears_once_from_its_idle() {
+        let mut anim = RiderAnim::new(durations(), RidePhase::Mounting);
+        assert_eq!(anim.advance(0.0, 0.0, 9.0, true), RideStep::Play(RiderClip::GetOn));
+        assert_eq!(anim.rear(), RideStep::None, "not during the get-on");
+        assert_eq!(anim.advance(1.0, 0.0, 9.0, true), RideStep::Play(RiderClip::Idle));
+        assert_eq!(anim.rear(), RideStep::Play(RiderClip::Rear));
+        assert_eq!(anim.rear(), RideStep::None, "one already playing");
+        assert_eq!(anim.advance(2.7, 0.0, 9.0, true), RideStep::None, "the rear is 2.77 s long");
+        assert_eq!(anim.advance(0.1, 0.0, 9.0, true), RideStep::Play(RiderClip::Idle));
+        // not from the run, nor during a gait one-shot
+        assert_eq!(anim.advance(0.0, 9.0, 9.0, true), RideStep::Play(RiderClip::IdleToRun));
+        assert_eq!(anim.rear(), RideStep::None);
+        assert_eq!(anim.advance(0.6, 9.0, 9.0, true), RideStep::Play(RiderClip::Run));
+        assert_eq!(anim.rear(), RideStep::None);
+        // a mount that moves off during the rear: it plays to its end, then the gait follows the speed
+        assert_eq!(anim.advance(0.0, 0.0, 9.0, true), RideStep::Play(RiderClip::RunToIdle));
+        assert_eq!(anim.advance(0.45, 0.0, 9.0, true), RideStep::Play(RiderClip::Idle));
+        assert_eq!(anim.rear(), RideStep::Play(RiderClip::Rear));
+        assert_eq!(anim.advance(1.0, 3.0, 9.0, true), RideStep::None);
+        assert_eq!(anim.advance(1.8, 3.0, 9.0, true), RideStep::Play(RiderClip::Walk));
+        // a seat without the clip (the boat and car poses) never rears
+        let mut posed = RiderAnim::new(RiderDurations { rear: None, ..durations() }, RidePhase::Riding);
+        assert_eq!(posed.advance(0.0, 0.0, 9.0, true), RideStep::Play(RiderClip::Idle));
+        assert_eq!(posed.rear(), RideStep::None);
+    }
+
+    /// The rider's rear clip by kind: `horse_em_jump_in_place` for horse, bear, pangolin and elephant,
+    /// `lion_em_jump_in_place` for lion and wildboar (player_full_body.xml :11634, :4876, :13636, :5275, :13077, :14227).
+    #[test]
+    fn the_rider_rear_clip_follows_the_mount_kind() {
+        for pose in [0, 1, 3, 9, 10] {
+            assert_eq!(MountKind::of(pose).rear(), "horse_em_jump_in_place", "pose {pose}");
+        }
+        for pose in [2, 4] {
+            assert_eq!(MountKind::of(pose).rear(), "lion_em_jump_in_place", "pose {pose}");
+        }
+    }
+
+    /// [`rear_local_rider`] plays the rear on the local rider of the reared mate only, then the idle.
+    #[test]
+    fn the_local_rider_rears_with_its_mate() {
+        let mut app = App::new();
+        app.add_message::<MountRear>().add_systems(Update, rear_local_rider);
+        let (mut rider, mut animator) = stepped_rider(riding());
+        assert!(!rider.step(&mut animator, 0.0, 0.0, 1.0));
+        assert_eq!(playing(&animator), "idle");
+        let player = app.world_mut().spawn((LocalPlayer { obj_id: 7 }, rider, animator)).id();
+        app.world_mut().write_message(MountRear { mate: 6 });
+        app.update();
+        assert_eq!(playing(app.world().get::<Animator>(player).unwrap()), "idle", "another mate's rear");
+        app.world_mut().write_message(MountRear { mate: 5 });
+        app.update();
+        assert_eq!(playing(app.world().get::<Animator>(player).unwrap()), "rear");
+        let mut entity = app.world_mut().entity_mut(player);
+        let (mut rider, mut animator) = entity.take::<(Rider, Animator)>().unwrap();
+        assert!(!rider.step(&mut animator, 2.8, 0.0, 1.0));
+        assert_eq!(playing(&animator), "idle");
     }
 
     #[test]

@@ -17,7 +17,9 @@ use bevy::prelude::*;
 
 use super::combat::{Acting, CombatIdle, Dead};
 use super::jump::{self, JumpDir, JumpKind, JumpPhase, JumpTrack};
+use super::mount::{Driven, MountRear};
 use super::player::LocalPlayer;
+use super::units::RemoteUnit;
 use super::weapons::{Drawn, Out, Wield};
 
 /// Direction suffixes of the 8-way locomotion clips; index = [`direction_index`].
@@ -396,6 +398,8 @@ pub struct Locomotion {
     pub action_exit: Option<f32>,
     /// The one-shot action clip the unit plays, for x2game's `anim_rules` (see `combat`).
     pub running: Option<RunningAction>,
+    /// The driven mate rears ([`rear_driven_mate`]) until this time (seconds on the app clock).
+    rear: Option<f64>,
 }
 
 /// A one-shot action clip as x2game's anim queue keeps it: its `anims` category, when it started and how long it lasts.
@@ -408,7 +412,7 @@ pub struct RunningAction {
 
 impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
-        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false, action_exit: None, running: None }
+        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false, action_exit: None, running: None, rear: None }
     }
 
     /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
@@ -497,7 +501,17 @@ pub fn drive_locomotion(
             if loco.jump.phase.is_some() {
                 loco.jump.interrupted(motion.airborne);
             }
+            loco.rear = None;
             continue;
+        }
+        // a rear plays to its end (its `IdleOneShot` has no `leave_at_moving`), then the graph's `Idle End` link (0 s) gives
+        // the idle its own blend
+        if let Some(until) = loco.rear {
+            if now < until {
+                continue;
+            }
+            loco.rear = None;
+            loco.action_exit = Some(0.0);
         }
         // the combat idle is the 1.2 derived flag `+0x5fc4` (`FUN_39355ee0`), not the battle byte and not the weapon: it holds
         // for 10 s after the last engagement or skill use. The weapon in the hand picks which idle; without one it is the fist.
@@ -621,6 +635,39 @@ pub fn drive_locomotion(
     }
 }
 
+/// The clip the mate plays for [`MountRear`] (`em_jump_in_place_anim`, horse_full_body.xml :573).
+const REAR_CLIP: &str = "fist_em_jump_in_place";
+/// `IdleOneShotNoLookIk` extends `IdleOneShot`, whose `transition_time` is 0.2 s when the state leaves it empty.
+const REAR_BLEND: f32 = 0.2;
+
+/// The mate the player drives rears for a standing Space ([`MountRear`]): the mount graph's `em_jump_in_place` ->
+/// `em_jump_in_place_anim` plays `fist_em_jump_in_place` once (`IdleOneShotNoLookIk`) and leads back to `Idle End`
+/// (horse_full_body.xml :567-574, links :1528, :1657-1658). The graph enters it only from `Idle Start`, so a mount that
+/// moves, jumps or acts does not rear, and one already rearing ignores the signal (`sub_3912B330` skips a graph in a
+/// `jump_in_place` state). A model whose `.cal` lacks the clip stays in its idle.
+pub fn rear_driven_mate(
+    time: Res<Time>,
+    library: Res<ClipLibrary>,
+    mut rears: MessageReader<MountRear>,
+    mut mates: Query<(&RemoteUnit, &mut Animator, &mut Locomotion, &Motion, Option<&Acting>), (With<Driven>, Without<Dead>)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for rear in rears.read() {
+        for (unit, mut animator, mut loco, motion, acting) in &mut mates {
+            let standing = motion.speed <= 0.3 && !motion.airborne && motion.climb.is_none() && acting.is_none();
+            if unit.obj_id != rear.mate || !standing || loco.rear.is_some() || !animator.starts_enabled() {
+                continue;
+            }
+            let Some(clip) = bind_clip(&animator.rig, &loco.clips.cal, &library, REAR_CLIP) else { continue };
+            loco.rear = Some(now + f64::from(clip.clip.duration));
+            loco.invalidate();
+            animator.play(clip, false, REAR_BLEND);
+            animator.random_idle = None;
+            animator.speed = 1.0;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -662,6 +709,70 @@ mod tests {
         let names = run_group(&cal, "fist_mo_normal_run").map(|l| sprint_tier(&l)).expect("the run group");
         assert_eq!(names[0].as_deref(), Some("fist_mo_sprint_run_f"));
         assert!(cal.animation("fist_mo_sprint_run_f").is_some(), "the .cal names the sprint clip");
+    }
+
+    /// The driven horse rears once for a standing Space: `fist_em_jump_in_place` (2.77 s in the pak), not again while it
+    /// plays, not when it moves, then its idle (needs `AA_PAK`).
+    #[test]
+    fn the_driven_horse_rears_once_and_returns_to_its_idle() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let library = ClipLibrary::default();
+        let set = shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &library).expect("the horse clips");
+        let rig = aa_anim::pose::shared_rig(HORSE).expect("the horse rig");
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(library)
+            .add_message::<MountRear>()
+            .add_systems(Update, (rear_driven_mate, drive_locomotion).chain());
+        let unit = crate::ingame::seating::fixture_unit(9, 139, None);
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let mate = app.world_mut().spawn((RemoteUnit::announced(&unit), Animator::new(rig, Vec::new()), loco, Motion::default(), Driven)).id();
+        let step = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        };
+        let playing = |app: &App| {
+            let animator = app.world().get::<Animator>(mate).unwrap();
+            animator.current.as_ref().and_then(|p| clip_file(&p.clip)).map_or(String::new(), |f| f.to_string())
+        };
+        let rear_until = |app: &App| app.world().get::<Locomotion>(mate).unwrap().rear;
+        step(&mut app, 0.1);
+        let idle = playing(&app);
+        assert!(idle.contains("idle"), "{idle}");
+
+        // a moving mount and another mate do not rear
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 5.0;
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 0.1);
+        assert_eq!(rear_until(&app), None);
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 0.0;
+        step(&mut app, 0.1);
+        app.world_mut().write_message(MountRear { mate: 8 });
+        step(&mut app, 0.1);
+        assert_eq!(rear_until(&app), None);
+
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 0.1);
+        assert_eq!(playing(&app), "fist_em_jump_in_place.caf");
+        let until = rear_until(&app).expect("rearing");
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        assert!((until - now - 2.767).abs() < 0.01, "the clip's own length: {}", until - now);
+        // a second press while it plays does not start it again; neither does a move
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 1.0);
+        assert_eq!((rear_until(&app), playing(&app).as_str()), (Some(until), "fist_em_jump_in_place.caf"));
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 5.0;
+        step(&mut app, 1.0);
+        assert_eq!(playing(&app), "fist_em_jump_in_place.caf", "the one-shot plays to its end");
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 0.0;
+        step(&mut app, 0.8);
+        assert_eq!(rear_until(&app), None);
+        assert_eq!(playing(&app), idle);
     }
 
     #[test]

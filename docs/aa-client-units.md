@@ -131,9 +131,22 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   sends the movement as `Command::MoveUnit` with the mate's object id (`CSMoveUnit`; the server ignores a riding character's
   own movement). The speed is the mount's relaxed stance run speed (`game_stances.ai_move_speed_run`, stance 2: 9 m/s for the
   Lilyut horse, 7.2 for a donkey; `Db::mount_speed`) times the `MoveSpeedMul` of the mate's buffs (`Sprint::mount_speed_mul`),
-  with the actor model's walk and backward factors; no jumping and no swimming while mounted. The mate's unit is marked
+  with the actor model's walk and backward factors; Space with a direction held jumps the mount with its own jump height and
+  gravity (`docs/aa-client-movement.md`, "Speeds and jumping"); no swimming while mounted. The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
   mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
+* **Rearing:** Space on a standing mount (no move request) does not lift it: 1.2's ground step (`sub_3912B330`,
+  x2game12.c:245905-245920) then calls the unit's +680 with 0, which sends the graph Signal `em_jump_in_place`
+  (`sub_39153FF0`) unless the graph is already in a `jump_in_place` state, and sets no jump vector. `control_player` writes
+  `mount::MountRear` (no vertical speed, no packet, no `PlayerInput::jumped`, so a cast goes on). The mate
+  (`anim::rear_driven_mate`) plays `fist_em_jump_in_place` once (`horse_full_body.xml` `em_jump_in_place` :567 ->
+  `em_jump_in_place_anim` :573, `IdleOneShotNoLookIk`, 0.2 s blend; 2.77 s for the horse) when it stands, entered from
+  `Idle Start` only (:1528) and back to `Idle End` (:1658); a model whose `.cal` lacks the clip stays in its idle. The rider
+  (`mount::rear_local_rider`) plays `horse_em_jump_in_place` (horse, bear, pangolin, elephant) or `lion_em_jump_in_place`
+  (lion, wildboar) from its idle gait only (the `*_DriverIdles_NullNode` hubs: horse :14565, lion :14617, bear :14368,
+  wildboar :15287, pangolin :14700, elephant :14475) and chooses its gait again at the clip's end. The submarine's
+  `submarine_em_jump_in_place_anim` (:13884) names an `em_jump_in_place` the 1.2 `.cal` does not list, and the boat poses
+  have no rider states here, so it does not rear. Both one-shots play to their end (`leave_at_moving` is empty).
 * A passenger seat (point 2, someone else's mate) is followed, not steered: the mover goes with the mount.
 * **Mount skills:** the pet bar's first five `ISLOT_PET_ACTION` slots (`hud/pet_action_bar/pet.alb`, capped by
   `MAX_PET_ACTION_SLOT` 5) map to the mate's displayed mount rows (`owned::displayed`; `GetMountSkill` is
@@ -306,6 +319,9 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
 * Whether pose 0 mounts (donkeys, elks, yatas), the boat/car poses and the other kinds really use these states; the
   graph's own `Enter` states were followed where present. Not captured (only a horse was mounted).
 * The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
+* The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet, how other clients see
+  the rear, whether movement input cuts it short and whether it cancels a cast (the code says no) need a capture of a
+  standing Space on a mount.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
 * Getting off a vehicle seat (a `$` helper: the wagon's bench, a carriage's back seat): the remake skips the 1.5 m

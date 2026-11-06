@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ingame::data::MountSpeed;
-use crate::ingame::mount::{LocalMount, LocalSeat};
+use crate::ingame::mount::{LocalMount, LocalSeat, MountRear};
 use crate::settings::Actions;
 use std::time::Duration;
 
@@ -36,6 +36,7 @@ impl Feel {
             .insert_resource(WaterQuery::new("main_world"))
             .insert_resource(WorldCollision::new("main_world", terrain.clone()))
             .add_message::<NetCommand>()
+            .add_message::<MountRear>()
             .add_systems(Update, control_player);
         let camera = app.world_mut().spawn(OrbitCamera::default()).id();
         let player = app
@@ -149,6 +150,10 @@ impl Feel {
 
     fn input(&self) -> PlayerInput {
         *self.app.world().resource::<PlayerInput>()
+    }
+
+    fn rears(&mut self) -> Vec<MountRear> {
+        self.app.world_mut().resource_mut::<Messages<MountRear>>().drain().collect()
     }
 
     fn mover(&self) -> &Mover {
@@ -735,9 +740,10 @@ fn a_driven_mount_jumps_with_its_own_height_and_gravity() {
 }
 
 /// A standing Space on the driver's seat does not lift the mount: with no move request `sub_3912B330` calls the unit's
-/// +680 with 0 (`em_jump_in_place`) and leaves the jump vector at 0, so no vertical speed and no take-off packet.
+/// +680 with 0 (`em_jump_in_place`) and leaves the jump vector at 0, so no vertical speed and no take-off packet, only
+/// one [`MountRear`] of the mate. The rear is no jump for the cast rules.
 #[test]
-fn a_standing_mount_does_not_take_off() {
+fn a_standing_mount_rears_instead_of_taking_off() {
     if !aa_cry::pak_available() {
         return;
     }
@@ -755,8 +761,22 @@ fn a_standing_mount_does_not_take_off() {
         packets.iter().all(|m| m.to_movement(0).flags & move_flags::JUMPING != move_flags::JUMPING),
         "no take-off packet: {packets:?}"
     );
+    assert_eq!(f.rears(), [MountRear { mate: 9 }]);
     f.tick(0.1);
     assert!(f.mover().grounded && f.mover().vz == 0.0);
+    assert!(f.rears().is_empty(), "one rear per press");
+
+    // a moving take-off is a jump, not a rear; on foot Space never rears
+    f.hold("moveforward");
+    f.tick(0.1);
+    f.tap("jump");
+    f.tick(1.0 / 60.0);
+    assert!(!f.mover().grounded);
+    assert!(f.rears().is_empty());
+    let mut on_foot = Feel::new();
+    on_foot.tap("jump");
+    on_foot.tick(1.0 / 60.0);
+    assert!(!on_foot.mover().grounded && on_foot.rears().is_empty());
 }
 
 /// A driven mount that leaves a ledge falls under its own gravity (30 for a horse), not the rider's 25.
