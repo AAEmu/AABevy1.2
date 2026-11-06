@@ -195,6 +195,7 @@ fn fire(time: Res<Time>, mut next: Local<f32>, mut out: MessageWriter<NetEvent>)
     })));
 }
 
+#[allow(clippy::type_complexity)]
 fn watch(
     mut seen: ResMut<Seen>,
     rider: Query<(Has<ingame::mount::Rider>, Has<ingame::anim::Locomotion>, Option<&Acting>, &aa_anim::Animator), With<Man>>,
