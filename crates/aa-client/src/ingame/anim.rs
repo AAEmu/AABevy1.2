@@ -607,6 +607,16 @@ pub fn drive_locomotion(
                 None => JumpKind::Relaxed,
             }
         };
+        // a creature's new direction in the air that keeps its clip (the horse graph has only `fist_mo_jump_[f|b]_loop`) is
+        // the graph's next `JumpLoop` state playing the same animation, which goes on: only `JumpMain` sets
+        // `AllowAnimRestart` (`jumpmain.xml`), `JumpLoop` does not
+        if creature
+            && let (State::Jump(JumpPhase::Loop, d, k), Some((JumpPhase::Loop, dir))) = (loco.state, jumping)
+            && d != dir
+            && jump::clip_names(JumpPhase::Loop, d, k)[0] == jump::clip_names(JumpPhase::Loop, dir, kind)[0]
+        {
+            loco.state = State::Jump(JumpPhase::Loop, dir, kind);
+        }
         let wanted = if let Some((phase, dir)) = jumping {
             // the kind stays the one the phase began with
             match loco.state {
@@ -897,6 +907,18 @@ mod tests {
         *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..run };
         step(&mut app, 0.02);
         assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        // it stops in the air (no direction): the same air clip plays on, not from its start (`JumpLoop` has no
+        // `AllowAnimRestart`, :946)
+        for _ in 0..3 {
+            step(&mut app, 0.02);
+        }
+        let clip_time = |app: &App| app.world().get::<Animator>(horse).unwrap().current.as_ref().map_or(0.0, |p| p.time);
+        let before = clip_time(&app);
+        assert!(before > 0.0);
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..Motion::default() };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        assert!(clip_time(&app) >= before, "the air clip restarted: {} after {before}", clip_time(&app));
 
         // the driven mate jumps backward on the keys and lands with none held: the standing landing of its side
         let mut loco = Locomotion::new((*set).clone());

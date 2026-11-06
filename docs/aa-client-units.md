@@ -80,6 +80,8 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     remote unit's packet to its +680 jump call is not traced: using the take-off bit is **inferred**. A remote mate's
     direction is always forward (a non-character's `Motion.local_dir`), so its backward jump plays the f clips
     (**approximate**).
+  * A new direction in the air that keeps the air clip (f to l, r, fl, fr or none; b to bl, br or none) plays it on
+    instead of from its start: only `JumpMain` sets `AllowAnimRestart` (`jumpmain.xml`), `JumpLoop` does not.
   * `examples/mount_jump.rs` scripts a remote mate's jump on the Lilyut horse (model 139) and takes a shot mid-air;
 * the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
   body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
