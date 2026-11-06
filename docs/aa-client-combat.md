@@ -915,7 +915,8 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
   `SkillFired`, the first `SCPlotEvent`): a plot step names only its own source and target.
 * **The local player** gets a `SkillMove` component. While it is there `player::control_player` does nothing (input locked, auto-run off) and
   `drive_local` plays the path: constant horizontal speed, parabola in z, `WorldCollision::slide` for walls (a wall ends the move where the
-  character is), never under `floor_at` (terrain or brush), landing on it. It sends a `CSMoveUnit` every 100 ms on the way (jump / fall
+  character is), never under `floor_at` (terrain or brush), landing on it (a path that ends more than 0.5 m over it falls on to it
+  under gravity: "A path that ends in the air" below). It sends a `CSMoveUnit` every 100 ms on the way (jump / fall
   state, velocity, forward delta) and a standing one at the end, so the server and the other players see the flight. `SCTeleportUnit` cancels
   a move and `follow_server` puts the player at the server's point. The clips are the combat module's (Charge `all_co_sk_dashattack`, Drop Back
   `all_co_sk_backstep`: the controller's `start_anim`).
@@ -970,15 +971,27 @@ skills a mount chains (`mount_attached_skills` 15506 / 17475 / 17476) have no co
   else the character's 5.4 m/s. It is held-forward movement in 1.2 (`390A8EE0` hands the movement controller a forward request), so
   it keeps to the ground (down a slope too) and falls off a ledge under the mover's gravity (a mate's `physics_living_gravity`
   from `MountSpeed`, a horse 30; a character 25), as a buff's float does when it ends; a Leap keeps its arc.
+* **A path that ends in the air.** A Leap along the facing ends its arc at the height it left from, so over falling ground it ends
+  above the floor (Elegant Leap from the test spot: 4.9 m over it, 25 m on); a Dash can run off a ledge just before its time is up,
+  and a wall can stop an arc mid-air. The unit then falls on from where the path ended, at the speed it came down with and under the
+  mover's gravity, the reports go on (fall state) and the standing one goes out when it lands (`advance`, `SkillMove::falling_on`;
+  within 0.5 m of the floor it is still put on it). Before, it was put on the floor in one frame. In 1.2 the self-target end point
+  (`390A1C20`) is the owner's position plus the rotated offset, with no ground projection, and the leap starts from a launch speed
+  and pitch (`3909A4A0`); how its last metres down to lower ground look is capture-pending, but a jump of metres in one frame is not
+  a moving living entity.
 * **Clips.** `combat` plays the controller's `start_anim` on the caster, the mate (`all_co_sk_leapattack` for the leaps); the rider
   plays its riding clips for the gait `drive_mount` gives the mate.
 * **Approximate / capture-pending.** Not captured from the 1.2 client: the leap seen from the saddle (the mate's mid-air pose is the
   mounted-jump work), the controllers' `end_anim` (`all_ac_stop`, `all_co_sk_stop`: not played), the controller camera of Drop Back,
-  and whether a Dash (which locks only input counter 0) lets the rider steer. Elegant Leap goes
-  31 m/s, over the server's 27.5 m/s mount speed check (`sus.rs`), which only logs. Tests: `skill_motion/mount_tests.rs` (Elegant Leap
-  25 m, every 100 ms a report that names the mate and none for the player, the Dash 27 m on the ground, a passenger starts nothing,
-  leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`. Still to do on the lane server: the owned horse,
-  Elegant Leap from the pet bar with `AA_SKILL_MOTION_LOG=1`, and a `--shot` mid-leap.
+  and whether a Dash (which locks only input counter 0) lets the rider steer. Approximate: walls stop the mate with the player's
+  capsule (0.35 m radius, 1.8 m), not a horse-sized one; the Dash's ground-following is `floor_at` plus gravity, a stand-in for 1.2's
+  living-entity movement controller, and a wall ends it (`390A8EE0` only ends on time); the fall after a path keeps x / y where the
+  path ended (whether 1.2 carries the horizontal speed on is capture-pending) and the keys stay locked until it lands; after the move
+  the ride starts from rest (`drive_vel` is reset; 1.2's hand-back is capture-pending). Elegant Leap goes 31 m/s, over the server's
+  27.5 m/s mount speed check (`sus.rs`), which only logs. Tests: `skill_motion/mount_tests.rs` (Elegant Leap 25 m, every 100 ms a
+  report that names the mate and none for the player, the fall on to the lower ground with no frame dropping 1 m, the Dash 27 m on
+  the ground, a passenger starts nothing, leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`. Still to do
+  on the lane server: the owned horse, Elegant Leap from the pet bar with `AA_SKILL_MOTION_LOG=1`, and a `--shot` mid-leap.
 
 ### Not done
 
