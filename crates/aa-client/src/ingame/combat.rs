@@ -725,6 +725,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
+        .init_resource::<super::skill_motion::Inbox>()
         .add_plugins(flash::plugin)
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(Update, framehold::observe.after(super::world_switch::clear_old_units).before(super::units::receive_moves))
