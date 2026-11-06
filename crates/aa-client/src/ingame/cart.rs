@@ -116,11 +116,17 @@ pub const TILT_TAU: f32 = 2.5;
 
 /// Height of the capsules that stand in for the body against the static world, metres. No model
 /// bounds are read: a wagon bed on its wheels is about this tall, and a taller wall still stops it.
+/// `push_out` starts a capsule at `STEP_UP + radius`, so from a radius of 0.55 m up (the wagon's 1.0)
+/// it is one sphere reaching `STEP_UP..STEP_UP + 2 * radius` and this height has no effect.
 pub const BODY_HEIGHT: f32 = 1.6;
 
 /// Capsule radius limits, metres: half the track, kept in a range that fits between two trees and
 /// still stops at a wall.
 const BODY_RADIUS: (f32, f32) = (0.4, 1.0);
+
+/// The frame time the blocked-speed factor of [`CartController::step_colliding`] is defined at. The
+/// factor is raised to `dt / BLOCK_FRAME`, so the crawl along a steep wall is the same at any frame rate.
+const BLOCK_FRAME: f32 = 1.0 / 60.0;
 
 /// The controller state the wire body is built from.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -291,17 +297,24 @@ impl CartController {
                 fix = correction;
             }
         }
+        // Where the body really went this frame when a wall changed the step (the wire velocity).
+        let mut blocked_motion = None;
         if fix.length_squared() > 1e-8 {
             self.pos.x += fix.x;
             self.pos.y += fix.y;
-            // The share of the wanted move that survived: 1 free, 0 head-on, 0.71 at a 45 degree wall.
-            // A wall at 60 degrees or more off the heading leaves the speed alone (the cart slides at
-            // the tangent), a steeper one takes it away smoothly; head-on stops the cart.
+            // The share of the wanted move that survived: 1 free, 0 head-on, 0.71 at a 45 degree wall
+            // (the sine of the angle between the heading and the wall's normal). A wall whose normal is
+            // 30 degrees or more off the heading leaves the speed alone (the cart slides at the
+            // tangent); a steeper one takes it away, per second rather than per frame; head-on stops it.
+            let moved = Vec2::new(self.pos.x, self.pos.y) - old_pos;
             let wanted = (new_pos - old_pos).length();
             if wanted > 1e-6 {
-                let kept = (Vec2::new(self.pos.x, self.pos.y) - old_pos).length() / wanted;
-                self.speed *= (kept * 2.0).min(1.0);
+                let kept = moved.length() / wanted;
+                self.speed *= (kept * 2.0).min(1.0).powf(dt / BLOCK_FRAME);
             }
+            // A push out of a wall the cart already stood in can move it metres in one frame: the
+            // velocity stays within the speed.
+            blocked_motion = Some((moved / dt).clamp_length_max(self.speed.abs()));
         }
         // Without ground the captured quaternions yaw about the cart's own up
         // axis (post-multiply, keeping any seeded tilt); with ground the plane
@@ -312,11 +325,9 @@ impl CartController {
             let delta = Quat::from_rotation_z(turn);
             (Quat::from_array(old_rotation) * delta).to_array()
         };
-        self.velocity = [
-            forward.x * self.speed,
-            forward.y * self.speed,
-            self.velocity[2],
-        ];
+        // Against a wall the body moves along it, not along the heading: the wire velocity says so.
+        let planar = blocked_motion.unwrap_or(forward * self.speed);
+        self.velocity = [planar.x, planar.y, self.velocity[2]];
     }
 
     /// Radius of the body capsules: half the track within [`BODY_RADIUS`].

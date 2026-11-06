@@ -1145,18 +1145,27 @@ pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a
   model's own layout), are slid against `WorldCollision::slide` from where the axle was to where the step
   would put it, with the on-foot `STEP_UP` (surfaces lower than 0.5 m above the body do not push).
   Radius is half the model's track clamped to 0.4..1.0 m (`body_radius`), height `BODY_HEIGHT` 1.6 m
-  (no model bounds are read: **approximate**, a capsule pair is not the box body).
+  (no model bounds are read: **approximate**, a capsule pair is not the box body). `push_out` starts the
+  capsule at `STEP_UP + radius`, so from a radius of 0.55 m up the "capsule" is one sphere and
+  `BODY_HEIGHT` has no effect: the wagon (radius 1.0) tests one sphere 1.5 m above the body, which
+  reaches from 0.5 to 2.5 m. Its rear wheels (1.53 m out) stick out of it at the sides.
 * The more limiting axle's correction moves the whole body; the heading is kept. The speed is scaled by
-  twice the share of the wanted move that survived (capped at 1): head-on stops the cart, a wall 60 degrees
-  or more off the heading leaves the speed alone and the cart slides along it (tangent kept). Reversing is
-  the same with the rear axle.
+  twice the share of the wanted move that survived (capped at 1; the share is the sine of the angle between
+  the heading and the wall's normal), and that factor is per 1/60 s, raised to `dt * 60` so the result
+  does not depend on the frame rate. Head-on stops the cart; a wall whose normal is 30 degrees or more off
+  the heading leaves the speed alone and the cart slides along it (tangent kept, 2.8 m/s at 45 degrees);
+  in between the cart crawls (about 0.05, 0.1 and 0.3 m/s at 20, 25 and 28 degrees) and the crawl climbs
+  steeply to 2 m/s toward 30 degrees. The rule is chosen, not captured. Reversing is the same with the
+  rear axle. While the walls change the step, the wire velocity is the body's real motion along the wall
+  (kept within the speed), not the heading times the speed.
 * `drive_cart` only slides once `ready_around(pos, 24 m)` says the cells are built; before that the cart drives
   through as before. Units, players and other vehicles are not collided (no evidence).
 * The sent pose is the slid pose, so the server's echo agrees; a server that disagrees falls into the existing
   2 m / 0.35 rad resync. The heading is not rotated out of a wall, so turning hard against one can still
   clip it (pending a capture of the real response).
-* Tests: synthetic walls (head-on, behind, 45 degrees, open ground bit-identical to `step_grounded`) and a
-  pak-backed drive at a real near-vertical face by Lutesong Harbor (skips without `AA_PAK`).
+* Tests: synthetic walls (head-on, behind, 45 degrees with the wire velocity along it, the steep-wall crawl at
+  10 to 144 FPS, open ground through the pass-through slide) and a pak-backed drive at a real near-vertical
+  face by Lutesong Harbor (skips without `AA_PAK`).
 
 #### Wheels and spindle (S6/S7 step 3)
 

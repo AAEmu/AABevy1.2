@@ -972,9 +972,61 @@ fn a_wall_behind_stops_a_reversing_cart() {
     for _ in 0..600 {
         cart.step_colliding(1.0 / 60.0, -1.0, 0.0, |_, _| None, &slide);
     }
-    // the rear axle sits 2.5453 m behind the origin
-    assert!(cart.pos.y - WHEEL_CONTACTS[2].1 >= -6.0 - 1e-3, "y {}", cart.pos.y);
+    // the rear axle sits 2.5453 m behind the origin (WHEEL_CONTACTS[2].1 is negative)
+    let rear = cart.pos.y + WHEEL_CONTACTS[2].1;
+    assert!(rear >= -6.0 - 1e-3, "rear axle at {rear}");
+    assert!(rear < -6.0 + 0.5, "stopped {rear} short of the wall");
     assert!(cart.speed.abs() < 0.5, "speed {}", cart.speed);
+}
+
+/// The speed a cart driven at full throttle keeps against a steep wall (its normal `degrees` off the
+/// heading), stepped at `fps`: the distance it slides along the wall in the last 5 of 10 seconds.
+fn crawl(degrees: f32, fps: f32) -> f32 {
+    let phi = degrees.to_radians();
+    let slide = wall(Vec2::new(-phi.sin(), phi.cos()), 6.0);
+    let mut cart = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0);
+    let frames = (10.0 * fps) as usize;
+    let mut half = Vec2::ZERO;
+    for i in 0..frames {
+        cart.step_colliding(1.0 / fps, 1.0, 0.0, |_, _| None, &slide);
+        if i + 1 == frames / 2 {
+            half = Vec2::new(cart.pos.x, cart.pos.y);
+        }
+    }
+    (Vec2::new(cart.pos.x, cart.pos.y) - half).length() / 5.0
+}
+
+#[test]
+fn the_crawl_along_a_steep_wall_does_not_depend_on_the_frame_rate() {
+    // A per-frame factor made this 1.84 m/s at 10 FPS and 0.13 m/s at 144 FPS (normal 28 degrees off).
+    // What is left is the step order: a 10 FPS frame moves with its whole 0.25 m/s of throttle first.
+    for degrees in [20.0, 25.0, 28.0] {
+        let reference = crawl(degrees, 60.0);
+        for fps in [10.0, 22.5, 144.0] {
+            let got = crawl(degrees, fps);
+            assert!(
+                (got - reference).abs() <= 0.3 * reference + 0.06,
+                "{degrees} deg at {fps} FPS: {got} m/s, 60 FPS {reference}"
+            );
+        }
+        assert!(reference < 1.0, "{degrees} deg: a steep wall still holds the cart, {reference} m/s");
+    }
+}
+
+#[test]
+fn the_wire_velocity_runs_along_a_slanted_wall() {
+    let normal = Vec2::new(-1.0, 1.0).normalize();
+    let slide = wall(normal, 10.0);
+    let mut cart = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0);
+    drive_at(&mut cart, 8.0, &slide);
+    let velocity = Vec2::new(cart.velocity[0], cart.velocity[1]);
+    assert!(normal.dot(velocity).abs() < 0.05, "velocity {velocity} into the wall");
+    assert!(velocity.length() > 2.0, "velocity {velocity}");
+    // the body moved by the velocity: one more step goes where it says
+    let before = Vec2::new(cart.pos.x, cart.pos.y);
+    cart.step_colliding(1.0 / 60.0, 1.0, 0.0, |_, _| None, &slide);
+    let step = (Vec2::new(cart.pos.x, cart.pos.y) - before) * 60.0;
+    assert!((step - Vec2::new(cart.velocity[0], cart.velocity[1])).length() < 1e-2, "step {step}");
 }
 
 #[test]
@@ -1050,7 +1102,7 @@ fn a_real_wall_or_trunk_stops_the_wagon() {
         if !(8.0..=11.0).contains(&travelled) {
             continue;
         }
-        assert!(cart.speed.abs() < TOP_SPEED, "speed {}", cart.speed);
+        assert!(cart.speed.abs() < 0.5, "speed {}", cart.speed);
         println!("wall at {mid:?}: stopped after {travelled:.2} m");
         tested += 1;
         if tested == 3 {
