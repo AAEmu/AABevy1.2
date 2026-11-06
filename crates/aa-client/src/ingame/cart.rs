@@ -28,6 +28,11 @@
 //! and the tilt at 2.5 s, as the `e_slope`/`b_forward` capture shows; the full
 //! rotation goes on the wire and `vel.z = dz/dt` keeps the 1/1092 m/s scale.
 //! The wheel and spindle visuals are in `vehicle.rs`.
+//!
+//! The constants below are the Farm Wagon's fit ([`CartParams::WAGON`]); every other land vehicle
+//! drives with its own `vehicle_models` row and body wheel layout ([`model`]).
+
+mod model;
 
 use aa_net::model::UnitKind;
 use aa_net::state::Units;
@@ -40,6 +45,8 @@ use bevy::prelude::*;
 use super::mount::LocalMount;
 use super::player::{LocalPlayer, Mover, STEP_UP, support_at};
 use super::units::{RemoteUnit, Views};
+
+pub use model::CartParams;
 
 /// `FUN_394045f0`: the send pump's interval object reads `100 ms`.
 pub const SEND_INTERVAL_MS: i32 = 100;
@@ -125,10 +132,17 @@ pub struct CartController {
     /// Last ground height under each wheel (see [`WHEEL_CONTACTS`]); a probe that
     /// misses the terrain falls back to its last value.
     wheel: [Option<f32>; 4],
+    /// The model's speed, turn rate, inertia and wheel layout.
+    params: CartParams,
 }
 
 impl CartController {
+    /// A Farm Wagon controller (the captured fit); [`Self::with_params`] takes another model's.
     pub fn new(pos: Pos, yaw: f32) -> Self {
+        Self::with_params(pos, yaw, CartParams::WAGON)
+    }
+
+    pub fn with_params(pos: Pos, yaw: f32, params: CartParams) -> Self {
         let (s, c) = (yaw * 0.5).sin_cos();
         Self {
             pos,
@@ -140,6 +154,7 @@ impl CartController {
             pitch: 0.0,
             roll: 0.0,
             wheel: [None; 4],
+            params,
         }
     }
 
@@ -163,6 +178,7 @@ impl CartController {
             pitch: 0.0,
             roll: 0.0,
             wheel: [None; 4],
+            params: CartParams::WAGON,
         }
     }
 
@@ -202,13 +218,13 @@ impl CartController {
     /// The wire `angVel` body keeps the captured `0.4 * steering` rad/s even below the
     /// stand-in's turn-in-place fade.
     pub fn angular_velocity(&self) -> [f32; 3] {
-        [0.0, 0.0, YAW_RATE_PER_STEER * self.steering]
+        [0.0, 0.0, self.params.yaw_rate_per_steer * self.steering]
     }
 
     /// The yaw rate the controller actually integrates, rad/s: the wire value faded out below
     /// [`TURN_FULL_SPEED`] and mirrored in reverse (see [`Self::step_grounded`]).
     pub fn effective_yaw_rate(&self) -> f32 {
-        YAW_RATE_PER_STEER * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
+        self.params.yaw_rate_per_steer * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
     }
 
     /// One frame of the kinematic stand-in without ground under it: `throttle`
@@ -227,8 +243,11 @@ impl CartController {
             return;
         }
         self.steering = approach(self.steering, steer.clamp(-1.0, 1.0), STEER_RATE * dt);
-        let target = throttle.clamp(-1.0, 1.0) * TOP_SPEED;
-        self.speed = approach(self.speed, target, ACCEL * dt);
+        let target = throttle.clamp(-1.0, 1.0) * self.params.top_speed;
+        // Easing toward zero (coasting, braking) uses the deceleration inertia, anything else the acceleration one.
+        let easing = target.abs() < self.speed.abs() && target * self.speed >= 0.0;
+        let rate = if easing { self.params.decel } else { self.params.accel };
+        self.speed = approach(self.speed, target, rate * dt);
         let turn = self.effective_yaw_rate() * dt;
         let old_rotation = self.rotation;
         self.yaw = wrap_angle(self.yaw + turn);
@@ -268,7 +287,7 @@ impl CartController {
         let mut heights = [None; 4];
         let mut hits = 0usize;
         let mut sum = 0.0f32;
-        for (i, &(x, y)) in WHEEL_CONTACTS.iter().enumerate() {
+        for (i, &(x, y)) in self.params.wheel_contacts.iter().enumerate() {
             let cx = self.pos.x + right.x * x + forward.x * y;
             let cy = self.pos.y + right.y * x + forward.y * y;
             let height = ground(cx, cy).or(self.wheel[i]);
@@ -290,16 +309,16 @@ impl CartController {
         let rear = (heights[2] + heights[3]) * 0.5;
         let right_height = (heights[0] + heights[2]) * 0.5;
         let left_height = (heights[1] + heights[3]) * 0.5;
-        let target_pitch = (front - rear).atan2(WHEELBASE);
-        let target_roll = (left_height - right_height).atan2(TRACK);
+        let target_pitch = (front - rear).atan2(self.params.wheelbase);
+        let target_roll = (left_height - right_height).atan2(self.params.track);
         // The four heights average at WHEEL_CENTROID, not at the body origin:
         // evaluate the fitted plane there (the slopes are the plane gradients,
         // tan(pitch) along +Y and -tan(roll) along +X).
         let plane_mean = heights.iter().sum::<f32>() / 4.0;
         let gradient_x = -target_roll.tan();
         let gradient_y = target_pitch.tan();
-        let target_z = plane_mean - gradient_x * WHEEL_CENTROID.0 - gradient_y * WHEEL_CENTROID.1
-            + REST_OFFSET;
+        let centroid = self.params.centroid();
+        let target_z = plane_mean - gradient_x * centroid.0 - gradient_y * centroid.1 + REST_OFFSET;
         let height_alpha = 1.0 - (-dt / HEIGHT_TAU).exp();
         let tilt_alpha = 1.0 - (-dt / TILT_TAU).exp();
         let old_z = self.pos.z;
@@ -461,6 +480,7 @@ pub fn drive_cart(
     mut out: MessageWriter<NetCommand>,
     mut drive: ResMut<CartDrive>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
+    db: Option<Res<super::data::Db>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let Some(s) = seat.0.filter(|s| s.cart) else {
@@ -493,7 +513,10 @@ pub fn drive_cart(
     let server_yaw = unit.yaw();
     if drive.obj_id != s.mount || drive.controller.is_none() {
         drive.obj_id = s.mount;
-        drive.controller = Some(CartController::new(server_pos, server_yaw));
+        // The driven model's own speed, turn rate and wheel layout; the wagon's when the row is missing.
+        let params = CartParams::load(unit.model_id, db.as_ref().and_then(|db| db.vehicle_look(unit.model_id)).as_ref())
+            .unwrap_or(CartParams::WAGON);
+        drive.controller = Some(CartController::with_params(server_pos, server_yaw, params));
         drive.pump = Pump::default();
         drive.written = None;
     } else if let Some(written) = drive.written

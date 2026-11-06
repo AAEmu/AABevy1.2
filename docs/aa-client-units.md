@@ -1028,6 +1028,31 @@ a still cart does not turn on the spot; the wire `angVel.z` keeps the captured
 quaternions show the yaw is applied about the cart's own up axis (`step` post-multiplies the
 turn when the ground is missing).
 
+#### Per-model dynamics (`cart/model.rs`)
+
+Every driven land slave uses its own `vehicle_models` row, not the Farm Wagon's.
+`X2::VehicleUnitModel::Init` (`FUN_390f0510`, query string at `0x39A06208`) reads `velocity`, `angVel`,
+`lin_inertia`, `lin_deaccel_inertia`, `rot_inertia` and `rot_deaccel_inertia`; `CartParams::load`
+reads the same row read-only (like `swim::ActorParams::load`) when `drive_cart` starts a drive,
+and the wheel contacts come from the body's `wheelN` / `wheel_type2N` mounts (`vehicle::wheel_mounts`,
+the reader the wheel visuals use): the mounts split at the middle of their length into a front and
+a rear axle and the widest pair of each is the contact pair. The wagon body's mounts reproduce
+`WHEEL_CONTACTS` to 1e-3 m (a test, skipped without `AA_PAK` / `AA_DB`).
+
+* `top_speed = velocity`, `yaw_rate_per_steer = angVel` (wire `angVel.z` too). Data, exact for
+  model 38 (4.0, 0.4); Hauler 65 and 58 5.0, 30/33 3.5, 45-48/50/52 15.0, 54-56 17.0, 17/28/29 13.0 and 10.0.
+* `accel = 1 / lin_inertia`, `decel = 1 / lin_deaccel_inertia` (model 38: 0.4 gives the captured 2.5 m/s²).
+  **Inferred** for every other model: only the wagon was captured. A model with no linear inertia
+  (the speed cars, `use_wheeled_vehicle_simulation`) takes the wagon's 1.6 s from rest to top speed.
+  Easing toward zero uses `decel`, speeding up or reversing `accel`.
+* A body with fewer than two axles of mounts (or no body model) keeps the wagon layout; a missing row keeps
+  `CartParams::WAGON` altogether. `CartController::new` is the wagon, `with_params` takes a model's.
+* The speed cars really run the CryPhysics wheeled simulation (`wheeled_vehicle_*` columns), which is not
+  ported: they drive the same kinematic stand-in at their own speed (**approximate**; `rot_inertia`,
+  `susp_*` and `max_climb_ang` are unused). A server that clamps below `velocity` would show as
+  `RESYNC_DISTANCE` snaps (capture-pending). The `vehicles` example only lays vehicles out, so there is
+  no slope screenshot; the slope fit is a unit test with a non-wagon wheelbase.
+
 #### Terrain following (C8a)
 
 The Farm Wagon is not a wheeled-sim vehicle (`vehicle_models.use_wheeled_vehicle_simulation`

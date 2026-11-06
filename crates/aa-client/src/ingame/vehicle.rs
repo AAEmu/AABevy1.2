@@ -919,6 +919,18 @@ fn mounts(model: &aa_cry::mesh::Model) -> Vec<(usize, Affine3A)> {
     out
 }
 
+/// The wheel mounts of a vehicle's body in unit space (cry: x right, y forward, metres), as the wheels are
+/// placed on them; the drive reads its ground-contact probes off these (`cart::model`).
+pub(super) fn wheel_mounts(look: &VehicleLook) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    for part in body_parts(look) {
+        if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {
+            out.extend(mounts(&model).into_iter().map(|(_, mount)| Vec3::from((affine(&part) * mount).translation)));
+        }
+    }
+    out
+}
+
 fn affine(part: &Part) -> Affine3A {
     Affine3A::from_scale_rotation_translation(part.scale, part.rot, part.pos)
 }

@@ -881,3 +881,50 @@ fn a_slave_attached_to_another_slave_is_not_driven_as_a_world_cart() {
         "a slave attached to another slave sent a world-space vehicle body"
     );
 }
+
+/// A speed car (`vehicle_models` 45, 15 m/s) and a Hauler (65, 5 m/s) reach their own top speed.
+#[test]
+fn other_models_reach_their_own_top_speed() {
+    let dt = 1.0 / 30.0;
+    for (velocity, ang_vel, inertia) in [(5.0, 0.4, 0.4), (15.0, 1.0, 0.0)] {
+        let params = CartParams::from_row(velocity, ang_vel, inertia, inertia, &[]);
+        let mut controller = CartController::with_params(Pos::default(), 0.0, params);
+        for _ in 0..300 {
+            controller.step(dt, 1.0, 0.0);
+        }
+        assert_eq!(controller.speed, velocity as f32);
+        controller.step(dt, 0.0, 1.0);
+        assert_eq!(controller.angular_velocity()[2], ang_vel as f32 * controller.steering);
+        controller.step(dt, -1.0, 0.0);
+        assert!(controller.speed < velocity as f32, "reversing eases off the top speed");
+    }
+}
+
+/// A model with its own wheelbase pitches by that wheelbase on a slope.
+#[test]
+fn the_wheelbase_of_the_model_sets_the_pitch() {
+    let mut params = CartParams::WAGON;
+    params.wheelbase = 2.0;
+    params.wheel_contacts = [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)];
+    params.track = 2.0;
+    let mut controller = CartController::with_params(Pos::new(0.0, 0.0, 0.0), 0.0, params);
+    // ground rising 0.5 m per metre along +Y
+    for _ in 0..2000 {
+        controller.step_grounded(0.01, 0.0, 0.0, |_, y| Some(0.5 * y));
+    }
+    assert!((controller.pitch - 0.5f32.atan()).abs() < 0.01, "pitch {}", controller.pitch);
+}
+
+/// Model 38 built from its row is the same controller as the wagon fit.
+#[test]
+fn model_38_params_step_like_the_wagon_fit() {
+    let params = CartParams::from_row(4.0, 0.4, 0.4, 0.4, &[]);
+    let mut a = CartController::new(Pos::default(), 0.3);
+    let mut b = CartController::with_params(Pos::default(), 0.3, params);
+    for i in 0..200 {
+        let (throttle, steer) = if i < 120 { (1.0, 1.0) } else { (0.0, -1.0) };
+        a.step(1.0 / 22.5, throttle, steer);
+        b.step(1.0 / 22.5, throttle, steer);
+    }
+    assert_eq!(a, b);
+}
