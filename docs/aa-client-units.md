@@ -731,6 +731,68 @@ of a dead hull (the deck still uses `ship_models.normal`), and the engine sound 
 only once the idle branch lands). Combat effects anchored to a body bone (`super::attachments`) go away
 with the old parts on a swap; re-anchoring them by bone name is not implemented.
 
+### Ship helm: rudder, wheel and throttle clips (`ship/helm.rs`)
+
+`X2::ShipUnitModel::Update` (`sub_390EBC50`, x2game12.c:198239) runs `UpdateRudder`, `UpdateSteeringWheel` and
+`UpdateThrottleAnim` every frame from two model fields that only the ship's movement controller writes.
+
+* **Input (decoded).** `sub_390B0040` (x2game12.c:151435) copies the interpolated sample's steering and throttle into
+  the model through `sub_390BE0B0` (model+0x35c) and `sub_390BE0D0` (model+0x358); these are their only callers.
+  `sub_390B2F30` (:153277) builds the sample from the type-3 `ship.steering` / `ship.throttle` bytes as `byte * (1/127)`
+  (`0.0078740157`), and `sub_390A16B0` lerps both between the two samples around the playback time (sample floats 11
+  and 12). Once the controller has reset (5 s without a sample, `sub_390AFF70` clears the arrival time) the
+  no-sample branch of `sub_390B2420` writes 0 and 0. So every ship, including the one this client steers, shows the
+  server's echo, not the local request. `VehicleTrack::display` carries both (the timeout now zeroes them) and
+  `RemoteUnit::helm` hands them to `ShipHelm`, which `helm::attach_ship_helms` puts on every `ShipModel` root.
+* **Rudder (`UpdateRudder`, `sub_390C7410`, :170604).** `sub_390C7330` takes the first model element named
+  `rudder` (`sub_39104630`, any element type, exact name) and keeps its authored local matrix; every frame the
+  rudder's matrix is that matrix times `RotZ(model+0x35c)`. The steering is used **as radians**: full helm (127)
+  turns the rudder 1 rad (57.3 degrees), and a positive (D, right) helm swings its aft edge to starboard. The
+  port marks the first prefab object named `rudder` (`prefab::named_parts_of`, `vehicle::assemble`) with
+  `helm::Rudder` and `turn_rudders` sets its rotation. The galleons, merchant ship, boarding ship, speedboat and
+  fishing boats have one; the cruise ship names its rudders `cruise_a_rudder_1` and the rowboat, solo ship and
+  duck boat have none (1.2 logs "ship unit model(%u) has no rudder").
+* **Wheel (`UpdateSteeringWheel`, `sub_390D2990`, :179169).** Skipped when the ship model's path contains
+  `smallboat`, `soloship` or `coupleduckship`. Otherwise it needs the element attached with type 35: the doodad
+  bound at attach point 35 `$helms` (`slave_doodad_bindings`: `galleon.galleon_helms` on the galleons, speedboats,
+  merchant ship, cruise ship, middle galleon and fishing boats, `boardship.boardship_bell` on the boarding ship;
+  `smallboat_helms` on the rowboat and solo ship, which skip). `sub_390E8E40` (:196276) keeps its
+  attach transform at model+0x364; without the element nothing below runs. The target is
+  `45 * ((315 + x + 44) / 45) - 315` degrees with C integer division, `x = (int)(steering_deg * option)`,
+  `315 = (int)(option * 45)`: it rounds up to the next 45 degrees, and the truncating division stops full left at
+  -315 while full right is +405. The drawn angle (model+0x360) moves toward it at `option / 2` rad/s and stops on it;
+  the element's matrix is its attach transform times `RotY(angle)`. An 8-spoke wheel at rest therefore always shows
+  the same spokes. `helm::mark_helm_wheels` finds the model of a drawn doodad with `attach_point == 35` under a
+  ship root and `turn_helm_wheels` turns it about the doodad's own Y.
+* **Steering state (model+0x354, `sub_390D2900`, :179125).** 0 when the drawn angle did not change this frame, 1 when
+  it grew, 2 when it shrank. `ShipHelm::state` exposes it (for the ship steering sound gate). A change starts an
+  animation action on the unit at attach point 1, the helmsman: `dword_39AC38BC` (still; also the default pose of
+  point 1 on every ship but the three without a wheel, `sub_390C2150`), `dword_39AC38C0` (growing),
+  `dword_39AC38C4` (shrinking).
+* **Throttle clips (`UpdateThrottleAnim`, `sub_390DB700`, :185523).** Only when a character element has `run_f`,
+  `run_b` or `idle` (`sub_390C20E0`). Each frame whose throttle differs from the last (model+0x3a0, -1 at load) plays
+  `run_f` (> 0), `run_b` (< 0) or `idle` (0), looped, 0.5 s blend, at speed `|throttle|` (1 for idle); a same-sign
+  change sets the native "keep going" flag, so the port only retimes the playing clip then. Among the rigged ship
+  parts only the duck boat's `coupleduckship_foot.chr` (all three) and the boarding ship's telescope (`idle`) have
+  them: `helm::ThrottleClips` binds them in `vehicle::add_parts`.
+
+`examples/ship_helm` draws the Eznan Cutter with its helm doodad on the hull's `$helms` helper and a held steering:
+`shots/aa-client/ship_helm.png` (full right, rudder 57.3 degrees) against `ship_helm_still.png` (steering 0), the
+wheel on the stern deck (`ship_helm_wheel.png`, and `ship_helm_wheel_turning.png` mid-turn), and the duck boat's
+feet (`--model 1287 --view duck --throttle 1`: the feet move between frames, at throttle 0 they do not).
+
+Approximate or capture-pending:
+
+* **The wheel option** (`dword_39AE6C90`, an object filled at run time) was not read; 7.0 is the value 1.2 uses while
+  it is null. A capture of a galleon helm turning (time to full lock, 405 degrees) would confirm it.
+* **The helmsman clips** behind `dword_39AC38BC` / `C0` / `C4` are hashes in the image data whose names were not
+  recovered (zlib/Cry CRC-32, FNV and djb2 of the `anim_actions` and graph names do not match). The likely rows are
+  `anim_actions` 5 `ac_steer_idle`, 6 `ac_steer_l_01` and 7 `ac_steer_r_01`; no driver clip is played from the state.
+* **The fishing boat's paddle wheel** (`fishboat_wheel.cga`, `fishboat_wheel_idle/run_f/run_b.anm`) has throttle
+  clips in 1.2, but this port does not play `.cga` node animations, so it stays still.
+* The helm doodad's place is the server's (parent-local packet position); 1.2 composes the turn with the attach
+  transform it was given, which should be the same `$helms` helper. Not checked against a live galleon.
+
 ### Vehicle and creature seats
 
 Riders resolve their seat through `model_attach_point_strings` (`Db::attach_point_strings`) by attach point, not by a
@@ -1348,9 +1410,10 @@ kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_
 * **A local controller ignores its own echo.** `FUN_390c63c0` is a no-op while the unit has a
   local vehicle controller; `receive_moves` therefore does not feed type-2/3 movements of a
   `Driven` unit (the cart this client drives) into the track.
-* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`) as the
-  seams for the S6/S9 rudder, wheel and propeller visuals; the track interpolates
-  steering/throttle for its pose but this port has no ship rudder or wheel-speed consumer yet.
+* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`); the track
+  interpolates steering/throttle for its pose (`VehicleTrack::display`, 0/0 after the 5 s reset) and
+  the ship's rudder, helm wheel and throttle clips read them (see "Ship helm" under Vehicles). A
+  land vehicle's steering and wheel speeds have no consumer yet.
 
 `DELAY` is the one value the decompile cannot give: it comes from a runtime getter
 (`DAT_39ae4e90`, integer ms capped at 10000 in `NetActorMovementController::PrePhysicsUpdate`).
@@ -1557,8 +1620,8 @@ its type-3 echo (the hull has no `Driven` marker). Leaving queues the final 0/0 
   `$lamp_rear` helper nodes plus the static `smallboat_helms.cgf` brush. It has **no** rudder part and
   no steering-wheel/helm bone: `FUN_390c7410` needs a child model named `rudder`, and
   `FUN_390d2990` returns early for `smallboat` / `soloship` / `coupleduckship`. No visual change is
-  therefore possible or native for this hull; sailboat/clipper rendering is still blocked by the
-  server-hull placement issue (deck standing is S10).
+  therefore possible or native for this hull. The larger ships' rudder and wheel follow the type-3
+  echo (see "Ship helm" under Vehicles).
 
 Pending live checks: the uncaptured game-option factor (folded into the rowboat's fitted
 `steer_vel`), the ramp on a sailboat or clipper (galleon row 1.0), and a second
