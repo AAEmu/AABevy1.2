@@ -17,7 +17,8 @@
 //! at the surface; the packets then carry the swim stance and no ground flag.
 //!
 //! Riding ([`super::mount`]): on the driver's seat of its own mate the keys move the mount at the mount's speed and Space jumps
-//! it with its own jump height and gravity while a direction is held (no swimming); the packets carry the mate's object id; a
+//! it with its own jump height and gravity while a direction is held; in water deeper than the mount's swim level it swims at
+//! the surface at its swim speed ([`MountSpeed::swim_level`], [`MountSpeed::swim`]); the packets carry the mate's object id; a
 //! passenger is carried along.
 
 use aa_anim::pose::Rig;
@@ -429,7 +430,7 @@ pub fn control_player(
         return;
     }
     // a passenger goes where the mount takes it (`mount::drive_mount`); a driver's keys steer the mount: its speed, its jump,
-    // no swimming, and the packets name the mount
+    // its swim level, and the packets name the mount
     let mount = mount.as_deref().copied().unwrap_or_default();
     // `AA_DISMOUNT_TRACE=1`: the local rider's position every 100 ms for 1.5 s after a detach, with the mount it left
     // and the mount's facing, so a replay can measure the landing in the mount's frame.
@@ -548,6 +549,8 @@ pub fn control_player(
         Some((_, speed)) => ActorParams { jump_height: speed.jump_height, gravity: speed.gravity, ..actor },
         None => actor,
     };
+    // and it swims with its own swim level (`swim::swim_level`): the depth it starts to swim in and floats at
+    let swim_depth = driving.map_or(actor.swim_depth(), |(_, speed)| speed.swim_level);
     // scripted keys (`--walk`) count like pressed ones
     let t = state.since_spawn;
     // the first step waits for the collision around the character (a deck or a house is not there before it is built)
@@ -594,7 +597,8 @@ pub fn control_player(
     // only swims up, which a mount does not
     let jump_held = pressed("jump", 'J') && driving.is_none();
     let jump_tapped = state.jump_tapped(&dev, t, tapped("jump"));
-    let vertical = jump_held as i32 as f32 - key("down", 'X');
+    // a swimming mount stays at the surface: X does not dive it (unverified, no capture of a ridden mount in the water)
+    let vertical = if driving.is_some() { 0.0 } else { jump_held as i32 as f32 - key("down", 'X') };
 
     // Read movement/character-yaw intent before HoldPosition prevents motion. A
     // successful UnbondRequested completion releases the seat; enqueue alone does not.
@@ -664,10 +668,13 @@ pub fn control_player(
     let mut step_tan = 0.0;
     let step = if let Some((_, speed)) = driving {
         // the mount's buffs (a gallop) speed it up; its carried velocity follows the wanted one at the
-        // actor model's `game_inertia` / `game_inertia_accel`, so a release coasts and a turn curves
-        let target = local_dir
-            * speed.of(local_dir, walking)
-            * sprint.as_ref().map_or(1.0, |s| s.mount_speed_mul);
+        // actor model's `game_inertia` / `game_inertia_accel`, so a release coasts and a turn curves. In the water
+        // it swims at its swim stance's speed, which its `SwimSpeedMul` buffs scale, and never pitches down
+        let target = if swimming {
+            local_dir * speed.swim_of(local_dir) * sprint.as_ref().map_or(1.0, |s| s.mount_swim_speed_mul)
+        } else {
+            local_dir * speed.of(local_dir, walking) * sprint.as_ref().map_or(1.0, |s| s.mount_speed_mul)
+        };
         let target = forward(mover.facing) * target.y + right(mover.facing) * target.x;
         let next = mount_velocity(state.drive_vel, target, speed, dt);
         // the frame's step is the mean of the old and new carried speeds, so the coast covers the
@@ -738,8 +745,9 @@ pub fn control_player(
     let mut jumped = false;
     let mut takeoff = false;
     let mut left_water = false;
-    // swimming starts and stops with the depth of the water over the ground (a body that rises out of it does not start)
-    let want_swim = swim::should_swim(swimming, pos.z, wet, actor.swim_depth()) && (swimming || !rising) && driving.is_none();
+    // swimming starts and stops with the depth of the water over the ground (a body that rises out of it does not start); a
+    // driven mount is an actor like the player (`CActor::UpdateSwimStats`) and swims at its own level
+    let want_swim = swim::should_swim(swimming, pos.z, wet, swim_depth) && (swimming || !rising);
     if want_swim && !swimming {
         mover.grounded = false;
         state.air_velocity = Vec2::ZERO;
@@ -757,9 +765,10 @@ pub fn control_player(
     // impact speed (m/s) of a landing in this step: sent once, in the movement packet of the landing
     let mut landed = None;
     if let (Some(w), true) = (wet, mover.swim.is_some()) {
-        // swimming: float at the surface, dive with X, surface with Space; a jump near the surface leaves the water
-        let rest = w.surface - actor.swim_depth();
-        if jump_tapped && pos.z >= rest - swim::JUMP_RANGE {
+        // swimming: float at the surface, dive with X, surface with Space; a jump near the surface leaves the water. A
+        // swimming mount only floats: no jump out, no dive, no pitched course (unverified)
+        let rest = w.surface - swim_depth;
+        if jump_tapped && driving.is_none() && pos.z >= rest - swim::JUMP_RANGE {
             mover.swim = None;
             mover.vz = actor.jump_speed();
             jumped = true;
@@ -767,7 +776,7 @@ pub fn control_player(
             state.swim_jump = true;
         } else {
             // forward with the camera pitched is a dive or a rise; holding it with the camera level keeps the depth
-            let course = (local_dir != Vec2::ZERO).then_some(swim_aim.z);
+            let course = (local_dir != Vec2::ZERO && driving.is_none()).then_some(swim_aim.z);
             let mut hold = mover.swim.map_or(0.0, |s| s.hold);
             let wanted = swim::wanted_vz(vertical, course, pos.z, rest, dt, &mut hold);
             mover.vz = swim::approach(mover.vz, wanted, swim::WATER_DRAG, dt);
@@ -781,7 +790,8 @@ pub fn control_player(
                 pos.z = rest;
                 mover.vz = mover.vz.min(0.0);
             }
-            mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed: local_vel.length(), vertical, deep: rest - pos.z > swim::DEEP, hold });
+            let speed = if driving.is_some() { state.drive_vel.length() } else { local_vel.length() };
+            mover.swim = Some(Swim { surface: w.surface, kind: w.kind, local_dir, speed, vertical, deep: rest - pos.z > swim::DEEP, hold });
         }
     }
     if mover.swim.is_none() {
@@ -1931,6 +1941,8 @@ mod dive_tests {
         player: Entity,
         camera: Entity,
         sent: Vec<MoveCommand>,
+        /// The `CSMoveUnit`s of a driven mate.
+        mate_sent: Vec<(u32, MoveCommand)>,
     }
 
     impl SwimApp {
@@ -1964,6 +1976,7 @@ mod dive_tests {
                 .insert_resource(collision)
                 .insert_resource(water)
                 .add_message::<NetCommand>()
+                .add_message::<crate::ingame::mount::MountRear>()
                 .add_systems(Update, control_player);
             app.world_mut()
                 .resource_mut::<SendState>()
@@ -1992,6 +2005,7 @@ mod dive_tests {
                 player,
                 camera,
                 sent: Vec::new(),
+                mate_sent: Vec::new(),
             }
         }
 
@@ -2001,16 +2015,33 @@ mod dive_tests {
                 .resource_mut::<Time>()
                 .advance_by(Duration::from_secs_f32(dt));
             self.app.update();
-            self.sent.extend(
-                self.app
-                    .world_mut()
-                    .resource_mut::<Messages<NetCommand>>()
-                    .drain()
-                    .filter_map(|NetCommand(c)| match c {
-                        Command::Move(m) => Some(m),
-                        _ => None,
-                    }),
-            );
+            for NetCommand(c) in self.app.world_mut().resource_mut::<Messages<NetCommand>>().drain() {
+                match c {
+                    Command::Move(m) => self.sent.push(m),
+                    Command::MoveUnit { obj_id, movement } => self.mate_sent.push((obj_id, movement)),
+                    _ => {}
+                }
+            }
+        }
+
+        /// On the driver's seat of mate 9.
+        fn ride(&mut self, speed: MountSpeed) {
+            self.app.insert_resource(crate::ingame::mount::LocalMount(Some(crate::ingame::mount::LocalSeat {
+                mount: 9,
+                point: 1,
+                drives: true,
+                cart: false,
+                ship: false,
+                turret: false,
+                speed,
+                lift: 0.0,
+            })));
+        }
+
+        fn sprint(&mut self, set: impl FnOnce(&mut crate::ingame::sprint::Sprint)) {
+            let mut sprint = crate::ingame::sprint::Sprint::default();
+            set(&mut sprint);
+            self.app.insert_resource(sprint);
         }
 
         fn pitch(&mut self, pitch: f32) {
@@ -2298,5 +2329,129 @@ mod dive_tests {
             "stuck at the surface over a missing seabed: {}",
             f.mover().pos.z
         );
+    }
+
+    /// A sea at 100 m over a bed 10 m down that rises 0.3 m a metre north of y = 100 (the shore line at y = 133), no pak.
+    fn beach() -> (TerrainQuery, WaterQuery) {
+        let g = aa_world::heightmap::GRID;
+        let heights: Vec<f32> = (0..g * g).map(|i| 90.0 + ((i / g) as f32 * 2.0 - 100.0).max(0.0) * 0.3).collect();
+        let cell = aa_world::heightmap::CellHeights {
+            min_z: 90.0,
+            max_z: heights.iter().copied().fold(90.0, f32::max),
+            heights,
+            surface: vec![0; g * g],
+            hole_sectors: [false; 256],
+            ocean_level: 0.0,
+            sectors: 0,
+        };
+        let terrain = TerrainQuery::fixture_cell("test", cell);
+        let water = WaterQuery::fixture_sea("test", 100.0, terrain.clone());
+        (terrain, water)
+    }
+
+    /// The bed of [`beach`] at `y`.
+    fn beach_bed(y: f32) -> f32 {
+        90.0 + (y - 100.0).max(0.0) * 0.3
+    }
+
+    const DT: f32 = 1.0 / 60.0;
+
+    #[test]
+    fn a_driven_horse_swims_at_its_level_and_speed_and_walks_out_of_the_shallows() {
+        let (terrain, water) = beach();
+        // 6 m of water over the bed
+        let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 113.0, 99.5));
+        // the Lilyut horse's rows (model 139); the same defaults without the database
+        let horse = Db::open().map_or_else(MountSpeed::default, |db| db.mount_speed(139));
+        assert!((horse.swim - 1.8).abs() < 1e-5 && (horse.swim_level - 2.143).abs() < 0.01, "{horse:?}");
+        f.ride(horse);
+        f.pitch(0.0);
+        let rest = 100.0 - horse.swim_level;
+        for _ in 0..180 {
+            f.tick(DT);
+        }
+        assert!(f.mover().swim.is_some(), "the horse walks on the sea bed: {:?}", f.mover().pos);
+        assert!((f.mover().pos.z - rest).abs() < 0.05, "the horse floats at {} for {rest}", f.mover().pos.z);
+        // X and Space neither dive nor lift a ridden mount
+        f.hold("down");
+        f.hold("jump");
+        for _ in 0..60 {
+            f.tick(DT);
+        }
+        f.release("down");
+        f.release("jump");
+        assert!(f.mover().swim.is_some() && (f.mover().pos.z - rest).abs() < 0.05, "{:?}", f.mover().pos);
+        // forward: the swim stance's 1.8 m/s, reported as the mate's swim packets with no ground flag
+        f.hold("moveforward");
+        for _ in 0..60 {
+            f.tick(DT);
+        }
+        let speed = f.mover().velocity.truncate().length();
+        assert!((speed - horse.swim).abs() < 0.05, "swims at {speed} m/s");
+        let (mate, last) = f.mate_sent.last().cloned().expect("the mate's movement");
+        assert_eq!(mate, 9);
+        assert_eq!(last.stance, stance::SWIM);
+        assert_eq!(last.state, MoveState::Fall);
+        assert_eq!(last.delta_movement, [0, 127, 0]);
+        assert!((last.pos.z - rest).abs() < 0.1, "{:?}", last.pos);
+        assert!(f.moves().is_empty(), "the rider reported itself");
+        // up the beach: it walks again once the water is LEAVE_MARGIN shallower than its swim level
+        let mut left = None;
+        for _ in 0..600 {
+            f.tick(DT);
+            if left.is_none() && f.mover().swim.is_none() {
+                left = Some(f.mover().pos.y);
+            }
+        }
+        let depth = 100.0 - beach_bed(left.expect("the horse never left the water"));
+        let leave = horse.swim_level - swim::LEAVE_MARGIN;
+        assert!(depth <= leave && depth > leave - 0.1, "left the water {depth} m deep");
+        let m = f.mover();
+        assert!(m.grounded && (m.pos.z - beach_bed(m.pos.y)).abs() < 0.05, "{:?}", m.pos);
+        assert_eq!(f.mate_sent.last().unwrap().1.stance, stance::RELAXED);
+    }
+
+    #[test]
+    fn a_horse_wades_through_water_a_player_swims_in() {
+        // 1.75 m over the bed: deeper than a player's 1.3 m, shallower than a horse's 2.14 m
+        for riding in [false, true] {
+            let (terrain, water) = beach();
+            let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 127.5, 98.3));
+            if riding {
+                f.ride(MountSpeed::default());
+            }
+            for _ in 0..60 {
+                f.tick(DT);
+            }
+            let m = f.mover();
+            assert_eq!(m.swim.is_some(), !riding, "riding {riding}: {:?}", m.pos);
+            if riding {
+                assert!(m.grounded && (m.pos.z - beach_bed(127.5)).abs() < 0.02, "the horse stands on the bed: {:?}", m.pos);
+            }
+        }
+    }
+
+    #[test]
+    fn swim_speed_buffs_scale_the_swimmer_and_the_swimming_mount() {
+        for (riding, base) in [(false, swim::BASE_SPEED), (true, MountSpeed::default().swim)] {
+            let (terrain, water) = beach();
+            let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 102.0, 99.0));
+            if riding {
+                f.ride(MountSpeed::default());
+            }
+            f.pitch(0.0);
+            // the flippers (buff 2416): +30 %
+            f.sprint(|s| if riding { s.mount_swim_speed_mul = 1.3 } else { s.swim_speed_mul = 1.3 });
+            for _ in 0..60 {
+                f.tick(DT);
+            }
+            f.hold("moveforward");
+            for _ in 0..60 {
+                f.tick(DT);
+            }
+            assert!(f.mover().swim.is_some());
+            let speed = f.mover().velocity.truncate().length();
+            assert!((speed - base * 1.3).abs() < 0.06, "riding {riding}: {speed} m/s for {}", base * 1.3);
+        }
     }
 }

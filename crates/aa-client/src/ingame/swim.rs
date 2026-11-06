@@ -64,6 +64,8 @@ pub const LEAVE_MARGIN: f32 = 0.2;
 pub const JUMP_RANGE: f32 = 0.2;
 /// The body is "deep" (the `_deep` clips) when its origin is this far under the swimming height (m).
 pub const DEEP: f32 = 0.5;
+/// The bone whose bind-pose height [`swim_level`] adds to `swim_height`.
+pub const SWIM_LEVEL_BONE: &str = "Bip01 Spine";
 /// `cl_shallowWaterDepthLo` / `Hi` / `SpeedMulPlayer`.
 pub const WADE_LO: f32 = 0.3;
 pub const WADE_HI: f32 = 1.0;
@@ -136,6 +138,30 @@ impl ActorParams {
         )
         .ok()
     }
+}
+
+/// How far over its feet an actor's swim level is (m): the depth of water it starts to swim in and how far under the
+/// surface its origin floats. `CActor::UpdateSwimStats` (`sub_39120300`, x2game12.c:239714-239774) takes
+/// `relativeWaterLevel = pos.z + vfunc108 - surface`; `vfunc108` is `sub_39113EE0` (slot 27 of the actor vtables in
+/// `x2game_unpacked.dll` `.rdata`), `this+116 x scale`, which `sub_39113150` (x2game12.c:229875-229923) sets to `swimHeight`
+/// plus the bind-pose height of the first of six predefined bones the skeleton has, else 0.8 of its box's top plus 0.2 of
+/// its bottom. `IsSwimming` (`sub_39114060`, x2game12.c:230678-230690) then wants water at least that deep. Which six bones is CryAnimation's (not in
+/// the dumps): the Nuian male's [`SWIM_LEVEL_BONE`] (1.116 m) plus its 0.2 is 1.32 m, the 1.3 m a player floats at, so the
+/// spine stands in for them. `model_file` is the actor's `.cdf` or `.chr`; `None` when its skeleton cannot be loaded.
+pub fn swim_level(model_file: &str, swim_height: f32) -> Option<f32> {
+    let skeleton = if model_file.to_ascii_lowercase().ends_with(".cdf") {
+        aa_anim::Cdf::load(model_file).ok()?.model
+    } else {
+        model_file.to_string()
+    };
+    let rig = aa_anim::pose::shared_rig(&skeleton).ok()?;
+    let joints = rig.bind.model_space(&rig);
+    let bone = rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case(SWIM_LEVEL_BONE)).map(|i| joints[i].1.z);
+    let height = bone.unwrap_or_else(|| {
+        let (low, high) = joints.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), j| (lo.min(j.1.z), hi.max(j.1.z)));
+        0.8 * high + 0.2 * low
+    });
+    height.is_finite().then_some(swim_height + height)
 }
 
 /// A player in the water: the surface and what it does there. `Mover::swim` is `Some` while it swims.
@@ -319,9 +345,11 @@ fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
 }
 
 /// Plays the swim clips on the local player while it swims, after `anim::drive_locomotion` (which sees a standing player: the
-/// player's `Motion` is empty in the water) and hands the animator back when it stops (`Locomotion::invalidate`).
+/// player's `Motion` is empty in the water) and hands the animator back when it stops (`Locomotion::invalidate`). A rider on a
+/// swimming mount keeps its seat's clips (the horse graph's Driver states have no swim state).
+#[allow(clippy::type_complexity)]
 pub fn drive_swim(
-    mut player: Query<(&Mover, &mut Animator, &mut Locomotion, &SwimClips, Option<&Acting>, Has<Dead>), With<LocalPlayer>>,
+    mut player: Query<(&Mover, &mut Animator, &mut Locomotion, &SwimClips, Option<&Acting>, Has<Dead>), (With<LocalPlayer>, Without<super::mount::Rider>)>,
     mut was_swimming: Local<bool>,
 ) {
     let Ok((mover, mut animator, mut loco, clips, acting, dead)) = player.single_mut() else { return };
@@ -543,6 +571,33 @@ mod tests {
                 let find = |n: &str| rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case(n)).map(|i| m[i].1);
                 let f = |v: Option<Vec3>| v.map_or("-".to_string(), |v| format!("({:.2}, {:.2}, {:.2})", v.x, v.y, v.z));
                 println!("{name:22} t={t:.2}/{:.2}s pelvis {} head {} lfoot {} rfoot {} root {}", clip.clip.duration, f(find("Bip01 Pelvis")), f(find("Bip01 Head")), f(find("Bip01 L Foot")), f(find("Bip01 R Foot")), f(m.get(rig.root).map(|r| r.1)));
+            }
+        }
+    }
+
+    /// The bind-pose height of the spine, neck and head bones of the player and the mounts (`--ignored --nocapture`): what
+    /// `sub_39113150` adds to `swim_height` for the swim level.
+    #[test]
+    #[ignore]
+    fn swim_level_bones() {
+        for skeleton in [
+            "objects/characters/nuian/male/nude/nu_m_base.chr",
+            "objects/characters/animals/horse/horse.chr",
+            "objects/characters/animals/donkey/donkey.chr",
+            "objects/characters/monster/snowlion/snowlion2_yellomane/snowlion2_yellomane.chr",
+            "game/objects/characters/monster/polarbear/polarbear_rider.chr",
+        ] {
+            let Ok(rig) = aa_anim::pose::shared_rig(skeleton) else {
+                println!("{skeleton}: missing");
+                continue;
+            };
+            let m = rig.bind.model_space(&rig);
+            println!("{skeleton}");
+            for (i, bone) in rig.skeleton.bones.iter().enumerate() {
+                let n = bone.name.to_ascii_lowercase();
+                if ["pelvis", "spine", "neck", "head", "bip01"].iter().any(|k| n.contains(k)) && !n.contains("nub") {
+                    println!("  {:28} z {:.3}", bone.name, m[i].1.z);
+                }
             }
         }
     }
