@@ -934,3 +934,128 @@ fn model_38_params_step_like_the_wagon_fit() {
     }
     assert_eq!(a, b);
 }
+
+/// A wall for [`CartController::step_colliding`]: the capsule centre may not pass the line
+/// `normal . p = offset` (a thin infinite wall), and slides along it.
+fn wall(normal: Vec2, offset: f32) -> impl Fn(Vec2, Vec2) -> Vec2 {
+    let normal = normal.normalize();
+    move |from, delta| {
+        let to = from + delta;
+        to - normal * (normal.dot(to) - offset).max(0.0)
+    }
+}
+
+fn drive_at(controller: &mut CartController, seconds: f32, slide: &impl Fn(Vec2, Vec2) -> Vec2) {
+    for _ in 0..(seconds * 60.0) as usize {
+        controller.step_colliding(1.0 / 60.0, 1.0, 0.0, |_, _| None, slide);
+    }
+}
+
+#[test]
+fn a_wall_ahead_stops_the_cart_within_the_capsule_radius() {
+    // Facing +Y (yaw 0); the wall is at y = 10, so the front axle capsule (centre at body y + 1.6104)
+    // may reach 10 - radius at most.
+    let mut cart = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0);
+    let radius = cart.body_radius();
+    drive_at(&mut cart, 8.0, &wall(Vec2::Y, 10.0));
+    let front = cart.pos.y + WHEEL_CONTACTS[0].1;
+    assert!(front <= 10.0 + 1e-3, "front axle at {front}");
+    assert!(front > 10.0 - 0.5, "stopped {front} short of the wall");
+    assert!(cart.speed.abs() < 0.5, "speed {}", cart.speed);
+    assert!(radius > 0.0);
+}
+
+#[test]
+fn a_wall_behind_stops_a_reversing_cart() {
+    let mut cart = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0);
+    let slide = wall(-Vec2::Y, 6.0);
+    for _ in 0..600 {
+        cart.step_colliding(1.0 / 60.0, -1.0, 0.0, |_, _| None, &slide);
+    }
+    // the rear axle sits 2.5453 m behind the origin
+    assert!(cart.pos.y - WHEEL_CONTACTS[2].1 >= -6.0 - 1e-3, "y {}", cart.pos.y);
+    assert!(cart.speed.abs() < 0.5, "speed {}", cart.speed);
+}
+
+#[test]
+fn a_slanted_wall_leaves_the_tangent() {
+    // A 45 degree wall: the cart slides along it toward +X and keeps some speed, without going through.
+    let normal = Vec2::new(-1.0, 1.0);
+    let slide = wall(normal, 10.0);
+    let mut cart = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0);
+    drive_at(&mut cart, 8.0, &slide);
+    assert!(cart.pos.x > 2.0, "no slide: x {}", cart.pos.x);
+    assert!(cart.speed > 0.5, "speed {}", cart.speed);
+    assert!(cart.pos.y > 2.0, "stalled: y {}", cart.pos.y);
+    for axle in cart.axles() {
+        let p = Vec2::new(cart.pos.x, cart.pos.y) + rotate(axle, cart.yaw);
+        assert!(normal.normalize().dot(p) <= 10.0 + 1e-2, "axle {p} through the wall");
+    }
+}
+
+#[test]
+fn open_ground_is_not_slowed_by_the_collision_step() {
+    let mut free = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.3);
+    let mut open = free;
+    for _ in 0..120 {
+        free.step_grounded(1.0 / 60.0, 1.0, 0.5, |_, _| None);
+        open.step_colliding(1.0 / 60.0, 1.0, 0.5, |_, _| None, |from, delta| from + delta);
+    }
+    assert_eq!(free, open);
+}
+
+#[test]
+fn a_real_wall_or_trunk_stops_the_wagon() {
+    if !aa_world::pak_available() {
+        return;
+    }
+    let terrain = TerrainQuery::new("main_world");
+    let collision = WorldCollision::new("main_world", terrain.clone());
+    let Some(_cell) = collision.build_blocking(20, 10) else {
+        return;
+    };
+    // The first tall, near-vertical triangle that starts at the ground near Lutesong Harbor: a wall,
+    // a hull or a trunk the wagon can drive at.
+    let centre = Vec3::new(21_040.0, 10_560.0, 100.0);
+    let radius = CartController::new(Pos::new(0.0, 0.0, 0.0), 0.0).body_radius();
+    let mut tested = 0;
+    for tri in collision.triangles_near(centre, 60.0, aa_world::collide::Mask::ALL) {
+        let normal = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
+        let mid = (tri[0] + tri[1] + tri[2]) / 3.0;
+        let Some(ground) = terrain.ground_at(mid.x, mid.y).map(|g| g.height) else { continue };
+        let low = tri.iter().map(|p| p.z).fold(f32::MAX, f32::min);
+        let high = tri.iter().map(|p| p.z).fold(f32::MIN, f32::max);
+        if normal.z.abs() > 0.1 || low > ground + 0.2 || high < ground + 1.6 {
+            continue;
+        }
+        // Approach the face from the side it looks toward, 12 m away, heading into it.
+        let dir = Vec2::new(normal.x, normal.y).normalize();
+        let start = Vec2::new(mid.x, mid.y) + dir * 12.0;
+        let yaw = f32::atan2(dir.x, -dir.y); // forward = (-sin, cos) = -dir
+        let Some(z) = terrain.ground_at(start.x, start.y).map(|g| g.height) else { continue };
+        let mut cart = CartController::new(Pos::new(start.x, start.y, z), yaw);
+        for _ in 0..(15 * 60) {
+            let body_z = cart.pos.z;
+            cart.step_colliding(1.0 / 60.0, 1.0, 0.0, |_, _| None, |from, delta| {
+                collision
+                    .slide(Vec3::new(from.x, from.y, body_z), delta, radius, BODY_HEIGHT, STEP_UP)
+                    .pos
+                    .truncate()
+            });
+        }
+        let end = Vec2::new(cart.pos.x, cart.pos.y);
+        let travelled = (end - start).length();
+        // The face is 12 m ahead: the front axle (1.6 m) and the capsule stop short of it. A shorter
+        // run was stopped by something else on the way, a longer one passed a sliver of a face.
+        if !(8.0..=11.0).contains(&travelled) {
+            continue;
+        }
+        assert!(cart.speed.abs() < TOP_SPEED, "speed {}", cart.speed);
+        println!("wall at {mid:?}: stopped after {travelled:.2} m");
+        tested += 1;
+        if tested == 3 {
+            break;
+        }
+    }
+    assert!(tested > 0, "no wall found to drive at");
+}
