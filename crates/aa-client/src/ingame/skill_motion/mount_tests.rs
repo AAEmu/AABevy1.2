@@ -30,6 +30,8 @@ struct Ride {
     app: App,
     player: Entity,
     mate: Entity,
+    /// The most the mover went down in one frame of [`Ride::run`] (m).
+    drop: f32,
 }
 
 impl Ride {
@@ -70,7 +72,7 @@ impl Ride {
         views.track_unit_entity(MATE, mate);
         app.insert_resource(views);
         app.world_mut().resource_mut::<SendState>().settle_for_test();
-        let mut ride = Ride { app, player, mate };
+        let mut ride = Ride { app, player, mate, drop: 0.0 };
         // the standing packets of the ride settle before the skill
         for _ in 0..30 {
             ride.tick();
@@ -114,15 +116,18 @@ impl Ride {
     }
 
     /// Frames until the skill move is over (at most `secs`): the packets with the second they went out, and the highest the mover
-    /// was over the ground.
+    /// was over the ground. [`Ride::drop`] keeps the most the mover went down in one frame.
     fn run(&mut self, secs: f32) -> (Vec<(f32, u32, MoveCommand)>, f32) {
         let mut sent = Vec::new();
         let mut top: f32 = 0.0;
         let mut t = 0.0;
+        let mut z = self.mover().pos.z;
         while t < secs {
             t += DT;
             sent.extend(self.tick().into_iter().map(|(obj, m)| (t, obj, m)));
             let pos = self.mover().pos;
+            self.drop = self.drop.max(z - pos.z);
+            z = pos.z;
             let ground = self.app.world().resource::<TerrainQuery>().height_at(pos.x, pos.y).unwrap_or(pos.z);
             top = top.max(pos.z - ground);
             if self.app.world().get::<SkillMove>(self.player).is_none() {
@@ -164,20 +169,41 @@ fn a_mount_leap_moves_the_driven_mate_and_reports_move_unit() {
     // the mate stands where the mover is
     let horse = ride.app.world().get::<RemoteUnit>(ride.mate).unwrap();
     assert_eq!((horse.pos, horse.facing), (to, ride.mover().facing));
-    // every report is the mate's: every 0.1 s, jump then fall, standing at the end
+    // every report is the mate's: every 0.1 s, jump then fall, standing at the end (the arc ends over the falling ground east of
+    // the spot, and the mate falls on to it: `a_mount_leap_over_falling_ground_comes_down_to_it`)
     assert!(sent.iter().all(|(_, obj, _)| *obj == MATE), "only CSMoveUnit for the mate: {:?}", sent.iter().map(|s| s.1).collect::<Vec<_>>());
     let leap: Vec<_> = sent.iter().filter(|(t, ..)| *t <= 0.8 + DT).collect();
     assert!((8..=11).contains(&leap.len()), "{} reports", leap.len());
-    for pair in leap.windows(2) {
+    for pair in sent.windows(2) {
         assert!(pair[1].0 - pair[0].0 <= 0.1 + 1.5 * DT, "a gap of {:.3} s", pair[1].0 - pair[0].0);
     }
     let states: Vec<MoveState> = leap.iter().map(|(_, _, m)| m.state).collect();
     let rise = states.iter().position(|s| *s == MoveState::Jump).expect("jump reports");
     let fall = states.iter().position(|s| *s == MoveState::Fall).expect("fall reports");
     assert!(rise < fall, "{states:?}");
-    let (_, _, last) = leap.last().unwrap();
+    let (_, _, last) = sent.last().unwrap();
     assert!(!last.moving && last.state == MoveState::Ground && last.velocity == [0; 3], "{last:?}");
     assert!((last.pos.x - to.x).abs() < 1e-3 && (last.pos.y - to.y).abs() < 1e-3);
+}
+
+/// East of [`SPOT`] the ground falls about 5 m over the leap's 25 m, and Elegant Leap's arc ends at the height it left from: the
+/// mate goes down to the ground from there at the speed it came down with, not in one frame.
+#[test]
+fn a_mount_leap_over_falling_ground_comes_down_to_it() {
+    let Some(mut ride) = Ride::new(true) else { return };
+    let from = ride.mover().pos;
+    ride.fire(ELEGANT_LEAP);
+    let (sent, _) = ride.run(3.0);
+    let to = ride.mover().pos;
+    let ground = ride.app.world().resource::<TerrainQuery>().height_at(to.x, to.y).unwrap();
+    assert!(from.z - ground > 3.0, "the test needs falling ground: {} -> {ground}", from.z);
+    assert!((to.z - ground).abs() < 0.3 && (east_of(from, to) - 25.0).abs() < 0.5, "{from} -> {to}");
+    // the arc comes down at about 37 m/s (0.62 m a frame); the fall on adds gravity, not a jump to the floor
+    assert!(ride.drop < 1.0, "it dropped {:.2} m in one frame", ride.drop);
+    let (_, _, last) = sent.last().unwrap();
+    assert!(!last.moving && last.state == MoveState::Ground && last.velocity == [0; 3] && (last.pos.z - to.z).abs() < 1e-3, "{last:?}");
+    let falling = sent.iter().filter(|(t, _, m)| *t > 0.8 + DT && m.state == MoveState::Fall).count();
+    assert!(falling >= 1, "the fall after the arc is reported: {:?}", sent.iter().map(|(t, _, m)| (*t, m.state)).collect::<Vec<_>>());
 }
 
 #[test]

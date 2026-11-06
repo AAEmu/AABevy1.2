@@ -160,8 +160,10 @@ pub struct SkillMove {
     controller_kind: Option<u32>,
     /// The mate the local player drives: the move is that mate's controller, and its reports name the mate.
     unit: Option<u32>,
-    /// Fall speed of a dash that ran off a ledge (m/s).
+    /// Fall speed of a dash that ran off a ledge, or of a unit that falls on after its path (m/s).
     fall: f32,
+    /// The path is over with the unit still in the air: it falls to the floor.
+    falling_on: bool,
     /// The mover's gravity (m/s^2): a mate falls with its own.
     gravity: f32,
 }
@@ -183,7 +185,7 @@ struct Hover {
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, unit: None, fall: 0.0, gravity: path::GRAVITY }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, unit: None, fall: 0.0, falling_on: false, gravity: path::GRAVITY }
     }
 
     /// A settled skill move for the deck tests: only its presence matters there.
@@ -286,6 +288,16 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
         mv.recover -= dt;
         return Stepped { pos, velocity: Vec3::ZERO, done: mv.recover <= 0.0, airborne: false };
     }
+    if mv.falling_on {
+        mv.fall += gravity * dt;
+        let floor = floor_at(terrain, collision, pos, STEP_UP);
+        let z = pos.z - mv.fall * dt;
+        // no floor under it (a hole): it stays where it is, as the path's end did before
+        mv.landed = !floor.is_finite() || z <= floor;
+        let z = if floor.is_finite() { z.max(floor) } else { pos.z };
+        let velocity = if mv.landed { Vec3::ZERO } else { Vec3::new(0.0, 0.0, -mv.fall) };
+        return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity, done: mv.landed && mv.recover <= 0.0, airborne: !mv.landed };
+    }
     mv.t += dt;
     let want = mv.flight.at(mv.t);
     let mut xy = Vec2::new(want.x, want.y);
@@ -305,7 +317,16 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
     }
     mv.landed = mv.t >= mv.flight.eta || blocked;
     if mv.landed && floor.is_finite() {
-        z = floor;
+        if z - floor > STEP_UP {
+            // still in the air when the path ends (a leap over falling ground: its arc ends at the height it left from; a dash
+            // off a ledge; a wall in the way of an arc): it falls on from there at the speed it came down with, instead of being
+            // put on the floor in one frame (metres for a mount's 25 m leap down a slope)
+            mv.landed = false;
+            mv.falling_on = true;
+            mv.fall = if dt > 0.0 { ((pos.z - z) / dt).max(0.0) } else { 0.0 };
+        } else {
+            z = floor;
+        }
     }
     let next = Vec3::new(xy.x, xy.y, z);
     let velocity = if dt > 0.0 { (next - pos) / dt } else { Vec3::ZERO };
