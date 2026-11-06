@@ -80,7 +80,6 @@ shim.__newindex = function(t, field, value)
   else
     rawset(t, field, value)
   end
-  rawset(t, field, value)
 end
 shim.__aa_bounty_shim = patchWindow
 setmetatable(userTrial, shim)
