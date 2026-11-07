@@ -76,21 +76,30 @@ pub fn bind_clip_with(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str, loc
     Some(bound)
 }
 
-/// The `.caf` file of every clip the client bound, by the address of its data (the clip library never drops one): aa-anim's clips
-/// carry the name from their file header, not their path, and the sound events of a clip are listed by file name.
-fn files() -> &'static std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>> {
-    static FILES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>>> = std::sync::OnceLock::new();
+/// A clip's file name, keyed by the address of its data, with a `Weak` of the clip that keeps the address allocated.
+type ClipFiles = std::sync::Mutex<std::collections::HashMap<usize, (std::sync::Weak<aa_anim::Clip>, Arc<str>)>>;
+
+/// The `.caf` file of every clip the client bound, by the address of its data: aa-anim's clips carry the name from their
+/// file header, not their path, and the sound events of a clip are listed by file name. The game's clip library never
+/// drops a clip, but a short-lived one (each test makes its own) does; the `Weak` in each entry keeps the freed clip's
+/// address from being reused, so a later clip can never be named by an earlier clip's file.
+fn files() -> &'static ClipFiles {
+    static FILES: std::sync::OnceLock<ClipFiles> = std::sync::OnceLock::new();
     FILES.get_or_init(Default::default)
 }
 
 pub(super) fn remember_file(clip: &BoundClip, path: &str) {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase();
-    files().lock().unwrap_or_else(|e| e.into_inner()).entry(Arc::as_ptr(&clip.clip) as usize).or_insert_with(|| Arc::from(name.as_str()));
+    files()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(Arc::as_ptr(&clip.clip) as usize)
+        .or_insert_with(|| (Arc::downgrade(&clip.clip), Arc::from(name.as_str())));
 }
 
 /// The file name (`fist_mo_normal_run_f.caf`, lower case) of a clip the client bound.
 pub fn clip_file(clip: &BoundClip) -> Option<Arc<str>> {
-    files().lock().unwrap_or_else(|e| e.into_inner()).get(&(Arc::as_ptr(&clip.clip) as usize)).cloned()
+    files().lock().unwrap_or_else(|e| e.into_inner()).get(&(Arc::as_ptr(&clip.clip) as usize)).map(|(_, name)| name.clone())
 }
 
 /// The clips a model can play while moving.
@@ -766,6 +775,27 @@ pub fn rear_driven_mate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clip dropped with its (test's own) clip library leaves its file name behind, but no later clip takes its address
+    /// and with it that name: tests that bind the same model in parallel read their own clips' files.
+    #[test]
+    fn a_dropped_clip_does_not_name_a_later_clip() {
+        let rig = Arc::new(Rig::new(aa_cry::Skeleton::default()));
+        let clip = |name: &str| {
+            BoundClip::new(&rig, Arc::new(aa_anim::Clip { name: name.into(), ..Default::default() }), SampleOptions::default())
+        };
+        let first = clip("first");
+        remember_file(&first, "animations/test/a_dropped_clip_first.caf");
+        assert_eq!(clip_file(&first).as_deref(), Some("a_dropped_clip_first.caf"));
+        let address = Arc::as_ptr(&first.clip) as usize;
+        drop(first);
+        // the allocator hands a freed block of this size to the next clip that asks for one
+        let later: Vec<BoundClip> = (0..64).map(|_| clip("later")).collect();
+        for c in &later {
+            assert_ne!(Arc::as_ptr(&c.clip) as usize, address, "the dropped clip's address is still held");
+            assert_eq!(clip_file(c), None, "a clip that was never bound by a file has no file");
+        }
+    }
 
     /// 1.2's `animations/nuian/male/lmg_files/fist_mo_normal_run.lmg`: the run, uphill and downhill, then the sprint tier, whose
     /// back directions are the run's own clips.
