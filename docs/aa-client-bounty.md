@@ -68,10 +68,12 @@ The popup-menu entry (`popup_menu_proc` proto `main.18`) stays out of scope: its
 local that no later closure captures, it is stored in no global, and no portrait/menu entry reaches
 it.
 
-`LocalizeUiText` keeps the native number types for record fields 11/13. The original 1.2 engine logs
-`Wrong parameter type ... parameter 4` for those two arguments (log-only, `CSS:8090-8105`); the Bevy
-`LocalizeUiText` converts Lua numbers with `lua_tostring`, so the history labels fill without a
-script error. The native types are not changed.
+`LocalizeUiText` keeps the native number type of record field 13 (rulingChoice's second argument,
+LocalizeUiText parameter 4; field 11 is tostring'd by the script). The 1.2 CryScriptSystem logs
+`[Script Error] Wrong parameter type ... parameter %d` for such arguments (cryscriptsystem.dll string
+0x3556FC40; that this call hits it is not verified live). The Bevy `LocalizeUiText` converts Lua
+numbers with `lua_tostring`, so the history labels fill without a script error. The native types are
+not changed.
 
 Seven focused bounty checks pass, including the nonempty rows, the selected-row reward request,
 `SET_BOUNTY_DONE` money refresh, hide/reopen re-patching and `SET_BOUNTY` opening the setup window.
@@ -80,4 +82,6 @@ inspected at **484.2-511.3 FPS**: it shows the authored Wanted poster, both rece
 (7 / Wanted One / 52 / blank / 12345 and 12 / Wanted Two / 55 / blank / 987654), the original detail
 card and "Offer a Reward". The trial example with `--bounty-rows` self-closes without WARN/ERROR or
 panic. The earlier empty/setup captures remain local-only; no native bounty reference capture is
-available, so no pixel-difference claim is made. Live in-world bounty settlement remains unverified.
+available, so no pixel-difference claim is made. Live in-world bounty settlement remains unverified. On the bevy lane CS11f/CS120 still have no server
+handler (see aa-net.md), so the reward button and the setup window send requests that are not
+answered there.
