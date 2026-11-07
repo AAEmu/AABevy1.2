@@ -378,6 +378,15 @@ fn afloat(ground: f32, water: Option<(f32, aa_world::WaterKind)>, swim_depth: f3
     }
 }
 
+/// The water whose fall rules apply to a body in the air: gravity x [`swim::WATER_GRAVITY`] and a 4 m/s fall under its
+/// surface, and a splash over more than [`swim::WADE_LO`] that is no landing. Any water for the player (the rules are the
+/// player's, `cl_shallowWaterDepthLo`), but for a driven mount only water deep enough to swim in (its own `swim_level`):
+/// shallower water is a wading depth for it (0.75 m of pond against a horse's 2.14 m), where it jumps and lands as on dry
+/// ground, as it walks there without the player's wading slowdown (`cl_shallowWaterSpeedMulPlayer` is players only).
+fn fall_water(wet: Option<swim::Wet>, driving: bool, swim_depth: f32) -> Option<swim::Wet> {
+    wet.filter(|w| !driving || w.depth >= swim_depth)
+}
+
 /// Keyboard movement, jumping, standing on the ground, swimming and the movement packets.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn control_player(
@@ -846,6 +855,7 @@ pub fn control_player(
         }
         if !mover.grounded {
             // water slows a fall down; the splash is no landing
+            let wet = fall_water(wet, driving.is_some(), swim_depth);
             let in_water = wet.is_some_and(|w| pos.z < w.surface);
             let gravity = actor.gravity * if in_water { swim::WATER_GRAVITY } else { 1.0 };
             (pos.z, mover.vz) = air_step(pos.z, mover.vz, gravity, dt, if in_water { 4.0 } else { f32::INFINITY });
@@ -2450,6 +2460,56 @@ mod dive_tests {
             assert_eq!(m.swim.is_some(), !riding, "riding {riding}: {:?}", m.pos);
             if riding {
                 assert!(m.grounded && (m.pos.z - beach_bed(127.5)).abs() < 0.02, "the horse stands on the bed: {:?}", m.pos);
+            }
+        }
+    }
+
+    /// Live check D2 (2026-11-07, `data/local/transport/live/mount/b-rider.clean.log`): the pond lane has 0.75 m of water
+    /// over its bed, a wading depth for a horse (2.14 m swim level). Its jump there is the dry one (1.3 m at gravity 30, no
+    /// 4 m/s fall cap) and the touchdown sends the landing (actor 0x14); the player's water fall rules made it 1.87 m high
+    /// and its touchdown a plain ground packet. The player still splashes into that water with no landing.
+    #[test]
+    fn a_driven_horse_jumps_and_lands_in_wading_water_as_on_dry_ground() {
+        let horse = Db::open().map_or_else(MountSpeed::default, |db| db.mount_speed(139));
+        for riding in [true, false] {
+            let terrain = TerrainQuery::fixture_flat("test", 90.0);
+            let water = WaterQuery::fixture_sea("test", 90.75, terrain.clone());
+            let mut f = SwimApp::fixture(terrain, water, Vec3::new(100.0, 100.0, 90.0));
+            if riding {
+                f.ride(horse);
+            }
+            // past the landing grace of the settle, then running
+            for _ in 0..120 {
+                f.tick(DT);
+            }
+            f.hold("moveforward");
+            for _ in 0..30 {
+                f.tick(DT);
+            }
+            assert!(f.mover().grounded && f.mover().swim.is_none(), "riding {riding}: {:?}", f.mover().pos);
+            f.sent.clear();
+            f.mate_sent.clear();
+            f.app.world_mut().resource_mut::<crate::settings::Actions>().tap_for_test("jump");
+            f.tick(DT);
+            f.app.world_mut().resource_mut::<crate::settings::Actions>().clear_taps_for_test();
+            f.release("jump");
+            let mut peak = f.mover().pos.z;
+            for _ in 0..90 {
+                f.tick(DT);
+                peak = peak.max(f.mover().pos.z);
+            }
+            assert!(f.mover().grounded, "riding {riding}: still in the air at {:?}", f.mover().pos);
+            let sent: Vec<MoveCommand> = if riding { f.mate_sent.iter().map(|(_, m)| m.clone()).collect() } else { f.sent.clone() };
+            let landing = sent.iter().any(|m| m.wire_actor_flags == Some(actor_flags::LANDING));
+            if riding {
+                let height = horse.jump_height;
+                assert!((peak - 90.0 - height).abs() < 0.05, "the horse jumped {} m for its dry {height} m", peak - 90.0);
+                assert!(landing, "the horse's touchdown in wading water sent no landing: {sent:?}");
+                assert!(f.moves().is_empty(), "the rider reported itself");
+            } else {
+                let dry = ActorParams::default().jump_height;
+                assert!(peak - 90.0 > dry + 0.1, "the player's jump in water keeps its water gravity: {} m", peak - 90.0);
+                assert!(!landing, "the player's splash is no landing");
             }
         }
     }

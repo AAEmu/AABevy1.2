@@ -172,6 +172,13 @@ as the player instead of waiting for cells around a different saved spawn.
   terrain hole in a loaded cell (no support, but `is_hole_at`) the floor stays at the body's current height minus the 5 cm swim clearance, so
   the clamp holds it in place instead of lifting it out of the water every frame.
 * A body that falls in is stopped by the water (35 m/s^2); gravity is x 0.3 in water and a splash is no landing (no fall packet).
+  These are the player's rules (the splash from `cl_shallowWaterDepthLo` 0.3 m; none of them is traced in 1.2). A driven mount
+  takes them only in water deep enough for it to swim in (`player::fall_water`, its own `swim_level`): shallower water is a
+  wading depth for it, where it jumps and lands as on dry ground, as it walks there without the player's wading slowdown. Live
+  check D2 (2026-11-07, `data/local/transport/live/mount/b-rider.clean.log`): in the pond lane's 0.75 m the horse's jump rose
+  1.87 m (water gravity from the bed to the surface), fell capped at 4 m/s and touched down with a plain ground packet; it
+  now has the dry 1.3 m arc and sends the landing (flags 6, actor 0x14). How 1.2 handles a mount's jump in shallow water is
+  not traced (**approximate**).
 * Clips: `fist_ba_idle_swim`, `fist_mo_swim_<dir>` (8 ways), `_deep` when diving (more than 0.5 m under the floating height), `fist_mo_swim_up / down`
   while only Space / X is pressed. `drive_swim` runs after `anim::drive_locomotion` (the player's `Motion` is empty in the water, so locomotion
   leaves the animator alone) and calls `Locomotion::invalidate` when the swim ends. `anim.rs` is not touched: a combat action on the whole body
