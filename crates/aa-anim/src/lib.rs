@@ -23,6 +23,7 @@ pub mod lmg;
 pub mod morph;
 pub mod pose;
 pub mod rope;
+pub mod trace;
 
 pub use animator::{AnimPlugin, AnimSet, Animator, ClipLibrary, Playing, RandomIdle, spawn_bones};
 pub use caf::{Clip, Track};

@@ -43,6 +43,11 @@ pub(super) fn gcd_at(game: &GameData, skills: &Skills, id: u32, now: Instant) ->
     if game.skills.get(&id).is_none_or(|info| info.ignore_gcd || info.auto_attack) {
         return (0, 0);
     }
+    global_at(game, skills, now)
+}
+
+/// The global cooldown (left, total) itself, for every skill that waits for it ([`gcd_at`] decides which).
+pub(super) fn global_at(game: &GameData, skills: &Skills, now: Instant) -> (u32, u32) {
     let mut best = (0, 0);
     if let Some((at, last)) = skills.last_cast.zip(game.skills.get(&skills.last_cast_skill)) {
         let total = last.gcd_ms;
@@ -105,11 +110,30 @@ pub(super) fn display_at(game: &GameData, skills: &Skills, id: u32, now: Instant
     Some(best)
 }
 
-/// Existing cast-start/DB estimate only; never reintroduce the single tag as received membership.
+/// The skill's own cooldown (left, total), without the global one: the later of the received manager entries and the own-cast
+/// estimate. [`display_at`] is this or [`gcd_at`], whichever ends later, as `X2Action:GetActionCooldownEx` pairs them.
+pub(super) fn own_at(game: &GameData, skills: &Skills, id: u32, now: Instant) -> Option<(u32, u32)> {
+    let info = game.skills.get(&id)?;
+    let mut best = native_at(info, skills, id, now);
+    replace(&mut best, observed_at(info, skills, id, now));
+    Some(best)
+}
+
+/// How long before the cast start a received timer still counts as the answer to that cast: the server sends SCCooldowns in
+/// the tick of the cast, and the cast's start is stamped at its first SCSkillStarted / SCSkillFired / SCPlotEvent, which can
+/// come a tick later (Charge: SCCooldowns 60 ms before its first SCPlotEvent, skill parity trace t1i). A timer from before that
+/// (a login snapshot, an earlier cast) is not the answer.
+const ANSWER_WINDOW: Duration = Duration::from_millis(500);
+
+/// Existing cast-start/DB estimate only; never reintroduce the single tag as received membership. A cast the server
+/// answered with SCCooldowns has no estimate: the 1.2 client shows the received value (Tiger Strike 12600 ms, where the
+/// DB says 18000).
 pub(super) fn observed_at(info: &SkillInfo, skills: &Skills, id: u32, now: Instant) -> (u32, u32) {
     if let Some(&used) = skills.last_used.get(&id) {
         let reset = info.tag != 0 && skills.reset_tags.iter().any(|&(tag, at)| tag == info.tag && at >= used);
-        if !reset {
+        let since = used.checked_sub(ANSWER_WINDOW).unwrap_or(used);
+        let answered = skills.native_cooldown_received_since(id, &info.tags, since);
+        if !reset && !answered {
             let left = Duration::from_millis(u64::from(info.cooldown_ms)).saturating_sub(now.saturating_duration_since(used));
             return (ms(left), info.cooldown_ms);
         }

@@ -114,13 +114,25 @@ pub struct SpeedRow {
 /// The move speed multiplier of the own unit's buffs, each with its ability level: the server's rounding of
 /// `value + linear x level / 100`, flat rows summed on 1000, then the percent rows.
 pub fn speed_multiplier<'a>(rows: impl IntoIterator<Item = (&'a SpeedRow, i32)>) -> f32 {
+    multiplier(rows, 1000.0)
+}
+
+/// The swim speed multiplier of a unit's buffs (`SwimSpeedMul`, attribute 66): as [`speed_multiplier`], but its flat rows
+/// are percent, summed on 100. 1.2's tooltip shows `swim_speed_mul` as `value %` and `move_speed_mul` as `value x 0.1 %`
+/// (`tooltip.lua` `GetCalculatedAddModifierValue`), so the flippers' (buff 2416) flat 30 is +30 %.
+pub fn swim_multiplier<'a>(rows: impl IntoIterator<Item = (&'a SpeedRow, i32)>) -> f32 {
+    multiplier(rows, 100.0)
+}
+
+/// Flat rows summed on `base`, then the percent rows, as a share of `base`.
+fn multiplier<'a>(rows: impl IntoIterator<Item = (&'a SpeedRow, i32)>, base: f32) -> f32 {
     let bonus = |r: &SpeedRow, level: i32| (r.value + r.linear * level as f32 / 100.0).round();
     let rows: Vec<(&SpeedRow, i32)> = rows.into_iter().collect();
-    let mut total = 1000.0 + rows.iter().filter(|(r, _)| r.kind == 0).map(|(r, l)| bonus(r, *l)).sum::<f32>();
+    let mut total = base + rows.iter().filter(|(r, _)| r.kind == 0).map(|(r, l)| bonus(r, *l)).sum::<f32>();
     for (r, l) in rows.iter().filter(|(r, _)| r.kind == 1) {
         total += total * bonus(r, *l) / 100.0;
     }
-    (total / 1000.0).max(0.0)
+    (total / base).max(0.0)
 }
 
 /// The blur's strength one frame on: towards 1 over [`BLUR_FADE`] while Dash runs, back to 0 over the same from wherever it
@@ -147,6 +159,9 @@ pub struct Sprint {
     pub ladder_speed_mul: f32,
     /// The same of the mount the player rides (its gallop and the like), 1 on foot.
     pub mount_speed_mul: f32,
+    /// The own buffs' `SwimSpeedMul` ([`swim_multiplier`], unit attribute 66), 1 without any, and the ridden mount's.
+    pub swim_speed_mul: f32,
+    pub mount_swim_speed_mul: f32,
     /// One of the own buffs has `sprint_motion`: the run plays the sprint tier of the run group.
     pub sprint_motion: bool,
     /// The blur's level, 0..1 (before easing and the setting).
@@ -160,6 +175,7 @@ pub struct Sprint {
     asked: Option<(DashAsk, f64)>,
     rows: Option<HashMap<u32, Vec<SpeedRow>>>,
     ladder_rows: Option<HashMap<u32, Vec<SpeedRow>>>,
+    swim_rows: Option<HashMap<u32, Vec<SpeedRow>>>,
     /// The buffs with `sprint_motion` (Dash, the speed songs, ...).
     sprint_buffs: Option<HashSet<u32>>,
     /// The blur setting (0..1) and when it was read (s).
@@ -173,6 +189,8 @@ impl Default for Sprint {
             speed_mul: 1.0,
             ladder_speed_mul: 1.0,
             mount_speed_mul: 1.0,
+            swim_speed_mul: 1.0,
+            mount_swim_speed_mul: 1.0,
             sprint_motion: false,
             blur: 0.0,
             gesture: DoubleForward::default(),
@@ -181,6 +199,7 @@ impl Default for Sprint {
             asked: None,
             rows: None,
             ladder_rows: None,
+            swim_rows: None,
             sprint_buffs: None,
             blur_setting: (0.0, f64::NEG_INFINITY),
         }
@@ -188,7 +207,7 @@ impl Default for Sprint {
 }
 
 /// The rows of `unit_attribute_id` for every buff (`MoveSpeedMul` 10: 533 rows in r208022's
-/// database; `LadderSpeedMul` 93: three).
+/// database; `LadderSpeedMul` 93: three; `SwimSpeedMul` 66: 47).
 fn load_rows(attribute: i64) -> HashMap<u32, Vec<SpeedRow>> {
     let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
     let mut rows: HashMap<u32, Vec<SpeedRow>> = HashMap::new();
@@ -261,6 +280,8 @@ pub fn drive_sprint(
         sprint.speed_mul = 1.0;
         sprint.ladder_speed_mul = 1.0;
         sprint.mount_speed_mul = 1.0;
+        sprint.swim_speed_mul = 1.0;
+        sprint.mount_swim_speed_mul = 1.0;
         sprint.sprint_motion = false;
         sprint.blur = 0.0;
         return;
@@ -275,19 +296,31 @@ pub fn drive_sprint(
     if sprint.ladder_rows.is_none() {
         sprint.ladder_rows = Some(load_rows(93));
     }
+    if sprint.swim_rows.is_none() {
+        sprint.swim_rows = Some(load_rows(66));
+    }
     let rows = sprint.rows.as_ref().expect("loaded above");
     let of = |entries: &[aa_net::state::BuffEntry]| speed_multiplier(entries.iter().flat_map(|e| rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))));
     let ladder_rows = sprint.ladder_rows.as_ref().expect("loaded above");
     let ladder_of = |entries: &[aa_net::state::BuffEntry]| {
         speed_multiplier(entries.iter().flat_map(|e| ladder_rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))))
     };
+    let swim_rows = sprint.swim_rows.as_ref().expect("loaded above");
+    let swim_of = |entries: &[aa_net::state::BuffEntry]| {
+        swim_multiplier(entries.iter().flat_map(|e| swim_rows.get(&e.buff.buff_id).into_iter().flatten().map(move |r| (r, e.buff.ability_level as i32))))
+    };
     let speed = of(own);
     let ladder_speed = ladder_of(own);
+    let swim_speed = swim_of(own);
     let mount = spawn.as_deref().and_then(|p| p.spawn.as_ref()).and_then(|s| s.unit.attached_to).map(|a| a.obj_id);
-    let mount_speed = mount.map_or(1.0, |m| of(buffs.as_deref().map_or(&[], |b| b.of(m))));
+    let mount_buffs = |m: u32| buffs.as_deref().map_or(&[][..], |b| b.of(m));
+    let mount_speed = mount.map_or(1.0, |m| of(mount_buffs(m)));
+    let mount_swim_speed = mount.map_or(1.0, |m| swim_of(mount_buffs(m)));
     sprint.speed_mul = speed;
     sprint.ladder_speed_mul = ladder_speed;
     sprint.mount_speed_mul = mount_speed;
+    sprint.swim_speed_mul = swim_speed;
+    sprint.mount_swim_speed_mul = mount_swim_speed;
     if sprint.sprint_buffs.is_none() {
         sprint.sprint_buffs = Some(load_sprint_buffs());
     }
@@ -485,6 +518,40 @@ mod tests {
         }
         assert!(sprinters.contains(&DASH_BUFF));
         assert!(!sprinters.contains(&3634), "the torch");
+    }
+
+    /// `SwimSpeedMul` rows are percent: the flippers (buff 2416, flat 30) swim 1.3 times as fast, buff 5752 (flat 100) twice,
+    /// 1373 (a percent row of 200) three times, and they scale the aimed swim velocity.
+    #[test]
+    fn swim_speed_buffs_are_percent() {
+        let flippers = SpeedRow { kind: 0, value: 30.0, linear: 0.0 };
+        let swift = SpeedRow { kind: 0, value: 100.0, linear: 0.0 };
+        let spirit = SpeedRow { kind: 1, value: 200.0, linear: 0.0 };
+        assert!((swim_multiplier([(&flippers, 1)]) - 1.3).abs() < 1e-5);
+        assert!((swim_multiplier([(&swift, 1)]) - 2.0).abs() < 1e-5);
+        assert!((swim_multiplier([(&spirit, 1)]) - 3.0).abs() < 1e-5);
+        assert!((swim_multiplier([(&flippers, 1), (&spirit, 1)]) - 3.9).abs() < 1e-5, "the percent row multiplies the flat ones");
+        assert_eq!(swim_multiplier(std::iter::empty()), 1.0);
+        let swim = super::super::swim::aimed_velocity(Vec2::Y, 0.0, swim_multiplier([(&flippers, 1)]));
+        assert!((swim.length() - 3.9).abs() < 1e-4, "{swim:?}");
+        // the move speed rows stay per mille
+        assert!((speed_multiplier([(&flippers, 1)]) - 1.03).abs() < 1e-5);
+    }
+
+    /// The database's `SwimSpeedMul` rows of the flippers and the swim speed buff (needs `AA_DB`).
+    #[test]
+    fn the_database_holds_the_swim_speed_rows() {
+        let rows = load_rows(66);
+        if rows.is_empty() {
+            eprintln!("no game database: skipped");
+            return;
+        }
+        assert_eq!(rows.get(&2416), Some(&vec![SpeedRow { kind: 0, value: 30.0, linear: 0.0 }]));
+        assert_eq!(rows.get(&5752), Some(&vec![SpeedRow { kind: 0, value: 100.0, linear: 0.0 }]));
+        assert_eq!(rows.get(&1373), Some(&vec![SpeedRow { kind: 1, value: 200.0, linear: 0.0 }]));
+        assert_eq!(rows.len(), 47, "the buffs with a SwimSpeedMul row");
+        let flippers = swim_multiplier(rows[&2416].iter().map(|r| (r, 1)));
+        assert!((flippers - 1.3).abs() < 1e-5);
     }
 
     /// The database's Dash row is the one the rule was read from (needs `AA_DB`).

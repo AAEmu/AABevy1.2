@@ -1025,6 +1025,14 @@ impl Client {
     pub fn sender(&self) -> UnboundedSender<Command> {
         self.commands.clone()
     }
+
+    /// A client without a session: the test holds the other ends (the commands it sends, the events it gets).
+    #[cfg(all(test, feature = "bevy"))]
+    pub(crate) fn detached() -> (Self, UnboundedReceiver<Command>, UnboundedSender<Event>) {
+        let (commands, cmd_rx) = unbounded_channel();
+        let (evt_tx, events) = unbounded_channel();
+        (Self { commands, events }, cmd_rx, evt_tx)
+    }
 }
 
 struct Session {

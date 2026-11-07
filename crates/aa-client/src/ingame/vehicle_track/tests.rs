@@ -176,6 +176,23 @@ fn five_seconds_without_a_sample_freeze_the_pose() {
 }
 
 #[test]
+fn the_helm_is_interpolated_and_released_by_the_timeout() {
+    let mut track = VehicleTrack::new(Vec3::ZERO, Quat::IDENTITY);
+    let helm = |time, steering, throttle| VehicleSample { steering, throttle, ..sample(time, 0.0, 0.0, 0.0, true) };
+    track.push(0.0, helm(1000, 0.0, 1.0));
+    track.push(0.1, helm(1100, 1.0, -1.0));
+    // the playback runs DELAY behind: halfway between the two samples
+    let pose = track.sample(0.35);
+    assert!((pose.steering - 0.5).abs() < 1e-3, "{pose:?}");
+    assert!(pose.throttle.abs() < 1e-3, "{pose:?}");
+    assert_eq!(track.display(), pose);
+    // sub_390B2420: after the reset the controller writes steering and throttle 0, the pose stays
+    let after = track.sample(5.5);
+    assert_eq!((after.steering, after.throttle), (0.0, 0.0));
+    assert_eq!((after.pos, after.rot), (pose.pos, pose.rot));
+}
+
+#[test]
 fn no_sample_keeps_the_announced_pose() {
     let mut track = VehicleTrack::new(Vec3::new(1.0, 2.0, 3.0), Quat::from_rotation_z(0.5));
     let pose = track.sample(10.0);

@@ -245,7 +245,9 @@ fn thrown_forward(st: &Stage, unit: Entity, source: u32) -> bool {
 fn throw(st: &mut Stage, unit: Entity, lying: Lying, now: f64) -> bool {
     let [start, lie, _] = lying.clips();
     let Some(length) = st.play(unit, start, Act::Cast, false, POSE_HOLD, now) else { return false };
-    if let (Some((first, _)), Some((cycle, _))) = (st.clip(unit, start), st.clip(unit, lie))
+    // a seated rider's throw is the upper body layer `Stage::play` started: the whole body chain would replace its rider loop
+    if !st.seated(unit)
+        && let (Some((first, _)), Some((cycle, _))) = (st.clip(unit, start), st.clip(unit, lie))
         && let Ok((mut animator, ..)) = st.actors.get_mut(unit)
     {
         animator.play_once_then(first, cycle, 0.08);
@@ -329,9 +331,11 @@ fn pose(st: &mut Stage, unit: Entity, look: &skills::BuffLook, now: f64) -> bool
     let Some(clip) = clip else { return false };
     let looping = st.book.clip_loops(&clip);
     let played = st.play(unit, &clip, Act::Cast, looping, POSE_HOLD, now).is_some();
-    // the reaction clips come as a start and a loop (`all_re_combat_stun_start` falls into `all_re_combat_stun`)
+    // the reaction clips come as a start and a loop (`all_re_combat_stun_start` falls into `all_re_combat_stun`); a seated rider's
+    // pose is the upper body layer `Stage::play` started, and the whole body chain would replace its rider loop
     if played
         && looping
+        && !st.seated(unit)
         && let Some((start, _)) = st.clip(unit, &format!("{clip}_start"))
         && let Some((cycle, _)) = st.clip(unit, &clip)
         && let Ok((mut animator, ..)) = st.actors.get_mut(unit)

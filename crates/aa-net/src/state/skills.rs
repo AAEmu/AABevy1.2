@@ -11,6 +11,7 @@ use web_time::Instant;
 mod native_timers;
 pub use native_timers::{NativeCooldown, NativeCooldownOrigin};
 
+use crate::mate::MateEvent;
 use crate::session::Event;
 use crate::skill::{Cooldown, SkillTarget, COOLDOWN_LIMIT};
 
@@ -107,6 +108,10 @@ resource! {
         /// `SCSkillFired` stamps it; an interrupted cast leaves none. Keyed per slave: stepping off
         /// and back on keeps the slave's running timer.
         pub mount_last_used: HashMap<(u32, u32), Instant>,
+        /// When a mate's `SCMateState` cooldown triples run out and their total (ms), keyed like
+        /// `mount_last_used` (`sub_39899D40` appends to the unit's cooldown container without clearing it,
+        /// `sub_39899E50` counts it down, and `sub_3989A290` answers the entry with the most time left).
+        pub mount_seeded: HashMap<(u32, u32), (Instant, u32)>,
         /// When a mount/slave last started any skill and which one (its global cooldown, which the
         /// server starts when it accepts the cast).
         pub mount_last_cast: HashMap<u32, (Instant, u32)>,
@@ -178,12 +183,19 @@ impl Skills {
         cooldown_ms: u32,
         now: Instant,
     ) -> Option<(Duration, Duration)> {
-        let used = *self.mount_last_used.get(&(caster, skill_id))?;
         let total = Duration::from_millis(u64::from(cooldown_ms));
-        total
-            .checked_sub(now.saturating_duration_since(used))
-            .filter(|left| !left.is_zero())
-            .map(|left| (left, total))
+        let own = self.mount_last_used.get(&(caster, skill_id)).and_then(|used| {
+            total.checked_sub(now.saturating_duration_since(*used)).filter(|left| !left.is_zero())
+        });
+        let seeded = self.mount_seeded.get(&(caster, skill_id)).and_then(|&(end, seed_total)| {
+            let left = end.saturating_duration_since(now);
+            (!left.is_zero()).then(|| (left, Duration::from_millis(u64::from(seed_total))))
+        });
+        match (own, seeded) {
+            // the received entry carries its own total (`sub_3989A290` returns `+8` with `+4`)
+            (own, Some((left, seed_total))) if own.is_none_or(|own| left > own) => Some((left, seed_total)),
+            (own, _) => own.map(|left| (left, total)),
+        }
     }
 
     /// Received-only `(remaining, total)` for a skill and its native ordered tag list.
@@ -494,6 +506,20 @@ impl Skills {
                     return latched;
                 }
             }
+            Event::Mate(MateEvent::State { obj_id, dynamic }) => {
+                // `sub_39899D40` appends: an earlier entry keeps counting down beside the new one, and the
+                // lookup takes the one with the most time left.
+                let mut changed = false;
+                for (skill, remaining, total) in dynamic.cooldowns() {
+                    let end = now + Duration::from_millis(u64::from(remaining));
+                    let seed = self.mount_seeded.entry((*obj_id, skill)).or_insert((now, 0));
+                    if end > seed.0 {
+                        *seed = (end, total);
+                        changed = true;
+                    }
+                }
+                return changed;
+            }
             Event::UnitsRemoved(ids) => {
                 let before = self.casting.len();
                 let lost_context = self.obj_id != 0 && ids.contains(&self.obj_id);
@@ -506,12 +532,14 @@ impl Skills {
                     self.casting.remove(id);
                 }
                 // A despawned slave's timers must not follow its object id when it is reused.
-                let timers = self.mount_last_used.len() + self.mount_last_cast.len();
+                let timers = self.mount_last_used.len() + self.mount_last_cast.len() + self.mount_seeded.len();
                 self.mount_last_used
                     .retain(|&(caster, _), _| !ids.contains(&caster));
                 self.mount_last_cast
                     .retain(|caster, _| !ids.contains(caster));
-                let pruned = timers != self.mount_last_used.len() + self.mount_last_cast.len();
+                self.mount_seeded.retain(|&(caster, _), _| !ids.contains(&caster));
+                let pruned = timers
+                    != self.mount_last_used.len() + self.mount_last_cast.len() + self.mount_seeded.len();
                 return self.casting.len() != before || lost_context || pruned;
             }
             Event::Cooldowns(cooldowns) if self.obj_id != 0 => {
@@ -603,6 +631,7 @@ impl PartialEq for Skills {
             && self.casting == o.casting
             && self.last_used == o.last_used
             && self.mount_last_used == o.mount_last_used
+            && self.mount_seeded == o.mount_seeded
             && self.mount_last_cast == o.mount_last_cast
             && self.last_cast == o.last_cast
             && self.last_cast_skill == o.last_cast_skill
@@ -821,6 +850,33 @@ mod tests {
     }
 
     #[test]
+    fn a_mate_state_triple_seeds_the_mount_cooldown_and_counts_down() {
+        use crate::mate::DynamicUnitState;
+        let mut s = skills();
+        // wire [skill, total, remaining]: sub_39899D40 stores e0 -> +0, e2 -> +4 (remaining), e1 -> +8 (total)
+        let dynamic = DynamicUnitState { skills: vec![[17092, 45_000, 30_000]], tags: Vec::new() };
+        s.apply(&Event::Mate(MateEvent::State { obj_id: 20, dynamic }));
+        let now = Instant::now();
+        let (left, total) = s.mount_cooldown_at(20, 17092, 10_000, now).unwrap();
+        assert!(left > Duration::from_secs(29) && left <= Duration::from_secs(30), "{left:?}");
+        assert_eq!(total, Duration::from_secs(45), "the received total, not the table length");
+        assert!(s.mount_cooldown_at(20, 17092, 10_000, now + Duration::from_secs(31)).is_none());
+        assert!(s.mount_cooldown_at(21, 17092, 10_000, now).is_none());
+        // sub_39899D40 appends without clearing: an empty or shorter later list leaves the running entry
+        s.apply(&Event::Mate(MateEvent::State { obj_id: 20, dynamic: DynamicUnitState::default() }));
+        let shorter = DynamicUnitState { skills: vec![[17092, 45_000, 1_000]], tags: Vec::new() };
+        s.apply(&Event::Mate(MateEvent::State { obj_id: 20, dynamic: shorter }));
+        let (left, total) = s.mount_cooldown_at(20, 17092, 10_000, now).unwrap();
+        assert!(left > Duration::from_secs(29) && total == Duration::from_secs(45), "{left:?} {total:?}");
+        // a running cast receipt that outlasts the seed answers with the table length
+        s.mount_last_used.insert((20, 17092), now + Duration::from_secs(25));
+        let (left, total) = s.mount_cooldown_at(20, 17092, 10_000, now + Duration::from_secs(29)).unwrap();
+        assert_eq!((left, total), (Duration::from_secs(6), Duration::from_secs(10)));
+        s.apply(&Event::UnitsRemoved(vec![20]));
+        assert!(s.mount_seeded.is_empty(), "a despawned mate drops its seed");
+    }
+
+    #[test]
     fn a_slave_cooldown_starts_at_the_cast_end_and_not_on_an_interrupted_cast() {
         let mut s = skills();
         // A cast-time slave skill: acceptance starts only the global cooldown (the server starts
@@ -889,6 +945,7 @@ mod tests {
             caster_pos: None,
             target_pos: None,
             casting_ms: 800,
+            targets: Vec::new(),
         });
         assert!(s.apply(&plot));
         assert_eq!(s.casting_of(5).unwrap().cast_ms, 800);
@@ -906,6 +963,7 @@ mod tests {
                 caster_pos: None,
                 target_pos: None,
                 casting_ms,
+                targets: Vec::new(),
             })
         };
         assert!(s.apply(&step(12, 0)));
@@ -922,7 +980,7 @@ mod tests {
         let mut s = skills();
         s.set_plot_gcd_catalog([(12148, 2000)].into());
         let step = |event_id, caster_obj_id| {
-            Event::PlotEvent(PlotEvent { tl: 7, event_id, skill_id: 18132, caster_obj_id, target_obj_id: 9, caster_pos: None, target_pos: None, casting_ms: 0 })
+            Event::PlotEvent(PlotEvent { tl: 7, event_id, skill_id: 18132, caster_obj_id, target_obj_id: 9, caster_pos: None, target_pos: None, casting_ms: 0, targets: Vec::new() })
         };
         assert!(s.apply(&step(12129, 5)), "the first step starts the plot");
         assert!(s.plot_gcd.is_none());
@@ -962,6 +1020,7 @@ mod tests {
             caster_pos: None,
             target_pos: None,
             casting_ms: 0,
+            targets: vec![9],
         });
         assert!(s.apply(&step), "the first plot step starts the skill");
         assert_eq!((s.last_cast_skill, s.last_used.contains_key(&11918)), (11918, true));

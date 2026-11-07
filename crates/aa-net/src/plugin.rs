@@ -11,8 +11,8 @@
 
 use std::sync::Mutex;
 
-use bevy::app::{App, Plugin, PreUpdate};
-use bevy::ecs::message::{Message, MessageReader, MessageWriter};
+use bevy::app::{App, Last, Plugin, PreUpdate};
+use bevy::ecs::message::{Message, MessageCursor, MessageWriter, Messages};
 use bevy::ecs::prelude::*;
 use bevy::ecs::system::SystemParam;
 
@@ -59,7 +59,12 @@ impl Plugin for NetPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<NetCommand>().add_message::<NetEvent>();
         init_state(app);
-        app.add_systems(PreUpdate, (send_commands, receive_events).chain());
+        // the commands go out twice a frame: in PreUpdate (the ones written after the last send), and in Last (the ones this
+        // frame's systems wrote), so a key press is sent in its own frame and not a frame later (CSStartSkill 10 ms after the press
+        // where the 1.2 client sends it within 1-8 ms: skill parity trace t1i, 2026-11-03). One cursor: each is sent once.
+        app.init_resource::<SentCommands>()
+            .add_systems(PreUpdate, (send_commands, receive_events).chain())
+            .add_systems(Last, send_commands);
         let options=app.world().get_resource::<crate::ClientOptions>().cloned().unwrap_or_default();
         match Client::spawn_thread_with(options) {
             Ok(client) => {
@@ -70,13 +75,17 @@ impl Plugin for NetPlugin {
     }
 }
 
-fn send_commands(client: Option<Res<NetClient>>, mut commands: MessageReader<NetCommand>) {
+/// How far the sender has read the commands: shared by its two runs a frame.
+#[derive(Resource, Default)]
+struct SentCommands(MessageCursor<NetCommand>);
+
+fn send_commands(client: Option<Res<NetClient>>, commands: Res<Messages<NetCommand>>, mut sent: ResMut<SentCommands>) {
     let Some(client) = client else {
-        commands.clear();
+        sent.0.clear(&commands);
         return;
     };
     let client = client.0.lock().expect("net client poisoned");
-    for NetCommand(cmd) in commands.read() {
+    for NetCommand(cmd) in sent.0.read(&commands) {
         if !client.send(cmd.clone()) {
             tracing::warn!("aa-net: the session has ended, dropping {cmd:?}");
         }
@@ -240,6 +249,35 @@ pub(crate) mod doodad_bond_plugin_tests {
         }
         assert_eq!(&world.doodad_bonds, expected);
     }
+
+    /// A command a system writes in `Update` goes out in the same frame (the `Last` send), and only once.
+    #[test]
+    fn a_command_written_in_update_is_sent_in_its_frame_once() {
+        let (client, mut sent, _events) = Client::detached();
+        let mut app = App::new();
+        app.add_message::<NetCommand>()
+            .add_message::<NetEvent>()
+            .init_resource::<SentCommands>()
+            .insert_resource(NetClient(Mutex::new(client)))
+            .add_systems(PreUpdate, send_commands)
+            .add_systems(Last, send_commands)
+            .init_resource::<Press>()
+            .add_systems(bevy::app::Update, |mut press: ResMut<Press>, mut out: MessageWriter<NetCommand>| {
+                if std::mem::take(&mut press.0) {
+                    out.write(NetCommand(Command::UseSkill { skill_id: 18132, target_obj_id: 7 }));
+                }
+            });
+        app.world_mut().resource_mut::<Press>().0 = true;
+        app.update();
+        assert!(matches!(sent.try_recv(), Ok(Command::UseSkill { skill_id: 18132, target_obj_id: 7 })), "sent in the frame of the press");
+        assert!(sent.try_recv().is_err(), "once");
+        app.update();
+        app.update();
+        assert!(sent.try_recv().is_err(), "not again from the next frame's PreUpdate");
+    }
+
+    #[derive(Resource, Default)]
+    struct Press(bool);
 
     #[test]
     fn plugin_doodad_bond_and_native_buff_history_recover_without_respawn() {

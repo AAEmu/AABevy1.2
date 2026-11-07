@@ -76,8 +76,15 @@ fn path(raw: &str) -> Option<String> {
     p.contains('.').then_some(p)
 }
 
-/// The parts of prefab `name` in the text of its xml file.
+/// The parts of prefab `name` in the text of its xml file (the tests' entry; the game reads them through [`load`]).
+#[cfg(test)]
 pub fn parts_of(xml: &str, name: &str) -> Vec<Part> {
+    named_parts_of(xml, name).into_iter().map(|(_, part)| part).collect()
+}
+
+/// The parts of prefab `name` in the text of its xml file, each with its object's editor `Name` (empty when it has
+/// none): a ship's `rudder` brush is found by it.
+pub fn named_parts_of(xml: &str, name: &str) -> Vec<(String, Part)> {
     let Some(from) = xml.find(&format!("<Prefab Name=\"{name}\"")) else { return Vec::new() };
     let tail = &xml[from..];
     let prefab = &tail[..tail.find("</Prefab>").unwrap_or(tail.len())];
@@ -101,7 +108,8 @@ pub fn parts_of(xml: &str, name: &str) -> Vec<Part> {
             _ => None,
         };
         let Some(model) = model else { continue };
-        out.push(Part {
+        let object = attr(tag, "Name").unwrap_or_default().to_string();
+        out.push((object, Part {
             model,
             material: attr(tag, "Material").filter(|m| !m.trim().is_empty()).and_then(|m| {
                 let m = m.trim().replace('\\', "/").to_ascii_lowercase();
@@ -115,17 +123,22 @@ pub fn parts_of(xml: &str, name: &str) -> Vec<Part> {
                 Some("AnimObject") => animation(body),
                 _ => None,
             },
-        });
+        }));
     }
     out
 }
 
 /// The parts of a `prefab://file/name` element, read from the pak.
 pub fn load(element: &str) -> Vec<Part> {
+    load_named(element).into_iter().map(|(_, part)| part).collect()
+}
+
+/// [`load`] with each object's editor `Name`.
+pub fn load_named(element: &str) -> Vec<(String, Part)> {
     let Some((file, name)) = element.strip_prefix("prefab://").and_then(|r| r.rsplit_once('/')) else { return Vec::new() };
     let file = file.replace('\\', "/").to_ascii_lowercase();
     match aa_pak::Pak::global().read_string(&file) {
-        Ok(xml) => parts_of(&xml, name),
+        Ok(xml) => named_parts_of(&xml, name),
         Err(_) => Vec::new(),
     }
 }
@@ -183,6 +196,13 @@ mod tests {
             "the AnimObject's authored, playing animation"
         );
         assert!(parts_of(XML, "missing").is_empty());
+    }
+
+    #[test]
+    fn each_part_keeps_its_object_name() {
+        let names: Vec<String> = named_parts_of(XML, "housing_new_g.step4_g").into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, ["step4_g", "barrel", "interaction_11", "GeomEntity1"]);
+        assert_eq!(named_parts_of(XML, "other")[0].0, "", "an object without a Name");
     }
 
     #[test]

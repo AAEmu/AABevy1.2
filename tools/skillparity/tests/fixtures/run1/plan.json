@@ -1,0 +1,130 @@
+{
+ "schema": "skillparity/plan/v1",
+ "skills": [
+  {
+   "id": 100,
+   "name": "Test Slash",
+   "slot": 1,
+   "key": "1",
+   "batch": 1,
+   "target": "unit",
+   "cast_ms": 0,
+   "wait_ms": 3000,
+   "cooldown_ms": 0
+  },
+  {
+   "id": 200,
+   "name": "Test Bolt",
+   "slot": 2,
+   "key": "2",
+   "batch": 1,
+   "target": "unit",
+   "cast_ms": 1500,
+   "wait_ms": 3000,
+   "cooldown_ms": 15000
+  },
+  {
+   "id": 300,
+   "name": "Test Dash",
+   "slot": 3,
+   "key": "3",
+   "batch": 1,
+   "target": "unit",
+   "cast_ms": 0,
+   "wait_ms": 3000,
+   "cooldown_ms": 0
+  },
+  {
+   "id": 400,
+   "name": "Test Only",
+   "slot": 4,
+   "key": "4",
+   "batch": 1,
+   "target": "unit",
+   "cast_ms": 0,
+   "wait_ms": 3000,
+   "cooldown_ms": 0
+  },
+  {
+   "id": 500,
+   "name": "Test Dust",
+   "slot": 5,
+   "key": "5",
+   "batch": 1,
+   "target": "unit",
+   "cast_ms": 0,
+   "wait_ms": 3000,
+   "cooldown_ms": 0
+  }
+ ],
+ "batches": [
+  {
+   "batch": 1,
+   "tree": 1,
+   "slots": {
+    "1": 100,
+    "2": 200,
+    "3": 300,
+    "4": 400,
+    "5": 500
+   },
+   "skills": [
+    {
+     "id": 100,
+     "name": "Test Slash",
+     "slot": 1,
+     "key": "1",
+     "batch": 1,
+     "target": "unit",
+     "cast_ms": 0,
+     "wait_ms": 3000,
+     "cooldown_ms": 0
+    },
+    {
+     "id": 200,
+     "name": "Test Bolt",
+     "slot": 2,
+     "key": "2",
+     "batch": 1,
+     "target": "unit",
+     "cast_ms": 1500,
+     "wait_ms": 3000,
+     "cooldown_ms": 15000
+    },
+    {
+     "id": 300,
+     "name": "Test Dash",
+     "slot": 3,
+     "key": "3",
+     "batch": 1,
+     "target": "unit",
+     "cast_ms": 0,
+     "wait_ms": 3000,
+     "cooldown_ms": 0
+    },
+    {
+     "id": 400,
+     "name": "Test Only",
+     "slot": 4,
+     "key": "4",
+     "batch": 1,
+     "target": "unit",
+     "cast_ms": 0,
+     "wait_ms": 3000,
+     "cooldown_ms": 0
+    },
+    {
+     "id": 500,
+     "name": "Test Dust",
+     "slot": 5,
+     "key": "5",
+     "batch": 1,
+     "target": "unit",
+     "cast_ms": 0,
+     "wait_ms": 3000,
+     "cooldown_ms": 0
+    }
+   ]
+  }
+ ]
+}

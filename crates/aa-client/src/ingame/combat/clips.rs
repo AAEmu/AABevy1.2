@@ -5,11 +5,17 @@
 //! `parameter` says which group of the skill's effects starts at that moment (`form`, `throw`, `launch`, `hit`) and
 //! `combat_sync` marks where the server's skill timeline is in the clip (the swing connects). Only the times are used here:
 //! the effect items carry their own bones.
+//!
+//! An event's `time` is a phase of its clip, 0 at the start and 1 at the end (CryEngine's anim events are normalised): every
+//! real time in the 1.2 databases lies in 0..=1 (the 32 above it are uninitialised floats near 1e31), and the original client
+//! fires them at `time * duration`. 2026-11-03 skill trace, Triple Slash: `twohand_co_sk_streakattack_3` (2.30 s) plays its
+//! `large_4` swing (0.04) at +94 ms and `large_8_axe` (0.12) at +281 ms, `streakattack_1` (1.71 s) its trail (`form` 0.140) at
+//! +239 ms and its voice (0.11) at +188 ms. [`ClipEvents::of`] and [`clip_effects`] give seconds for a clip of known length.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-/// The moments of one clip, in seconds from its start.
+/// The moments of one clip: phases (0..=1) as parsed, seconds from its start once [`ClipEvents::scaled`] by its length.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ClipEvents {
     pub form: Option<f32>,
@@ -34,18 +40,31 @@ impl ClipEvents {
         self.voice.or_else(|| self.release())
     }
 
-    /// The events of clip `name` of the model whose animation table is `cal` (none when the model has no event database or no
-    /// such clip).
-    pub fn of(cal: &aa_anim::Cal, name: &str) -> ClipEvents {
+    /// The events of clip `name` of the model whose animation table is `cal`, in seconds for a clip `duration` seconds long
+    /// (none when the model has no event database or no such clip).
+    pub fn of(cal: &aa_anim::Cal, name: &str, duration: f32) -> ClipEvents {
         let (Some(db), Some(entry)) = (cal.anim_events.as_deref(), cal.animation(name)) else { return ClipEvents::default() };
-        clip_events(db, &entry.path)
+        clip_events(db, &entry.path).scaled(duration)
+    }
+
+    /// Phases to seconds: every moment times the clip's length.
+    pub fn scaled(self, duration: f32) -> ClipEvents {
+        let at = |t: Option<f32>| t.map(|t| t * duration);
+        ClipEvents {
+            form: at(self.form),
+            throw: at(self.throw),
+            launch: at(self.launch),
+            combat_sync: at(self.combat_sync),
+            voice: at(self.voice),
+            aw_none: at(self.aw_none),
+        }
     }
 }
 
 /// An effect the clip itself starts (`effect` / `@effect` anim events: the flowers of `/flowers`, the tears of `/sad`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClipEffect {
-    /// Seconds into the clip.
+    /// When in the clip: a phase (0..=1) as parsed, seconds in what [`clip_effects`] returns.
     pub time: f32,
     /// `library.group.name` for aa-fx.
     pub effect: String,
@@ -57,8 +76,14 @@ pub struct ClipEffect {
 type Table = HashMap<String, ClipEvents>;
 type EffectTable = HashMap<String, Arc<[ClipEffect]>>;
 
-/// The effects clip `name` of the model whose animation table is `cal` starts itself.
-pub fn clip_effects(cal: &aa_anim::Cal, name: &str) -> Arc<[ClipEffect]> {
+/// The effects clip `name` of the model whose animation table is `cal` starts itself, at seconds into a clip `duration` long.
+pub fn clip_effects(cal: &aa_anim::Cal, name: &str, duration: f32) -> Arc<[ClipEffect]> {
+    let effects = clip_effect_phases(cal, name);
+    effects.iter().map(|e| ClipEffect { time: e.time * duration, ..e.clone() }).collect()
+}
+
+/// [`clip_effects`] as parsed: the times are phases of the clip.
+fn clip_effect_phases(cal: &aa_anim::Cal, name: &str) -> Arc<[ClipEffect]> {
     let (Some(db), Some(entry)) = (cal.anim_events.as_deref(), cal.animation(name)) else { return Arc::default() };
     static TABLES: OnceLock<Mutex<HashMap<String, Arc<EffectTable>>>> = OnceLock::new();
     let key = db.to_ascii_lowercase().replace('\\', "/");
@@ -173,6 +198,18 @@ mod tests {
     }
 
     #[test]
+    fn phases_become_seconds_with_the_clip_length() {
+        // twohand_co_sk_streakattack_1: 1.71 s long, the trail forms at 0.140 (+239 ms in the original), the voice at 0.11 (+188 ms)
+        let events = ClipEvents { form: Some(0.14021), voice: Some(0.11), combat_sync: Some(0.17712), ..ClipEvents::default() };
+        let s = events.scaled(1.709);
+        assert!((s.form.unwrap() - 0.2396).abs() < 1e-3, "{s:?}");
+        assert!((s.voice.unwrap() - 0.188).abs() < 1e-3, "{s:?}");
+        assert!((s.combat_sync.unwrap() - 0.3027).abs() < 1e-3, "{s:?}");
+        assert_eq!((s.throw, s.launch, s.aw_none), (None, None, None));
+        assert_eq!(ClipEvents::default().scaled(2.0), ClipEvents::default());
+    }
+
+    #[test]
     fn effects_of_a_clip() {
         let xml = r#"<anim_event_list>
  <animation name="animations/nuian/male/fist/fist_em_celebrate.caf">
@@ -197,12 +234,13 @@ mod tests {
         if !aa_cry::pak_available() {
             return;
         }
+        // phases of the clips
         let bow = clip_events("animations/nuian/male/event_database.animevents", "animations/nuian/male/bow/bow_co_sk_launch.caf");
         assert!((bow.release().unwrap() - 0.358).abs() < 0.01, "{bow:?}");
         // the rat's database names the folder `rat`, its clips live in `rat_black`
         let rat = clip_events("animations/animals/rat_black/event_database.animevents", "animations/animals/rat_black/fist/fist_co_attack_r_01.caf");
         assert!((rat.combat_sync.unwrap() - 0.487).abs() < 0.01, "{rat:?}");
-        // the sword leaves the hand 0.43 s into the holster clip
+        // the sword leaves the hand 43 % into the holster clip
         let holster = clip_events("animations/nuian/male/event_database.animevents", "animations/nuian/male/onehand/onehand_ac_holster_side_l.caf");
         assert!((holster.aw_none.unwrap() - 0.428).abs() < 0.01, "{holster:?}");
         assert_eq!(clip_events("animations/nope.animevents", "x.caf"), ClipEvents::default());

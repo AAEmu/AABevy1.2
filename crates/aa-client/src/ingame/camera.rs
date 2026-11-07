@@ -645,9 +645,14 @@ pub fn follow_player(
     // the player's rig (its `camera` bone's bind height, kept per rig id) and the lift of its race's `.cdf`
     (rigs, mut bind, lift): (Query<&aa_anim::Animator, With<LocalPlayer>>, Local<Option<(u64, Option<f32>)>>, Option<Res<CameraLift>>),
     mut followed: Option<ResMut<CameraFollowed>>,
-    quest: Option<Res<super::quest_camera::QuestShot>>,
+    (quest, dev): (Option<Res<super::quest_camera::QuestShot>>, Res<DevOptions>),
 ) {
     let (Ok((mover, mut visibility)), Ok((mut orbit, mut transform))) = (player.single_mut(), camera.single_mut()) else { return };
+    if let Some((at, dir)) = dev.view {
+        // `--view`: a fixed still, the 1.2 client's camera pose
+        *transform = Transform::from_translation(cry_to_bevy(at)).looking_to(cry_to_bevy(dir).normalize_or(Vec3::NEG_Z), Vec3::Y);
+        return;
+    }
     // the zoom settles at 1.2's pace; in first person the own character is hidden (only this system's own decision is written)
     let distance = approach_distance(orbit.distance, orbit.wanted, time.delta_secs());
     if distance != orbit.distance {

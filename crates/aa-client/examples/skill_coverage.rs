@@ -575,7 +575,7 @@ impl Ctx<'_> {
             for m in models {
                 match presence(m, &name) {
                     Presence::Ok => {
-                        let e = ClipEvents::of(&m.cal, &name);
+                        let e = ClipEvents::of(&m.cal, &name, 1.0); // only whether the events exist
                         if c.launch_timed && e.release().is_none() {
                             c.no_release.push(m.tag.clone());
                         }

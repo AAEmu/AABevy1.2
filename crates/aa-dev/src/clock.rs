@@ -23,6 +23,10 @@ pub const WARMUP: f64 = 1.0;
 /// Wall seconds over which the rates are measured. Frame deltas are compared, never cumulative time from frame 0, so a
 /// warm-up offset cannot distort the ratio; a clamped frame (a hitch) is left out entirely.
 pub const WINDOW: f64 = 3.0;
+/// Wall seconds a rate window must hold before its ratio is judged. Frames left out of a window (load hitches, stalls,
+/// clamped deltas) do not fill it, so right after a slow start the window can hold a single frame, whose render-thread
+/// jitter alone reads as several percent (2026-11-03: one 17.6 ms frame after two 500 ms load frames read 1.06x).
+pub const MIN_RATE_WALL: f64 = 0.5;
 /// A `Time<Real>` delta that differs from the wall delta by more than this is the render thread's one-frame lag (or its
 /// catch-up) after a main-thread stall, not a rate; the frame is left out of both windows. 5 % of the shortest judged
 /// window ([`WARMUP`]), so a stall right after the warm-up cannot decide the run.
@@ -253,27 +257,29 @@ impl ClockAudit {
             );
         }
         let real = self.real_ratio();
-        if self.real_window.wall > 0.0 && real > 1.0 + tolerance {
+        if self.real_window.wall >= MIN_RATE_WALL && real > 1.0 + tolerance {
             return Assessment::Fail(format!(
                 "Time<Real> runs {real:.3}x the wall clock over the last {:.1} s (faster than wall)",
                 self.real_window.wall
             ));
         }
+        if self.virtual_window.wall < MIN_RATE_WALL {
+            // Too few judged frames yet for a rate; the strategy, speed and pause checks above already ran.
+            return Assessment::Warmup;
+        }
         let game = self.ratio();
-        if self.virtual_window.wall > 0.0 {
-            if game > 1.0 + tolerance {
-                return Assessment::Fail(format!(
-                    "game time runs {game:.3}x wall time over the last {:.1} s (clock={})",
-                    self.virtual_window.wall,
-                    self.mode_name()
-                ));
-            }
-            if game < 1.0 - tolerance {
-                return Assessment::Slow(format!(
-                    "game time runs {game:.3}x wall time over the last {:.1} s",
-                    self.virtual_window.wall
-                ));
-            }
+        if game > 1.0 + tolerance {
+            return Assessment::Fail(format!(
+                "game time runs {game:.3}x wall time over the last {:.1} s (clock={})",
+                self.virtual_window.wall,
+                self.mode_name()
+            ));
+        }
+        if game < 1.0 - tolerance {
+            return Assessment::Slow(format!(
+                "game time runs {game:.3}x wall time over the last {:.1} s",
+                self.virtual_window.wall
+            ));
         }
         Assessment::Ok
     }
@@ -490,6 +496,23 @@ mod tests {
         if request.0 {
             exit.write(AppExit::Success);
         }
+    }
+
+    #[test]
+    fn a_single_frame_after_load_hitches_is_not_judged() {
+        // 2026-11-03 t1d: two load frames (536 ms, then a clamped 500 ms) leave both rate windows nearly empty once the
+        // warm-up has passed; the next 17.6 ms frame alone read 1.06x and failed the run at command 0.
+        let mut h = Harness::new(true);
+        h.step(Duration::from_millis(16), Duration::from_millis(16));
+        // a main-thread stall (left out of both windows), then a clamped frame (left out of the game window)
+        h.step(Duration::from_millis(600), Duration::from_millis(16));
+        h.step(Duration::from_millis(500), Duration::from_millis(500));
+        // one frame whose render instant came 2.5 ms late: 1.077x over the few judged milliseconds
+        h.step(Duration::from_micros(16_500), Duration::from_micros(19_000));
+        assert!(h.audit().wall_secs() > WARMUP);
+        assert_eq!(h.exit(), None, "one jittered frame is not a rate");
+        h.run(120, Duration::from_millis(16), Duration::from_millis(16));
+        assert_eq!(h.exit(), None, "a steady wall clock after the hitches passes");
     }
 
     #[test]
