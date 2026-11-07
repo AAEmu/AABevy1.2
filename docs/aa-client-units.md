@@ -1333,10 +1333,13 @@ Water does not hold a cart up. The wheel probes read only the terrain and static
 (`WorldCollision` does not know about water), so in water the cart drives on the bed. Live check V1
 (2026-11-07, Farm Wagon): in the Solzreed pond at (15562, 15391) the wagon stands at z 126.30 on the
 bed. A player on foot stands at 126.25 there and wades. The river volume's surface is 127.00
-(`/waterdebug info`), so the front wheels (radius 0.518 m) are under water and the rear wheels
-(0.885 m) are under water to the hub. Reversed into the sea east of (15620, 15383), the wagon follows
-the seabed down to z 84.5, 15.5 m below the surface, and the driver stays seated. The server's
-`/height` `Floor` is its terrain heightmap, not the water surface. The AAEmu server tests water only
+(`/waterdebug info`), so the water stands 0.7 m up the wheels: over the hub of the front wheels
+(radius 0.518 m, their tops 0.3 m out of the water) and just under the hub of the rear wheels
+(0.885 m). Reversed into the sea east of (15620, 15383), the wagon follows the seabed down to z 84.5,
+15.5 m below the surface, and the driver stays seated (the client's terrain at (15692, 15389) is
+83.8). The server's `/height` `Floor` is its geodata (navmesh) height, the same value as its
+`NavMeshHeight` (the terrain heightmap only without geodata, `heightmap.rs` `get_height`), never the
+water surface: 126.38 at the pond stop, but 97.26 over that seabed. The AAEmu server tests water only
 at the summon. **Not traced:** what 1.2 does with a land vehicle in deep water (CryPhysics buoyancy,
 a sinking cart, or forcing the driver off). This is capture-pending.
 
