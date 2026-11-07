@@ -276,6 +276,17 @@ its `item_assets` row (`ItemVisual`: `detail`, `heel`, `more_asset_id`). `PartAs
   Bevy's per skinned mesh joint extraction.
 * `aa_anim::animator::take_stats()` returns the animators updated and the nanoseconds spent in `animate` since the last call.
 
+## Clip start record (`trace.rs`, opt-in)
+
+For aa-client's `AA_SKILL_TRACE` (`docs/aa-client-combat.md`, "Skill trace"). `aa_anim::trace::enable()` (once, before any clip plays)
+makes every `Animator` keep a `ClipStart` for each clip it starts: `play` (layer 0), `play_layer` (layer 1), and the clips it
+switches to by itself in `update` (the return clip after `play_once_then`, a `RandomIdle` variant). A start refused by gameplay
+framehold is not recorded. The owner drains them with `Animator::take_starts()` (`has_starts()` first, a read, so the component is not
+marked changed); the animator knows neither its entity nor its role. A record holds the Unix microseconds of the start, the layer,
+`looping`, the fade seconds, the clip's pak path (`BoundClip::source`) and its `.cal` name (`BoundClip::name`, set by the code that
+binds by name: aa-client's `bind_clip_with`, only while the trace is on). Off (the default) every hook is one relaxed atomic load
+and `BoundClip::name` stays `None`.
+
 ## Partial-body layer (`Animator::play_layer`)
 
 One clip can play over part of the body while the base clip (locomotion) keeps playing everywhere else: a cast or a shot on the

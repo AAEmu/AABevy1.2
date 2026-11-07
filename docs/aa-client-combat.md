@@ -656,6 +656,14 @@ The black ring of Crippling Mire is `psychokinesis_launch_form_end` (`AA_COMBAT_
 
 **Where `bip01` is (real captures, bevycombat on the real client, `data/extract/aa-client-combat/real/`)**: x2game's id 0 is the joint `bip01`, which every clip puts on the ground, so the beams (23 of 30) and the flying shots (src 0: 143 homing and 65 ballistic classes) would leave the feet. The real client does not: Arc Lightning's launch disc hangs at the caster's waist to chest (about 1.2 m, ahead of the torso in the lunge), the Absorb Lifeforce beam runs at chest height from the hand side, the Flamebolt fireball leaves at shoulder height. Which engine detail makes the joint report there (an unextracted root offset or the bind pose, 1.04 m) is not known, so `src_bone_names` sends id 0, 14 to 18 and the unknown ids to `Bip01 Hit` (1.1 to 1.4 m above the unit, follows the pose), the rest of the table is x2game's. The fx items of bone 0 (1,352: auras, rings) stay on the origin: no capture shows one, the real client's launch disc is the only item known to sit on `bip01`. The real beams look different from ours in colour and shape (Arc Lightning is a blue swirl disc and thin strands, ours white strands only: aa-fx), the placement was compared by height only.
 
+**Gliding effects** (`the_gliding_buffs_effect_groups_resolve_in_the_particle_libraries`, prints the table): the 55 gliding buffs
+carry 8 particle effects and all resolve in their `libs/particles` library: `abillity_skill_table_m.system_skill.gliding_skill` (46 buffs,
+events 0..5: the 44 of fx group 731 and Lucius' wings of group 679), `pegasus_wing_buff` (6747) and `pegasus_wing_black_buff` (7076), the quest wings
+`X2_EFFECTS_P.doodad.quest_freedom_wing` / `_dot` (1940, 8283), `quest_albatross_wing` (1392), `X2_EFFECTS.doodad_effect.quest_astra_wing_dot` (1443) and
+`prefab.shrine_goddess` (8271). Lucius' wings (1371, 1514) add the `FxChr` `glider_a.chr`, which is not in the pak: that item
+draws nothing (see the `FxChr` note below). The buff effect path (`buffs::spawn_fx`) plays all of these like any buff effect: the gliding flag only stops the
+start animations. What `gliding_skill` looks like in flight (a trail, wind or nothing visible) is capture-pending (no screenshot of a 1.2 flight).
+
 **Character effects** (`FxChr`, 12 items: Summon Crows' crows, the pet net, Golem's hand, the whip, the glider): `FxItem::chr`, spawned as
 `aa_fx::ChrEffect` instead of `Effect` in `spawn_effect` / `ground_effect`, on the bone like a particle item, `life` = the held limit
 (12 s) or 6 s (then the end clip plays). Summon Crows (13340): two crows circle in front of the caster with a black portal.
@@ -710,6 +718,99 @@ and a live target (a dead one answers code 4).
   (no capture of Protective Wings), and doodads that other players or npcs spawn (their `DoodadsSpawned` clouts) are not drawn:
   open.
 
+## Skill trace (`AA_SKILL_TRACE`, `skilltrace/`)
+
+`AA_SKILL_TRACE=<path.jsonl>` makes the client write one JSON object per line describing what it does during skills (the file is
+replaced at start, rows are flushed every 250 ms and at exit). The format is the `skillparity/v1` trace of
+`tools/skillparity/README.md` (the original client writes the same rows; a differ compares the two skill by skill): every row has
+`src:"bevy"`, `wall_us` (Unix microseconds, `SystemTime::now`), `frame` (Bevy `FrameCount`) and `kind`; names are lower case with `/`
+separators and no `game/` prefix, positions are game coordinates (Z up, X east, Y north; `aa_world::bevy_to_cry`), yaw is degrees
+with 0 = north and counter-clockwise (west is +90), in (-180, 180]. A field the client cannot know is left out. Unset, the plugin
+adds no system and the hooks cost one relaxed atomic load. Rows of one frame are not sorted by time across kinds (`anim` and `sound`
+carry the moment they were asked for, the others the moment they were noticed): sort by `wall_us`. Pass `--require-wall-clock` for a
+comparison run, as for any timing measurement here.
+
+| row | where it comes from | notes |
+|---|---|---|
+| `anim` | `aa_anim::Animator` records every start (`play`, `play_once_then`, `play_layer`, and the clips it switches to itself: the return clip of a one-shot, a random idle variant) while `aa_anim::trace` is on; `skilltrace::world::drain_anims` writes them after the animation pass | `inst` = entity bits, `role` = `player` / `target` (the unit `Target` names) / `other`; `clip` = the `.cal` name, `file` = `BoundClip::source`; `layer` 0 base / 1 the bone-masked layer; `speed` = `Animator::speed` when the row is written (1 for the layer, which runs in real time); `blend` = the fade seconds; units only (`LocalPlayer`, `RemoteUnit`), not previews or props |
+| `fx` | an `aa_fx::Effect` / `ChrEffect` that appears (`Added`), whoever spawned it: combat's `start_items`, `clip_effects`, projectiles, arrival and ground effects, buff and vehicle effects | `name` = `library.group.effect` (a `ChrEffect`: its `.chr` path), `phase:"spawn"`, `pos` where the effect is when it starts, `inst` / `role` the unit it is on (`Effect::body`, else the nearest ancestor with an animator), `bone` when it hangs on a bone of that unit or follows one (`Fx::follow`), `scale`. Placed world effects (torches, fires) and the invisible effects of the pipeline warm-up are not traced |
+| `sound` | `aa_audio::Engine::play_with` (and so `play_at`, `play_2d`, and the `Sound` component's start) records every event it is asked for while `aa_audio::trace` is on | `name` = the event path as asked, `phase:"play"`, `pos` for a positional sound. Every sound, UI and ambience included; a muted run traces the same sounds. PCM voices (the player's music score) are not |
+| `net` | `NetCommand` and `NetEvent` messages (`skilltrace/net.rs`) | `dir` out / in, `op` = the protocol name from `aa_net::opcodes` without `Packet` (`CSStartSkill`, `CSStopCasting`, `CSChangeTarget`, `SCSkillStarted`, `SCSkillFired`, `SCSkillEnded`, `SCSkillStopped`, `SCCastingStopped`, `SCPlotEvent`, `SCPlotEnded`, `SCPlotCastingStopped`, `SCPlotChannelingStopped`, `SCUnitDamaged`, `SCUnitHealed`, `SCCombatText`, `SCBuffCreated` / `Removed` / `Updated`, `SCSkillCooldownReset`, `SCCooldowns`, `SCTargetChanged`, `SCUnitDeath`, `SCCombatEngaged` / `Cleared` / `FirstHit`, `SCTeleportUnit`); only these. `skill_id`, `tl`, `obj` (the caster of a skill packet, the unit hit, healed, buffed or targeted otherwise) and `fields` (the other small integers: `target`, `cast_ms`, `delay_ms`, `damage`, `hit_type` ...). The row is written in `Update` of the frame that passed the message on, a frame at most after the packet; the server's own log has the exact times |
+| `castbar` | `hud/skill_trace.rs`: `Casts::trace_view`, the state `HUD.casting_info` / `X2Unit:UnitCastingInfo` read | `unit` `player` / `target`, `state` `start` / `stop` (a cast that becomes a channel is a `stop` and a `start`), `name`, `total_ms`, `elapsed_ms` (a channel's bar counts down: the time that has run), `channel` |
+| `cooldown` | `hud/skill_trace.rs`: `panels::action_skill_cooldown` (the number the action bar slot shows, linked skills converted, before the HUD quantises it to a quarter second) and `cooldown::global_at` | `slot` 1..12 (display cell of the current page; skill slots only, not items), `remain_ms`, `total_ms`, `gcd:true` for the global cooldown pair (no `slot`). A row when a cooldown starts or is restarted (`remain_ms` the time left) and one with `remain_ms:0` when it ends |
+| `press` | `hud::panels::action_keys` | `slot` 1..12 and the default key of it (`"1"`..`"0"`, `"-"`, `"="`), written when the HUD takes the press: a real key, the script runner's `cast slot N` and `key slotN`. A click on the bar is not a press |
+| `pos` | `GlobalTransform` of the player and its target | `unit`, `x`, `y`, `z`, `yaw`; a row at the start, when the unit moves more than 1 cm or turns more than 0.1 degree, and when the target is another unit |
+| `frame` | `Time<Real>` | `dt_ms` of every frame |
+| `mark` | the script runner: `trace TEXT` and `echo TEXT` (`docs/aa-client-script.md`) | `label` = the text, `skill_id` for a `skill:<id>:...` label |
+
+The opt-in records live in aa-anim (`trace.rs`: clip starts, `BoundClip::name`) and aa-audio (`trace.rs`: sounds); see `docs/aa-anim.md`
+and `docs/aa-audio.md`. Not covered: the `.cal` name of a clip bound by pak path (creature, seating, vehicle and glide clips have `file`
+only; the clips bound through `ingame::anim::bind_clip`, which is what locomotion, combat, buffs and the hit reactions use, carry
+`clip`), clicks on the action bar, item cooldowns, and the original's `flags`. The row format, the names and the coordinates are unit
+tested (`cargo test -p aa-client --bin aa-client skilltrace`); the trace was written without a server, so the rows of a real fight are
+still to be looked at.
+
+## Mounted casters (riders and their mounts)
+
+**What 1.2 does.** The anims loader `397287E0` (`x2game12.c:1607422`) reads `SELECT id, category_id, hang_ub, loop, move_ub,
+name, relaxed_ub, ride_ub, swim_move_ub, swim_ub FROM anims` into a 36-byte desc (`hang_ub` at `+4`, `move_ub` `+12`, `name`
+`+16`, `relaxed_ub` `+20`, `ride_ub` `+24`, `swim_move_ub` `+28`, `swim_ub` `+32`), and `39156E50` (`InitAnimDescWrapperMap`)
+copies them into the anim desc wrapper (`ride_ub` at `+20`). The code that picks `ride_ub` for a seated unit was not located;
+the graphs and the data say what it plays:
+
+* `player_upper_body.xml` takes two signals for one clip: the variant (`onehand_co_sk_shielddefense_ub` ->
+  `onehand_co_sk_shielddefense_mub_anim`, the `.cal`'s `_mub`) and the plain name (`onehand_co_sk_shielddefense` -> `..._ub_anim`,
+  the clip itself on the upper body, `ub_one_shot_interruptable`). 116 of the 144 `ride_ub` values are states of it, and 103 rows
+  without one have their plain name there.
+* The riding states are upper body states: `onehand_co_horse_attack_l/r_slash` (from `Combat Skill Start`, `ub_one_shot_interruptable`),
+  `horse_co_sk_jousting` and `horse_ba_carrot` (`UpperBodyLoop`). `player_full_body.xml` has none of them.
+* Mounted Attack (Rider) 11013 fires 84 `onehand_co_horse_attack_r_slash`, whose row has no `ride_ub` (its `move_ub` / `hang_ub`
+  `..._ub` is not in the `.cal`): the rider plays the clip itself, on the upper body. Mounted Defense 11036 / 11037 fire 394,
+  `ride_ub` `onehand_co_sk_shielddefense_ub`. The hit, critical, dodge, parry, shield block and stun rows and the `fist_em_*`
+  emotes have a `ride_ub`.
+* Breakthrough, Overrun and Drop Back Rider (15506, 17476, 17475) fire 277 `horse_ac_spur_f`: no graph has a state for it and
+  `global_player.cal` lists no such clip (the pak has `animations/<race>/male/horse/horse_ac_spur_f.caf`), so the rider shows nothing.
+
+**What the client does** (`Stage::play`, `SkillBook::ride_clip`). `mount::seat` takes the rider's `Locomotion`; a unit with
+`mount::Rider` and no locomotion is seated, and `Stage::play` plays every action of it on its upper body (`BoneMask::upper_body`,
+`Animator::play_layer`, `UPPER_BODY_BLEND`), never on the whole body: the row's `ride_ub` (`_mub` first, `upper_candidates`), else
+the clip itself. The rider loop keeps playing underneath (`Rider::step`'s `Animator::play` leaves the layer alone). The `.cal`
+(clips, anim events, layer sounds) comes from the unit's `Character`, as `Rider::bind` reads it. The action ends like any layered
+one (`end_actions`, `release_layers`); a hit reaction is skipped only while another action plays (a rider has no run of its
+own); `anim_rules` (`rejects`) needs locomotion and does not judge a rider's clips. A buff pose is one of these actions too: the
+stun's `ride_ub` (`all_re_combat_stun_ub`, 192 stun buffs) and a knockdown's throw play on the upper body, and `buffs.rs` skips
+the whole body start-and-loop chain (`play_once_then`) for a seated rider (`Stage::seated`), so the rider loop is still the base
+clip when the buff goes.
+
+**The mount's own skills** need nothing of their own: `SCSkillStarted` / `SCSkillFired` name the mate (caster kind 3) and the
+generic path plays the clips on its `RemoteUnit`. Back Kick 11369 (start 18 `all_co_sk_shout`, fire 20 `all_co_sk_lowkick`, cast
+300 ms, fx group 502): standing, both play on the whole body; above 0.3 m/s the horse rig's `Bip01 Spine` subtree (spine, front
+legs, neck and head; the pelvis and hind legs stay with the run) is the upper body mask, so both play as a layer and the gallop
+goes on. `global_horse.cal` has no `_ub` variant of either, so the clips themselves go through the mask.
+
+Tests: `skills.rs` `a_rider_reads_the_ride_ub_column`; `combat.rs` `a_seated_rider_plays_its_skills_on_the_upper_body` (seated by
+`mount::start_stop_riding`; the layer is `onehand_co_horse_attack_r_slash.caf` / `onehand_co_sk_shielddefense_mub.caf`, the rider
+loop stays the base clip, the layer and `Acting` end with the clip), `a_buff_pose_leaves_the_rider_loop_alone` (stun 63 and
+knockdown 1172 on a seated rider) and `the_driven_horse_plays_its_own_skill_and_keeps_galloping`.
+Example: `cargo run -p aa-client --example rider_attack -- --mute --shot shots/aa-client/rider_attack.png --shot-after 6` (a Nuian
+man on the Lilyut horse, seated by the mount systems, 11013 fired every second through combat's own plugin; `AA_RIDER_ANIM=394`
+for Mounted Defense): the slash turns his torso and swings the right arm back while the legs keep the riding idle.
+
+**Approximate / capture-pending:**
+
+* "`ride_ub`, else the clip itself on the upper body" is read from the graph and the data, not from the native selector. A clip
+  with no `ride_ub` and no upper body state of its name (`all_co_sk_lowkick` on a player) probably plays nothing on a 1.2 rider;
+  ours plays it through the mask. That includes a knockdown's `all_re_combat_knockback_start` and stand-up and a `ragdoll`
+  buff's `dead_0x` on a seated rider (whether 1.2 throws a rider off or shows nothing is capture-pending).
+* A galloping horse's Back Kick: `horse_upper_body.xml` maps `all_co_sk_shout` to `all_co_sk_shout_ub`, which `global_horse.cal`
+  does not list, and has no lowkick state (only `horse_full_body.xml`'s `Skill Start -> all_co_sk_lowkick`, `IdleOneShotNoLookIk`).
+  Whether the 1.2 horse shows nothing or stops for the kick while it runs is capture-pending; ours keeps galloping with the clips
+  on its front half.
+* `horse_full_body.xml` and `global_horse.cal` have `onehand_co_horse_attack_l/r_slash` (`animals/horse/onehand/`): the horse
+  probably plays the rider's attack with it. How the client hands the rider's clip to its mount was not found; not done.
+* Nothing was compared with a capture of a real rider; the lane server check (`AA_FAKE_MOUNT=still` with an 11013 on the rider) is
+  still to do.
+
 ## Not done
 
 * Play Dead, `/bow`, `/kneel` have no clip in the skill data: their pose comes from their buff (`ragdoll`, `fist_ac_sitground`,
@@ -737,8 +838,8 @@ and a live target (a dead one answers code 4).
 * Camera shakes only reach the local player's camera (its own blows, or a shake that hits it) and at half strength; a shake that
   starts at HIT plays when the damage lands (a miss does not shake). Nothing in the data asks for more: `fx_shake_cameras.range` is 0 in all 17 rows
   (the real client has no distance mode to read), so a remote caster's shake is left out on purpose.
-* Mounted and flying casters (the mount agent's: `mount.rs`). Swimming casters cast as on land (above); the clip plays over the swim pose, the real
-  client's blend of the two is not known.
+* Flying casters. Mounted casters: see "Mounted casters" above. Swimming casters cast as on land (above); the clip plays over
+  the swim pose, the real client's blend of the two (the `swim_ub` / `swim_move_ub` columns) is not known.
 * Doodad casters (a ship's cannon: the skill events name the doodad as the caster): `caster_entity` falls back to the `RemoteDoodad` entity, so the
   skill's effects and its projectile start on the doodad (its origin stands for every bone). Unit tested through the entity lookup only: the
   lane has no cannon, no real cast was seen.
@@ -883,7 +984,8 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
   `SkillFired`, the first `SCPlotEvent`): a plot step names only its own source and target.
 * **The local player** gets a `SkillMove` component. While it is there `player::control_player` does nothing (input locked, auto-run off) and
   `drive_local` plays the path: constant horizontal speed, parabola in z, `WorldCollision::slide` for walls (a wall ends the move where the
-  character is), never under `floor_at` (terrain or brush), landing on it. It sends a `CSMoveUnit` every 100 ms on the way (jump / fall
+  character is), never under `floor_at` (terrain or brush), landing on it (a path that ends more than 0.5 m over it falls on to it
+  under gravity: "A path that ends in the air" below). It sends a `CSMoveUnit` every 100 ms on the way (jump / fall
   state, velocity, forward delta) and a standing one at the end, so the server and the other players see the flight. `SCTeleportUnit` cancels
   a move and `follow_server` puts the player at the server's point. The clips are the combat module's (Charge `all_co_sk_dashattack`, Drop Back
   `all_co_sk_backstep`: the controller's `start_anim`).
@@ -912,6 +1014,53 @@ Motioncaster): `shots/skill-motion/*.mp4` (`charge`, `lasso`, `pull`, `knockback
 * Hooks outside the module (all small): `combat.rs` `Stage.motion` + one call at the top of `apply`; `player.rs` `floor_at` is `pub(super)` and
   `control_player` returns early while a `SkillMove` runs; `camera.rs` `follow_player` adds the lag; `units.rs` `is_character` / `latest`;
   `remote.rs` `Track::latest`; `mod.rs` the plugin. `AA_SKILL_MOTION_LOG=1` logs every move.
+
+### Skill controllers of the mate the player drives
+
+Twelve Leap and eight Dash npc mount skills carry `skills.skill_controller_id` and no plot: Elegant Leap 17399 -> 7175 (50 degrees,
+25 m/s, 800 ms, 25 m along the facing, start anim 19 `all_co_sk_leapattack`, end anim 48 `all_ac_stop`), Haphazard Jump 21175 -> 7176
+(18 m), Drop Back 17391 -> 6750 (12 m back, `controller_camera`), Overrun 17388 -> 6586 (to 1 m short of the target, end anim 46),
+Dash 17152 / Breakthrough 11309 / Ram 22491 -> kind 4 3000 ms, Zebra Charge 21172 1000 ms, La Mancha's Call 19087 7000 ms. The rider
+skills a mount chains (`mount_attached_skills` 15506 / 17475 / 17476) have no controller.
+
+* **1.2.** Skill fire (`0x3939B010`, `x2game12.c:763380`) calls `StartSkillController` (virtual +0x90 of the caster's actor +0x3be8)
+  with the skill's controller unless the caster is rooted (+0x3A72) and the controller is not a Leap. `0x390CA700`
+  (`x2game12.c:173533`) runs kinds 1/2/3/4/6/7 only when that object's virtual +4 returns 1, and the owned mate's is the
+  `ActorUnitModel` (vtable `0x399A4F68`, virtual +4 `0x390E54D0` returns 1; `GetSpeedInfo` needs the same object, `docs/aa-net.md`). So
+  the 1.2 client moves its own driven mount and reports it as the mate's movement. The AAEmu server runs no controller for a mate
+  (its skill controller needs an NPC caster), so nothing else would move it.
+* **The client.** `SCSkillFired` names the mate as the caster. `Roster::runner` resolves a controller of the mate that
+  `LocalMount::driving` names (the driver's seat of a mate: not a passenger, cart, ship or turret seat) to the local player's mover,
+  which `mount::drive_mount` copies to the mate every frame (`drive_local` runs before it). The `SkillMove` carries the mate's id
+  (`unit`), and `drive_local` reports the move as `CSMoveUnit` with that id: the same body as the player's (jump / fall state, every
+  100 ms, a standing report at the end). `control_player` yields to the move as on foot (keys locked, the ride's carried speed reset).
+  The rooted check is the mate's buffs. Leaving the seat ends the move with no further report. A floating controller of a buff on the
+  mate runs the same way.
+* **Dash (kind 4)** holds forward at the mover's run speed: a mate's run speed (`LocalSeat.speed.run`, a horse 9 m/s: 27 m in 3 s),
+  else the character's 5.4 m/s. It is held-forward movement in 1.2 (`390A8EE0` hands the movement controller a forward request), so
+  it keeps to the ground (down a slope too) and falls off a ledge under the mover's gravity (a mate's `physics_living_gravity`
+  from `MountSpeed`, a horse 30; a character 25), as a buff's float does when it ends; a Leap keeps its arc.
+* **A path that ends in the air.** A Leap along the facing ends its arc at the height it left from, so over falling ground it ends
+  above the floor (Elegant Leap from the test spot: 4.9 m over it, 25 m on); a Dash can run off a ledge just before its time is up,
+  and a wall can stop an arc mid-air. The unit then falls on from where the path ended, at the speed it came down with and under the
+  mover's gravity, the reports go on (fall state) and the standing one goes out when it lands (`advance`, `SkillMove::falling_on`;
+  within 0.5 m of the floor it is still put on it). Before, it was put on the floor in one frame. In 1.2 the self-target end point
+  (`390A1C20`) is the owner's position plus the rotated offset, with no ground projection, and the leap starts from a launch speed
+  and pitch (`3909A4A0`); how its last metres down to lower ground look is capture-pending, but a jump of metres in one frame is not
+  a moving living entity.
+* **Clips.** `combat` plays the controller's `start_anim` on the caster, the mate (`all_co_sk_leapattack` for the leaps); the rider
+  plays its riding clips for the gait `drive_mount` gives the mate.
+* **Approximate / capture-pending.** Not captured from the 1.2 client: the leap seen from the saddle (the mate's mid-air pose is the
+  mounted-jump work), the controllers' `end_anim` (`all_ac_stop`, `all_co_sk_stop`: not played), the controller camera of Drop Back,
+  and whether a Dash (which locks only input counter 0) lets the rider steer. Approximate: walls stop the mate with the player's
+  capsule (0.35 m radius, 1.8 m), not a horse-sized one; the Dash's ground-following is `floor_at` plus gravity, a stand-in for 1.2's
+  living-entity movement controller, and a wall ends it (`390A8EE0` only ends on time); the fall after a path keeps x / y where the
+  path ended (whether 1.2 carries the horizontal speed on is capture-pending) and the keys stay locked until it lands; after the move
+  the ride starts from rest (`drive_vel` is reset; 1.2's hand-back is capture-pending). Elegant Leap goes 31 m/s, over the server's
+  27.5 m/s mount speed check (`sus.rs`), which only logs. Tests: `skill_motion/mount_tests.rs` (Elegant Leap 25 m, every 100 ms a
+  report that names the mate and none for the player, the fall on to the lower ground with no frame dropping 1 m, the Dash 27 m on
+  the ground, a passenger starts nothing, leaving the seat ends it) and `path.rs` `a_mount_dash_runs_at_the_mount_speed`. Still to do
+  on the lane server: the owned horse, Elegant Leap from the pet bar with `AA_SKILL_MOTION_LOG=1`, and a `--shot` mid-leap.
 
 ### Not done
 

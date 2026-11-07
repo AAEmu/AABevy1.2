@@ -417,6 +417,9 @@ impl Engine {
     }
 
     pub fn play_with(&self, path: &str, at: Option<Vec3>, opts: PlayOptions) -> Voice {
+        if crate::trace::enabled() {
+            crate::trace::record(path, at);
+        }
         let id = self.voice();
         self.send(Cmd::Play { id, path: path.to_string(), at, opts });
         id

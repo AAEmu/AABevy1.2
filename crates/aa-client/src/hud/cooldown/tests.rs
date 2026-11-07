@@ -372,3 +372,32 @@ fn account_option_82_changes_real_slot_captions_without_rebinding_or_restarting_
     }
     Ok(())
 }
+
+#[test]
+fn a_cast_the_server_answered_shows_the_received_timer_not_the_estimate() {
+    let game = game();
+    let info = game.skills.get(&7).unwrap();
+    let used = Instant::now();
+    let mut skills = Skills::default();
+    skills.last_used.insert(7, used);
+    // No answer: the DB estimate stands.
+    assert_eq!(own_at(&game, &skills, 7, used), Some((30_000, 30_000)));
+    // SCCooldowns came with the cast (here a frame before SCSkillStarted): its 12600 wins over the 30000 estimate.
+    skills.native_skill_cooldowns.push(entry(7, 12_600, 12_600, used - Duration::from_millis(30)));
+    assert_eq!(observed_at(info, &skills, 7, used), (0, 0));
+    assert_eq!(own_at(&game, &skills, 7, used), Some((12_600, 12_600)));
+    skills.advance_native_frame(1);
+    skills.advance_native_frame(12_601);
+    assert_eq!(own_at(&game, &skills, 7, used + Duration::from_millis(12_600)), Some((0, 0)), "ready when the server's timer ends");
+    // A tag row answers the cast as well; an older receipt from an earlier cast does not.
+    skills.native_skill_cooldowns.clear();
+    skills.native_tag_cooldowns.push(entry(20, 9000, 9000, used + Duration::from_millis(5)));
+    assert_eq!(observed_at(info, &skills, 7, used), (0, 0));
+    skills.native_tag_cooldowns[0].updated_at = used - Duration::from_secs(3);
+    assert_eq!(observed_at(info, &skills, 7, used), (30_000, 30_000));
+    // a tick before the cast's start is still its answer, a second before is not
+    skills.native_tag_cooldowns[0].updated_at = used - Duration::from_millis(120);
+    assert_eq!(observed_at(info, &skills, 7, used), (0, 0));
+    skills.native_tag_cooldowns[0].updated_at = used - Duration::from_secs(1);
+    assert_eq!(observed_at(info, &skills, 7, used), (30_000, 30_000));
+}

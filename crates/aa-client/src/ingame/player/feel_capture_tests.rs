@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ingame::data::MountSpeed;
-use crate::ingame::mount::{LocalMount, LocalSeat};
+use crate::ingame::mount::{LocalMount, LocalSeat, MountRear};
 use crate::settings::Actions;
 use std::time::Duration;
 
@@ -36,6 +36,7 @@ impl Feel {
             .insert_resource(WaterQuery::new("main_world"))
             .insert_resource(WorldCollision::new("main_world", terrain.clone()))
             .add_message::<NetCommand>()
+            .add_message::<MountRear>()
             .add_systems(Update, control_player);
         let camera = app.world_mut().spawn(OrbitCamera::default()).id();
         let player = app
@@ -108,6 +109,17 @@ impl Feel {
     }
 
     fn tick(&mut self, dt: f32) -> Vec<MoveCommand> {
+        self.tick_named(dt).into_iter().map(|(_, movement)| movement).collect()
+    }
+
+    /// One step's movement packets with the unit each names: `Some(mate)` for `CSMoveUnit`, `None` for the own `CSMove`.
+    fn tick_named(&mut self, dt: f32) -> Vec<(Option<u32>, MoveCommand)> {
+        self.step(dt);
+        self.named_packets()
+    }
+
+    /// One step; its commands stay queued.
+    fn step(&mut self, dt: f32) {
         self.app
             .world_mut()
             .resource_mut::<Time>()
@@ -117,20 +129,31 @@ impl Feel {
             .world_mut()
             .resource_mut::<Actions>()
             .clear_taps_for_test();
-        self.packets()
     }
 
     fn packets(&mut self) -> Vec<MoveCommand> {
+        self.named_packets().into_iter().map(|(_, movement)| movement).collect()
+    }
+
+    fn named_packets(&mut self) -> Vec<(Option<u32>, MoveCommand)> {
         self.app
             .world_mut()
             .resource_mut::<Messages<NetCommand>>()
             .drain()
             .filter_map(|NetCommand(command)| match command {
-                Command::Move(movement) => Some(movement),
-                Command::MoveUnit { movement, .. } => Some(movement),
+                Command::Move(movement) => Some((None, movement)),
+                Command::MoveUnit { obj_id, movement } => Some((Some(obj_id), movement)),
                 _ => None,
             })
             .collect()
+    }
+
+    fn input(&self) -> PlayerInput {
+        *self.app.world().resource::<PlayerInput>()
+    }
+
+    fn rears(&mut self) -> Vec<MountRear> {
+        self.app.world_mut().resource_mut::<Messages<MountRear>>().drain().collect()
     }
 
     fn mover(&self) -> &Mover {
@@ -529,6 +552,7 @@ fn mount_speed_uses_inertia_accel_for_a_request_and_inertia_without_one() {
         backward: 0.2,
         inertia: 4.0,
         accel: 11.0,
+        ..MountSpeed::default()
     };
     let target = Vec2::new(0.0, mount_speed.run);
     let dt = 0.1;
@@ -573,7 +597,7 @@ fn mount_speed_uses_inertia_accel_for_a_request_and_inertia_without_one() {
     let coasted = mount_velocity(carried, Vec2::ZERO, mount_speed, dt);
     assert!(close(coasted.y, 9.0 * (-0.4f32).exp(), 1e-5), "{coasted:?}");
     // a 0 rate means no inertia: the new velocity is the target, not a freeze
-    let instant = MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 0.0, accel: 0.0 };
+    let instant = MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 0.0, accel: 0.0, ..MountSpeed::default() };
     assert_eq!(mount_velocity(Vec2::ZERO, Vec2::new(0.0, 9.0), instant, dt), Vec2::new(0.0, 9.0));
     assert_eq!(mount_velocity(Vec2::new(0.0, 9.0), Vec2::ZERO, instant, dt), Vec2::ZERO);
 }
@@ -592,6 +616,7 @@ fn a_mount_ramps_and_coasts_at_the_captured_rates() {
         backward: 0.2,
         inertia: 4.0,
         accel: 11.0,
+        ..MountSpeed::default()
     };
     let mut f = Feel::new();
     f.mount(mount_speed);
@@ -653,6 +678,161 @@ fn a_mount_ramps_and_coasts_at_the_captured_rates() {
         .expect("the mount's final stop packet")
         .to_movement(0);
     assert_eq!((final_stop.flags, final_stop.velocity), (move_flags::STOPPING, [0; 3]));
+}
+
+/// Space on the driver's seat jumps the mate (`sub_39404D50` sets the request on the controlled unit) with the mount's
+/// own row: the Lilyut horse's `game_jump_height` 1.3 and `physics_living_gravity` 30 launch at sqrt(2 g h) 8.83 m/s,
+/// peak at 1.30 m and land 0.59 s later. The flags are the on-foot capture's (no mounted-jump capture exists): JUMPING
+/// with actor 0x0c, then 0x14 on the landing, every packet a `CSMoveUnit` of the mate.
+#[test]
+fn a_driven_mount_jumps_with_its_own_height_and_gravity() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let horse = MountSpeed::default();
+    // `control_player` gives the rider's `ActorParams` the mount's row while it drives
+    let launch = ActorParams { jump_height: horse.jump_height, gravity: horse.gravity, ..ActorParams::default() }.jump_speed();
+    assert!(close(launch, 8.832, 0.001));
+    let mut f = Feel::new();
+    f.mount(horse);
+    f.hold("moveforward");
+    for _ in 0..5 {
+        f.tick(0.1);
+    }
+    assert!(f.mover().grounded);
+    let dt = 1.0 / 60.0;
+    let start = f.mover().pos.z;
+    f.tap("jump");
+    let packets = f.tick_named(dt);
+    assert!(f.input().jumped, "a mounted take-off is a jump for the cast rules");
+    let (unit, takeoff) = packets.last().expect("the take-off packet");
+    let takeoff = takeoff.to_movement(0);
+    assert_eq!(*unit, Some(9), "the take-off names the mate");
+    assert_eq!((takeoff.flags, takeoff.actor_flags), (move_flags::JUMPING, 0x0c));
+    assert!(
+        (i32::from(takeoff.velocity[2]) - 9044).abs() <= 2,
+        "launch vz {} (8.83 m/s)",
+        takeoff.velocity[2]
+    );
+    assert!(f.app.world().resource::<LocalJump>().rising);
+
+    let mut air = dt;
+    let mut peak = 0.0f32;
+    let mut sent = packets;
+    let mut landing = None;
+    while air < 2.0 {
+        let packets = f.tick_named(dt);
+        air += dt;
+        peak = peak.max(f.mover().pos.z - start);
+        let grounded = f.mover().grounded;
+        if grounded {
+            landing = packets.last().map(|(_, m)| m.to_movement(0));
+        }
+        sent.extend(packets);
+        if grounded {
+            break;
+        }
+    }
+    let landing = landing.expect("the landing packet");
+    assert!(close(peak, 1.30, 0.05), "peak {peak}");
+    assert!(close(air, 0.59, 0.05), "air time {air}");
+    assert_eq!((landing.flags, landing.actor_flags), (move_flags::JUMPING, actor_flags::LANDING));
+    assert_eq!(landing.fall_vel, 0);
+    assert!(sent.iter().all(|(unit, _)| *unit == Some(9)), "every packet is the mate's CSMoveUnit");
+}
+
+/// A standing Space on the driver's seat does not lift the mount: with no move request `sub_3912B330` calls the unit's
+/// +680 with 0 (`em_jump_in_place`) and leaves the jump vector at 0, so no vertical speed and no take-off packet, only
+/// one [`MountRear`] of the mate. The rear is no jump for the cast rules.
+#[test]
+fn a_standing_mount_rears_instead_of_taking_off() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mut f = Feel::new();
+    f.mount(MountSpeed::default());
+    f.tick(0.1);
+    f.tick(0.1);
+    f.packets();
+    f.tap("jump");
+    let packets = f.tick(1.0 / 60.0);
+    assert!(f.mover().grounded);
+    assert_eq!(f.mover().vz, 0.0);
+    assert!(!f.input().jumped);
+    assert!(
+        packets.iter().all(|m| m.to_movement(0).flags & move_flags::JUMPING != move_flags::JUMPING),
+        "no take-off packet: {packets:?}"
+    );
+    assert_eq!(f.rears(), [MountRear { mate: 9 }]);
+    f.tick(0.1);
+    assert!(f.mover().grounded && f.mover().vz == 0.0);
+    assert!(f.rears().is_empty(), "one rear per press");
+
+    // a moving take-off is a jump, not a rear; on foot Space never rears
+    f.hold("moveforward");
+    f.tick(0.1);
+    f.tap("jump");
+    f.tick(1.0 / 60.0);
+    assert!(!f.mover().grounded);
+    assert!(f.rears().is_empty());
+    let mut on_foot = Feel::new();
+    on_foot.tap("jump");
+    on_foot.tick(1.0 / 60.0);
+    assert!(!on_foot.mover().grounded && on_foot.rears().is_empty());
+}
+
+/// A driven mount that leaves a ledge falls under its own gravity (30 for a horse), not the rider's 25.
+#[test]
+fn a_driven_mount_falls_with_its_own_gravity() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let mut f = Feel::new();
+    f.mount(MountSpeed::default());
+    {
+        let mut mover = f.app.world_mut().get_mut::<Mover>(f.player).unwrap();
+        mover.grounded = false;
+        mover.vz = 0.0;
+        mover.pos.z += 3.0;
+    }
+    let before = f.mover().pos.z;
+    f.tick(0.1);
+    assert!(close(f.mover().vz, -3.0, 1e-4), "vz {}", f.mover().vz);
+    assert!(close(f.mover().pos.z - before, -0.15, 1e-4), "dz {}", f.mover().pos.z - before);
+}
+
+/// A mounted take-off sets `PlayerInput::jumped`, so `combat::cancel_on_move` ends the driver's casts as it does on foot
+/// (the fixture's skill and plot casts, one `StopCasting` each), once. A mount that moves off ends them on the move
+/// already (`PlayerInput::moving` from its first held frame), so this one is held in place (run speed 0, as against a
+/// wall): only the jump can end the cast.
+#[test]
+fn a_mount_jump_cancels_the_drivers_cast() {
+    if !aa_cry::pak_available() || !aa_anim::db::GameDb::available() {
+        return;
+    }
+    let mut f = Feel::new();
+    f.mount(MountSpeed { run: 0.0, ..MountSpeed::default() });
+    f.app
+        .init_resource::<aa_anim::ClipLibrary>()
+        .init_resource::<aa_net::state::Doodads>()
+        .init_resource::<aa_net::state::Units>();
+    crate::ingame::combat::fixture_cancel_casts(&mut f.app, 1);
+    let stop_castings = |f: &mut Feel, dt: f32| {
+        f.step(dt);
+        f.app
+            .world_mut()
+            .resource_mut::<Messages<NetCommand>>()
+            .drain()
+            .filter(|NetCommand(command)| matches!(command, Command::StopCasting { .. }))
+            .count()
+    };
+    assert_eq!(stop_castings(&mut f, 0.1), 0, "standing on the mount keeps the cast");
+    f.hold("moveforward");
+    f.tap("jump");
+    assert_eq!(stop_castings(&mut f, 1.0 / 60.0), 2, "the take-off ends the skill and the plot cast");
+    let input = f.input();
+    assert!(input.jumped && !input.moving && !input.turned && !f.mover().grounded, "{input:?}");
+    assert_eq!(stop_castings(&mut f, 0.1), 0, "a cancelled cast is not cancelled again");
 }
 
 /// feel capture 1, slopes: the 3D speed is 5.30 at 11 degrees, 5.06 at 21 and 4.1-4.2 at 38-41, with the

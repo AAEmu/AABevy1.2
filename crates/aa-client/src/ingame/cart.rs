@@ -27,7 +27,14 @@
 //! (pitch/roll and `z = mean + 0.024 m`), with the height low-passed at 0.15 s
 //! and the tilt at 2.5 s, as the `e_slope`/`b_forward` capture shows; the full
 //! rotation goes on the wire and `vel.z = dz/dt` keeps the 1/1092 m/s scale.
-//! The wheel and spindle visuals are in `vehicle.rs`.
+//! The wheel and spindle visuals are in `vehicle.rs`. Static world geometry (walls, trees, rocks)
+//! stops the cart: capsules at the two axle centres slide against `WorldCollision`
+//! ([`CartController::step_colliding`]).
+//!
+//! The constants below are the Farm Wagon's fit ([`CartParams::WAGON`]); every other land vehicle
+//! drives with its own `vehicle_models` row and body wheel layout ([`model`]).
+
+mod model;
 
 use aa_net::model::UnitKind;
 use aa_net::state::Units;
@@ -40,6 +47,8 @@ use bevy::prelude::*;
 use super::mount::LocalMount;
 use super::player::{LocalPlayer, Mover, STEP_UP, support_at};
 use super::units::{RemoteUnit, Views};
+
+pub use model::CartParams;
 
 /// `FUN_394045f0`: the send pump's interval object reads `100 ms`.
 pub const SEND_INTERVAL_MS: i32 = 100;
@@ -105,6 +114,20 @@ pub const HEIGHT_TAU: f32 = 0.15;
 /// (0.051/0.064 rad). The tilt part is the slower CryPhysics body settle.
 pub const TILT_TAU: f32 = 2.5;
 
+/// Height of the capsules that stand in for the body against the static world, metres. No model
+/// bounds are read: a wagon bed on its wheels is about this tall, and a taller wall still stops it.
+/// `push_out` starts a capsule at `STEP_UP + radius`, so from a radius of 0.55 m up (the wagon's 1.0)
+/// it is one sphere reaching `STEP_UP..STEP_UP + 2 * radius` and this height has no effect.
+pub const BODY_HEIGHT: f32 = 1.6;
+
+/// Capsule radius limits, metres: half the track, kept in a range that fits between two trees and
+/// still stops at a wall.
+const BODY_RADIUS: (f32, f32) = (0.4, 1.0);
+
+/// The frame time the blocked-speed factor of [`CartController::step_colliding`] is defined at. The
+/// factor is raised to `dt / BLOCK_FRAME`, so the crawl along a steep wall is the same at any frame rate.
+const BLOCK_FRAME: f32 = 1.0 / 60.0;
+
 /// The controller state the wire body is built from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CartController {
@@ -125,10 +148,18 @@ pub struct CartController {
     /// Last ground height under each wheel (see [`WHEEL_CONTACTS`]); a probe that
     /// misses the terrain falls back to its last value.
     wheel: [Option<f32>; 4],
+    /// The model's speed, turn rate, inertia and wheel layout.
+    params: CartParams,
 }
 
 impl CartController {
+    /// A Farm Wagon controller (the captured fit); [`Self::with_params`] takes another model's.
+    #[cfg(test)]
     pub fn new(pos: Pos, yaw: f32) -> Self {
+        Self::with_params(pos, yaw, CartParams::WAGON)
+    }
+
+    pub fn with_params(pos: Pos, yaw: f32, params: CartParams) -> Self {
         let (s, c) = (yaw * 0.5).sin_cos();
         Self {
             pos,
@@ -140,6 +171,7 @@ impl CartController {
             pitch: 0.0,
             roll: 0.0,
             wheel: [None; 4],
+            params,
         }
     }
 
@@ -163,6 +195,7 @@ impl CartController {
             pitch: 0.0,
             roll: 0.0,
             wheel: [None; 4],
+            params: CartParams::WAGON,
         }
     }
 
@@ -202,13 +235,13 @@ impl CartController {
     /// The wire `angVel` body keeps the captured `0.4 * steering` rad/s even below the
     /// stand-in's turn-in-place fade.
     pub fn angular_velocity(&self) -> [f32; 3] {
-        [0.0, 0.0, YAW_RATE_PER_STEER * self.steering]
+        [0.0, 0.0, self.params.yaw_rate_per_steer * self.steering]
     }
 
     /// The yaw rate the controller actually integrates, rad/s: the wire value faded out below
     /// [`TURN_FULL_SPEED`] and mirrored in reverse (see [`Self::step_grounded`]).
     pub fn effective_yaw_rate(&self) -> f32 {
-        YAW_RATE_PER_STEER * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
+        self.params.yaw_rate_per_steer * self.steering * (self.speed / TURN_FULL_SPEED).clamp(-1.0, 1.0)
     }
 
     /// One frame of the kinematic stand-in without ground under it: `throttle`
@@ -223,19 +256,66 @@ impl CartController {
     where
         F: Fn(f32, f32) -> Option<f32>,
     {
+        self.step_colliding(dt, throttle, steer, ground, |from, delta| from + delta);
+    }
+
+    /// [`Self::step_grounded`] with the static world in the way. `slide(from, delta)` moves a capsule
+    /// of [`Self::body_radius`] from `from` by `delta` (xy, game space) and returns where it ends up,
+    /// sliding along the walls it meets. A capsule stands at each axle centre; the more limiting
+    /// correction moves the whole body and the speed shrinks with the share of the move that was
+    /// blocked, so a wall ahead stops the cart and a slanted one leaves the tangent.
+    pub fn step_colliding<F, S>(&mut self, dt: f32, throttle: f32, steer: f32, ground: F, slide: S)
+    where
+        F: Fn(f32, f32) -> Option<f32>,
+        S: Fn(Vec2, Vec2) -> Vec2,
+    {
         if dt <= 0.0 {
             return;
         }
         self.steering = approach(self.steering, steer.clamp(-1.0, 1.0), STEER_RATE * dt);
-        let target = throttle.clamp(-1.0, 1.0) * TOP_SPEED;
-        self.speed = approach(self.speed, target, ACCEL * dt);
+        let target = throttle.clamp(-1.0, 1.0) * self.params.top_speed;
+        // Easing toward zero (coasting, braking) uses the deceleration inertia, anything else the acceleration one.
+        let easing = target.abs() < self.speed.abs() && target * self.speed >= 0.0;
+        let rate = if easing { self.params.decel } else { self.params.accel };
+        self.speed = approach(self.speed, target, rate * dt);
         let turn = self.effective_yaw_rate() * dt;
         let old_rotation = self.rotation;
+        let (old_yaw, old_pos) = (self.yaw, Vec2::new(self.pos.x, self.pos.y));
         self.yaw = wrap_angle(self.yaw + turn);
         let (xs, xc) = self.yaw.sin_cos();
         let forward = Vec2::new(-xs, xc);
         self.pos.x += forward.x * self.speed * dt;
         self.pos.y += forward.y * self.speed * dt;
+        let new_pos = Vec2::new(self.pos.x, self.pos.y);
+        // The most limiting axle: the largest correction of the wanted position.
+        let mut fix = Vec2::ZERO;
+        for axle in self.axles() {
+            let from = old_pos + rotate(axle, old_yaw);
+            let to = new_pos + rotate(axle, self.yaw);
+            let correction = slide(from, to - from) - to;
+            if correction.length_squared() > fix.length_squared() {
+                fix = correction;
+            }
+        }
+        // Where the body really went this frame when a wall changed the step (the wire velocity).
+        let mut blocked_motion = None;
+        if fix.length_squared() > 1e-8 {
+            self.pos.x += fix.x;
+            self.pos.y += fix.y;
+            // The share of the wanted move that survived: 1 free, 0 head-on, 0.71 at a 45 degree wall
+            // (the sine of the angle between the heading and the wall's normal). A wall whose normal is
+            // 30 degrees or more off the heading leaves the speed alone (the cart slides at the
+            // tangent); a steeper one takes it away, per second rather than per frame; head-on stops it.
+            let moved = Vec2::new(self.pos.x, self.pos.y) - old_pos;
+            let wanted = (new_pos - old_pos).length();
+            if wanted > 1e-6 {
+                let kept = moved.length() / wanted;
+                self.speed *= (kept * 2.0).min(1.0).powf(dt / BLOCK_FRAME);
+            }
+            // A push out of a wall the cart already stood in can move it metres in one frame: the
+            // velocity stays within the speed.
+            blocked_motion = Some((moved / dt).clamp_length_max(self.speed.abs()));
+        }
         // Without ground the captured quaternions yaw about the cart's own up
         // axis (post-multiply, keeping any seeded tilt); with ground the plane
         // gives the whole rotation.
@@ -245,11 +325,22 @@ impl CartController {
             let delta = Quat::from_rotation_z(turn);
             (Quat::from_array(old_rotation) * delta).to_array()
         };
-        self.velocity = [
-            forward.x * self.speed,
-            forward.y * self.speed,
-            self.velocity[2],
-        ];
+        // Against a wall the body moves along it, not along the heading: the wire velocity says so.
+        let planar = blocked_motion.unwrap_or(forward * self.speed);
+        self.velocity = [planar.x, planar.y, self.velocity[2]];
+    }
+
+    /// Radius of the body capsules: half the track within [`BODY_RADIUS`].
+    pub fn body_radius(&self) -> f32 {
+        (self.params.track * 0.5).clamp(BODY_RADIUS.0, BODY_RADIUS.1)
+    }
+
+    /// The front and rear axle centres in model space (x right, y forward): the means of the wheel
+    /// contacts' front pair and rear pair.
+    fn axles(&self) -> [Vec2; 2] {
+        let c = &self.params.wheel_contacts;
+        let mid = |a: (f32, f32), b: (f32, f32)| Vec2::new((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+        [mid(c[0], c[1]), mid(c[2], c[3])]
     }
 
     /// Samples the four wheel contacts and low-passes the plane (`z = mean +
@@ -268,7 +359,7 @@ impl CartController {
         let mut heights = [None; 4];
         let mut hits = 0usize;
         let mut sum = 0.0f32;
-        for (i, &(x, y)) in WHEEL_CONTACTS.iter().enumerate() {
+        for (i, &(x, y)) in self.params.wheel_contacts.iter().enumerate() {
             let cx = self.pos.x + right.x * x + forward.x * y;
             let cy = self.pos.y + right.y * x + forward.y * y;
             let height = ground(cx, cy).or(self.wheel[i]);
@@ -290,16 +381,16 @@ impl CartController {
         let rear = (heights[2] + heights[3]) * 0.5;
         let right_height = (heights[0] + heights[2]) * 0.5;
         let left_height = (heights[1] + heights[3]) * 0.5;
-        let target_pitch = (front - rear).atan2(WHEELBASE);
-        let target_roll = (left_height - right_height).atan2(TRACK);
+        let target_pitch = (front - rear).atan2(self.params.wheelbase);
+        let target_roll = (left_height - right_height).atan2(self.params.track);
         // The four heights average at WHEEL_CENTROID, not at the body origin:
         // evaluate the fitted plane there (the slopes are the plane gradients,
         // tan(pitch) along +Y and -tan(roll) along +X).
         let plane_mean = heights.iter().sum::<f32>() / 4.0;
         let gradient_x = -target_roll.tan();
         let gradient_y = target_pitch.tan();
-        let target_z = plane_mean - gradient_x * WHEEL_CENTROID.0 - gradient_y * WHEEL_CENTROID.1
-            + REST_OFFSET;
+        let centroid = self.params.centroid();
+        let target_z = plane_mean - gradient_x * centroid.0 - gradient_y * centroid.1 + REST_OFFSET;
         let height_alpha = 1.0 - (-dt / HEIGHT_TAU).exp();
         let tilt_alpha = 1.0 - (-dt / TILT_TAU).exp();
         let old_z = self.pos.z;
@@ -309,6 +400,12 @@ impl CartController {
         self.velocity[2] = (self.pos.z - old_z) / dt;
         true
     }
+}
+
+/// A model-space offset (x right, y forward) in the world at `yaw`.
+fn rotate(offset: Vec2, yaw: f32) -> Vec2 {
+    let (s, c) = yaw.sin_cos();
+    Vec2::new(c * offset.x - s * offset.y, s * offset.x + c * offset.y)
 }
 
 fn approach(value: f32, target: f32, step: f32) -> f32 {
@@ -461,6 +558,7 @@ pub fn drive_cart(
     mut out: MessageWriter<NetCommand>,
     mut drive: ResMut<CartDrive>,
     typing: Option<Res<crate::hud::HudKeyboardFocus>>,
+    db: Option<Res<super::data::Db>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let Some(s) = seat.0.filter(|s| s.cart) else {
@@ -493,7 +591,10 @@ pub fn drive_cart(
     let server_yaw = unit.yaw();
     if drive.obj_id != s.mount || drive.controller.is_none() {
         drive.obj_id = s.mount;
-        drive.controller = Some(CartController::new(server_pos, server_yaw));
+        // The driven model's own speed, turn rate and wheel layout; the wagon's when the row is missing.
+        let params = CartParams::load(unit.model_id, db.as_ref().and_then(|db| db.vehicle_look(unit.model_id)).as_ref())
+            .unwrap_or(CartParams::WAGON);
+        drive.controller = Some(CartController::with_params(server_pos, server_yaw, params));
         drive.pump = Pump::default();
         drive.written = None;
     } else if let Some(written) = drive.written
@@ -509,9 +610,19 @@ pub fn drive_cart(
     };
     if let Some(terrain) = terrain.as_ref() {
         let body_z = controller.pos.z;
-        controller.step_grounded(dt, throttle, steer, |x, y| {
-            wheel_ground(terrain, collision.as_deref(), x, y, body_z)
-        });
+        let ground = |x, y| wheel_ground(terrain, collision.as_deref(), x, y, body_z);
+        // Walls only count once the cells around the cart are built: until then it drives through.
+        let walls = collision
+            .as_deref()
+            .filter(|c| c.ready_around(controller.pos.x, controller.pos.y, 24.0));
+        let radius = controller.body_radius();
+        match walls {
+            Some(walls) => controller.step_colliding(dt, throttle, steer, ground, |from, delta| {
+                let feet = Vec3::new(from.x, from.y, body_z);
+                walls.slide(feet, delta, radius, BODY_HEIGHT, STEP_UP).pos.truncate()
+            }),
+            None => controller.step_grounded(dt, throttle, steer, ground),
+        }
     } else {
         controller.step(dt, throttle, steer);
     }

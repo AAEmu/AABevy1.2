@@ -17,7 +17,10 @@ use bevy::prelude::*;
 
 use super::combat::{Acting, CombatIdle, Dead};
 use super::jump::{self, JumpDir, JumpKind, JumpPhase, JumpTrack};
+use super::mount::{Driven, MountRear};
 use super::player::LocalPlayer;
+use super::swim::{MountSwimClips, mount_swim_side};
+use super::units::RemoteUnit;
 use super::weapons::{Drawn, Out, Wield};
 
 /// Direction suffixes of the 8-way locomotion clips; index = [`direction_index`].
@@ -64,26 +67,39 @@ fn root_reach(rig: &Rig, clip: &BoundClip) -> f32 {
 pub fn bind_clip_with(rig: &Rig, cal: &Cal, clips: &ClipLibrary, name: &str, lock_root: bool) -> Option<BoundClip> {
     let entry = cal.animation(name)?;
     let options = SampleOptions { position_scale: entry.position_scale(cal.base_height), lock_root_motion: lock_root };
-    let bound = clips.bound(rig, &entry.path, options).ok()?;
+    let mut bound = clips.bound(rig, &entry.path, options).ok()?;
     remember_file(&bound, &entry.path);
+    if aa_anim::trace::enabled() {
+        // the skill trace names a clip started by the `.cal` name it was asked for
+        bound.name = Some(name.to_ascii_lowercase().into());
+    }
     Some(bound)
 }
 
-/// The `.caf` file of every clip the client bound, by the address of its data (the clip library never drops one): aa-anim's clips
-/// carry the name from their file header, not their path, and the sound events of a clip are listed by file name.
-fn files() -> &'static std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>> {
-    static FILES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, Arc<str>>>> = std::sync::OnceLock::new();
+/// A clip's file name, keyed by the address of its data, with a `Weak` of the clip that keeps the address allocated.
+type ClipFiles = std::sync::Mutex<std::collections::HashMap<usize, (std::sync::Weak<aa_anim::Clip>, Arc<str>)>>;
+
+/// The `.caf` file of every clip the client bound, by the address of its data: aa-anim's clips carry the name from their
+/// file header, not their path, and the sound events of a clip are listed by file name. The game's clip library never
+/// drops a clip, but a short-lived one (each test makes its own) does; the `Weak` in each entry keeps the freed clip's
+/// address from being reused, so a later clip can never be named by an earlier clip's file.
+fn files() -> &'static ClipFiles {
+    static FILES: std::sync::OnceLock<ClipFiles> = std::sync::OnceLock::new();
     FILES.get_or_init(Default::default)
 }
 
 pub(super) fn remember_file(clip: &BoundClip, path: &str) {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_ascii_lowercase();
-    files().lock().unwrap_or_else(|e| e.into_inner()).entry(Arc::as_ptr(&clip.clip) as usize).or_insert_with(|| Arc::from(name.as_str()));
+    files()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(Arc::as_ptr(&clip.clip) as usize)
+        .or_insert_with(|| (Arc::downgrade(&clip.clip), Arc::from(name.as_str())));
 }
 
 /// The file name (`fist_mo_normal_run_f.caf`, lower case) of a clip the client bound.
 pub fn clip_file(clip: &BoundClip) -> Option<Arc<str>> {
-    files().lock().unwrap_or_else(|e| e.into_inner()).get(&(Arc::as_ptr(&clip.clip) as usize)).cloned()
+    files().lock().unwrap_or_else(|e| e.into_inner()).get(&(Arc::as_ptr(&clip.clip) as usize)).map(|(_, name)| name.clone())
 }
 
 /// The clips a model can play while moving.
@@ -98,8 +114,11 @@ pub struct ClipSet {
     walk: [Option<BoundClip>; 8],
     /// The sprint tier of the run group (`fist_mo_normal_run.lmg`): what a unit whose buffs have `sprint_motion` runs with (Dash).
     sprint: SprintClips,
-    /// The old single air clip (`fist_mo_relaxed_jump_s_loop`): a model without it has no jump at all.
+    /// The old single air clip (`fist_mo_relaxed_jump_s_loop`), or a mount's (`fist_mo_jump_f_loop`, [`ClipSet::creature_jump`]):
+    /// a model without either has no jump at all.
     jump: Option<BoundClip>,
+    /// The jump is the horse graph's ([`JumpKind::Creature`]): the model's `.cal` has the mount clips, not the humanoid ones.
+    creature_jump: bool,
     /// The jump clips by `.cal` name ([`super::jump::clip_names`]), bound when the set loads (relaxed, walking, Dash) or the
     /// first time a unit of the model jumps with its weapon out; `None` for a name the model lacks.
     jumps: Arc<std::sync::Mutex<std::collections::HashMap<String, Option<BoundClip>>>>,
@@ -110,6 +129,9 @@ pub struct ClipSet {
     stances: Arc<[OnceLock<Arc<StanceClips>>; 5]>,
     /// The climb clips of [`super::ladder::LadderClips`], bound on the first hang.
     climb: Arc<OnceLock<Option<Arc<super::ladder::LadderClips>>>>,
+    /// The horse graph's swim set, played while the unit is [`Swimming`]: only for a model without the humanoid jump (a
+    /// character's swim is [`super::swim`]'s); `None` for a model whose animation folder has no swim idle.
+    swim: Option<Arc<MountSwimClips>>,
 }
 
 /// The stance a unit fights in, from the weapon it holds: its idle and run clips are `<prefix>_ba_combat_idle` and
@@ -156,11 +178,17 @@ impl Stance {
 /// peaceful one).
 pub struct StanceClips {
     idle: Option<BoundClip>,
+    /// `<prefix>_ba_combat_idle_rand_N`: what the combat idle plays now and then.
+    idle_variants: Vec<BoundClip>,
     run: [Option<BoundClip>; 8],
     run_clip_speed: f32,
     /// The sprint tier of the stance's run group (`<prefix>_mo_combat_run.lmg`), see [`SprintClips`].
     sprint: SprintClips,
 }
+
+/// Seconds of the combat idle before a random variant, and before the first one after an action (skill parity trace t1i).
+const COMBAT_IDLE_VARIANT_SECS: f32 = 3.0;
+const COMBAT_IDLE_FIRST_AFTER_ACTION_SECS: f32 = 3.12;
 
 /// The second speed tier of a run locomotion group: 1.2's run groups list their eight directions twice, the run clips and then the
 /// sprint clips (`fist_mo_normal_run.lmg`: `fist_mo_sprint_run_f`, `_fl`, `_fr`, `_l`, `_r`, and the run's own `_b`, `_bl`, `_br`;
@@ -230,10 +258,16 @@ impl StanceClips {
         let bind = |name: String, fallback: String| bind_clip(rig, cal, clips, &name).or_else(|| bind_clip(rig, cal, clips, &fallback));
         let base = if stance == Stance::Staff { "onehand" } else { "fist" };
         let idle = bind(format!("{prefix}_ba_combat_idle"), format!("{base}_ba_combat_idle"));
+        // the random variants of the stance's own combat idle (none when the idle is the fallback's)
+        let idle_variants = if bind_clip(rig, cal, clips, &format!("{prefix}_ba_combat_idle")).is_some() {
+            (1..=9).filter_map(|n| bind_clip(rig, cal, clips, &format!("{prefix}_ba_combat_idle_rand_{n}"))).collect()
+        } else {
+            Vec::new()
+        };
         let run: [Option<BoundClip>; 8] = std::array::from_fn(|i| bind(format!("{prefix}_mo_combat_run_{}", DIRS[i]), format!("{base}_mo_combat_run_{}", DIRS[i])));
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let sprint = SprintClips::load(rig, cal, clips, &format!("{prefix}_mo_combat_run"));
-        StanceClips { idle, run, run_clip_speed, sprint }
+        StanceClips { idle, idle_variants, run, run_clip_speed, sprint }
     }
 }
 
@@ -245,7 +279,15 @@ impl ClipSet {
         let dirs = |prefix: &str| -> [Option<BoundClip>; 8] { std::array::from_fn(|i| bind(&format!("{prefix}_{}", DIRS[i]))) };
         let run = dirs("fist_mo_normal_run");
         let walk = dirs("fist_mo_normal_walk");
-        let jump = bind("fist_mo_relaxed_jump_s_loop");
+        // a mount's `.cal` (`global_horse.cal`) has no humanoid jump: its air clip and its swim are the horse graph's
+        let (jump, creature_jump, swim) = match bind("fist_mo_relaxed_jump_s_loop") {
+            Some(clip) => (Some(clip), false, None),
+            None => {
+                let clip = bind(jump::CREATURE_AIR);
+                let creature = clip.is_some();
+                (clip, creature, MountSwimClips::load(rig, &cal, clips).map(Arc::new))
+            }
+        };
         let run_clip_speed = run[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let walk_clip_speed = walk[0].as_ref().map_or(0.0, |c| ground_speed(rig, c));
         let sprint = SprintClips::load(rig, &cal, clips, "fist_mo_normal_run");
@@ -257,14 +299,24 @@ impl ClipSet {
             walk,
             sprint,
             jump,
+            creature_jump,
             jumps: Default::default(),
             run_clip_speed,
             walk_clip_speed,
             stances: Default::default(),
             climb: Default::default(),
+            swim,
         };
         // a jump's clips are bound before the first jump: binding loads the file, and a take-off is shorter than a hitch
-        if set.jump.is_some() {
+        if set.creature_jump {
+            for back in [false, true] {
+                for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
+                    for dir in JUMP_DIRS {
+                        set.jump_clip(rig, clips, phase, dir, JumpKind::Creature { back });
+                    }
+                }
+            }
+        } else if set.jump.is_some() {
             for kind in [JumpKind::Relaxed, JumpKind::Walk, JumpKind::Sprint] {
                 for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
                     for dir in JUMP_DIRS {
@@ -293,7 +345,6 @@ impl ClipSet {
     pub fn can_move(&self) -> bool {
         self.run[0].is_some() || self.walk[0].is_some()
     }
-
     /// The climb clips of the model, bound the first time a unit of it hangs (the `.cal` names only
     /// the exit clips, so they are bound by path; see [`super::ladder::LadderClips`]).
     pub(super) fn climb_clips(&self, rig: &Rig, clips: &ClipLibrary) -> Option<Arc<super::ladder::LadderClips>> {
@@ -375,11 +426,26 @@ pub struct Locomotion {
     stance: Option<Stance>,
     /// A climb clip is playing; leaving the ladder invalidates the state once.
     pub(super) on_climb: bool,
+    /// The exit link of the action that last played on the whole body (the animation graph's `X_anim -> Skill End`, see
+    /// `combat::graph`), until locomotion takes over: the idle or run after it blends that long (0.3 s after a shout).
+    pub action_exit: Option<f32>,
+    /// The one-shot action clip the unit plays, for x2game's `anim_rules` (see `combat`).
+    pub running: Option<RunningAction>,
+    /// The driven mate rears ([`rear_driven_mate`]) until this time (seconds on the app clock).
+    rear: Option<f64>,
+}
+
+/// A one-shot action clip as x2game's anim queue keeps it: its `anims` category, when it started and how long it lasts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunningAction {
+    pub category: u8,
+    pub started: f64,
+    pub length: f64,
 }
 
 impl Locomotion {
     pub fn new(clips: ClipSet) -> Locomotion {
-        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false }
+        Locomotion { clips, state: State::Idle, jump: JumpTrack::default(), stance: None, on_climb: false, action_exit: None, running: None, rear: None }
     }
 
     /// Forgets which clip is playing: the next [`drive_locomotion`] starts the right one (after something else, an attack or a
@@ -405,12 +471,16 @@ enum State {
     Moving(usize, bool, bool),
     /// A phase of a jump, the direction it was chosen with and what the unit jumps as.
     Jump(JumpPhase, JumpDir, JumpKind),
+    /// A state of the horse graph's swim set ([`MountSwimClips`]): `None` the swim idle, else the side
+    /// ([`mount_swim_side`]), its lean ([`super::swim::mount_swim_lean`]) and whether it is a `_deep` state.
+    Swim(Option<(usize, i8, bool)>),
 }
 
 const JUMP_DIRS: [JumpDir; 9] = [JumpDir::S, JumpDir::F, JumpDir::B, JumpDir::L, JumpDir::R, JumpDir::Fl, JumpDir::Fr, JumpDir::Bl, JumpDir::Br];
 
-/// What the local player's input says of its jump, written by [`super::player::control_player`]: other units are seen from
-/// their movement only (their air time is a fall, played from the air clip).
+/// What the local player's input says of its jump, written by [`super::player::control_player`]; the mate it drives jumps on
+/// it too. Other units are seen from their movement only: a character's air time is a fall, played from the air clip, and a
+/// mate's begins with the take-off when its movement had one ([`AirStart`]).
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct LocalJump {
     /// The air time began with a take-off (Space), not a fall off a ledge.
@@ -428,6 +498,21 @@ pub struct LocalJump {
     /// A freefall ([`super::jump::freefall`]): the fall clip replaces the air clip.
     pub freefall: bool,
 }
+
+/// The unit swims: its movement's stance is `SWIM` or `CO_SWIM` ([`super::units::move_units`]), or the mover of the mate the
+/// player drives swims ([`super::mount::drive_mount`]). A model with the horse graph's swim set plays it
+/// ([`drive_locomotion`]); others keep their clips. `level` is the graph's `waterLevel` (the origin plus the swim level
+/// minus the surface, see [`super::swim::MOUNT_DEEP_LEVEL`]; 0 for a unit whose level is not known).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Swimming {
+    pub level: f32,
+}
+
+/// A remote mate's air time began with a take-off (the movement's `JUMP_START` actor flag), written by
+/// [`super::units::move_units`]: its jump plays the take-off, a fall the air clip. Only units spawned with it (the mates) are
+/// shown airborne apart from the characters; the mate the player drives takes its take-off from [`LocalJump`].
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AirStart(pub bool);
 
 /// Index into [`DIRS`] of the 8-way direction closest to `local_dir` (x right, y forward).
 pub fn direction_index(local_dir: Vec2) -> usize {
@@ -447,15 +532,16 @@ pub fn direction_index(local_dir: Vec2) -> usize {
 
 /// Picks the clip for the unit's [`Motion`] and keeps the feet matched to its speed. A unit with its weapon out ([`Drawn`]) stands
 /// and runs in the stance of the weapon until it puts it away; walking stays the peaceful walk.
+#[allow(clippy::type_complexity)]
 pub fn drive_locomotion(
     time: Res<Time>,
     library: Res<ClipLibrary>,
     local_jump: Option<Res<LocalJump>>,
-    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatIdle>), (Without<Dead>, Without<super::seating::SeatPose>)>,
+    mut units: Query<(&mut Animator, &mut Locomotion, &Motion, Option<&Acting>, Option<&Drawn>, Option<&Wield>, Has<LocalPlayer>, Has<CombatIdle>, Has<Driven>, Option<&AirStart>, Option<&Swimming>), (Without<Dead>, Without<super::seating::SeatPose>)>,
 ) {
     let now = time.elapsed_secs_f64();
     let local_jump = local_jump.map(|j| *j).unwrap_or_default();
-    for (mut animator, mut loco, motion, acting, drawn, wield, local, fighting) in &mut units {
+    for (mut animator, mut loco, motion, acting, drawn, wield, local, fighting, driven, air_start, swimming) in &mut units {
         if !animator.starts_enabled() { continue; }
         // a ladder owns the clip; `drive_climb` plays it
         if motion.climb.is_some() {
@@ -468,6 +554,36 @@ pub fn drive_locomotion(
             if loco.jump.phase.is_some() {
                 loco.jump.interrupted(motion.airborne);
             }
+            loco.rear = None;
+            continue;
+        }
+        // a rear plays to its end (its `IdleOneShot` has no `leave_at_moving`), then the graph's `Idle End` link (0 s) gives
+        // the idle its own blend
+        if let Some(until) = loco.rear {
+            if now < until {
+                continue;
+            }
+            loco.rear = None;
+            loco.action_exit = Some(0.0);
+        }
+        // the horse graph's swim states (`Stance` swim): the swim idle with no move request (`SwimControl` within 0.3), else
+        // the clip of the request's side, `_deep` under `waterLevel` -1.01, at the clip's own pace. The move states also want
+        // `PseudoSpeed` 0.2..2, taken as the land threshold of 0.3 m/s; the diagonals' pelvis turn is not drawn
+        if let (Some(swimming), Some(set)) = (swimming, loco.clips.swim.clone()) {
+            loco.jump = JumpTrack::default();
+            let side = (motion.speed > 0.3 && motion.local_dir != Vec2::ZERO).then(|| mount_swim_side(motion.local_dir));
+            let clip = set.pick(side, swimming.level);
+            // the clip plays on while the graph stays in its state; a new state starts its clip again even when it is the same
+            // one (f to fl: `SwimMovement` sets `AllowAnimRestart`, `swimmovement.xml`)
+            let state = State::Swim(side.map(|s| (s, super::swim::mount_swim_lean(motion.local_dir, s), swimming.level < super::swim::MOUNT_DEEP_LEVEL)));
+            let playing = loco.state == state && animator.current.as_ref().is_some_and(|p| Arc::ptr_eq(&p.clip.clip, &clip.clip));
+            if !playing {
+                animator.play(clip.clone(), true, super::swim::MOUNT_SWIM_BLEND);
+                animator.random_idle = None;
+            }
+            loco.state = state;
+            loco.action_exit = None;
+            animator.speed = 1.0;
             continue;
         }
         // the combat idle is the 1.2 derived flag `+0x5fc4` (`FUN_39355ee0`), not the battle byte and not the weapon: it holds
@@ -480,6 +596,9 @@ pub fn drive_locomotion(
         } else {
             None
         };
+        // standing in one stance's idle and going to the other's: the 1.2 client blends it like any idle to idle (0.2, relaxed to
+        // combat at a key press and back after it), not like a run (skill parity trace t1i, 2026-11-03: 58 of 58 such changes)
+        let restanced = stance != loco.stance && loco.state == State::Idle;
         if stance != loco.stance {
             loco.stance = stance;
             loco.state = State::Unknown;
@@ -489,22 +608,42 @@ pub fn drive_locomotion(
         let base_speed = if local && local_jump.speed_mul > 0.05 { motion.speed / local_jump.speed_mul } else { motion.speed };
         let walk = moving && base_speed < (WALK_SPEED + RUN_SPEED) * 0.5;
         let sprinting = moving && !walk && local && local_jump.sprint_motion;
-        // a jump: its phase by 1.2's graph (`super::jump`), the share of the playing clip deciding when a phase may end
+        // a jump: its phase by 1.2's graph (`super::jump`), the share of the playing clip deciding when a phase may end. The
+        // player's keys jump the player and the mate it drives (`sub_390CCAB0` hands the unit's jump to its riders); another
+        // unit's take-off is its movement's ([`AirStart`])
+        let own = local || driven;
+        let creature = loco.clips.creature_jump;
         let jumping = if loco.clips.jump.is_some() {
-            let (rising, asked) = if local { (local_jump.rising, local_jump.dir) } else { (false, if moving { motion.local_dir } else { Vec2::ZERO }) };
+            let (rising, asked) = if own {
+                (local_jump.rising, local_jump.dir)
+            } else {
+                (air_start.is_some_and(|a| a.0), if moving { motion.local_dir } else { Vec2::ZERO })
+            };
             let progress = match loco.state {
                 State::Jump(..) => animator.current.as_ref().map_or(1.0, |c| if c.clip.clip.duration > 0.0 { c.time / c.clip.clip.duration } else { 1.0 }),
                 // something else played over the phase (it was invalidated): the phase counts as played
                 _ => 1.0,
             };
-            loco.jump
-                .step(motion.airborne, rising, JumpDir::of(asked.x, asked.y), progress)
-                .map(|p| jump::in_freefall(p, local && local_jump.freefall))
+            let dir = match loco.jump.phase {
+                // the horse graph's landings do not leave for a changed request (`leave_request_changed` empty, :812-872)
+                Some((JumpPhase::Land, d)) if creature && !motion.airborne => d,
+                _ => JumpDir::of(asked.x, asked.y),
+            };
+            loco.jump.step(motion.airborne, rising, dir, progress).map(|p| jump::in_freefall(p, own && local_jump.freefall))
         } else {
             loco.jump = JumpTrack::default();
             None
         };
-        let kind = if local && local_jump.sprint {
+        let kind = if creature {
+            // the side of a phase with no direction asked: the one the jump went to so far
+            let back = match (loco.state, jumping) {
+                (State::Jump(_, JumpDir::S, JumpKind::Creature { back }), _) => back,
+                (State::Jump(_, d, _), _) => d.backward(),
+                (_, Some((_, d))) => d.backward(),
+                _ => false,
+            };
+            JumpKind::Creature { back }
+        } else if local && local_jump.sprint {
             JumpKind::Sprint
         } else if local && local_jump.walking {
             JumpKind::Walk
@@ -514,6 +653,16 @@ pub fn drive_locomotion(
                 None => JumpKind::Relaxed,
             }
         };
+        // a creature's new direction in the air that keeps its clip (the horse graph has only `fist_mo_jump_[f|b]_loop`) is
+        // the graph's next `JumpLoop` state playing the same animation, which goes on: only `JumpMain` sets
+        // `AllowAnimRestart` (`jumpmain.xml`), `JumpLoop` does not
+        if creature
+            && let (State::Jump(JumpPhase::Loop, d, k), Some((JumpPhase::Loop, dir))) = (loco.state, jumping)
+            && d != dir
+            && jump::clip_names(JumpPhase::Loop, d, k)[0] == jump::clip_names(JumpPhase::Loop, dir, kind)[0]
+        {
+            loco.state = State::Jump(JumpPhase::Loop, dir, kind);
+        }
         let wanted = if let Some((phase, dir)) = jumping {
             // the kind stays the one the phase began with
             match loco.state {
@@ -541,7 +690,7 @@ pub fn drive_locomotion(
             }
             let clip = match wanted {
                 State::Unknown | State::Idle => stance_clips.and_then(|c| c.idle.clone()).or_else(|| Some(loco.clips.idle.clone())),
-                State::Jump(..) => None,
+                State::Jump(..) | State::Swim(_) => None,
                 State::Moving(d, walk, sprint) => {
                     let (primary, secondary) = if walk { (&loco.clips.walk, &loco.clips.run) } else { (&loco.clips.run, &loco.clips.walk) };
                     let combat_run = stance_clips.filter(|_| !walk).and_then(|c| if sprint { c.sprint.clips[d].clone().or_else(|| c.run[d].clone()) } else { c.run[d].clone() });
@@ -549,9 +698,26 @@ pub fn drive_locomotion(
                     combat_run.or(sprint_run).or_else(|| primary[d].clone()).or_else(|| secondary[d].clone()).or_else(|| primary[0].clone()).or_else(|| secondary[0].clone())
                 }
             };
+            // after an action, the graph's walk out of it (its exit link, else the idle's own 0.2); from one stance's idle to the
+            // other's the idle's own 0.2 too; between idles and runs 0.15
+            let after_action = loco.action_exit.is_some();
+            let blend = loco.action_exit.take().map(super::combat::idle_blend).unwrap_or(if restanced && wanted == State::Idle {
+                super::combat::idle_blend(0.0)
+            } else {
+                0.15
+            });
             if let Some(clip) = clip {
-                animator.play(clip, true, 0.15);
-                animator.random_idle = None;
+                animator.play(clip, true, blend);
+                // the combat idle's random variants (`*_ba_combat_idle_rand_1..5`): one 3.0 s after the idle comes back from the
+                // last, never the same twice in a row, 0.2 in and out; the first 3.12 s after an action (skill parity trace t1i,
+                // 2026-11-03: 20 variants, 2.99-3.01 s and 3.10-3.15 s)
+                animator.random_idle = match (wanted, stance_clips) {
+                    (State::Idle, Some(c)) if !c.idle_variants.is_empty() => Some(
+                        aa_anim::RandomIdle::every_secs(c.idle_variants.clone(), COMBAT_IDLE_VARIANT_SECS, 0.2, 0.2, (now * 1000.0) as u32)
+                            .first_after(if after_action { COMBAT_IDLE_FIRST_AFTER_ACTION_SECS } else { COMBAT_IDLE_VARIANT_SECS }),
+                    ),
+                    _ => None,
+                };
             }
             loco.state = wanted;
         }
@@ -572,9 +738,64 @@ pub fn drive_locomotion(
     }
 }
 
+/// The clip the mate plays for [`MountRear`] (`em_jump_in_place_anim`, horse_full_body.xml :573).
+const REAR_CLIP: &str = "fist_em_jump_in_place";
+/// `IdleOneShotNoLookIk` extends `IdleOneShot`, whose `transition_time` is 0.2 s when the state leaves it empty.
+const REAR_BLEND: f32 = 0.2;
+
+/// The mate the player drives rears for a standing Space ([`MountRear`]): the mount graph's `em_jump_in_place` ->
+/// `em_jump_in_place_anim` plays `fist_em_jump_in_place` once (`IdleOneShotNoLookIk`) and leads back to `Idle End`
+/// (horse_full_body.xml :567-574, links :1528, :1657-1658). The graph enters it only from `Idle Start`, so a mount that
+/// moves, jumps or acts does not rear, and one already rearing ignores the signal (`sub_3912B330` skips a graph in a
+/// `jump_in_place` state). A model whose `.cal` lacks the clip stays in its idle.
+#[allow(clippy::type_complexity)]
+pub fn rear_driven_mate(
+    time: Res<Time>,
+    library: Res<ClipLibrary>,
+    mut rears: MessageReader<MountRear>,
+    mut mates: Query<(&RemoteUnit, &mut Animator, &mut Locomotion, &Motion, Option<&Acting>), (With<Driven>, Without<Dead>)>,
+) {
+    let now = time.elapsed_secs_f64();
+    for rear in rears.read() {
+        for (unit, mut animator, mut loco, motion, acting) in &mut mates {
+            let standing = motion.speed <= 0.3 && !motion.airborne && motion.climb.is_none() && acting.is_none();
+            if unit.obj_id != rear.mate || !standing || loco.rear.is_some() || !animator.starts_enabled() {
+                continue;
+            }
+            let Some(clip) = bind_clip(&animator.rig, &loco.clips.cal, &library, REAR_CLIP) else { continue };
+            loco.rear = Some(now + f64::from(clip.clip.duration));
+            loco.invalidate();
+            animator.play(clip, false, REAR_BLEND);
+            animator.random_idle = None;
+            animator.speed = 1.0;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A clip dropped with its (test's own) clip library leaves its file name behind, but no later clip takes its address
+    /// and with it that name: tests that bind the same model in parallel read their own clips' files.
+    #[test]
+    fn a_dropped_clip_does_not_name_a_later_clip() {
+        let rig = Arc::new(Rig::new(aa_cry::Skeleton::default()));
+        let clip = |name: &str| {
+            BoundClip::new(&rig, Arc::new(aa_anim::Clip { name: name.into(), ..Default::default() }), SampleOptions::default())
+        };
+        let first = clip("first");
+        remember_file(&first, "animations/test/a_dropped_clip_first.caf");
+        assert_eq!(clip_file(&first).as_deref(), Some("a_dropped_clip_first.caf"));
+        let address = Arc::as_ptr(&first.clip) as usize;
+        drop(first);
+        // the allocator hands a freed block of this size to the next clip that asks for one
+        let later: Vec<BoundClip> = (0..64).map(|_| clip("later")).collect();
+        for c in &later {
+            assert_ne!(Arc::as_ptr(&c.clip) as usize, address, "the dropped clip's address is still held");
+            assert_eq!(clip_file(c), None, "a clip that was never bound by a file has no file");
+        }
+    }
 
     /// 1.2's `animations/nuian/male/lmg_files/fist_mo_normal_run.lmg`: the run, uphill and downhill, then the sprint tier, whose
     /// back directions are the run's own clips.
@@ -613,6 +834,253 @@ mod tests {
         let names = run_group(&cal, "fist_mo_normal_run").map(|l| sprint_tier(&l)).expect("the run group");
         assert_eq!(names[0].as_deref(), Some("fist_mo_sprint_run_f"));
         assert!(cal.animation("fist_mo_sprint_run_f").is_some(), "the .cal names the sprint clip");
+    }
+
+    /// The driven horse rears once for a standing Space: `fist_em_jump_in_place` (2.77 s in the pak), not again while it
+    /// plays, not when it moves, then its idle (needs `AA_PAK`).
+    #[test]
+    fn the_driven_horse_rears_once_and_returns_to_its_idle() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let library = ClipLibrary::default();
+        let set = shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &library).expect("the horse clips");
+        let rig = aa_anim::pose::shared_rig(HORSE).expect("the horse rig");
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(library)
+            .add_message::<MountRear>()
+            .add_systems(Update, (rear_driven_mate, drive_locomotion).chain());
+        let unit = crate::ingame::seating::fixture_unit(9, 139, None);
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let mate = app.world_mut().spawn((RemoteUnit::announced(&unit), Animator::new(rig, Vec::new()), loco, Motion::default(), Driven)).id();
+        let step = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        };
+        let playing = |app: &App| {
+            let animator = app.world().get::<Animator>(mate).unwrap();
+            animator.current.as_ref().and_then(|p| clip_file(&p.clip)).map_or(String::new(), |f| f.to_string())
+        };
+        let rear_until = |app: &App| app.world().get::<Locomotion>(mate).unwrap().rear;
+        step(&mut app, 0.1);
+        let idle = playing(&app);
+        assert!(idle.contains("idle"), "{idle}");
+
+        // a moving mount and another mate do not rear
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 5.0;
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 0.1);
+        assert_eq!(rear_until(&app), None);
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 0.0;
+        step(&mut app, 0.1);
+        app.world_mut().write_message(MountRear { mate: 8 });
+        step(&mut app, 0.1);
+        assert_eq!(rear_until(&app), None);
+
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 0.1);
+        assert_eq!(playing(&app), "fist_em_jump_in_place.caf");
+        let until = rear_until(&app).expect("rearing");
+        let now = app.world().resource::<Time>().elapsed_secs_f64();
+        assert!((until - now - 2.767).abs() < 0.01, "the clip's own length: {}", until - now);
+        // a second press while it plays does not start it again; neither does a move
+        app.world_mut().write_message(MountRear { mate: 9 });
+        step(&mut app, 1.0);
+        assert_eq!((rear_until(&app), playing(&app).as_str()), (Some(until), "fist_em_jump_in_place.caf"));
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 5.0;
+        step(&mut app, 1.0);
+        assert_eq!(playing(&app), "fist_em_jump_in_place.caf", "the one-shot plays to its end");
+        app.world_mut().get_mut::<Motion>(mate).unwrap().speed = 0.0;
+        step(&mut app, 0.8);
+        assert_eq!(rear_until(&app), None);
+        assert_eq!(playing(&app), idle);
+    }
+
+    /// A mount's `.cal` (`global_horse.cal`, included by the horse, wildboar and pangolin) binds the horse graph's jump instead
+    /// of the humanoid one. A remote horse that takes off ([`AirStart`]) plays `fist_mo_jump_f_start`, the air clip and the
+    /// running landing, then runs; a fall plays the air clip with no take-off; the mate the player drives jumps backward
+    /// from [`LocalJump`] and lands standing on `fist_mo_jump_b_end` (needs `AA_PAK`).
+    #[test]
+    fn a_mount_jumps_with_the_horse_graphs_clips() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        let library = ClipLibrary::default();
+        for model in ["animals/horse/horse", "animals/wildboar/wildboar_grey/wildboar_grey", "animals/pangolin/pangolin_red/pangolin_red"] {
+            let (chr, cal) = (format!("objects/characters/{model}.chr"), format!("objects/characters/{model}.cal"));
+            let set = shared_clip_set(&chr, &cal, &library).unwrap_or_else(|| panic!("{model}: no clips"));
+            assert!(set.creature_jump, "{model}: the horse graph's jump");
+            let rig = aa_anim::pose::shared_rig(&chr).expect("the rig");
+            for phase in [JumpPhase::Start, JumpPhase::Loop, JumpPhase::Land, JumpPhase::Fall] {
+                for (dir, back) in [(JumpDir::F, false), (JumpDir::Br, false), (JumpDir::S, false), (JumpDir::S, true)] {
+                    let kind = JumpKind::Creature { back };
+                    let clip = set.jump_clip(&rig, &library, phase, dir, kind).expect("a clip");
+                    let want = format!("{}.caf", jump::clip_names(phase, dir, kind)[0]);
+                    assert_eq!(clip_file(&clip).as_deref(), Some(want.as_str()), "{model} {phase:?} {dir:?}");
+                }
+            }
+        }
+
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let set = shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &library).expect("the horse clips");
+        let rig = aa_anim::pose::shared_rig(HORSE).expect("the horse rig");
+        fn tick(time: Res<Time>, mut animators: Query<&mut Animator>) {
+            for mut animator in &mut animators {
+                animator.update(time.delta_secs());
+            }
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<LocalJump>().insert_resource(library).add_systems(Update, (tick, drive_locomotion).chain());
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let horse = app.world_mut().spawn((Animator::new(rig.clone(), Vec::new()), loco, Motion::default(), AirStart::default())).id();
+        let step = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        };
+        let playing = |app: &App, e: Entity| {
+            let animator = app.world().get::<Animator>(e).unwrap();
+            animator.current.as_ref().and_then(|p| clip_file(&p.clip)).map_or(String::new(), |f| f.to_string())
+        };
+        let run = Motion { speed: 9.0, local_dir: Vec2::Y, ..Motion::default() };
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = run;
+        step(&mut app, 0.1);
+        let running = playing(&app, horse);
+        assert!(running.contains("run"), "{running}");
+
+        // the take-off, held to 0.98 of its length, then the air clip, then the landing on the run
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..run };
+        app.world_mut().get_mut::<AirStart>(horse).unwrap().0 = true;
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_start.caf");
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+        }
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = run;
+        app.world_mut().get_mut::<AirStart>(horse).unwrap().0 = false;
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_land.caf");
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+        }
+        assert_eq!(playing(&app, horse), running);
+        // a fall off a ledge: no take-off
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..run };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        // it stops in the air (no direction): the same air clip plays on, not from its start (`JumpLoop` has no
+        // `AllowAnimRestart`, :946)
+        for _ in 0..3 {
+            step(&mut app, 0.02);
+        }
+        let clip_time = |app: &App| app.world().get::<Animator>(horse).unwrap().current.as_ref().map_or(0.0, |p| p.time);
+        let before = clip_time(&app);
+        assert!(before > 0.0);
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { airborne: true, ..Motion::default() };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, horse), "fist_mo_jump_f_loop.caf");
+        assert!(clip_time(&app) >= before, "the air clip restarted: {} after {before}", clip_time(&app));
+
+        // the driven mate jumps backward on the keys and lands with none held: the standing landing of its side
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let driven = app.world_mut().spawn((Animator::new(rig, Vec::new()), loco, Motion::default(), Driven)).id();
+        *app.world_mut().resource_mut::<LocalJump>() = LocalJump { rising: true, dir: Vec2::NEG_Y, ..LocalJump::default() };
+        *app.world_mut().get_mut::<Motion>(driven).unwrap() = Motion { speed: 3.0, local_dir: Vec2::NEG_Y, airborne: true, climb: None };
+        step(&mut app, 0.02);
+        assert_eq!(playing(&app, driven), "fist_mo_jump_b_start.caf");
+        *app.world_mut().resource_mut::<LocalJump>() = LocalJump::default();
+        *app.world_mut().get_mut::<Motion>(driven).unwrap() = Motion::default();
+        for _ in 0..200 {
+            step(&mut app, 0.02);
+            if playing(&app, driven) != "fist_mo_jump_b_start.caf" {
+                break;
+            }
+        }
+        assert_eq!(playing(&app, driven), "fist_mo_jump_b_end.caf");
+    }
+
+    /// A mount's `.cal` binds the horse graph's swim set from `global_horse.cal` (a character's does not: its swim is
+    /// `swim::drive_swim`'s). A [`Swimming`] horse plays the swim idle with no request, the side's clip moving (a diagonal
+    /// on the forward clip, started again as the graph's own state), the `_deep` one under `waterLevel` -1.01, and its land
+    /// clips again out of the water (needs `AA_PAK`).
+    #[test]
+    fn a_mount_swims_with_the_horse_graphs_clips() {
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let library = ClipLibrary::default();
+        let set = shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &library).expect("the horse clips");
+        let swim = set.swim.clone().expect("the horse swims");
+        let file = |clip: &BoundClip| clip_file(clip).map_or(String::new(), |f| f.to_string());
+        assert_eq!(file(swim.pick(None, 0.0)), "fist_ba_idle_swim.caf");
+        assert_eq!(file(swim.pick(None, -3.0)), "fist_ba_idle_swim.caf", "the swim idle at any depth");
+        for (side, name) in [(0, "f"), (1, "b"), (2, "l"), (3, "r")] {
+            assert_eq!(file(swim.pick(Some(side), -1.0)), format!("fist_mo_swim_{name}.caf"));
+            assert_eq!(file(swim.pick(Some(side), -1.02)), format!("fist_mo_swim_{name}_deep.caf"));
+        }
+        let human = shared_clip_set("objects/characters/nuian/male/nude/nu_m_base.chr", "objects/characters/nuian/male/nude/nu_m_base.cal", &library).expect("the Nuian clips");
+        assert!(human.swim.is_none(), "a character's swim is not the horse graph's");
+
+        let rig = aa_anim::pose::shared_rig(HORSE).expect("the horse rig");
+        fn tick(time: Res<Time>, mut animators: Query<&mut Animator>) {
+            for mut animator in &mut animators {
+                animator.update(time.delta_secs());
+            }
+        }
+        let mut app = App::new();
+        app.init_resource::<Time>().init_resource::<LocalJump>().insert_resource(library).add_systems(Update, (tick, drive_locomotion).chain());
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let horse = app.world_mut().spawn((Animator::new(rig, Vec::new()), loco, Motion::default(), AirStart::default(), Swimming::default())).id();
+        let step = |app: &mut App, dt: f32| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(dt));
+            app.update();
+        };
+        let playing = |app: &App| {
+            let animator = app.world().get::<Animator>(horse).unwrap();
+            animator.current.as_ref().map_or((String::new(), 0.0), |p| (clip_file(&p.clip).map_or(String::new(), |f| f.to_string()), p.time))
+        };
+        step(&mut app, 0.1);
+        assert_eq!(playing(&app).0, "fist_ba_idle_swim.caf");
+        // swimming forward at the horse's 1.8 m/s: the clip plays on in its state
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { speed: 1.8, local_dir: Vec2::Y, ..Motion::default() };
+        step(&mut app, 0.1);
+        let (clip, before) = playing(&app);
+        assert_eq!(clip, "fist_mo_swim_f.caf");
+        step(&mut app, 0.1);
+        let (clip, after) = playing(&app);
+        assert!(clip == "fist_mo_swim_f.caf" && after > before, "the forward swim restarted in its state: {clip} {after} after {before}");
+        // forward left is the graph's fl state on the same clip: `SwimMovement`'s `AllowAnimRestart` starts it again, and it
+        // plays on in fl
+        app.world_mut().get_mut::<Motion>(horse).unwrap().local_dir = Vec2::new(-1.0, 1.0).normalize();
+        step(&mut app, 0.1);
+        let (clip, restarted) = playing(&app);
+        assert!(clip == "fist_mo_swim_f.caf" && restarted < after, "the diagonal did not start the clip again: {clip} {restarted} after {after}");
+        step(&mut app, 0.1);
+        let (clip, on) = playing(&app);
+        assert!(clip == "fist_mo_swim_f.caf" && on > restarted, "{clip} {on} after {restarted}");
+        app.world_mut().get_mut::<Motion>(horse).unwrap().local_dir = Vec2::X;
+        step(&mut app, 0.1);
+        assert_eq!(playing(&app).0, "fist_mo_swim_r.caf");
+        // 1.5 m under its floating level
+        app.world_mut().get_mut::<Swimming>(horse).unwrap().level = -1.5;
+        step(&mut app, 0.1);
+        assert_eq!(playing(&app).0, "fist_mo_swim_r_deep.caf");
+        // out of the water at a run
+        app.world_mut().entity_mut(horse).remove::<Swimming>();
+        *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { speed: 9.0, local_dir: Vec2::Y, ..Motion::default() };
+        step(&mut app, 0.1);
+        let (clip, _) = playing(&app);
+        assert!(clip.contains("run"), "{clip}");
     }
 
     #[test]

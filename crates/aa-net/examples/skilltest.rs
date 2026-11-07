@@ -10,6 +10,8 @@
 //! * `--skills ID,..` cast these skills (learned first when they belong to a tree: the tree is swapped in).
 //! * `--defaults`     the default skills (melee attack, Shoot Arrow, Return, kick, sprint, instruments, dance).
 //! * `--keep-cooldowns` leave the server's cooldowns on (default: `/ignoreskillcds true`), the same skill is cast twice.
+//! * `--equip SLOT:ITEM,...` wear these item templates before the trees are learned (`model::slot`: 15 main hand,
+//!   16 off hand, 17 ranged, 18 instrument): a missing one is added with `/item add self`, `SLOT:0` takes the slot off.
 //!
 //! GM rights (`access_level` 100 of the account) are needed for `/level`, `/spawn` and `/ignoreskillcds`.
 //! Names, target types and the effect kinds each skill is expected to have come from the server's `compact.sqlite3`.
@@ -46,6 +48,7 @@ struct Args {
     no_learn: bool,
     corpse: bool,
     learn_only: bool,
+    equip: Vec<(usize, u32)>,
 }
 
 fn parse_args() -> Result<Args> {
@@ -67,6 +70,7 @@ fn parse_args() -> Result<Args> {
         no_learn: false,
         corpse: false,
         learn_only: false,
+        equip: vec![],
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -88,6 +92,12 @@ fn parse_args() -> Result<Args> {
             "--no-learn" => a.no_learn = true,
             "--learn-only" => a.learn_only = true,
             "--corpse" => a.corpse = true,
+            "--equip" => {
+                for pair in value()?.split(',') {
+                    let (slot, item) = pair.split_once(':').with_context(|| format!("--equip wants SLOT:ITEM, not {pair}"))?;
+                    a.equip.push((slot.parse()?, item.parse()?));
+                }
+            }
             "--at" => {
                 let v: Vec<f32> = value()?.split(',').map(|x| x.parse()).collect::<Result<_, _>>()?;
                 a.at = Some(Pos::new(v[0], v[1], v[2]));
@@ -470,6 +480,37 @@ impl Session {
         Ok(())
     }
 
+    /// Wears `template` in equipment slot `slot` (`0`: takes the slot off into the bag), adding it to the bag first when it is
+    /// not there. Equipping is a `CSSwapItems` of the worn slot (container 1) with the bag slot (container 2).
+    async fn equip(&mut self, slot: usize, template: u32) -> Result<()> {
+        use aa_net::items::ItemMove;
+        let worn = self.state.inventory.equipment.slots.get(slot).cloned().flatten();
+        if template == 0 {
+            let Some(item) = worn else { return Ok(()) };
+            let free = self.state.inventory.bag.iter().position(Option::is_none).context("no free bag slot")?;
+            println!("  take off slot {slot} (item {})", item.template_id);
+            self.client.send(Command::SwapItems(ItemMove { from_item_id: item.id, to_item_id: 0, from_container: 1, from_slot: slot as u8, to_container: 2, to_slot: free as u8 }));
+            self.pump(Duration::from_millis(800), None).await?;
+            return Ok(());
+        }
+        if worn.as_ref().is_some_and(|i| i.template_id == template) {
+            return Ok(());
+        }
+        let in_bag = |s: &Self| s.state.inventory.bag.iter().enumerate().find_map(|(i, it)| it.as_ref().filter(|it| it.template_id == template).map(|it| (i, it.id)));
+        if in_bag(self).is_none() {
+            self.gm(&format!("/item add self {template}")).await?;
+        }
+        let (bag_slot, id) = in_bag(self).with_context(|| format!("item {template} did not arrive in the bag"))?;
+        println!("  wear item {template} in slot {slot} (bag slot {bag_slot})");
+        self.client.send(Command::SwapItems(ItemMove { from_item_id: worn.map_or(0, |i| i.id), to_item_id: id, from_container: 1, from_slot: slot as u8, to_container: 2, to_slot: bag_slot as u8 }));
+        self.pump(Duration::from_millis(800), None).await?;
+        let now = self.state.inventory.equipment.slots.get(slot).cloned().flatten().map(|i| i.template_id);
+        if now != Some(template) {
+            bail!("slot {slot} holds {now:?} after equipping {template}");
+        }
+        Ok(())
+    }
+
     async fn learn(&mut self, ids: &[u32]) -> Result<Vec<u32>> {
         let mut learned = vec![];
         for &id in ids {
@@ -762,6 +803,9 @@ async fn main() -> Result<()> {
         s.pump(Duration::from_millis(300), None).await?;
         s.gm("/kill").await?;
         println!("  killed the dummy {d} (a corpse to cast at)");
+    }
+    for &(slot, item) in &args.equip {
+        s.equip(slot, item).await?;
     }
     let (dummy, dpos) = s.ensure_dummy().await?;
     println!("  dummy obj {dummy} at ({:.1}, {:.1}) {:.1} m", dpos.x, dpos.y, dpos.distance(s.here));

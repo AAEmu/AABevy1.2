@@ -5,6 +5,8 @@
 
 #[path = "../src/script/mod.rs"]
 mod script;
+#[path = "../src/skilltrace/mod.rs"]
+mod skilltrace;
 #[path = "../src/hud/mod.rs"]
 mod hud;
 #[path = "../src/ingame/mod.rs"]
