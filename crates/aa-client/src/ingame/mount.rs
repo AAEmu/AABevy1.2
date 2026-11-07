@@ -408,6 +408,18 @@ impl RiderAnim {
         }
     }
 
+    /// The rider was asleep (its animator parked by `units::cull_units`) and is seen again: the clips stopped where they
+    /// were while the mount went on, so the get-on and any one-shot are over and the riding loops start again in the gait
+    /// of the mount's motion now, as for a rider first seen riding (no idle-to-run or landing for what happened unseen).
+    fn wake(&mut self) {
+        if self.phase == RidePhase::Dismounting {
+            return;
+        }
+        self.phase = RidePhase::Riding;
+        self.gait = None;
+        self.transition = None;
+    }
+
     /// Starts the get-off chain; `false` when the mount has no get-off clips.
     fn begin_dismount(&mut self) -> bool {
         if self.durations.get_off_start.is_none() {
@@ -681,6 +693,9 @@ pub struct Rider {
     run_speed: f32,
     /// The locomotion the unit had on foot, given back when it gets off.
     on_foot: Option<Locomotion>,
+    /// The rider's animator was parked (`units::Asleep`) while nobody saw it: [`pose_riders`] kept it on its seat
+    /// without stepping its clips, and starts it again in the mount's gait when it wakes ([`RiderAnim::wake`]).
+    slept: bool,
 }
 
 impl Rider {
@@ -791,6 +806,7 @@ impl Rider {
             anim,
             run_speed,
             on_foot: None,
+            slept: false,
         })
     }
 
@@ -827,6 +843,19 @@ impl Rider {
             1.0
         };
         false
+    }
+
+    /// [`Rider::step`] for a riding remote unit whose animator `units::cull_units` may have parked (`None`): asleep, its
+    /// clips wait, and once the animator is back it starts again in the mount's gait ([`RiderAnim::wake`]).
+    fn step_awake(&mut self, animator: Option<&mut Animator>, dt: f32, mount: MountMotion, tempo: f32) {
+        let Some(animator) = animator else {
+            self.slept = true;
+            return;
+        };
+        if std::mem::take(&mut self.slept) {
+            self.anim.wake();
+        }
+        self.step(animator, dt, mount, tempo);
     }
 
     /// Rears with the mount ([`MountRear`]) when the rider stands in its idle gait ([`RiderAnim::rear`]).
@@ -1016,11 +1045,11 @@ pub fn start_stop_riding(
     net: Res<Units>,
     db: Option<Res<Db>>,
     clips: Res<ClipLibrary>,
-    units: Query<(Entity, &RemoteUnit, Option<&Rider>, Option<&Character>, Option<&Animator>)>,
+    units: Query<(Entity, &RemoteUnit, Option<&Rider>, Option<&Character>, Option<&Animator>, Option<&super::units::Asleep>)>,
     mut seen: Local<Seen>,
 ) {
     let mut present = std::collections::HashSet::new();
-    for (entity, unit, rider, character, animator) in &units {
+    for (entity, unit, rider, character, animator, asleep) in &units {
         let attached = net.by_id.get(&unit.obj_id).and_then(|u| u.attached_to);
         let seat_of = attached.map(|a| (a.obj_id, a.point));
         let action = seat_action(seat_of, rider.map(|r| (r.mount, r.point, r.dismounting())));
@@ -1028,15 +1057,19 @@ pub fn start_stop_riding(
         let mut seated = false;
         match action {
             SeatAction::Mount | SeatAction::Remount => {
-                // wait for the animator (a unit far away has none) and the mount's data
+                // wait for the rider's rig (a unit whose model is still loading has none) and the mount's data. A rider
+                // nobody sees has its animator parked (`units::Asleep`): it is seated all the same, so `pose_riders`
+                // keeps it on the mount and the culling judges it where the mount is, not where it got on
                 let mount = attached.and_then(|a| net.by_id.get(&a.obj_id));
+                let awake = animator.is_some();
+                let rig = animator.or(asleep.map(super::units::Asleep::animator));
                 if let (Some(a), Some(db), Some(character), Some(animator), Some(mount)) =
-                    (attached, db.as_deref(), character, animator, mount)
+                    (attached, db.as_deref(), character, rig, mount)
                 {
                     // a fresh remote attach plays the get-on of the reply's reason, which the 1.2 client maps and
                     // passes to FUN_39153b60 (FUN_390eb520 -> FUN_390bb4d0); AAEmu echoes the request's reason (the
-                    // original server's value is unverified)
-                    let reason = fresh_get_on_reason(fresh, a.reason);
+                    // original server's value is unverified). An unseen get-on is over by the time the rider is seen
+                    let reason = fresh_get_on_reason(fresh && awake, a.reason);
                     if let Some(rider) = Rider::bind(
                         db,
                         &clips,
@@ -1084,16 +1117,21 @@ pub fn start_stop_riding(
 }
 
 /// Puts the riders on their mounts' seats and plays the rider clips for the gait of the mount.
-#[allow(clippy::type_complexity)]
+///
+/// A rider nobody sees has its animator parked (`units::Asleep`): it is still put on its seat every frame, so it stays
+/// with its mount and `units::cull_units` judges it where the mount is (the server sends no movement of an attached
+/// unit, so its own position is where it got on). Its clips wait, and start again in the mount's gait when it wakes.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn pose_riders(
     time: Res<Time>,
     net: Res<Units>,
     views: Res<Views>,
-    mut riders: Query<(&mut RemoteUnit, &mut Transform, &mut Rider, &mut Animator)>,
+    mut riders: Query<(&mut RemoteUnit, &mut Transform, &mut Rider, Option<&mut Animator>)>,
     mounts: Query<
         (
             &RemoteUnit,
             Option<&Animator>,
+            Option<&super::units::Asleep>,
             Option<&super::vehicle::SeatHelpers>,
             Option<&Motion>,
             Has<Swimming>,
@@ -1112,12 +1150,13 @@ pub fn pose_riders(
         }
         let mounted = views.unit_entity(rider.mount).and_then(|e| mounts.get(e).ok().map(|m| (e, m)));
         let (pos, facing, mount_motion, tempo, rotation) = match mounted {
-            Some((e, (mount, mount_animator, helpers, motion, swimming))) => {
+            Some((e, (mount, mount_animator, mount_asleep, helpers, motion, swimming))) => {
                 let model_id = net.by_id.get(&mount.obj_id).map_or(0, |u| u.model_id);
+                // a sleeping mount's bones keep their last pose under its moving root
                 let world = seat_world(
                     e,
                     model_id,
-                    mount_animator,
+                    mount_animator.or(mount_asleep.map(super::units::Asleep::animator)),
                     helpers,
                     &rider.seat,
                     &transforms,
@@ -1140,7 +1179,7 @@ pub fn pose_riders(
                 // the mount left the view: stay with where the server says it is, or where the rider stands if the
                 // mount is gone too; its one-shots still finish (the server detaches it next)
                 let Some(m) = net.by_id.get(&rider.mount) else {
-                    rider.step(&mut animator, dt, MountMotion::default(), 1.0);
+                    rider.step_awake(animator.as_deref_mut(), dt, MountMotion::default(), 1.0);
                     continue;
                 };
                 super::units::unit_world_pose_in(m, &net).map_or(
@@ -1151,12 +1190,15 @@ pub fn pose_riders(
         };
         unit.pos = pos;
         unit.facing = facing;
-        *transform = Transform {
+        let placed = Transform {
             translation: cry_to_bevy(pos),
             rotation,
             scale: Vec3::splat(unit.scale()),
         };
-        rider.step(&mut animator, dt, mount_motion, tempo);
+        if *transform != placed {
+            *transform = placed;
+        }
+        rider.step_awake(animator.as_deref_mut(), dt, mount_motion, tempo);
     }
 }
 
@@ -1376,15 +1418,24 @@ impl DismountMove {
     }
 }
 
-/// Plays the get-off start/loop/end clips of the riders that detached and lets them walk once the clips are over.
+/// Plays the get-off start/loop/end clips of the riders that detached and lets them walk once the clips are over. A
+/// rider nobody sees (its animator parked by `units::cull_units`) walks at once: its get-off would otherwise wait for it
+/// to be seen, and it would stay where it got off, unmoved by its own movement, until then.
 pub fn step_dismounts(
     mut commands: Commands,
     time: Res<Time>,
-    mut riders: Query<(Entity, &mut Rider, &mut Animator)>,
+    mut riders: Query<(Entity, &mut Rider, Option<&mut Animator>, Has<super::units::Asleep>)>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut rider, mut animator) in &mut riders {
-        if rider.dismounting() && rider.step(&mut animator, dt, MountMotion::default(), 1.0) {
+    for (entity, mut rider, animator, asleep) in &mut riders {
+        if !rider.dismounting() {
+            continue;
+        }
+        let done = match animator {
+            Some(mut animator) => rider.step(&mut animator, dt, MountMotion::default(), 1.0),
+            None => asleep,
+        };
+        if done {
             commands.queue(move |world: &mut World| unseat(world, entity));
         }
     }
@@ -3822,6 +3873,7 @@ mod tests {
             anim,
             run_speed: 9.0,
             on_foot: None,
+            slept: false,
         };
         (rider, Animator::new(rig, Vec::new()))
     }
@@ -4882,3 +4934,6 @@ mod seat_lag_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod sleep_tests;

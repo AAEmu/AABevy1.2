@@ -133,9 +133,10 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     The get-on is only for a **fresh** attach: the local player when a reason is pending, a remote unit when the attach
     arrives after this client saw it on foot. A remote rider that streams in already riding, one that leaves the drawing
     range mounted and returns on the same seat, and a local player entity built again while riding start in the riding
-    loops; waiting for the rider's animator or the mount's data keeps a real on-foot-to-attach transition fresh, while a
-    unit first seen attached never becomes fresh (a conservative rule; the real client's per-entity attach event is not
-    in the 1.2 notes);
+    loops; waiting for the rider's rig (a model still loading) or the mount's data keeps a real on-foot-to-attach
+    transition fresh, while a unit first seen attached never becomes fresh (a conservative rule; the real client's
+    per-entity attach event is not in the 1.2 notes). A rider that gets on out of view (its animator parked, see below) is
+    seated at once from the parked animator's rig, without the get-on: it is over by the time anyone sees the rider;
   * **riding:** `Horse_DriverIdle` (:1464), `Horse_DriverWalk` (:1490) and `Horse_DriverRun` (:1479) by the graph's
     PseudoSpeed bands 0..0.1, 0.15..0.6 and 0.7..2, with the `_FIST_MO_RIDER_HORSE_IDLETORUN` (:1474) and
     `horse_mo_relaxed_runtoidle_f` (:1488) one-shots between idle and run. Their `transition_time` 0.2 s is the blend; the
@@ -182,6 +183,18 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     and has no run-to-idle), so the elephant crossfades directly instead of playing the horse's clips;
 * the seat is the bone's place on the mount's last drawn pose carried to where the mount stands in this frame, so a rider does
   not trail a moving mount;
+* a rider nobody sees stays on its mount: `units::cull_units` parks the animator (`units::Asleep`) of a unit outside the
+  view or over 60 m away and judges that from the unit's own transform, and the server sends no movement of an attached
+  unit, so a rider that was not placed while asleep stayed where it got on or where it left the view, was never judged in
+  view again and its mount was drawn alone (live check D1, 2026-11-07: a rider seated in view, the camera turned away while
+  it rode 18 m on; a rider that got on behind the camera and rode into view; a horse swimming into view from the beach).
+  `pose_riders` puts a sleeping rider (and one whose mount sleeps: the parked bones keep their pose under the moving root)
+  on its seat every frame without stepping its clips, so it wakes with its mount; on waking it starts again in the gait of
+  the mount's motion now (`RiderAnim::wake`: no idle-to-run, landing or get-on for what happened unseen), and a rider that
+  gets off while asleep walks at once (`step_dismounts`) instead of holding its get-off until it is seen. Its drawn
+  position (`RemoteUnit::pos`) follows the seat too; the network `Unit::pos` stays where it got on (the script runner's
+  `units` distance reads that one). A rider asleep in the 60-110 m band is drawn on the seat in the last pose its parked
+  animator had (a far unit is frozen like every other one);
 * the rider's state machine waits while its `Animator` is frame-held (`combat::framehold`, ice/stone): the get-on, gait and
   get-off timers and clip records stop with the animator's clock, so a hold cannot finish the get-on behind the freeze or
   take a getting-off rider off before the get-off clips played (they resume where they stopped);
