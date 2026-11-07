@@ -1697,6 +1697,21 @@ mod tests {
     }
 
     #[test]
+    fn bag_use_by_type_sees_the_queued_use_through_every_use_slot_wrapper() {
+        // `X2Bag:UseItemByType` reads `AAUI.UseSlot`'s answer: the skillbook and look-conversion wrappers pass it through.
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install(&mut rt, &bridge).unwrap();
+        rt.lua.load(r#"
+            HUD.bag_slots = 4
+            HUD.bag = { [1] = { id = 777, count = 1 } }
+            assert(X2Bag:UseItemByType(777) == true)
+            assert(X2Bag:UseItemByType(9) == false)
+        "#).exec().unwrap();
+        assert_eq!(bridge.borrow().requests, vec![Request::UseBag { slot: 1 }]);
+    }
+
+    #[test]
     fn page_requests_apply_and_action_slots_follow_the_page() {
         let bridge = Rc::new(RefCell::new(HudData::default()));
         bridge.borrow_mut().requests.push(Request::SetActionBarPage { page: 1 });
