@@ -60,8 +60,9 @@ call that would have written it also used the nil `listCtrl` global. The origina
 its page argument and the PageListCtrl's `UpdatePage` does the paging, so the shim loops over all
 records too. UIParent's `SET_BOUNTY` handler calls `ShowSetupBountyWindow(id, name, money)`, matching
 the native event's argument order; the shipped scripts have no SET_BOUNTY listener. The original
-FillLeftFrame body still indexes its own CUR_SELECTED upvalue, so the left detail card stays on the
-row the board opened with; the shim only restores the reward handler's selection binding.
+FillLeftFrame body indexes its argument with its own CUR_SELECTED upvalue; the wrapper passes a view
+that resolves every key to the selected record, so the detail card and the reward button follow the
+same row.
 
 The popup-menu entry (`popup_menu_proc` proto `main.18`) stays out of scope: its closure is held in a
 local that no later closure captures, it is stored in no global, and no portrait/menu entry reaches

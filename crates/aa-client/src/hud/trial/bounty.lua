@@ -48,7 +48,10 @@ local function patchWindow(wnd)
     curSelected = sel
     bountyRecords = recs
     records = recs
-    return fillLeft(self, sel, recs)
+    -- The original body indexes its argument with its own CUR_SELECTED upvalue; hand it a view
+    -- whose every key resolves to the selected record so the card follows the selection.
+    local row = recs and sel and recs[sel]
+    return fillLeft(self, sel, setmetatable({}, { __index = function() return row end }))
   end
 
   wnd.FillData = function(self, page)

@@ -325,6 +325,10 @@ fn shim_fills_nonempty_rows_reward_selection_done_and_repatches_after_reopen() -
         .load("userTrial.bountyBulletWnd.pageListCtrl.listCtrl:Select(1)")
         .exec()?;
     aa_ui::lua::flush(&rt.lua);
+    // The detail card follows the selection, so it names the row the button rewards.
+    rt.lua
+        .load("assert(userTrial.bountyBulletWnd.leftFrame.identikitPicture.name:GetText()=='Second')")
+        .exec()?;
     crate::hud::expansion::fixture::click(&rt, "userTrial.bountyBulletWnd.bountyButton")?;
     assert_eq!(
         commands(&state),
