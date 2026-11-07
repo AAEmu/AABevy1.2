@@ -16,6 +16,8 @@
 //!   45 degrees; unarmed combat plays the side clip. The pelvis turn is not drawn (aa-anim has none).
 //! * **Dash** (stance `sprint`, buff 2675): `fist_mo_jump_sprint_[dir]_*`, standing `fist_mo_jump_sprint_s_end`; backward
 //!   ones take the relaxed backward clips. Its take-off blends in at once (transition 0).
+//! * **Mounts** ([`JumpKind::Creature`]): the horse graph `game/animations/graphs/horse_full_body.xml` (every rideable
+//!   mate's `actor_models.animation_graph`) has only forward and backward clips, `fist_mo_jump_[f|b]_*`.
 
 /// The phases of a jump.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +115,22 @@ impl JumpDir {
             d => d.code(),
         }
     }
+
+    /// A backward direction (`b`, `bl`, `br`).
+    pub fn backward(self) -> bool {
+        matches!(self, JumpDir::B | JumpDir::Bl | JumpDir::Br)
+    }
+
+    /// A creature's clip side: the horse graph's `l`, `r`, `fl` and `fr` play the forward clip and `bl`, `br` the
+    /// backward one (`horse_full_body.xml` :940-1013 overrides, the pelvis turn not drawn). It has no `s` state, so no
+    /// direction takes the side the jump went to (`back`).
+    fn creature(self, back: bool) -> &'static str {
+        match self {
+            JumpDir::S if back => "b",
+            d if d.backward() => "b",
+            _ => "f",
+        }
+    }
 }
 
 /// What the character jumps as: the graph's `Stance` and `Item1`, and walking (`jumpMP02`).
@@ -126,11 +144,21 @@ pub enum JumpKind {
     Sprint,
     /// The weapon out: `[item1]_mo_combat_*` (`fist`, `onehand`, `twohand`, `staff`, `music`).
     Combat(&'static str),
+    /// A creature of the horse graph (a mount): `fist_mo_jump_[f|b]_*`. `back`: the jump went backward, which picks the
+    /// side of a phase with no direction asked (the standing landing `fist_mo_jump_b_end`).
+    Creature { back: bool },
 }
+
+/// A creature's air clip: the horse graph's `fist_mo_jump_[dir]_loop` forward, and its freefall state
+/// (`fist_mo_jump_freefall`, `horse_full_body.xml` :1055-1059).
+pub const CREATURE_AIR: &str = "fist_mo_jump_f_loop";
 
 /// The clip names to try for a phase, best first: the graph's choice, then the relaxed unarmed one, then the old single air
 /// clip. The names are `.cal` aliases (`fist_mo_relaxed_jump_s_start = fist\fist_mo_jump_s_start.caf` in `global_player.cal`).
 pub fn clip_names(phase: JumpPhase, dir: JumpDir, kind: JumpKind) -> Vec<String> {
+    if let JumpKind::Creature { back } = kind {
+        return creature_names(phase, dir, back);
+    }
     if phase == JumpPhase::Fall {
         return vec!["all_re_combat_fall".to_string(), "fist_mo_relaxed_jump_s_loop".to_string()];
     }
@@ -150,6 +178,7 @@ pub fn clip_names(phase: JumpPhase, dir: JumpDir, kind: JumpKind) -> Vec<String>
             d => format!("fist_mo_jump_sprint_{}", suffix(d.relaxed())),
         },
         JumpKind::Combat(item) => format!("{item}_mo_combat_jump_{}", suffix(dir.combat())),
+        JumpKind::Creature { .. } => unreachable!("a creature's names are creature_names'"),
     };
     let mut names = vec![first];
     for n in [relaxed, "fist_mo_relaxed_jump_s_loop".to_string()] {
@@ -160,10 +189,34 @@ pub fn clip_names(phase: JumpPhase, dir: JumpDir, kind: JumpKind) -> Vec<String>
     names
 }
 
-/// The cross-fade into a phase (s): the graph's `transition_time` (a Dash take-off has none).
+/// A creature's clips (`horse_full_body.xml` :808-1060; `global_horse.cal` :220-239 names the f and b sets, l and r are
+/// commented out): `fist_mo_jump_[side]_start`, `_loop`, and at touchdown `_land` with a direction asked (`Jump to Move`)
+/// or `_end` with none (`fist_mo_jump_[dir]_f_end` / `_b_end`, `Jump to Idle`); a freefall plays [`CREATURE_AIR`]. The
+/// walking variants (`_start_walk`, `_f_loop_walk`, Action `jumpMP02`) play the same clips. The air clip is the fallback.
+fn creature_names(phase: JumpPhase, dir: JumpDir, back: bool) -> Vec<String> {
+    let side = dir.creature(back);
+    let first = match phase {
+        JumpPhase::Start => format!("fist_mo_jump_{side}_start"),
+        JumpPhase::Loop => format!("fist_mo_jump_{side}_loop"),
+        JumpPhase::Land if dir == JumpDir::S => format!("fist_mo_jump_{side}_end"),
+        JumpPhase::Land => format!("fist_mo_jump_{side}_land"),
+        JumpPhase::Fall => CREATURE_AIR.to_string(),
+    };
+    let mut names = vec![first];
+    if names[0] != CREATURE_AIR {
+        names.push(CREATURE_AIR.to_string());
+    }
+    names
+}
+
+/// The cross-fade into a phase (s): the graph's `transition_time` (a Dash take-off has none). A creature's take-off and air
+/// clip blend 0.1 and its landing and freefall 0.2 (`horse_full_body.xml` :984, :946, :872, :1059); its standing landings
+/// (:812, :825) leave it empty, taken as 0.2 too.
 pub fn fade(phase: JumpPhase, kind: JumpKind) -> f32 {
     match (phase, kind) {
         (JumpPhase::Start, JumpKind::Sprint) => 0.0,
+        (JumpPhase::Loop, JumpKind::Creature { .. }) => 0.1,
+        (JumpPhase::Land, JumpKind::Creature { .. }) => 0.2,
         (JumpPhase::Start, _) | (JumpPhase::Land, _) => 0.1,
         (JumpPhase::Loop | JumpPhase::Fall, _) => 0.2,
     }
@@ -241,6 +294,33 @@ mod tests {
         assert_eq!(clip_names(JumpPhase::Land, JumpDir::F, JumpKind::Sprint).last().unwrap(), "fist_mo_relaxed_jump_s_loop");
         assert_eq!(fade(JumpPhase::Start, JumpKind::Sprint), 0.0);
         assert_eq!(fade(JumpPhase::Loop, JumpKind::Relaxed), 0.2);
+    }
+
+    /// `horse_full_body.xml` :808-1060: f, l, r, fl, fr take the forward clips and b, bl, br the backward ones; a landing
+    /// with a direction is `_land`, without one the `_end` of the side the jump went to; the freefall is the forward loop.
+    #[test]
+    fn a_mount_jumps_with_the_horse_graphs_forward_and_backward_clips() {
+        let first = |p, d, back| clip_names(p, d, JumpKind::Creature { back })[0].clone();
+        for d in [JumpDir::F, JumpDir::L, JumpDir::R, JumpDir::Fl, JumpDir::Fr] {
+            assert_eq!(first(JumpPhase::Start, d, false), "fist_mo_jump_f_start", "{d:?}");
+            assert_eq!(first(JumpPhase::Loop, d, true), "fist_mo_jump_f_loop", "{d:?}");
+            assert_eq!(first(JumpPhase::Land, d, false), "fist_mo_jump_f_land", "{d:?}");
+        }
+        for d in [JumpDir::B, JumpDir::Bl, JumpDir::Br] {
+            assert_eq!(first(JumpPhase::Start, d, false), "fist_mo_jump_b_start", "{d:?}");
+            assert_eq!(first(JumpPhase::Loop, d, false), "fist_mo_jump_b_loop", "{d:?}");
+            assert_eq!(first(JumpPhase::Land, d, false), "fist_mo_jump_b_land", "{d:?}");
+        }
+        // no direction at touchdown: the standing landing of the jump's side
+        assert_eq!(first(JumpPhase::Land, JumpDir::S, false), "fist_mo_jump_f_end");
+        assert_eq!(first(JumpPhase::Land, JumpDir::S, true), "fist_mo_jump_b_end");
+        assert_eq!(first(JumpPhase::Start, JumpDir::S, false), "fist_mo_jump_f_start");
+        // the freefall, and the air clip as the only fallback (no humanoid name)
+        assert_eq!(clip_names(JumpPhase::Fall, JumpDir::B, JumpKind::Creature { back: true }), ["fist_mo_jump_f_loop"]);
+        assert_eq!(clip_names(JumpPhase::Land, JumpDir::B, JumpKind::Creature { back: true }), ["fist_mo_jump_b_land", "fist_mo_jump_f_loop"]);
+        let creature = JumpKind::Creature { back: false };
+        assert_eq!((fade(JumpPhase::Start, creature), fade(JumpPhase::Loop, creature)), (0.1, 0.1));
+        assert_eq!((fade(JumpPhase::Land, creature), fade(JumpPhase::Fall, creature)), (0.2, 0.2));
     }
 
     #[test]

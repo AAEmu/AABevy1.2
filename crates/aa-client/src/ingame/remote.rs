@@ -38,6 +38,8 @@ pub struct Report {
     pub airborne: bool,
     /// In combat (the movement flag, the alertness or the stance of the packet).
     pub combat: bool,
+    /// Swimming: the packet's stance is `SWIM` or `CO_SWIM`.
+    pub swimming: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -60,6 +62,7 @@ pub struct Pose {
     pub heading: Vec2,
     pub airborne: bool,
     pub combat: bool,
+    pub swimming: bool,
 }
 
 /// The buffered reports of one unit and the playback clock.
@@ -81,8 +84,15 @@ pub fn lerp_angle(a: f32, b: f32, t: f32) -> f32 {
 impl Track {
     /// A unit that stands at `pos` facing `yaw`.
     pub fn new(pos: Vec3, yaw: f32) -> Track {
-        let report = Report { pos, yaw, server_ms: 0, airborne: false, combat: false };
+        let report = Report { pos, yaw, server_ms: 0, airborne: false, combat: false, swimming: false };
         Track { snaps: VecDeque::from([Snap { t: 0.0, arrival: f32::NEG_INFINITY, report }]), clock: 0.0, gap: 0.1 }
+    }
+
+    /// A unit that floats at `pos` facing `yaw` in the swim stance (a mate its driver left in the water).
+    pub fn swimming(pos: Vec3, yaw: f32) -> Track {
+        let mut track = Track::new(pos, yaw);
+        track.snaps[0].report.swimming = true;
+        track
     }
 
     /// Where the newest report put the unit.
@@ -170,7 +180,7 @@ impl Track {
             (speed, d.normalize_or_zero())
         };
         if clock <= first.t || n == 1 {
-            return Pose { pos: first.report.pos, yaw: first.report.yaw, speed: 0.0, heading: Vec2::ZERO, airborne: first.report.airborne, combat };
+            return Pose { pos: first.report.pos, yaw: first.report.yaw, speed: 0.0, heading: Vec2::ZERO, airborne: first.report.airborne, combat, swimming: first.report.swimming };
         }
         if clock >= last.t {
             // past the newest report: carry on for a moment if the unit was moving, else hold
@@ -180,9 +190,9 @@ impl Track {
             if speed > STANDING && over < EXTRAPOLATE {
                 let v = (last.report.pos - prev.report.pos) / (last.t - prev.t).max(1e-4);
                 let v = if last.report.airborne { v } else { Vec3::new(v.x, v.y, 0.0) };
-                return Pose { pos: last.report.pos + v * over, yaw: last.report.yaw, speed, heading, airborne: last.report.airborne, combat };
+                return Pose { pos: last.report.pos + v * over, yaw: last.report.yaw, speed, heading, airborne: last.report.airborne, combat, swimming: last.report.swimming };
             }
-            return Pose { pos: last.report.pos, yaw: last.report.yaw, speed: 0.0, heading: Vec2::ZERO, airborne: last.report.airborne, combat };
+            return Pose { pos: last.report.pos, yaw: last.report.yaw, speed: 0.0, heading: Vec2::ZERO, airborne: last.report.airborne, combat, swimming: last.report.swimming };
         }
         let i = (0..n - 1).find(|&i| self.snaps[i + 1].t >= clock).unwrap_or(n - 2);
         let (a, b) = (self.snaps[i], self.snaps[i + 1]);
@@ -196,6 +206,7 @@ impl Track {
             heading,
             airborne: if f < 0.5 { a.report.airborne } else { b.report.airborne },
             combat,
+            swimming: if f < 0.5 { a.report.swimming } else { b.report.swimming },
         }
     }
 }
@@ -213,7 +224,7 @@ mod tests {
     use super::*;
 
     fn report(x: f32, ms: u32) -> Report {
-        Report { pos: Vec3::new(x, 0.0, 0.0), yaw: 0.0, server_ms: ms, airborne: false, combat: false }
+        Report { pos: Vec3::new(x, 0.0, 0.0), yaw: 0.0, server_ms: ms, airborne: false, combat: false, swimming: false }
     }
 
     /// Plays back a unit that walks `speed` m/s along x, reported every 100 ms, with arrival times jittered by `jitter` (s,

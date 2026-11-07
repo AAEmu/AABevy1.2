@@ -14,7 +14,8 @@
 //!   `materialeffects.xml`; the column is the water, object or terrain surface under the foot
 //!   ([`Audio::surface`]), the cell gives the sound of `fxlibs/<row>.xml`). The run and walk clips have none of their own: the
 //!   steps are phases (0.25, 0.75 of a cycle) in the `.lmg` of their group ([`SoundBook::clip_events`]). A clip on the upper body of
-//!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock.
+//!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock. A model
+//!   without a clip set (the opened glider) carries its own `.cal` in [`SoundEvents`].
 //! * **Blows.** A received weapon impact plays the weapon's sound on the target's material (`combat_sounds`, [`SoundBook::blow`]).
 //!
 //! Every unit has at most [`UNIT_CAP`] sounds at a time (a new one replaces the oldest of the same or a lower [`Class`], else it is
@@ -40,7 +41,7 @@ use super::camera::OrbitCamera;
 use super::combat::{Dead, Sfx};
 use super::player::LocalPlayer;
 use super::units::RemoteUnit;
-use super::vehicle::VehicleMotion;
+use super::vehicle::{VehicleDamage, VehicleMotion};
 use crate::Screen;
 use crate::sound::{Packs, log_enabled};
 
@@ -175,6 +176,14 @@ impl SoundBook {
             .map(|n| Arc::from(n.as_str()));
         inner.model_packs.insert(model, name.clone());
         name
+    }
+
+    /// Whether the model is a ship (`ShipUnitModel::UpdateSound` rather than the vehicle one).
+    pub fn is_ship(&self, model: u32) -> bool {
+        self.inner().conn.as_ref().is_some_and(|c| {
+            c.query_row("SELECT sub_type = 'ShipModel' FROM models WHERE id = ?1", params![model], |r| r.get::<_, bool>(0))
+                .unwrap_or(false)
+        })
     }
 
     /// The maximum speed of a vehicle or ship model (`vehicle_models.velocity` / `ship_models.velocity`): the
@@ -768,14 +777,35 @@ struct Cursor {
     events: Arc<[AnimSound]>,
 }
 
-/// Plays the sound events of the clips the units play (footsteps, grunts, swings), for the units near the camera.
+/// The `.cal` of a model that plays its clips without a [`Locomotion`] (an opened glider, `glide::show_glider`): [`anim_sounds`]
+/// plays the events of its `$SoundEventDatabase` as it does a unit's.
+#[derive(Component, Clone)]
+pub struct SoundEvents(pub Arc<aa_anim::Cal>);
+
+impl SoundEvents {
+    /// The component for a model whose `.cal` names a sound event database (`None`: nothing to play).
+    pub fn of(cal: Arc<aa_anim::Cal>) -> Option<SoundEvents> {
+        cal.sound_events.is_some().then_some(SoundEvents(cal))
+    }
+}
+
+/// The `$SoundEventDatabase` an animated entity's clips are looked up in: a unit's from its clip set, else the model's own.
+fn sound_database<'a>(loco: Option<&'a Locomotion>, own: Option<&'a SoundEvents>) -> Option<&'a str> {
+    loco.map(|loco| &loco.clips.cal).or(own.map(|own| &own.0)).and_then(|cal| cal.sound_events.as_deref())
+}
+
+/// Plays the sound events of the clips the units play (footsteps, grunts, swings), for the units near the camera, and of the
+/// models that carry [`SoundEvents`] (the glider's opening and folding).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn anim_sounds(
     mut commands: Commands,
     time: Res<Time>,
     audio: Audio,
     terrain: Res<TerrainQuery>,
-    units: Query<(Entity, &Animator, &Locomotion, &GlobalTransform, Option<&RemoteUnit>, Option<&LocalPlayer>), Without<Dead>>,
+    units: Query<
+        (Entity, &Animator, Option<&Locomotion>, Option<&SoundEvents>, &GlobalTransform, Option<&RemoteUnit>, Option<&LocalPlayer>),
+        (Without<Dead>, Or<(With<Locomotion>, With<SoundEvents>)>),
+    >,
     xforms: Query<&GlobalTransform>,
     mut cursors: Local<HashMap<Entity, Cursor>>,
     mut next_prune: Local<f32>,
@@ -790,13 +820,13 @@ fn anim_sounds(
         *next_prune = now + 3.0;
         cursors.retain(|e, _| units.contains(*e));
     }
-    for (entity, animator, loco, gt, remote, local) in &units {
+    for (entity, animator, loco, own, gt, remote, local) in &units {
         let Some(playing) = animator.current.as_ref() else { continue };
         if gt.translation().distance_squared(camera) > ANIM_REACH * ANIM_REACH {
             cursors.remove(&entity);
             continue;
         }
-        let Some(database) = loco.clips.cal.sound_events.as_deref() else { continue };
+        let Some(database) = sound_database(loco, own) else { continue };
         let clip = Arc::as_ptr(&playing.clip.clip) as usize;
         let t = playing.time;
         let (before, wrapped) = match cursors.get(&entity) {
@@ -930,13 +960,22 @@ fn init(mut commands: Commands, engine: Option<Res<Engine>>) {
 pub struct VehicleSound {
     engine: Option<Entity>,
     run: Option<Entity>,
+    /// A ship's second loop (`ShipUnitModel` `this+0x38c`), the pack's `steering` item.
+    steering: Option<Entity>,
     engine_path: Option<Arc<str>>,
     run_path: Option<Arc<str>>,
+    steering_path: Option<Arc<str>>,
+    /// A `ShipModel` root: `run` gates on 1 m/s and `steering` exists.
+    ship: bool,
     /// `vehicle_models.velocity` / `ship_models.velocity`, at least 0.1.
     max_speed: f32,
     /// The speed ratio last written (NaN: not written yet).
     last_speed: f32,
     run_playing: bool,
+    steering_playing: bool,
+    /// The engine sound has been started (it is not while the prefab is dying or dead).
+    engine_started: bool,
+    /// Prefab state 5 or 6 at the last look.
     stopped: bool,
 }
 
@@ -945,11 +984,16 @@ impl VehicleSound {
         VehicleSound {
             engine: None,
             run: None,
+            steering: None,
             engine_path: None,
             run_path: None,
+            steering_path: None,
+            ship: false,
             max_speed: 1.0,
             last_speed: f32::NAN,
             run_playing: false,
+            steering_playing: false,
+            engine_started: false,
             stopped: false,
         }
     }
@@ -963,30 +1007,45 @@ impl VehicleSound {
 /// neither started nor updated there, but it is not explicitly stopped. The Farm Wagon's `sound_packs` 176
 /// `run_tractor` has no `engine` item and `run` -> sound 950 (`sounds/x2vehicles:trailer:run`); the speedcar's
 /// `run_speedcar` has the reverse (`engine` -> `sounds/x2vehicles:speed_car:run`, `run` with no sound).
+#[allow(clippy::type_complexity)]
 fn vehicle_engine_sounds(
     mut commands: Commands,
     units: Option<Res<Units>>,
     book: Option<Res<SoundBook>>,
     packs: Option<Res<Packs>>,
     // only vehicle roots: `vehicle::spawn` gives them `VehicleMotion`, players and NPCs never get it
-    vehicles: Query<(Entity, &RemoteUnit), (With<VehicleMotion>, Without<VehicleSound>)>,
+    vehicles: Query<(Entity, &RemoteUnit, Option<&VehicleDamage>), (With<VehicleMotion>, Without<VehicleSound>)>,
 ) {
     let (Some(units), Some(book), Some(packs)) = (units, book, packs) else { return };
     let Some(packs) = packs.get() else { return };
-    for (entity, remote) in &vehicles {
+    for (entity, remote, damage) in &vehicles {
         let model = units.by_id.get(&remote.obj_id).map(|unit| unit.model_id);
         let mut state = VehicleSound::checked_only();
         if let Some(model) = model {
+            state.ship = book.is_ship(model);
             state.max_speed = book.vehicle_max_speed(model).unwrap_or(1.0).max(0.1);
             if let Some(pack) = book.pack_of_model(model) {
                 state.engine_path = packs.path(&pack, "engine").map(Arc::from);
                 state.run_path = packs.path(&pack, "run").map(Arc::from);
+                if state.ship {
+                    state.steering_path = packs.path(&pack, "steering").map(Arc::from);
+                }
             }
         }
-        state.engine = state
-            .engine_path
+        // a unit that appears dying or dead never starts its engine (the native returns before that block)
+        state.stopped = damage.is_some_and(|damage| matches!(damage.state, 5 | 6));
+        state.engine_started = !state.stopped;
+        state.engine = state.engine_path.as_ref().map(|path| {
+            let mut engine = commands.spawn((ChildOf(entity), Transform::default()));
+            if state.engine_started {
+                engine.insert(Sound::event(path.as_ref()));
+            }
+            engine.id()
+        });
+        state.steering = state
+            .steering_path
             .as_ref()
-            .map(|path| commands.spawn((ChildOf(entity), Transform::default(), Sound::event(path.as_ref()))).id());
+            .map(|_| commands.spawn((ChildOf(entity), Transform::default())).id());
         state.run = state
             .run_path
             .as_ref()
@@ -1010,44 +1069,60 @@ fn write_vehicle_params(sound: &mut Sound, ratio: f32) {
     sound.params.push(("pitch2".into(), pitch));
 }
 
-/// Toggles `run` with the model's movement and keeps the `engine` parameters on its speed. Native gates on
-/// prefab damage state 5 (dying) or 6 (dead): it stops the `run`/`yaw`/`pitch` handles and freezes the engine
-/// (no start, no updates; it is not explicitly stopped). This branch has no dying state yet (PR #69), so it
-/// gates on [`Dead`] (state 6) and stops both sounds there - a deviation from the native until #69. A
-/// resurrection plays the engine again.
+/// A ship turns (the `steering` loop plays) above this yaw rate in rad/s. Native keys it on `this+213`, which
+/// `UpdateSteeringWheel` (`sub_390D2990`) sets to 1 or 2 while the helm wheel turns toward its quantised steering
+/// target and to 0 once it rests there, so the original is silent through a steady turn. The Bevy motion has no
+/// helm wheel (capture-pending); the yaw rate stands in and plays through the whole turn.
+const STEERING_YAW_RATE: f32 = 0.02;
+
+/// A ship's `run` loop plays only above this speed in m/s (`ShipUnitModel::UpdateSound`, `sub_390C7BF0`).
+const SHIP_RUN_SPEED: f32 = 1.0;
+
+/// A land vehicle's `run` loop plays above this speed or yaw rate (`FUN_390c6780`).
+const VEHICLE_RUN_SPEED: f32 = 0.0003;
+
+/// Toggles `run` (and a ship's `steering`) with the model's movement and keeps the `engine` parameters on its
+/// speed. In prefab damage state 5 (dying) or 6 (dead) native stops `run`/`steering` and freezes the engine
+/// (no start, no updates; it is not explicitly stopped); back in 1..4 the engine updates again.
 fn update_vehicle_engine_sounds(
     mut commands: Commands,
-    dead: Query<(), With<Dead>>,
-    mut roots: Query<(Entity, &mut VehicleSound, Option<&VehicleMotion>)>,
+    mut roots: Query<(&mut VehicleSound, Option<&VehicleMotion>, Option<&VehicleDamage>)>,
     mut sounds: Query<&mut Sound>,
 ) {
-    for (entity, mut state, motion) in &mut roots {
-        let dead = dead.contains(entity);
-        if dead != state.stopped {
-            state.stopped = dead;
-            if dead {
-                if let Some(engine) = state.engine {
-                    commands.entity(engine).remove::<Sound>();
-                }
-                if let Some(run) = state.run {
-                    commands.entity(run).remove::<Sound>();
+    for (mut state, motion, damage) in &mut roots {
+        let stopped = damage.is_some_and(|damage| matches!(damage.state, 5 | 6));
+        if stopped != state.stopped {
+            state.stopped = stopped;
+            state.last_speed = f32::NAN;
+            if stopped {
+                // nothing starts them again while stopped, so this runs once per death
+                for handle in [state.run, state.steering].into_iter().flatten() {
+                    commands.entity(handle).remove::<Sound>();
                 }
                 state.run_playing = false;
-            } else if let (Some(engine), Some(path)) = (state.engine, state.engine_path.as_ref()) {
-                commands.entity(engine).insert(Sound::event(path.as_ref()));
-                state.last_speed = f32::NAN;
+                state.steering_playing = false;
             }
         }
-        if dead {
+        if stopped {
             continue;
         }
-        let (speed, moving) = motion.map_or((0.0, false), |motion| {
-            let speed = motion.velocity.length();
-            (speed, speed > 0.0003 || motion.yaw_rate.abs() > 0.0003)
-        });
+        let (speed, yaw_rate) = motion.map_or((0.0, 0.0), |motion| (motion.velocity.length(), motion.yaw_rate));
+        let moving = if state.ship {
+            speed > SHIP_RUN_SPEED
+        } else {
+            speed > VEHICLE_RUN_SPEED || yaw_rate.abs() > VEHICLE_RUN_SPEED
+        };
         if let Some(engine) = state.engine {
             let ratio = (speed / state.max_speed).clamp(0.0, 1.0);
-            if (!state.last_speed.is_finite() || (ratio - state.last_speed).abs() > 0.001)
+            if !state.engine_started {
+                if let Some(path) = state.engine_path.as_ref() {
+                    let mut sound = Sound::event(path.as_ref());
+                    write_vehicle_params(&mut sound, ratio);
+                    commands.entity(engine).insert(sound);
+                    state.engine_started = true;
+                    state.last_speed = ratio;
+                }
+            } else if (!state.last_speed.is_finite() || (ratio - state.last_speed).abs() > 0.001)
                 && let Ok(mut sound) = sounds.get_mut(engine)
             {
                 write_vehicle_params(&mut sound, ratio);
@@ -1063,6 +1138,17 @@ fn update_vehicle_engine_sounds(
                 commands.entity(run).remove::<Sound>();
             }
             state.run_playing = moving;
+        }
+        if let (Some(steering), Some(path)) = (state.steering, state.steering_path.as_ref()) {
+            let turning = yaw_rate.abs() > STEERING_YAW_RATE;
+            if turning != state.steering_playing {
+                if turning {
+                    commands.entity(steering).insert(Sound::event(path.as_ref()));
+                } else {
+                    commands.entity(steering).remove::<Sound>();
+                }
+                state.steering_playing = turning;
+            }
         }
     }
 }
@@ -1153,6 +1239,67 @@ mod tests {
         assert_eq!(times(0.6, 0.1, true), vec![0.0, 0.7]);
         // a long frame skips two
         assert_eq!(times(0.1, 0.8, false), vec![0.3, 0.7]);
+    }
+
+    /// The opened glider has no clip set (`Locomotion` is removed from the model): its own `.cal` in [`SoundEvents`] makes
+    /// `anim_sounds` play the `$SoundEventDatabase` events of its clips. `start` fires `x2vehicles:glider:start` once (at
+    /// 0.02 of the clip), and `end` fires `:end` (at 0.33). Without the component the model was skipped and neither played.
+    #[test]
+    fn a_glider_model_plays_the_start_and_end_sounds_of_its_own_clips() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Ok(database) = std::env::var("AA_DB") else { return };
+        let Ok(packs) = SoundPacks::open(database) else { return };
+        let model = "objects/env/06_unit/06_glider/glider_bx";
+        let (Ok(cal), Ok(rig)) = (aa_anim::Cal::shared(&format!("{model}.cal")), aa_anim::pose::shared_rig(&format!("{model}.chr")))
+        else {
+            return;
+        };
+        let library = aa_anim::ClipLibrary::default();
+        let bind = |name: &str| super::super::anim::bind_clip(&rig, &cal, &library, name).unwrap_or_else(|| panic!("glider clip {name}"));
+        let (start, end) = (bind("start"), bind("end"));
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(SoundBook::open())
+            .insert_resource(Packs::fixture(packs))
+            .insert_resource(TerrainQuery::new("__glider_sound_test__"))
+            .add_systems(Update, anim_sounds);
+        app.world_mut().spawn((OrbitCamera::default(), GlobalTransform::IDENTITY));
+        let mut animator = Animator::new(rig.clone(), Vec::new());
+        animator.play(start, false, 0.0);
+        let events = SoundEvents::of(cal.clone()).expect("the glider .cal names its sound event database");
+        let glider = app.world_mut().spawn((animator, events, GlobalTransform::IDENTITY)).id();
+        let set_time = |app: &mut App, t: f32| {
+            app.world_mut().get_mut::<Animator>(glider).unwrap().current.as_mut().unwrap().time = t;
+        };
+        let sounds = |app: &mut App| -> Vec<String> {
+            let world = app.world_mut();
+            let mut query = world.query::<(&Sound, &ChildOf)>();
+            query.iter(world).filter(|(_, child)| child.parent() == glider).map(|(sound, _)| sound.event.clone()).collect()
+        };
+        // the database is read on a thread: the playhead waits past the event (0.02 x 0.83 s) until it is there
+        set_time(&mut app, 0.1);
+        for _ in 0..500 {
+            app.update();
+            if !sounds(&mut app).is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        for t in [0.2, 0.5, 0.8] {
+            set_time(&mut app, t);
+            app.update();
+        }
+        assert_eq!(sounds(&mut app), ["Sounds/x2vehicles:glider:start"], "the start clip's sound, once");
+        app.world_mut().get_mut::<Animator>(glider).unwrap().play(end, false, 0.0);
+        for t in [0.1, 0.2, 0.5] {
+            set_time(&mut app, t);
+            app.update();
+        }
+        let mut all = sounds(&mut app);
+        all.sort();
+        assert_eq!(all, ["Sounds/x2vehicles:glider:end", "Sounds/x2vehicles:glider:start"], "the end clip's sound at 0.33 of 0.5 s");
     }
 
     #[test]
@@ -1332,21 +1479,118 @@ mod tests {
         assert!((speed - 0.99).abs() < 1e-4, "full speed at 15 m/s: {speed}");
     }
 
-    /// The current deviation: native stops only the non-engine handles in states 5/6 and leaves the engine
-    /// frozen; this branch has no dying state and stops both on `Dead` (state 6).
+    fn set_state(app: &mut App, root: Entity, state: u8) {
+        let mut damage = VehicleDamage {
+            state,
+            variant: String::new(),
+            max_hp: 100,
+            requested: None,
+            dying_start: None,
+            dying_time: 0.0,
+            death_seen: false,
+            dead_effect_played: false,
+        };
+        if let Some(old) = app.world().get::<VehicleDamage>(root) {
+            damage.variant = old.variant.clone();
+        }
+        app.world_mut().entity_mut(root).insert(damage);
+    }
+
+    /// Native stops `run` in state 5/6 and leaves the engine frozen (not stopped, not updated); back in 1..4
+    /// the engine updates again.
     #[test]
-    fn a_destroyed_vehicle_stops_its_engine_and_restarts_it_on_resurrection() {
+    fn a_dying_vehicle_stops_run_and_freezes_the_engine() {
         let Some((mut app, root)) = vehicle_app(1323) else { return };
         app.update();
         app.update();
-        assert_eq!(vehicle_sound_events(&mut app, root).len(), 1);
-        app.world_mut().entity_mut(root).insert(Dead { at: 0.0 });
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(15.0, 0.0, 0.0);
         app.update();
-        let dead = vehicle_sound_events(&mut app, root);
-        assert!(dead.is_empty(), "dead: {dead:?}");
-        app.world_mut().entity_mut(root).remove::<Dead>();
+        assert_eq!(vehicle_engine_param(&mut app, root, "speed"), Some(0.99));
+        set_state(&mut app, root, 5);
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::ZERO;
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:speed_car:run"], "the engine stays");
+        assert_eq!(vehicle_engine_param(&mut app, root, "speed"), Some(0.99), "and is not updated");
+        set_state(&mut app, root, 6);
+        app.update();
+        assert_eq!(vehicle_engine_param(&mut app, root, "speed"), Some(0.99));
+        set_state(&mut app, root, 2);
+        app.update();
+        assert_eq!(vehicle_engine_param(&mut app, root, "speed"), Some(0.0), "restarted");
+    }
+
+    #[test]
+    fn a_dying_tractor_stops_run_and_restarts_it() {
+        let Some((mut app, root)) = vehicle_app(1008) else { return };
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(2.0, 0.0, 0.0);
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root).len(), 1);
+        set_state(&mut app, root, 5);
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        // still moving, still dying: `run` stays off on the later frames too
+        app.update();
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        set_state(&mut app, root, 2);
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:trailer:run"]);
+    }
+
+    /// A unit that appears dying never starts its engine; it starts when the state returns to 1..4.
+    #[test]
+    fn a_vehicle_that_appears_dead_has_no_engine_until_it_recovers() {
+        let Some((mut app, root)) = vehicle_app(1323) else { return };
+        set_state(&mut app, root, 6);
+        app.update();
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        set_state(&mut app, root, 1);
         app.update();
         app.update();
         assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:speed_car:run"]);
+    }
+
+    /// A galleon (pack 144): `run` only above 1 m/s, `steering` while it turns, both gone in state 5.
+    #[test]
+    fn a_ship_runs_above_one_metre_per_second_and_steers_while_turning() {
+        let Some((mut app, root)) = vehicle_app(115) else { return };
+        let run = "sounds/x2vehicles:ship:move_02";
+        let turn = "sounds/x2vehicles:ship:turn";
+        app.update();
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(0.5, 0.0, 0.0);
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty(), "0.5 m/s is below the gate");
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(2.0, 0.0, 0.0);
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), [run]);
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().yaw_rate = 0.3;
+        app.update();
+        let mut both = vehicle_sound_events(&mut app, root);
+        both.sort();
+        assert_eq!(both, [run, turn]);
+        set_state(&mut app, root, 5);
+        app.update();
+        assert!(vehicle_sound_events(&mut app, root).is_empty());
+        set_state(&mut app, root, 2);
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root).len(), 2);
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().yaw_rate = 0.0;
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), [run]);
+    }
+
+    /// A land vehicle has no `steering` loop and keeps the 0.0003 gate.
+    #[test]
+    fn a_land_vehicle_keeps_its_own_run_gate() {
+        let Some((mut app, root)) = vehicle_app(1008) else { return };
+        app.world_mut().get_mut::<VehicleMotion>(root).unwrap().velocity = Vec3::new(0.5, 0.0, 0.0);
+        app.update();
+        app.update();
+        assert_eq!(vehicle_sound_events(&mut app, root), ["sounds/x2vehicles:trailer:run"]);
     }
 }

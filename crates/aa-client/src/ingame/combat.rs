@@ -725,6 +725,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<preload::Preload>()
         .init_resource::<CameraShake>()
         .init_resource::<PlayerInput>()
+        .init_resource::<super::skill_motion::Inbox>()
         .add_plugins(flash::plugin)
         .add_systems(OnExit(Screen::InGame), reset)
         .add_systems(Update, framehold::observe.after(super::world_switch::clear_old_units).before(super::units::receive_moves))
@@ -823,6 +824,8 @@ struct Stage<'w, 's> {
     local: Query<'w, 's, (Entity, &'static LocalPlayer)>,
     #[allow(clippy::type_complexity)]
     actors: Query<'w, 's, (&'static mut Animator, Option<&'static mut Locomotion>, Option<&'static Acting>, Option<&'static Motion>, Has<Dead>)>,
+    /// The units seated on a mount: `mount::seat` takes their locomotion (and with it the model's `.cal`) away while they ride.
+    riders: Query<'w, 's, &'static aa_anim::Character, With<super::mount::Rider>>,
     asleep: Query<'w, 's, &'static super::units::Asleep>,
     dead: Query<'w, 's, (), With<Dead>>,
     xforms: Query<'w, 's, &'static GlobalTransform>,
@@ -954,10 +957,24 @@ impl Stage<'_, '_> {
         candidates.into_iter().find(|n| self.clip(unit, n).is_some()).unwrap_or_else(|| base.to_string())
     }
 
+    /// The unit sits on a mount: `mount::seat` took its locomotion, and its base clip is the rider loop of `mount::Rider`, which
+    /// only `Rider::step` may change (its actions are upper body layers, see [`Stage::play`]).
+    fn seated(&self, unit: Entity) -> bool {
+        matches!(self.actors.get(unit), Ok((_, None, ..))) && self.riders.contains(unit)
+    }
+
+    /// The unit's animation name table: its locomotion's, else (a seated rider has none) its character's, as `Rider::bind` reads it.
+    fn cal(&self, unit: Entity) -> Option<Arc<aa_anim::Cal>> {
+        match self.actors.get(unit).ok()? {
+            (_, Some(loco), ..) => Some(loco.clips.cal.clone()),
+            _ => aa_anim::Cal::shared(&self.riders.get(unit).ok()?.assets.cal).ok(),
+        }
+    }
+
     /// The model's clip `name` bound to the unit's animator and its length.
     fn clip(&self, unit: Entity, name: &str) -> Option<(aa_anim::BoundClip, Arc<aa_anim::Cal>)> {
-        let (animator, loco, ..) = self.actors.get(unit).ok()?;
-        let cal = loco?.clips.cal.clone();
+        let (animator, ..) = self.actors.get(unit).ok()?;
+        let cal = self.cal(unit)?;
         let clip = bind_action_clip(&animator.rig, &cal, &self.clips, name)?;
         Some((clip, cal))
     }
@@ -969,6 +986,12 @@ impl Stage<'_, '_> {
         skills::upper_candidates(&upper).find_map(|n| self.clip(unit, &n).map(|(clip, _)| clip))
     }
 
+    /// The same for a seated rider: the `ride_ub` clip of the row (`onehand_co_sk_shielddefense_ub`, the `.cal`'s `_mub`).
+    fn ride_clip(&self, unit: Entity, name: &str) -> Option<aa_anim::BoundClip> {
+        let ride = self.book.ride_clip(name)?;
+        skills::upper_candidates(&ride).find_map(|n| self.clip(unit, &n).map(|(clip, _)| clip))
+    }
+
     /// The anim events of clip `name` of the unit's model, in seconds into the clip (the databases hold phases of it).
     fn events(&self, unit: Entity, name: &str) -> clips::ClipEvents {
         let Some((clip, cal)) = self.clip(unit, name) else { return clips::ClipEvents::default() };
@@ -978,20 +1001,28 @@ impl Stage<'_, '_> {
     /// Plays a clip on a unit as an action. `hold` is how long a looping clip may last. Returns the clip's length, `None` when the
     /// unit cannot (no such clip, dead, busy with something a hit reaction must not interrupt).
     fn play(&mut self, unit: Entity, name: &str, kind: Act, looping: bool, hold: f64, now: f64) -> Option<f32> {
-        // a unit on the move plays the clip on its upper body and keeps running below it
-        let (mask, exit) = {
-            let (_, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
-            // a hit reaction never interrupts an action or a run
-            if dead || loco.is_none() || (kind == Act::Hurt && (acting.is_some() || motion.is_some_and(|m| m.speed > 0.3))) {
+        // a unit on the move plays the clip on its upper body and keeps running below it; a rider seated on a mount always does
+        // (its legs are the rider loop of `mount::Rider`, which keeps playing under the layer)
+        let (mask, exit, riding) = {
+            let (animator, loco, acting, motion, dead) = self.actors.get(unit).ok()?;
+            let riding = self.seated(unit);
+            // a hit reaction never interrupts an action or a run (a rider's run is the mount's)
+            let running = !riding && motion.is_some_and(|m| m.speed > 0.3);
+            if dead || (loco.is_none() && !riding) || (kind == Act::Hurt && (acting.is_some() || running)) {
                 if verbose() {
                     info!("combat: {unit:?} does not play {name}: dead {dead}, locomotion {}, acting {}", loco.is_some(), acting.is_some());
                 }
                 return None;
             }
-            let moving = kind != Act::Hurt && !full_body_only() && motion.is_some_and(|m| m.speed > 0.3);
+            let moving = kind != Act::Hurt && !full_body_only() && running;
             // the exit link of the action the whole body is still in (0 from an idle or a run)
             let exit = acting.filter(|a| !a.layered && a.until > now).and(loco.as_ref().and_then(|l| l.action_exit)).unwrap_or(0.0);
-            (loco.filter(|l| moving && l.clips.can_move()).and_then(|l| l.clips.upper.clone()), exit)
+            let mask = match loco {
+                Some(loco) => (moving && loco.clips.can_move()).then(|| loco.clips.upper.clone()).flatten(),
+                // `player_upper_body.xml` has the riding states; a rig without an upper body plays nothing
+                None => Some(aa_anim::BoneMask::upper_body(&animator.rig)?),
+            };
+            (mask, exit, riding)
         };
         // a stop marker (`all_ac_stop`, the clip of a skill that only ends what the unit is doing) releases the unit
         if skills::is_stop_clip(name) {
@@ -1011,7 +1042,15 @@ impl Stage<'_, '_> {
             return None;
         }
         let layered = mask.is_some();
-        let clip = if mask.is_some() { self.upper_clip(unit, name) } else { None };
+        // a rider's variant is `ride_ub`; without one the clip itself plays on the upper body (Mounted Attack's
+        // `onehand_co_horse_attack_r_slash` is a state of the upper body graph only)
+        let clip = if riding {
+            self.ride_clip(unit, name)
+        } else if layered {
+            self.upper_clip(unit, name)
+        } else {
+            None
+        };
         let Some(clip) = clip.or_else(|| self.clip(unit, name).map(|(clip, _)| clip)) else {
             if verbose() {
                 info!("combat: unit has no clip {name}");
@@ -1099,8 +1138,8 @@ impl Stage<'_, '_> {
 
     /// The sound events of a clip that plays on the unit's upper body.
     fn layer_sounds(&self, unit: Entity, clip: &aa_anim::BoundClip) -> Option<Arc<[AnimSound]>> {
-        let (_, loco, ..) = self.actors.get(unit).ok()?;
-        let database = loco?.clips.cal.sound_events.as_deref()?;
+        let cal = self.cal(unit)?;
+        let database = cal.sound_events.as_deref()?;
         let events = self.audio.book()?.clip_events(database, &clip_file(clip)?, clip.clip.duration)?;
         (!events.is_empty()).then_some(events)
     }
@@ -3172,6 +3211,255 @@ mod tests {
         assert_eq!(unit_entity(7, [(local, 7)].into_iter(), [(remote, 7)].into_iter()), Some(local));
         assert_eq!(unit_entity(8, [(local, 7)].into_iter(), [(remote, 8)].into_iter()), Some(remote));
         assert_eq!(unit_entity(0, [(local, 0)].into_iter(), [(remote, 0)].into_iter()), None);
+    }
+
+    /// `SCSkillFired` of a skill; the caster is `raw` as aa-net projects it (a mate: kind 3).
+    fn fired(tl: u16, skill: u32, anim: u32, raw: aa_net::SkillCasterData) -> Event {
+        Event::SkillFired(SkillFired { skill_id: skill, tl, caster: raw.projection(), target: SkillTarget::unit(0), delay_ms: 0, channeling_ms: 0, fire_anim_id: anim, raw_final_flag: 0, result: Default::default(), raw_caster: raw, raw_target: aa_net::SkillTargetData::Unit(0) })
+    }
+
+    fn started(tl: u16, skill: u32, cast_ms: u32, raw: aa_net::SkillCasterData) -> Event {
+        Event::SkillStarted(SkillStarted { skill_id: skill, tl, caster: raw.projection(), target: SkillTarget::unit(0), cast_ms, base_cast_ms: cast_ms, synergy: 0, result: 0, result_value: 0, raw_result: Default::default(), raw_caster: raw, raw_target: aa_net::SkillTargetData::Unit(0) })
+    }
+
+    /// An app that turns skill events into clips, on a hand-advanced clock.
+    fn clip_app(book: SkillBook, clips: ClipLibrary, units: Units) -> App {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Time<Virtual>>()
+            .insert_resource(clips)
+            .insert_resource(book)
+            .insert_resource(units)
+            .insert_resource(aa_net::state::Doodads::default())
+            .insert_resource(Skills::default())
+            .init_resource::<crate::ingame::skill_motion::Inbox>()
+            .insert_resource(Combat::default())
+            .add_message::<NetEvent>();
+        app
+    }
+
+    fn tick(app: &mut App, dt: f64, event: Option<Event>) -> f64 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f64(dt));
+        if let Some(event) = event {
+            app.world_mut().write_message(NetEvent(event));
+        }
+        app.update();
+        app.world().resource::<Time>().elapsed_secs_f64()
+    }
+
+    /// The files of the clips started on the upper body layer of `unit` since the last call (needs `aa_anim::trace`).
+    fn layer_starts(app: &mut App, unit: Entity) -> Vec<String> {
+        let mut animator = app.world_mut().get_mut::<Animator>(unit).unwrap();
+        let starts = animator.take_starts();
+        starts.iter().filter(|s| s.layer == aa_anim::trace::UPPER).filter_map(|s| s.file.as_deref()?.rsplit('/').next().map(str::to_string)).collect()
+    }
+
+    /// A rider seated by `mount::start_stop_riding` (which takes its locomotion away) plays its skills on the upper body:
+    /// Mounted Attack (Rider) 11013's `onehand_co_horse_attack_r_slash` (84), which has no `ride_ub` and is a state of the upper body
+    /// graph only, and Mounted Defense 11036's 394 through its `ride_ub` (`onehand_co_sk_shielddefense_mub`). The rider loop stays the
+    /// base clip; the action and the layer end with the clip (needs `AA_PAK` and `AA_DB`).
+    #[test]
+    fn a_seated_rider_plays_its_skills_on_the_upper_body() {
+        let (Some(book), Some(db), Ok(game)) = (SkillBook::open(), crate::ingame::data::Db::open(), aa_anim::GameDb::open()) else {
+            eprintln!("no database: skipped");
+            return;
+        };
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        let assets = aa_anim::CharacterDesc::default_for(&game, aa_anim::Race::Nuian, aa_anim::Gender::Male).and_then(|d| d.resolve(&game)).expect("a Nuian man");
+        let rig = shared_rig(&assets.skeleton).expect("his rig");
+        let cal = Cal::shared(&assets.cal).expect("his .cal");
+        let clips = ClipLibrary::default();
+        let set = ClipSet::load(&rig, cal.clone(), &clips).expect("his clips");
+        let ride_loop = bind_clip(&rig, &cal, &clips, "horse_ba_relaxed_idle").expect("the rider idle");
+        let length = |name: &str| bind_action_clip(&rig, &cal, &clips, name).map(|c| c.clip.duration).unwrap_or_else(|| panic!("{name}"));
+        let (attack, defense) = (length("onehand_co_horse_attack_r_slash"), length("onehand_co_sk_shielddefense_mub"));
+        let mut rider = crate::ingame::seating::fixture_unit(7, 42, None);
+        rider.attached_to = Some(aa_net::model::Attachment { obj_id: 9, point: 1, reason: 1 });
+        let mut horse = crate::ingame::seating::fixture_unit(9, 43, None);
+        horse.model_id = 139;
+        let mut units = Units::default();
+        units.by_id.insert(7, rider.clone());
+        units.by_id.insert(9, horse);
+        let mut app = clip_app(book, clips, units);
+        app.insert_resource(db).add_systems(Update, (crate::ingame::mount::start_stop_riding, handle_events, end_actions, release_layers).chain());
+        let character = aa_anim::Character { assets: Arc::new(assets), model_root: Entity::PLACEHOLDER, parts: Vec::new() };
+        let entity = app
+            .world_mut()
+            .spawn((RemoteUnit::announced(&rider), Animator::new(rig, Vec::new()), character, Locomotion::new(set), Motion::default(), Transform::default(), GlobalTransform::default()))
+            .id();
+        tick(&mut app, 0.1, None);
+        assert!(app.world().get::<crate::ingame::mount::Rider>(entity).is_some() && app.world().get::<Locomotion>(entity).is_none(), "seated without locomotion");
+        app.world_mut().get_mut::<Animator>(entity).unwrap().play(ride_loop, true, 0.0);
+        let base = |app: &App| app.world().get::<Animator>(entity).unwrap().current.as_ref().map(|p| Arc::as_ptr(&p.clip.clip));
+        let riding = base(&app);
+        let unit = aa_net::SkillCasterData::Unit(7);
+        // the layer's clip is private to the animator: the clip-start record names it (the skill trace's, on for every animator)
+        aa_anim::trace::enable();
+        app.world_mut().get_mut::<Animator>(entity).unwrap().take_starts();
+        for (tl, skill, anim, clip, length) in [(1, 11013, 84, "onehand_co_horse_attack_r_slash", attack), (2, 11036, 394, "onehand_co_sk_shielddefense_mub", defense)] {
+            let now = tick(&mut app, 0.1, Some(fired(tl, skill, anim, unit)));
+            let acting = *app.world().get::<Acting>(entity).unwrap_or_else(|| panic!("{skill} plays on the rider"));
+            assert!(acting.layered, "{skill} is a layer");
+            let duration = f64::from(length.min(4.0));
+            assert!((acting.until - now - duration).abs() < 1e-3, "{skill} plays {clip} ({duration:.3} s), not a {:.3} s clip", acting.until - now);
+            assert!(app.world().get::<Animator>(entity).unwrap().has_layer());
+            assert_eq!(layer_starts(&mut app, entity), [format!("{clip}.caf")]);
+            assert_eq!(base(&app), riding, "the rider loop keeps playing under {clip}");
+            // the action is over with its clip; the one-shot layer has ended by then too
+            app.world_mut().get_mut::<Animator>(entity).unwrap().update(length + 0.2);
+            tick(&mut app, duration + 0.01, None);
+            assert!(app.world().get::<Acting>(entity).is_none(), "no action is left on the rider");
+            assert!(!app.world().get::<Animator>(entity).unwrap().has_layer(), "the layer ended with {clip}");
+            assert_eq!(base(&app), riding);
+        }
+    }
+
+    /// A buff pose on a seated rider: the stun 63 (`all_re_combat_stun`, whose row's `ride_ub` is `all_re_combat_stun_ub`) and
+    /// the knockdown 1172 (`knock_down`, thrown with `all_re_combat_knockback_start`). The pose plays on the upper body like any
+    /// other action of the rider; the whole body start-and-loop chain a standing unit gets (`play_once_then`) must not replace
+    /// the rider loop, which is still the base clip when the buff is gone (needs `AA_PAK` and `AA_DB`).
+    #[test]
+    fn a_buff_pose_leaves_the_rider_loop_alone() {
+        let (Some(book), Some(db), Ok(game)) = (SkillBook::open(), crate::ingame::data::Db::open(), aa_anim::GameDb::open()) else {
+            eprintln!("no database: skipped");
+            return;
+        };
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        let assets = aa_anim::CharacterDesc::default_for(&game, aa_anim::Race::Nuian, aa_anim::Gender::Male).and_then(|d| d.resolve(&game)).expect("a Nuian man");
+        let rig = shared_rig(&assets.skeleton).expect("his rig");
+        let cal = Cal::shared(&assets.cal).expect("his .cal");
+        let clips = ClipLibrary::default();
+        let set = ClipSet::load(&rig, cal.clone(), &clips).expect("his clips");
+        let ride_loop = bind_clip(&rig, &cal, &clips, "horse_ba_relaxed_idle").expect("the rider idle");
+        let mut rider = crate::ingame::seating::fixture_unit(7, 42, None);
+        rider.attached_to = Some(aa_net::model::Attachment { obj_id: 9, point: 1, reason: 1 });
+        rider.buffs.clear();
+        let mut horse = crate::ingame::seating::fixture_unit(9, 43, None);
+        horse.model_id = 139;
+        let mut units = Units::default();
+        units.by_id.insert(7, rider.clone());
+        units.by_id.insert(9, horse);
+        let mut app = clip_app(book, clips, units);
+        app.insert_resource(db).insert_resource(State::new(crate::Screen::InGame)).init_resource::<framehold::Frameholds>().add_systems(
+            Update,
+            (
+                crate::ingame::mount::start_stop_riding,
+                framehold::observe,
+                framehold::sync,
+                buffs::ensure_visuals,
+                handle_events,
+                framehold::sync_after_receipts,
+                buffs::reconcile_buffs,
+                end_actions,
+                release_layers,
+            )
+                .chain(),
+        );
+        app.world_mut().spawn((LocalPlayer { obj_id: 100 }, GlobalTransform::default()));
+        let character = aa_anim::Character { assets: Arc::new(assets), model_root: Entity::PLACEHOLDER, parts: Vec::new() };
+        let entity = app
+            .world_mut()
+            .spawn((RemoteUnit::announced(&rider), Animator::new(rig, Vec::new()), character, Locomotion::new(set), Motion::default(), Transform::default(), GlobalTransform::default()))
+            .id();
+        tick(&mut app, 0.1, Some(Event::UnitSpawned(Box::new(rider.clone()))));
+        assert!(app.world().get::<crate::ingame::mount::Rider>(entity).is_some() && app.world().get::<Locomotion>(entity).is_none(), "seated without locomotion");
+        app.world_mut().get_mut::<Animator>(entity).unwrap().play(ride_loop, true, 0.0);
+        let base = |app: &App| app.world().get::<Animator>(entity).unwrap().current.as_ref().map(|p| Arc::as_ptr(&p.clip.clip));
+        let riding = base(&app);
+        for (index, id) in [(1, 63), (2, 1172)] {
+            let buff = aa_net::buff::Buff { buff_id: id, index, kind: aa_net::buff::BuffKind::Unknown, ..default() };
+            tick(&mut app, 0.1, Some(Event::BuffCreated { obj_id: 7, buff }));
+            assert!(app.world().get::<Acting>(entity).is_some(), "buff {id} poses the rider");
+            assert!(app.world().get::<Animator>(entity).unwrap().has_layer(), "buff {id} is a layer");
+            assert_eq!(base(&app), riding, "buff {id} keeps the rider loop under its pose");
+            tick(&mut app, 0.1, Some(Event::BuffRemoved { obj_id: 7, index }));
+            // the knockdown's stand-up plays out before the rider is free again
+            for _ in 0..40 {
+                app.world_mut().get_mut::<Animator>(entity).unwrap().update(0.1);
+                tick(&mut app, 0.1, None);
+            }
+            assert!(app.world().get::<Acting>(entity).is_none(), "buff {id}: no action is left on the rider");
+            assert!(!app.world().get::<Animator>(entity).unwrap().has_layer(), "buff {id}: its layer is gone");
+            assert_eq!(base(&app), riding, "buff {id}: the rider loop is the base clip after the buff");
+        }
+    }
+
+    /// The mount's own skill: Back Kick 11369 (start 18 `all_co_sk_shout`, fire 20 `all_co_sk_lowkick`, 300 ms cast) cast by the
+    /// driven horse (`SCSkillStarted` / `SCSkillFired` with a mount caster). Standing it plays both clips on the whole body; galloping
+    /// it plays them on the upper body (the horse rig has a `Bip01 Spine`) and keeps its run (needs `AA_PAK` and `AA_DB`).
+    #[test]
+    fn the_driven_horse_plays_its_own_skill_and_keeps_galloping() {
+        let Some(book) = SkillBook::open() else { return };
+        if !aa_cry::pak_available() {
+            eprintln!("no pak: skipped");
+            return;
+        }
+        const HORSE: &str = "objects/characters/animals/horse/horse.chr";
+        let clips = ClipLibrary::default();
+        let set = crate::ingame::anim::shared_clip_set(HORSE, "objects/characters/animals/horse/horse.cal", &clips).expect("the horse clips");
+        assert!(set.upper.is_some(), "the horse rig has an upper body");
+        let rig = shared_rig(HORSE).expect("the horse rig");
+        let kick = bind_action_clip(&rig, &set.cal, &clips, "all_co_sk_lowkick").expect("the horse's kick").clip.duration;
+        let mut horse = crate::ingame::seating::fixture_unit(9, 43, None);
+        horse.model_id = 139;
+        let mut units = Units::default();
+        units.by_id.insert(9, horse.clone());
+        let mut app = clip_app(book, clips, units);
+        app.add_systems(Update, (handle_events, end_actions, release_layers, crate::ingame::anim::drive_locomotion).chain());
+        let mut loco = Locomotion::new((*set).clone());
+        loco.invalidate();
+        let mate = app
+            .world_mut()
+            .spawn((RemoteUnit::announced(&horse), Animator::new(rig, Vec::new()), loco, Motion::default(), crate::ingame::mount::Driven, Transform::default(), GlobalTransform::default()))
+            .id();
+        let playing = |app: &App| {
+            let animator = app.world().get::<Animator>(mate).unwrap();
+            animator.current.as_ref().and_then(|p| clip_file(&p.clip)).map_or(String::new(), |f| f.to_string())
+        };
+        let acting = |app: &App| app.world().get::<Acting>(mate).copied();
+        let mount = aa_net::SkillCasterData::Mount { obj_id: 9, mount_skill_id: 11369 };
+        tick(&mut app, 0.1, None);
+        let idle = playing(&app);
+
+        // standing: the whole body
+        tick(&mut app, 0.1, Some(started(1, 11369, 300, mount)));
+        assert_eq!((playing(&app).as_str(), acting(&app).map(|a| a.layered)), ("all_co_sk_shout.caf", Some(false)));
+        let now = tick(&mut app, 0.3, Some(fired(1, 11369, 20, mount)));
+        assert_eq!(playing(&app), "all_co_sk_lowkick.caf");
+        let until = acting(&app).expect("kicking").until;
+        assert!((until - now - f64::from(kick)).abs() < 1e-3, "the kick lasts its clip: {}", until - now);
+        tick(&mut app, f64::from(kick) + 0.01, None);
+        assert!(acting(&app).is_none());
+        assert_eq!(playing(&app), idle, "back to the idle");
+
+        // galloping: the upper body, with the run kept below
+        {
+            let mut motion = app.world_mut().get_mut::<Motion>(mate).unwrap();
+            motion.speed = 9.0;
+            motion.local_dir = Vec2::Y;
+        }
+        tick(&mut app, 0.1, None);
+        let run = playing(&app);
+        assert!(run.contains("run"), "{run}");
+        aa_anim::trace::enable();
+        layer_starts(&mut app, mate);
+        tick(&mut app, 0.1, Some(started(2, 11369, 300, mount)));
+        assert_eq!(acting(&app).map(|a| a.layered), Some(true), "the shout is a layer");
+        // the horse's `.cal` has no `all_co_sk_shout_ub` (`move_ub`): the clip itself plays through the mask
+        assert_eq!(layer_starts(&mut app, mate), ["all_co_sk_shout.caf"]);
+        assert!(app.world().get::<Animator>(mate).unwrap().has_layer());
+        assert_eq!(playing(&app), run);
+        let now = tick(&mut app, 0.3, Some(fired(2, 11369, 20, mount)));
+        let kicking = acting(&app).expect("kicking");
+        assert!(kicking.layered && (kicking.until - now - f64::from(kick)).abs() < 1e-3, "{kicking:?}");
+        assert_eq!(layer_starts(&mut app, mate), ["all_co_sk_lowkick.caf"]);
+        assert_eq!(playing(&app), run, "the gallop goes on under the kick");
     }
 
     #[test]
