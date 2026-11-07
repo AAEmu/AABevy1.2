@@ -14,7 +14,8 @@
 //!   `materialeffects.xml`; the column is the water, object or terrain surface under the foot
 //!   ([`Audio::surface`]), the cell gives the sound of `fxlibs/<row>.xml`). The run and walk clips have none of their own: the
 //!   steps are phases (0.25, 0.75 of a cycle) in the `.lmg` of their group ([`SoundBook::clip_events`]). A clip on the upper body of
-//!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock.
+//!   a moving unit is invisible to `anim_sounds` (it is the animator's layer): [`LayerSounds`] plays its events by the clock. A model
+//!   without a clip set (the opened glider) carries its own `.cal` in [`SoundEvents`].
 //! * **Blows.** A received weapon impact plays the weapon's sound on the target's material (`combat_sounds`, [`SoundBook::blow`]).
 //!
 //! Every unit has at most [`UNIT_CAP`] sounds at a time (a new one replaces the oldest of the same or a lower [`Class`], else it is
@@ -776,14 +777,35 @@ struct Cursor {
     events: Arc<[AnimSound]>,
 }
 
-/// Plays the sound events of the clips the units play (footsteps, grunts, swings), for the units near the camera.
+/// The `.cal` of a model that plays its clips without a [`Locomotion`] (an opened glider, `glide::show_glider`): [`anim_sounds`]
+/// plays the events of its `$SoundEventDatabase` as it does a unit's.
+#[derive(Component, Clone)]
+pub struct SoundEvents(pub Arc<aa_anim::Cal>);
+
+impl SoundEvents {
+    /// The component for a model whose `.cal` names a sound event database (`None`: nothing to play).
+    pub fn of(cal: Arc<aa_anim::Cal>) -> Option<SoundEvents> {
+        cal.sound_events.is_some().then_some(SoundEvents(cal))
+    }
+}
+
+/// The `$SoundEventDatabase` an animated entity's clips are looked up in: a unit's from its clip set, else the model's own.
+fn sound_database<'a>(loco: Option<&'a Locomotion>, own: Option<&'a SoundEvents>) -> Option<&'a str> {
+    loco.map(|loco| &loco.clips.cal).or(own.map(|own| &own.0)).and_then(|cal| cal.sound_events.as_deref())
+}
+
+/// Plays the sound events of the clips the units play (footsteps, grunts, swings), for the units near the camera, and of the
+/// models that carry [`SoundEvents`] (the glider's opening and folding).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn anim_sounds(
     mut commands: Commands,
     time: Res<Time>,
     audio: Audio,
     terrain: Res<TerrainQuery>,
-    units: Query<(Entity, &Animator, &Locomotion, &GlobalTransform, Option<&RemoteUnit>, Option<&LocalPlayer>), Without<Dead>>,
+    units: Query<
+        (Entity, &Animator, Option<&Locomotion>, Option<&SoundEvents>, &GlobalTransform, Option<&RemoteUnit>, Option<&LocalPlayer>),
+        (Without<Dead>, Or<(With<Locomotion>, With<SoundEvents>)>),
+    >,
     xforms: Query<&GlobalTransform>,
     mut cursors: Local<HashMap<Entity, Cursor>>,
     mut next_prune: Local<f32>,
@@ -798,13 +820,13 @@ fn anim_sounds(
         *next_prune = now + 3.0;
         cursors.retain(|e, _| units.contains(*e));
     }
-    for (entity, animator, loco, gt, remote, local) in &units {
+    for (entity, animator, loco, own, gt, remote, local) in &units {
         let Some(playing) = animator.current.as_ref() else { continue };
         if gt.translation().distance_squared(camera) > ANIM_REACH * ANIM_REACH {
             cursors.remove(&entity);
             continue;
         }
-        let Some(database) = loco.clips.cal.sound_events.as_deref() else { continue };
+        let Some(database) = sound_database(loco, own) else { continue };
         let clip = Arc::as_ptr(&playing.clip.clip) as usize;
         let t = playing.time;
         let (before, wrapped) = match cursors.get(&entity) {
@@ -1217,6 +1239,67 @@ mod tests {
         assert_eq!(times(0.6, 0.1, true), vec![0.0, 0.7]);
         // a long frame skips two
         assert_eq!(times(0.1, 0.8, false), vec![0.3, 0.7]);
+    }
+
+    /// The opened glider has no clip set (`Locomotion` is removed from the model): its own `.cal` in [`SoundEvents`] makes
+    /// `anim_sounds` play the `$SoundEventDatabase` events of its clips. `start` fires `x2vehicles:glider:start` once (at
+    /// 0.02 of the clip), and `end` fires `:end` (at 0.33). Without the component the model was skipped and neither played.
+    #[test]
+    fn a_glider_model_plays_the_start_and_end_sounds_of_its_own_clips() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Ok(database) = std::env::var("AA_DB") else { return };
+        let Ok(packs) = SoundPacks::open(database) else { return };
+        let model = "objects/env/06_unit/06_glider/glider_bx";
+        let (Ok(cal), Ok(rig)) = (aa_anim::Cal::shared(&format!("{model}.cal")), aa_anim::pose::shared_rig(&format!("{model}.chr")))
+        else {
+            return;
+        };
+        let library = aa_anim::ClipLibrary::default();
+        let bind = |name: &str| super::super::anim::bind_clip(&rig, &cal, &library, name).unwrap_or_else(|| panic!("glider clip {name}"));
+        let (start, end) = (bind("start"), bind("end"));
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(SoundBook::open())
+            .insert_resource(Packs::fixture(packs))
+            .insert_resource(TerrainQuery::new("__glider_sound_test__"))
+            .add_systems(Update, anim_sounds);
+        app.world_mut().spawn((OrbitCamera::default(), GlobalTransform::IDENTITY));
+        let mut animator = Animator::new(rig.clone(), Vec::new());
+        animator.play(start, false, 0.0);
+        let events = SoundEvents::of(cal.clone()).expect("the glider .cal names its sound event database");
+        let glider = app.world_mut().spawn((animator, events, GlobalTransform::IDENTITY)).id();
+        let set_time = |app: &mut App, t: f32| {
+            app.world_mut().get_mut::<Animator>(glider).unwrap().current.as_mut().unwrap().time = t;
+        };
+        let sounds = |app: &mut App| -> Vec<String> {
+            let world = app.world_mut();
+            let mut query = world.query::<(&Sound, &ChildOf)>();
+            query.iter(world).filter(|(_, child)| child.parent() == glider).map(|(sound, _)| sound.event.clone()).collect()
+        };
+        // the database is read on a thread: the playhead waits past the event (0.02 x 0.83 s) until it is there
+        set_time(&mut app, 0.1);
+        for _ in 0..500 {
+            app.update();
+            if !sounds(&mut app).is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        for t in [0.2, 0.5, 0.8] {
+            set_time(&mut app, t);
+            app.update();
+        }
+        assert_eq!(sounds(&mut app), ["Sounds/x2vehicles:glider:start"], "the start clip's sound, once");
+        app.world_mut().get_mut::<Animator>(glider).unwrap().play(end, false, 0.0);
+        for t in [0.1, 0.2, 0.5] {
+            set_time(&mut app, t);
+            app.update();
+        }
+        let mut all = sounds(&mut app);
+        all.sort();
+        assert_eq!(all, ["Sounds/x2vehicles:glider:end", "Sounds/x2vehicles:glider:start"], "the end clip's sound at 0.33 of 0.5 s");
     }
 
     #[test]

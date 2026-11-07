@@ -76,6 +76,7 @@ use super::player::{
 };
 use super::ship::DeckRide;
 use super::ship::deck::{DeckContact, DeckGround, DeckSlide, deck_move, leave_deck, slide_step, yaw_of};
+use super::sounds::SoundEvents;
 use super::weapons::StowedPack;
 
 /// `DAT_3999cf98`: degrees to radians in the 0x50 block builder (kept for the block's derivation; the rows are loaded
@@ -530,20 +531,49 @@ impl Pose {
 
     /// The glider model's `.cal` clip (`glider_bx.cal`: start, loop, end, endloop, left, right, front, back, sliding) and
     /// whether it loops. The diagonals take the side clip of the turn.
+    ///
+    /// The character's clips name them: every race's `event_database.animevents` has an `item_backpack` event at 0 on the
+    /// gliding clips (`fist_ac_gliding_start` -> `start`, `_idle` -> `loop;0.5;2;`, `_front` -> `front;0.5;2;`, `_end` ->
+    /// `end`, then `endloop;0.1;34;` at 0.1, ...). x2game's anim event handler (x2game12.c:254214) plays such a parameter,
+    /// `clip;blend;flags;`, on the attachment of the `item_*` slot (`FUN_39361820`: default blend 0.1 and flags 0x80; 2 is
+    /// loop, 0x20 starts after the current clip). So the opening plays `start` and the fold `end`; `endloop` is one frame,
+    /// the last of `end` (`glider_bx` frame 142), so holding `end` shows it. Their sound events are the glider's start and
+    /// end sounds.
     pub fn glider_clip(self) -> (&'static str, bool) {
         match self {
-            // `FUN_3911d6c0(1)` plays the item model's "loop" when the glider opens (the character plays
-            // `fist_ac_gliding_start`); "start" exists in the `.cal` but is not the decompile's attach animation.
-            Pose::Start => ("loop", true),
+            Pose::Start => ("start", false),
             Pose::Idle => ("loop", true),
             Pose::Fast => ("front", true),
             Pose::Slow => ("back", true),
             Pose::Left | Pose::FrontLeft | Pose::BackLeft => ("left", true),
             Pose::Right | Pose::FrontRight | Pose::BackRight => ("right", true),
             Pose::Slide => ("sliding", true),
-            Pose::End => ("endloop", false),
+            Pose::End => ("end", false),
         }
     }
+
+    /// What a glider model plays for this pose when it cannot bind [`Pose::glider_clip`]'s clip (a `.cal` entry whose `.caf`
+    /// is only in the model's `.dbh`): the opened `loop` for the opening, the folded `endloop` for the fold.
+    pub fn glider_fallback(self) -> Option<(&'static str, bool)> {
+        match self {
+            Pose::Start => Some(("loop", true)),
+            Pose::End => Some(("endloop", false)),
+            _ => None,
+        }
+    }
+}
+
+/// The glider model's clip for a pose ([`Pose::glider_clip`], else [`Pose::glider_fallback`]), its `.cal` name and whether
+/// it loops.
+fn bind_glider_clip(
+    rig: &aa_anim::pose::Rig,
+    cal: &Cal,
+    library: &ClipLibrary,
+    pose: Pose,
+) -> Option<(BoundClip, &'static str, bool)> {
+    std::iter::once(pose.glider_clip())
+        .chain(pose.glider_fallback())
+        .find_map(|(name, looped)| bind_clip(rig, cal, library, name).map(|clip| (clip, name, looped)))
 }
 
 /// The flight the local player is in.
@@ -1757,15 +1787,21 @@ pub fn show_glider(
             .entity(root)
             .remove::<Locomotion>()
             .remove::<Motion>();
-        commands.entity(root).insert((
+        let cal = glider_cal(&path);
+        let mut model = commands.entity(root);
+        model.insert((
             GliderModel,
             GliderPlay {
-                cal: glider_cal(&path),
+                cal: cal.clone(),
                 playing: None,
                 failed: None,
             },
             ChildOf(bone),
         ));
+        // the glider's own `$SoundEventDatabase`: the start and end clips' `x2vehicles:glider:*` sounds
+        if let Some(events) = cal.and_then(SoundEvents::of) {
+            model.insert(events);
+        }
         return;
     }
     for (_, animator, mut play) in &mut models {
@@ -1773,16 +1809,18 @@ pub fn show_glider(
         if play.playing == Some(pose) {
             continue;
         }
-        let (name, looped) = pose.glider_clip();
-        if let Some(clip) = play
+        if let Some((clip, _, looped)) = play
             .cal
             .as_ref()
-            .and_then(|cal| bind_clip(&animator.rig, cal, &library, name))
+            .and_then(|cal| bind_glider_clip(&animator.rig, cal, &library, pose))
         {
             animator.play(clip, looped, 0.15);
             animator.random_idle = None;
         } else if play.cal.is_some() {
-            warn!("glide: the glider model has no {name:?} clip for {pose:?}");
+            warn!(
+                "glide: the glider model has no {:?} clip for {pose:?}",
+                pose.glider_clip().0
+            );
         }
         play.playing = Some(pose);
     }
@@ -1995,16 +2033,21 @@ pub fn draw_remote_gliders(
                         .entity(root)
                         .remove::<Locomotion>()
                         .remove::<Motion>();
-                    commands.entity(root).insert((
+                    let cal = glider_cal(&path);
+                    let mut model = commands.entity(root);
+                    model.insert((
                         GliderModel,
                         RemoteGliderModel,
                         GliderPlay {
-                            cal: glider_cal(&path),
+                            cal: cal.clone(),
                             playing: None,
                             failed: None,
                         },
                         ChildOf(bone),
                     ));
+                    if let Some(events) = cal.and_then(SoundEvents::of) {
+                        model.insert(events);
+                    }
                     glide.glider = Some(root);
                 } else {
                     // no model this frame: do not look it up again every frame
@@ -2039,14 +2082,16 @@ pub fn draw_remote_gliders(
             && play.failed != Some(pose)
             && let Some(cal) = play.cal.as_ref()
         {
-            let (name, looped) = pose.glider_clip();
-            if let Some(clip) = bind_clip(&glider_animator.rig, cal, &library, name) {
+            if let Some((clip, _, looped)) = bind_glider_clip(&glider_animator.rig, cal, &library, pose) {
                 glider_animator.play(clip, looped, 0.15);
                 glider_animator.random_idle = None;
                 play.playing = Some(pose);
             } else {
                 // a model without that clip: say so once, remember the failure for this pose, try the next pose only
-                warn!("glide: the glider model has no {name:?} clip for {pose:?}");
+                warn!(
+                    "glide: the glider model has no {:?} clip for {pose:?}",
+                    pose.glider_clip().0
+                );
                 play.failed = Some(pose);
             }
         }
@@ -2334,12 +2379,68 @@ mod tests {
         );
         assert_eq!(flight.stop(-1.0, Some(0.0)), Phase::Sliding);
         assert_eq!(pose(&flight, Input::default()), Pose::Slide);
-        // `FUN_3911d6c0(1)` opens the item model with "loop"; the character's start is separate.
+        // the character's start clip has `item_backpack start`, its end clip `item_backpack end`: the glider model plays
+        // its own `start` / `end` once, and the opened `loop` / folded `endloop` only when it lacks them
         assert_eq!(
             Pose::Start.character_clip(),
             ("fist_ac_gliding_start", false)
         );
-        assert_eq!(Pose::Start.glider_clip(), ("loop", true));
+        assert_eq!(Pose::Start.glider_clip(), ("start", false));
+        assert_eq!(Pose::Start.glider_fallback(), Some(("loop", true)));
+        assert_eq!(Pose::End.glider_clip(), ("end", false));
+        assert_eq!(Pose::End.glider_fallback(), Some(("endloop", false)));
+        assert_eq!(Pose::Idle.glider_fallback(), None);
+    }
+
+    /// The character's event databases are what name the glider model's clips: an `item_backpack` event at 0 of the
+    /// start clip plays `start`, of the end clip `end` (then `endloop` after it), of the idle clip `loop`. Every race's
+    /// database must agree with [`Pose::glider_clip`], or the glider would open with a clip 1.2 does not play (and miss
+    /// the start / end sounds, which are events of the glider's own `start` / `end` clips).
+    #[test]
+    fn the_character_event_databases_name_the_glider_clips() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let mut checked = 0;
+        // dwarf/female has no gliding clips of its own
+        for race in ["nuian/male", "nuian/female", "ferre/male", "ferre/female", "dwarf/male", "warborn/male"] {
+            let Ok(bytes) = aa_cry::read(&format!("animations/{race}/event_database.animevents")) else {
+                continue;
+            };
+            let xml = String::from_utf8_lossy(&bytes).replace("\r\n", "\n");
+            let doc = roxmltree::Document::parse(&xml).expect("event database xml");
+            // the clip names of the `item_backpack` events of the race's own clip, in time order
+            let backpack = |clip: &str| -> Vec<String> {
+                let own = format!("animations/{race}/fist/{clip}.caf");
+                doc.descendants()
+                    .filter(|n| n.has_tag_name("animation"))
+                    .find(|n| n.attribute("name").is_some_and(|name| name.eq_ignore_ascii_case(&own)))
+                    .map(|n| {
+                        n.children()
+                            .filter(|e| e.has_tag_name("event"))
+                            .filter(|e| {
+                                e.attribute("name")
+                                    .is_some_and(|name| name.trim_start_matches('!') == "item_backpack")
+                            })
+                            .filter_map(|e| e.attribute("parameter"))
+                            .map(|param| param.split(';').next().unwrap_or("").to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let first = |pose: Pose| backpack(pose.character_clip().0).into_iter().next();
+            assert_eq!(first(Pose::Start).as_deref(), Some(Pose::Start.glider_clip().0), "{race} start");
+            assert_eq!(first(Pose::Idle).as_deref(), Some(Pose::Idle.glider_clip().0), "{race} idle");
+            assert_eq!(first(Pose::Fast).as_deref(), Some(Pose::Fast.glider_clip().0), "{race} front");
+            assert_eq!(first(Pose::Slide).as_deref(), Some(Pose::Slide.glider_clip().0), "{race} sliding");
+            assert_eq!(
+                backpack(Pose::End.character_clip().0),
+                [Pose::End.glider_clip().0, Pose::End.glider_fallback().unwrap().0],
+                "{race} end"
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "no character event database was read");
     }
 
     #[test]
@@ -2379,7 +2480,7 @@ mod tests {
     }
 
     /// The sweep of every glider item: the row resolves, the `.cal` binds every clip the flying glider plays, the stowed
-    /// look and an `endloop` clip found only in the `.dbh` are listed. `AA_PAK` / `AA_DB` needed.
+    /// look and a clip found only in the `.dbh` (played through its fallback) are listed. `AA_PAK` / `AA_DB` needed.
     #[test]
     fn every_glider_item_resolves_and_binds_its_clips() {
         if !aa_cry::pak_available() {
@@ -2412,7 +2513,7 @@ mod tests {
                 failures.push(format!("{id} {}: no .cal or rig for {chr}", glider.model));
                 continue;
             };
-            // every clip a flying glider plays (`Pose::glider_clip`; the opening plays "loop", `FUN_3911d6c0(1)`)
+            // every clip a flying glider plays (`Pose::glider_clip`, else `Pose::glider_fallback`)
             let flying = [
                 Pose::Start,
                 Pose::Idle,
@@ -2426,28 +2527,42 @@ mod tests {
                 Pose::BackRight,
                 Pose::Slide,
             ];
-            for pose in flying {
-                let (name, _) = pose.glider_clip();
-                if bind_clip(&rig, &cal, &library, name).is_none() {
-                    failures.push(format!("{id} {}: clip {name} ({pose:?}) does not bind", glider.model));
-                }
-            }
-            // `FUN_3911d6c0(0)` plays "endloop" as the glider closes. For 17 items (kite, butterfly, kraken, sloth, ...) the
-            // loose `.caf` is not in the pak, but the `.cal`'s `$TracksDBH` track database holds it, so 1.2 has it; aa-anim
-            // reads loose `.caf` only (no `.dbh` decoder), so here the closing glider keeps its last clip (a known gap)
-            let (end, _) = Pose::End.glider_clip();
-            if bind_clip(&rig, &cal, &library, end).is_none() {
-                let path = cal.animation(end).map(|entry| entry.path.clone()).unwrap_or_default();
-                let in_dbh = !path.is_empty()
+            // For some items (kite, butterfly, kraken, sloth, ...) a clip's loose `.caf` is not in the pak, but the `.cal`'s
+            // `$TracksDBH` track database holds it, so 1.2 has it; aa-anim reads loose `.caf` only (no `.dbh` decoder), so
+            // here such a glider plays the fallback, or keeps its last clip (a known gap)
+            let in_dbh = |name: &str| -> (bool, String) {
+                let path = cal.animation(name).map(|entry| entry.path.clone()).unwrap_or_default();
+                let found = !path.is_empty()
                     && cal
                         .tracks_dbh
                         .as_deref()
                         .and_then(|dbh| aa_cry::read(dbh).ok())
                         .is_some_and(|bytes| bytes.windows(path.len()).any(|w| w.eq_ignore_ascii_case(path.as_bytes())));
-                if !in_dbh {
-                    failures.push(format!("{id} {}: no {end} clip, neither loose nor in the .dbh", glider.model));
+                (found, path)
+            };
+            for pose in flying {
+                let (name, _) = pose.glider_clip();
+                match bind_glider_clip(&rig, &cal, &library, pose) {
+                    None => failures.push(format!("{id} {}: clip {name} ({pose:?}) does not bind", glider.model)),
+                    Some((_, bound, _)) if bound != name => {
+                        let (found, path) = in_dbh(name);
+                        if !found {
+                            failures.push(format!("{id} {}: no {name} clip, neither loose nor in the .dbh", glider.model));
+                        }
+                        println!("glider sweep: {id} {} plays {bound} for {name}: {path} is only in the .dbh", glider.model);
+                    }
+                    Some(_) => {}
                 }
-                println!("glider sweep: {id} {} plays no {end}: {path} is only in the .dbh", glider.model);
+            }
+            // the fold plays "end" (else "endloop"), held for `END_CLIP`
+            if bind_glider_clip(&rig, &cal, &library, Pose::End).is_none() {
+                for (name, _) in std::iter::once(Pose::End.glider_clip()).chain(Pose::End.glider_fallback()) {
+                    let (found, path) = in_dbh(name);
+                    if !found {
+                        failures.push(format!("{id} {}: no {name} clip, neither loose nor in the .dbh", glider.model));
+                    }
+                    println!("glider sweep: {id} {} plays no {name}: {path} is only in the .dbh", glider.model);
+                }
             }
             if db.backpack(id).is_none() {
                 println!("glider sweep: {id} {} has no stowed look (asset2_id 0): nothing is drawn on the back", glider.model);
@@ -3131,7 +3246,7 @@ mod tests {
         let Some(db) = Db::open() else { return };
         let glider = db.glider(14677).expect("glider item 14677");
         assert!(glider.model.ends_with("glider_bx.chr"), "{}", glider.model);
-        let Some(mut app) = flying_glider_app(db, 14677) else { return };
+        let Some(mut app) = flying_glider_app(db, 14677, Pose::Idle) else { return };
         let normal = glider_wing_normal(app.world_mut()).expect("the glider model was spawned");
         let degrees = from_level(normal);
         println!("glider wing normal {normal:?}, {degrees:.1} deg from level");
@@ -3139,6 +3254,21 @@ mod tests {
             degrees < 10.0,
             "the glider wing stands up: its plane is {degrees:.1} deg from horizontal"
         );
+    }
+
+    /// The opening plays the glider's own `start` clip (the character's `item_backpack start` event), which unfolds the
+    /// wing: held at its last frame (0.83 s for `glider_bx`) it must end in the same level wing as the idle `loop`.
+    #[test]
+    fn the_opening_clip_unfolds_into_the_level_wing() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let Some(db) = Db::open() else { return };
+        let Some(mut app) = flying_glider_app(db, 14677, Pose::Start) else { return };
+        let normal = glider_wing_normal(app.world_mut()).expect("the glider model was spawned");
+        let degrees = from_level(normal);
+        println!("glider wing after the start clip: normal {normal:?}, {degrees:.1} deg from level");
+        assert!(degrees < 10.0, "the opened wing stands up: its plane is {degrees:.1} deg from horizontal");
     }
 
     /// The same level check for every distinct opened model of the glider items (`Db::glider_items`), each on the
@@ -3161,7 +3291,7 @@ mod tests {
             }
             seen.push(glider.model.clone());
             let Some(db) = Db::open() else { return };
-            let Some(mut app) = flying_glider_app(db, id) else { return };
+            let Some(mut app) = flying_glider_app(db, id, Pose::Idle) else { return };
             let (normal, span) = glider_spread_axes(app.world_mut())
                 .unwrap_or_else(|| panic!("the glider model of item {id} was spawned"));
             let three = glider_wing_normal(app.world_mut()).map(from_level);
@@ -3242,9 +3372,10 @@ mod tests {
         Some((first.cross(second).normalize_or_zero(), first))
     }
 
-    /// A Nuian male in the gliding idle clip with item `item`'s glider opened on its `item_glider` bone, after 1 s of
-    /// [`drive_glide`] / [`show_glider`]. `None` when the character's rig or clips cannot be loaded.
-    fn flying_glider_app(db: Db, item: u32) -> Option<App> {
+    /// A Nuian male in the gliding clip of `pose` (the idle one for [`Pose::Idle`]) with item `item`'s glider opened on its
+    /// `item_glider` bone, after 1 s of [`drive_glide`] / [`show_glider`]. `None` when the character's rig or clips cannot
+    /// be loaded.
+    fn flying_glider_app(db: Db, item: u32, pose: Pose) -> Option<App> {
         use aa_anim::pose::shared_rig;
         use aa_net::model::{Equipment, Item};
         use aa_net::state::Inventory;
@@ -3282,7 +3413,7 @@ mod tests {
                 flight,
                 buff_id: 1029,
                 buff_index: 1,
-                pose: Pose::Idle,
+                pose,
                 touched: false,
                 touched_for: 0.0,
                 missing: 0.0,

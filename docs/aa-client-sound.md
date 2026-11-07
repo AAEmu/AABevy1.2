@@ -113,11 +113,21 @@ a teleport) keeps the original's mood but not this one, and after a fold in the 
 end rather than when the fall is fast again.
 
 The glider `.cal`s name a `$SoundEventDatabase` whose `fist_ac_gliding_start.caf` / `_end.caf` (the `.cal`'s `start` and `end`)
-fire `x2vehicles:glider:start` (0.02 s) and `:end` (0.33 s); the character's databases (nuian, ferre, dwarf, warborn) have no
-gliding events. `end` is played by nothing found: the fold plays `endloop` (`3911D6C0(0)`, and `ChangeBackpackVisual`
-`39360BB0` outside move mode 4). `start` is played by `ChangeBackpackVisual` on the back-slot model while the actor is in move
-mode 4, which the equipment refresh (`39362D20`, after `3911D6C0(1)`'s `loop`) and `391219C0(1)` reach; whether that runs at
-every opening is not settled, and `glide.rs` plays `loop` for the opening. Neither sound is wired (capture-pending).
+fire `x2vehicles:glider:start` (at 0.02 of the clip) and `:end` (at 0.33); the character's sound databases (nuian, ferre, dwarf,
+warborn) have no gliding events. What plays those glider clips is the character's *animation* event database
+(`animations/<race>/<gender>/event_database.animevents`, every race with gliding clips): `fist_ac_gliding_start` has
+`!item_backpack start` (and `!glider start`) at 0, `fist_ac_gliding_end` has `!item_backpack end` at 0, `endloop;0.1;34;` at 0.1 and
+`!glider end` at 0.5, and the flight clips `loop` / `front` / `back` / `left` / `right` / `sliding` with `;0.5;2;`. x2game's anim
+event handler (x2game12.c:254214) sends an `item_*` event to `FUN_39361820`, which plays the parameter `clip;blend;flags;` on that
+slot's attachment (default blend 0.1, flags 0x80; 2 loops, 0x20 starts after the current clip). So every opening plays the
+glider's `start` and every fold its `end`, then the one-frame `endloop` (`glider_bx` frame 142, `end`'s last frame).
+`Pose::glider_clip` plays `start` / `end` (falling back to `loop` / `endloop` for a model that lacks them; every glider item has
+both loose), and `show_glider` / `draw_remote_gliders` give the glider model a `sounds::SoundEvents` with its `.cal`, so
+`anim_sounds` (which otherwise needs a unit's `Locomotion`) plays the events. Live (2026-11-07, `liveglide`,
+`data/local/transport/live/glider-fix/f1.log`): `sound: foley Sounds/x2vehicles:glider:start` 0.13 s after
+`glide: buff 1029 opens the glider` (the model is spawned the frame after the buff), and `:end` 0.2 s after the fold, on the
+ground and on the water. Approximate: `end` is held instead of switching to `endloop` (the same frame), and the 0.15 s blend
+replaces the events' 0.1 / 0.5 s ones.
 
 A mood with an item in the zone's pack (`combat`, `death`, `low_health`, `falling`, `gliding`, `quest_camera`, `siege_period`;
 the other moods have none in any of the 72 packs) has a sound. The original (`SoundMoodManager::AddSoundMood`,

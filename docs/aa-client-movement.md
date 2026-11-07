@@ -229,7 +229,12 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
   attachment (`FUN_394e4e80`; the bone is a child of `Bip01 Spine2`, `item_assets` offsets 0) and the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
-  `start/loop/front/back/left/right/sliding/endloop`. The model is spawned in the bone's CryEngine frame
+  `start/loop/front/back/left/right/sliding/end`. The character's clips choose the glider's: each race's
+  `event_database.animevents` has an `item_backpack` event at 0 of the gliding clips (`start`, `loop;0.5;2;`, `front;0.5;2;`,
+  ..., `end` then `endloop;0.1;34;`), which x2game plays on the back-slot attachment (`FUN_39361820`), so the opening is
+  the glider's `start` (it unfolds, 0.83 s for `glider_bx`) and the fold its `end` (held: `endloop` is its last frame);
+  `Pose::glider_fallback` plays `loop` / `endloop` for a model without them. Their sound events are the glider's start / end
+  sounds (`docs/aa-client-sound.md`). The model is spawned in the bone's CryEngine frame
   (`creature::spawn_cry_space`, no second `CRY_TO_BEVY`): with the world conversion added again the wing stood on
   edge (owner report 2026-11-01). **S14-C5 settled.**
 * Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,
