@@ -826,11 +826,22 @@ pub fn track_flight(
                     );
                 }
             } else {
-                info!(
-                    "glide: buff {} gone, folding in the air at {:.1} m",
-                    active.buff_id,
-                    distance.unwrap_or(f32::INFINITY)
-                );
+                if active.water {
+                    // the contact was the water surface (the swim stance already went out): the fold is the graph's
+                    // `gliding_end`, the only way out of the gliding states, and the swim takes over; the probe measured
+                    // the bed under the water, so this is no fold in the air
+                    info!(
+                        "glide: buff {} gone on the water, folding into the swim ({:.1} m of water)",
+                        active.buff_id,
+                        distance.unwrap_or(f32::INFINITY)
+                    );
+                } else {
+                    info!(
+                        "glide: buff {} gone, folding in the air at {:.1} m",
+                        active.buff_id,
+                        distance.unwrap_or(f32::INFINITY)
+                    );
+                }
                 gliding.end_flight(active.buff_id);
                 state.glide_owns = false;
                 return;
@@ -2895,6 +2906,65 @@ mod tests {
         let gliding = app.world().resource::<Gliding>();
         let active = gliding.active.expect("still waiting for the buff removal");
         assert!(active.water && active.touched);
+    }
+
+    /// The buff's removal after a water entry over deep water (the stop probe finds no floor within `land_height + 0.2`
+    /// under the surface) ends the flight the way every flight ends: through the graph's `gliding_end`, the only way out of
+    /// the gliding states (`glider_null_node` -> `gliding_end` -> `Vehicle End`), and the swim takes over. No slide, the
+    /// end clip is shown for `END_CLIP`, and the glide controller lets go of the player.
+    #[test]
+    fn a_buff_lost_after_the_water_entry_folds_into_the_swim() {
+        let mut flight = Flight::start(GlideParams::EXPERIMENTAL);
+        flight.elapsed = 10.0;
+        flight.phase = Phase::Gliding;
+        let active = Active {
+            flight,
+            buff_id: 1029,
+            buff_index: 3,
+            pose: Pose::Idle,
+            touched: true,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: true,
+            deck: None,
+        };
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Buffs>()
+            .init_resource::<SendState>()
+            .init_resource::<crate::ingame::units::Views>()
+            .insert_resource(TerrainQuery::new("__glide_test__"))
+            .insert_resource(WorldCollision::new(
+                "__glide_test__",
+                TerrainQuery::new("__glide_test__"),
+            ))
+            .insert_resource(Gliding {
+                active: Some(active),
+                ..Default::default()
+            })
+            .add_systems(Update, track_flight);
+        app.world_mut().spawn((
+            LocalPlayer { obj_id: 7 },
+            Mover {
+                pos: Vec3::new(0.0, 0.0, 100.0),
+                facing: 0.0,
+                vz: 0.0,
+                grounded: false,
+                velocity: Vec3::ZERO,
+                swim: None,
+                wading: 0.0,
+            },
+        ));
+        for _ in 0..3 {
+            tick(&mut app, 0.1);
+        }
+        let gliding = app.world().resource::<Gliding>();
+        assert!(
+            gliding.active.is_none(),
+            "the water entry's buff removal must not start a slide on the water"
+        );
+        assert_eq!(gliding.ending, END_CLIP, "the gliding_end clip is shown");
+        assert!(!app.world().resource::<SendState>().glide_owns, "the swim takes over");
     }
 
     #[test]

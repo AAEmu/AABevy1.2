@@ -225,6 +225,14 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   flags 0x14** (later grounded packets return to flags 4 / actor 0x04). Water is **stance 2, flags 0, actor flags 0** and
   then the same remove (row 5288 / 13:39:15), not a fold stop. Velocity at 1/1024 m/s. Deploy is `CSStartSkill` 12373 cast
   as the equipped item 14677 (item id 16777259). **S14-C1 settled for flight; S14-C3 settled; S14-C2 key flags partly open.**
+* End after a water entry: the buff's removal runs the same stop probe, which measures to the bed under the water, so over
+  deep water the flight ends without a slide, through `gliding_end` like every flight (the graph's only way out of the
+  gliding states: `glider_null_node` -> `gliding_end` -> `Vehicle End`), and the swim takes over when the controller lets
+  go. The log says `glide: buff N gone on the water, folding into the swim (D m of water)`, not "folding in the air" (live
+  check 2026-11-07, `data/local/transport/live/glider-fix/f1.log`). **Capture-pending:** 1.2's probe ray
+  (`FUN_3911fc80`, entity types `0x301` = static, terrain and `ent_water`, from 0.1 m over the feet) can hit the water
+  surface itself, so whether the original slides on the surface after the water entry depends on where its actor is when
+  the removal arrives; this client keeps the bed distance (a slide only in water shallower than `land_height + 0.2`).
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
   item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
   attachment (`FUN_394e4e80`; the bone is a child of `Bip01 Spine2`, `item_assets` offsets 0) and the graph's
