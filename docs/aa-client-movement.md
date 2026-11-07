@@ -178,7 +178,12 @@ as the player instead of waiting for cells around a different saved spawn.
   check D2 (2026-11-07, `data/local/transport/live/mount/b-rider.clean.log`): in the pond lane's 0.75 m the horse's jump rose
   1.87 m (water gravity from the bed to the surface), fell capped at 4 m/s and touched down with a plain ground packet; it
   now has the dry 1.3 m arc and sends the landing (flags 6, actor 0x14). How 1.2 handles a mount's jump in shallow water is
-  not traced (**approximate**).
+  not traced (**approximate**). Walking out of the water is no landing (`SendState::waded_out`): the swim ends `LEAVE_MARGIN`
+  shallower than the swim level, which for a mount is a wading depth with the dry rules, and its step down onto the bed
+  had sent a landing (flags 6, actor 0x14) as the horse came out of the sea (review re-check, 2026-11-07,
+  `data/local/transport/live/mount/review/w-rider.moves.txt`; with the fix `w2-rider.moves.txt` has the fall packet and a
+  plain ground one, as before the wading change). The short air time of that step still plays the local mount's
+  jump-loop and landing clips (an older gap, not changed here).
 * Clips: `fist_ba_idle_swim`, `fist_mo_swim_<dir>` (8 ways), `_deep` when diving (more than 0.5 m under the floating height), `fist_mo_swim_up / down`
   while only Space / X is pressed. `drive_swim` runs after `anim::drive_locomotion` (the player's `Motion` is empty in the water, so locomotion
   leaves the animator alone) and calls `Locomotion::invalidate` when the swim ends. `anim.rs` is not touched: a combat action on the whole body

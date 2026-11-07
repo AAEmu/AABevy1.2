@@ -791,6 +791,7 @@ pub fn control_player(
         mover.grounded = false;
         mover.vz = mover.vz.min(0.0);
         left_water = true;
+        state.waded_out = true;
         info!("left the water at ({:.1}, {:.1}, {:.2}), ground {:.2}", pos.x, pos.y, pos.z, ground);
     }
 
@@ -861,7 +862,9 @@ pub fn control_player(
             (pos.z, mover.vz) = air_step(pos.z, mover.vz, gravity, dt, if in_water { 4.0 } else { f32::INFINITY });
             if pos.z <= ground && mover.vz <= 0.0 {
                 pos.z = ground;
-                if state.grace <= 0.0 && !wet.is_some_and(|w| w.depth > swim::WADE_LO) {
+                // stepping down onto the bed after walking out of the water is no landing either (a mount takes the dry
+                // rules in water shallower than its swim level, where it walks out)
+                if state.grace <= 0.0 && !state.waded_out && !wet.is_some_and(|w| w.depth > swim::WADE_LO) {
                     landed = Some(-mover.vz);
                 }
                 mover.vz = 0.0;
@@ -917,6 +920,7 @@ pub fn control_player(
     // the jump's clips (`super::jump`): a take-off, walking, Dash and the keys' direction
     if !airborne {
         state.took_off = false;
+        state.waded_out = false;
     }
     // 1.2's freefall (move mode 1): fast and high over the terrain, held until the ground
     let terrain_height = terrain.ground_at(pos.x, pos.y).map_or(ground, |g| g.height);
@@ -1253,6 +1257,8 @@ pub struct SendState {
     was_moving: bool,
     /// The air time began with a jump out of the water (its packets keep the old jump flags).
     swim_jump: bool,
+    /// The air time began with walking out of the water (no jump): its touchdown on the bed is no landing.
+    waded_out: bool,
     /// The last hanging packet said "moving": the next idle one is the stop packet.
     ladder_moving: bool,
 }
@@ -1282,6 +1288,7 @@ impl SendState {
         self.last_velocity = Vec3::ZERO;
         self.stop_pending = None;
         self.swim_jump = false;
+        self.waded_out = false;
         self.was_moving = false;
     }
 
@@ -2442,6 +2449,11 @@ mod dive_tests {
         let m = f.mover();
         assert!(m.grounded && (m.pos.z - beach_bed(m.pos.y)).abs() < 0.05, "{:?}", m.pos);
         assert_eq!(f.mate_sent.last().unwrap().1.stance, stance::RELAXED);
+        // walking out is no landing: the mount's dry rules in its wading depth (`fall_water`) do not make the step down
+        // onto the bed one
+        let landing = |m: &MoveCommand| m.wire_actor_flags.is_some_and(|a| a & (actor_flags::JUMPING | actor_flags::FALL_VELOCITY) != 0);
+        let landings: Vec<_> = f.mate_sent.iter().filter(|(_, m)| landing(m)).collect();
+        assert!(landings.is_empty(), "walking out of the water sent a landing: {landings:?}");
     }
 
     #[test]
