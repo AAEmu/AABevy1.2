@@ -88,6 +88,13 @@ impl Track {
         Track { snaps: VecDeque::from([Snap { t: 0.0, arrival: f32::NEG_INFINITY, report }]), clock: 0.0, gap: 0.1 }
     }
 
+    /// A unit that floats at `pos` facing `yaw` in the swim stance (a mate its driver left in the water).
+    pub fn swimming(pos: Vec3, yaw: f32) -> Track {
+        let mut track = Track::new(pos, yaw);
+        track.snaps[0].report.swimming = true;
+        track
+    }
+
     /// Where the newest report put the unit.
     pub fn latest(&self) -> Vec3 {
         self.snaps.back().expect("a track always has a report").report.pos

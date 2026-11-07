@@ -297,6 +297,13 @@ impl RemoteUnit {
         self.vehicle.as_ref().map_or_else(|| self.track.latest(), |track| track.latest_pos())
     }
 
+    /// [`RemoteUnit::reset_track`] in the swim stance: the unit floats at `pos` swimming until its next movement (a mate its
+    /// driver got off in the water).
+    pub(super) fn reset_swimming(&mut self, pos: Vec3, facing: f32) {
+        self.reset_track(pos, facing);
+        self.track = Track::swimming(pos, facing);
+    }
+
     /// Starts the buffered movement over at `pos` (a rider got off).
     pub(super) fn reset_track(&mut self, pos: Vec3, facing: f32) {
         self.track = Track::new(pos, facing);
@@ -2603,6 +2610,33 @@ mod swim_tests {
             assert!(world.get::<Swimming>(entity).is_none(), "still swimming on the ground");
             assert!((world.get::<RemoteUnit>(entity).unwrap().pos.z - 100.0).abs() < 1e-4, "a walker 0.5 m over the terrain stands on it");
         }
+    }
+
+    /// A mate the player drove and got off in the water (`mount::track_local_mount` starts its track over with
+    /// `Track::swimming` when it is [`Swimming`]) floats where it was and swims on until its next movement: it is not set on
+    /// the bed 0.5 m under it and keeps its `waterLevel`.
+    #[test]
+    fn a_mate_left_in_the_water_swims_on() {
+        let terrain = TerrainQuery::fixture_flat("__swim_left_test__", 100.0);
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Views>()
+            .insert_resource(WaterQuery::fixture_sea("__swim_left_test__", 102.0, terrain.clone()))
+            .insert_resource(terrain)
+            .add_systems(Update, move_units);
+        let at = Vec3::new(500.0, 500.0, 100.5);
+        let mut unit = RemoteUnit { character: false, ..RemoteUnit::fixture(7, at) };
+        unit.reset_swimming(at, 0.0);
+        let mate = app.world_mut().spawn((unit, Transform::default(), Motion::default(), AirStart::default(), Swimming::default())).id();
+        for _ in 0..10 {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.02));
+            app.update();
+        }
+        let world = app.world();
+        assert!((world.get::<RemoteUnit>(mate).unwrap().pos.z - 100.5).abs() < 1e-4, "the mate was set on the bed");
+        let level = world.get::<Swimming>(mate).expect("the mate swims on").level;
+        let want = 100.5 + super::super::data::MountSpeed::default().swim_level - 102.0;
+        assert!((level - want).abs() < 1e-4, "waterLevel {level}, not {want}");
     }
 }
 

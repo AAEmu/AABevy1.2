@@ -229,7 +229,10 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   mate plays its swim clips ("the mount's swim" above) and the rider sits in its idle (PseudoSpeed 0, "riding" above). A get-off there leaves the rider swimming at the surface
   (`player::afloat`; the get-off pose in water is capture-pending). The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
-  mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
+  mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands. A
+  mate left swimming (`anim::Swimming`) starts over in the swim stance (`RemoteUnit::reset_swimming`): the driver's last
+  packets for it carried stance `SWIM`, so it floats where it was with its swim clips until its next movement packet
+  instead of standing in its land idle on the bed (capture-pending: what the mate does after the get-off in water).
 * **Rearing:** Space on a standing mount (no move request) does not lift it: 1.2's ground step (`sub_3912B330`,
   x2game12.c:245905-245920) then calls the unit's +680 with 0, which sends the graph Signal `em_jump_in_place`
   (`sub_39153FF0`) unless the graph is already in a `jump_in_place` state, and sets no jump vector. It still sets the

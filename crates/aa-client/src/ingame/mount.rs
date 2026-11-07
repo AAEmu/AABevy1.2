@@ -1551,7 +1551,7 @@ pub fn track_local_mount(
         With<LocalPlayer>,
     >,
     mut cameras: Query<&mut OrbitCamera>,
-    mut units: Query<(&mut RemoteUnit, Has<Driven>)>,
+    mut units: Query<(&mut RemoteUnit, Has<Driven>, Has<Swimming>)>,
     mut fallback_reason: Local<bool>,
 ) {
     // the reason of this frame's SCUnitDetached (the server echoes the CSUnMountMate reason: 9 unmount, 10 dismiss)
@@ -1578,9 +1578,15 @@ pub fn track_local_mount(
         // the mate the player drove goes back to its movement packets, from where it stands
         if let Some(e) = old.filter(|s| s.drives).and_then(|s| drawn.views.unit_entity(s.mount)) {
             commands.entity(e).remove::<Driven>();
-            if let Ok((mut unit, _)) = units.get_mut(e) {
+            if let Ok((mut unit, _, swimming)) = units.get_mut(e) {
                 let (pos, facing) = (unit.pos, unit.facing);
-                unit.reset_track(pos, facing);
+                // a mate left in the water swims on where it floats (the driver's last packets for it had the swim stance)
+                // until its next movement, instead of standing in its land idle or being set on the bed
+                if swimming {
+                    unit.reset_swimming(pos, facing);
+                } else {
+                    unit.reset_track(pos, facing);
+                }
             }
         }
         seat_state.0 = attached.map(|a| {
@@ -1711,7 +1717,7 @@ pub fn track_local_mount(
                     let drawn = drawn.views
                         .unit_entity(ship)
                         .and_then(|entity| units.get(entity).ok())
-                        .map(|(hull, _)| (hull.pos, hull.game_rotation()));
+                        .map(|(hull, _, _)| (hull.pos, hull.game_rotation()));
                     deck_landing(db, &net, ship, from, mover.facing, drawn)
                 });
                 if let Some((ride, landing)) = ship_landing {
@@ -1754,7 +1760,7 @@ pub fn track_local_mount(
     }
     // the driven mate's unit (built again when it comes back into view) follows the mover
     if let Some(e) = seat_state.0.filter(|s| s.drives && !s.ship && (s.cart || !s.turret)).and_then(|s| drawn.views.unit_entity(s.mount))
-        && units.get(e).is_ok_and(|(_, driven)| !driven)
+        && units.get(e).is_ok_and(|(_, driven, _)| !driven)
     {
         commands.entity(e).insert(Driven);
     }
