@@ -1329,6 +1329,17 @@ mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
 A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
 bridge deck over its river bed.
 
+Water does not hold a cart up. The wheel probes read only the terrain and static brushes
+(`WorldCollision` does not know about water), so in water the cart drives on the bed. Live check V1
+(2026-11-07, Farm Wagon): in the Solzreed pond at (15562, 15391) the wagon stands at z 126.30 on the
+bed. A player on foot stands at 126.25 there and wades. The river volume's surface is 127.00
+(`/waterdebug info`), so the front wheels (radius 0.518 m) are under water and the rear wheels
+(0.885 m) are under water to the hub. Reversed into the sea east of (15620, 15383), the wagon follows
+the seabed down to z 84.5, 15.5 m below the surface, and the driver stays seated. The server's
+`/height` `Floor` is its terrain heightmap, not the water surface. The AAEmu server tests water only
+at the summon. **Not traced:** what 1.2 does with a land vehicle in deep water (CryPhysics buoyancy,
+a sinking cart, or forcing the driver off). This is capture-pending.
+
 Out of scope: bumps from rocks and bushes (the `g3` case's 0.3 m bumps; walls, trees and large rocks
 stop the cart, see World collision below) and full wheeled
 physics for the nine car models. Remote carts' tilt now comes from the received type-2
