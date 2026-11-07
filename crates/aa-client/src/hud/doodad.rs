@@ -169,6 +169,9 @@ pub(super) struct Tables {
     zone_messages: HashSet<u32>,
     /// Attachment funcs require a known-free doodad bond and the separate mount gate.
     attachment_skills: HashSet<(u32, u32)>,
+    /// `skills.id` -> (`source_mount`, `source_mount_mate`): whether the skill may be used from a mount / a mate only
+    /// (`desc +0x14B` / `+0x14C`, `FUN_393b3d50`). A skill missing here is left to the server.
+    mount_flags: HashMap<u32, (bool, bool)>,
     /// `(doodad_func_group_id, skill)` -> the fish-stand func and its `actual_func_id`.
     fish_funcs: HashMap<(u32, u32), fish::FishFunc>,
     /// `doodad_func_buy_fish_id` / `doodad_func_convert_fish_id` -> accepted item templates.
@@ -200,6 +203,12 @@ impl Tables {
             );
         }
         (t.fish_buy_items, t.fish_convert_items, t.fish_max_weights) = fish::load_items(conn);
+        if let Ok(mut q) = conn.prepare("SELECT id, source_mount, source_mount_mate FROM skills") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                t.mount_flags.insert(super::data::any_int(r, 0)? as u32, (super::data::any_flag(r, 1)?, super::data::any_flag(r, 2)?));
+            }
+        }
         let mut q = conn.prepare("SELECT id, use_target_highlight, use_target_silhouette, use_target_decal, target_decal_size, sim_radius FROM doodad_almighties")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -313,6 +322,11 @@ impl Tables {
         !self.attachment_skills.contains(&(group, skill)) || (bond_free && mount_free)
     }
 
+    /// `skills.source_mount` / `source_mount_mate` of a skill (`None`: not in the table).
+    fn mount_flags(&self, skill: u32) -> Option<(bool, bool)> {
+        self.mount_flags.get(&skill).copied()
+    }
+
     /// Does the doodad light up (`use_target_highlight`)?
     pub(super) fn glows(&self, template_id: u32) -> bool {
         !self.dark.contains(&template_id)
@@ -411,6 +425,8 @@ pub(super) struct View {
     /// A right click on the climb doodad under the pointer when it is the nearest doodad and in
     /// grab reach: `(distance, id)`, handled by the dialog's unit comparison.
     climb_click: Option<(f32, u32)>,
+    /// The unidentified option behind `dword_39ADB2A0`: get off the mate within 3 m instead of refusing a use.
+    auto_dismount: bool,
     /// What the doodad tooltip shows now.
     tip: Option<Tip>,
     /// The doodad last right clicked: the bar is about it while it is in reach.
@@ -768,6 +784,64 @@ pub(super) fn in_interaction_reach(data: &HudData, doodads: &Doodads, units: &Un
 fn needs_walk(data: &HudData, doodads: &Doodads, units: &Units, obj_id: u32) -> bool {
     interaction_gap(data, doodads, units, obj_id)
         .is_some_and(|(gap, real)| real && gap >= INTERACTION_DISTANCE)
+}
+
+/// The local player's state that `FUN_393b3d50` checks before a doodad use.
+#[derive(Clone, Copy, Debug, Default)]
+struct UseState {
+    dead: bool,
+    gliding: bool,
+    climbing: bool,
+    /// Attached to a unit (`player+0x3af0`): `Some(true)` when it is a slave, `Some(false)` a mate.
+    attached: Option<bool>,
+}
+
+/// What `FUN_393b3d50` does with a use when the player is attached and the skill is not `source_mount`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Gate {
+    Pass,
+    /// A local `ErrorMessageType` (`sub_39428370` raises and does not return); no packet.
+    Refuse(i16),
+    /// The auto-dismount option is on: get off the mate, then use.
+    Dismount,
+}
+
+const CANT_DO_WHILE_DEAD: i16 = 332;
+const CANNOT_INTERACT_WHILE_GLIDING: i16 = 334;
+const CANNOT_INTERACT_WHILE_CLIMB: i16 = 223;
+const SLAVE_UNBIND_FIRST: i16 = 102;
+const CANNOT_INTERACT_WHILE_MOUNTING: i16 = 222;
+/// `FUN_39093800`'s 3.0 m within which the auto-dismount gets off before the use.
+const DISMOUNT_RANGE: f32 = 3.0;
+
+/// `FUN_393b3d50`: dead, gliding and climbing refuse first; then `source_mount` skills pass, and any other use while
+/// attached refuses (102 on a slave, else 222) unless `source_mount_mate` and the unit is a mate.
+fn use_gate(state: UseState, flags: Option<(bool, bool)>, auto_dismount: bool) -> Gate {
+    if state.dead {
+        return Gate::Refuse(CANT_DO_WHILE_DEAD);
+    }
+    if state.gliding {
+        return Gate::Refuse(CANNOT_INTERACT_WHILE_GLIDING);
+    }
+    if state.climbing {
+        return Gate::Refuse(CANNOT_INTERACT_WHILE_CLIMB);
+    }
+    let (Some(slave), Some((source_mount, mount_mate))) = (state.attached, flags) else { return Gate::Pass };
+    if source_mount || (mount_mate && !slave) {
+        return Gate::Pass;
+    }
+    if auto_dismount {
+        return Gate::Dismount;
+    }
+    Gate::Refuse(if slave { SLAVE_UNBIND_FIRST } else { CANNOT_INTERACT_WHILE_MOUNTING })
+}
+
+/// The mount, glider and ladder state the doodad use reads (one parameter for [`execute`]).
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct UseWorld<'w, 's> {
+    mount: Option<Res<'w, crate::ingame::LocalMount>>,
+    gliding: Option<Res<'w, crate::ingame::glide::Gliding>>,
+    ladder: Query<'w, 's, (), With<crate::ingame::ladder::Ladder>>,
 }
 
 /// The 1.2 client refuses a doodad use that costs more labor than the player has, before it asks the server: the
@@ -1910,7 +1984,7 @@ pub(super) fn execute(
     mut inventory: ResMut<Inventory>,
     seats: Option<Res<crate::ingame::seating::Seats>>,
     player: Option<Res<aa_net::state::Player>>,
-    mount: Option<Res<crate::ingame::LocalMount>>,
+    world: UseWorld,
     views: Res<Views>,
     poses: super::pick::UnitPoses,
     mut dev: ResMut<crate::ingame::DevOptions>,
@@ -1957,6 +2031,16 @@ pub(super) fn execute(
     }
     let mut commands = Vec::new();
     let mut opens: Vec<(u32, usize, bool)> = Vec::new();
+    let auto_dismount = d.doodad.auto_dismount;
+    let seat = world.mount.as_deref().and_then(|m| m.0);
+    let attached = seat.is_some() || player.as_ref().and_then(|p| p.spawn.as_ref()).is_some_and(|s| s.unit.attached_to.is_some());
+    let state = UseState {
+        dead: d.snapshot.dead,
+        gliding: world.gliding.as_deref().is_some_and(|g| g.flying()),
+        climbing: !world.ladder.is_empty(),
+        // a ship and a manned turret are slaves (unit type 2) as much as a cart is
+        attached: attached.then(|| seat.is_some_and(|s| s.cart || s.ship || s.turret)),
+    };
     for pick in execute {
         match pick.source {
             super::dynamic_actions::Source::Doodad {
@@ -1989,6 +2073,14 @@ pub(super) fn execute(
                                 doodad_obj_id: obj_id,
                             },
                         ));
+                    } else if let Gate::Refuse(code) =
+                        use_gate(state, d.game.get().and_then(|g| g.doodad.mount_flags(pick.skill)), auto_dismount)
+                    {
+                        // `FUN_393b3ec0` runs `FUN_393b3d50` before its range check: a refused use does not walk.
+                        debug!("doodad: use {} refused locally ({code}) before the walk", pick.skill);
+                        if let Some(errors) = errors.as_mut() {
+                            errors.write(crate::hud::ShowError(code));
+                        }
                     } else {
                         defer_action(
                             &mut d,
@@ -2083,6 +2175,27 @@ pub(super) fn execute(
     let game = game_slot.get();
     for (obj_id, command) in commands {
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
+            // `FUN_393b3d50` comes first in both native use paths, before the skill start that checks the labor.
+            let flags = game.and_then(|g| g.doodad.mount_flags(*skill_id));
+            match use_gate(state, flags, auto_dismount) {
+                Gate::Pass => {}
+                Gate::Refuse(code) => {
+                    debug!("doodad: use {skill_id} refused locally ({code})");
+                    if let Some(errors) = errors.as_mut() {
+                        errors.write(crate::hud::ShowError(code));
+                    }
+                    continue;
+                }
+                Gate::Dismount => {
+                    // `FUN_393b3d50`: within 3.0 m the mate is left (`CSUnMountMate` 9); in or out of 3 m it returns 1
+                    // and the use goes on. The slave unbind (`sub_39345AA0`) is capture-pending.
+                    let mut d = bridge.0.borrow_mut();
+                    let near = interaction_gap(&d, &doodads, &units, obj_id).is_some_and(|(gap, _)| gap < DISMOUNT_RANGE);
+                    if near && state.attached == Some(false) {
+                        super::pets::owned::unmount(&mut d, false);
+                    }
+                }
+            }
             if lacks_labor(game.map(|g| &g.rules), *skill_id, labor) {
                 debug!("doodad: skill {skill_id} needs more labor than {labor}");
                 failed.write(super::alerts::UseFailed {
@@ -2096,7 +2209,7 @@ pub(super) fn execute(
             let group = doodads.by_id.get(&obj_id).map(|o| o.func_group_id);
             let mount_free = player.as_ref().and_then(|p| p.spawn.as_ref())
                 .is_some_and(|spawn| spawn.unit.attached_to.is_none())
-                && mount.as_ref().is_none_or(|mount| mount.0.is_none());
+                && seat.is_none();
             let bond_free = seats.as_ref().is_some_and(|seats| seats.own_free());
             if group.zip(game).is_some_and(|(group, game)| !game.doodad.allows_attachment(group, *skill_id, bond_free, mount_free)) {
                 debug!("doodad: attachment use {skill_id} requires known-free bond and mount");
@@ -2556,7 +2669,7 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL, sim_radius REAL);
              CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
-             CREATE TABLE skills (id INTEGER);
+             CREATE TABLE skills (id INTEGER, source_mount TEXT, source_mount_mate TEXT);
              CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
              CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
              CREATE TABLE localized_texts (tbl_name TEXT, tbl_column_name TEXT, idx INTEGER, en_us TEXT);
@@ -4283,6 +4396,11 @@ mod tests {
 
     /// The bar request used by the fallback tests: skill 14602 on doodad 300 in phase 1 at 3 m.
     fn fallback_skill_app(bounded: bool) -> (App, Shared) {
+        gated_app(bounded, None)
+    }
+
+    /// [`fallback_skill_app`] with the skill's `(source_mount, source_mount_mate)` flags in the tables.
+    fn gated_app(bounded: bool, flags: Option<(bool, bool)>) -> (App, Shared) {
         let bridge = Shared::default();
         {
             let mut d = bridge.borrow_mut();
@@ -4291,6 +4409,9 @@ mod tests {
             d.player_radius = 0.0;
             let mut game = GameData::default();
             game.doodad.add_full(1, 14602, "DoodadFuncUse", 0);
+            if let Some(flags) = flags {
+                game.doodad.mount_flags.insert(14602, flags);
+            }
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4321,6 +4442,182 @@ mod tests {
         let mut views = Views::default();
         views.fixture_doodad(300, Entity::PLACEHOLDER);
         (pending_app(bridge.clone(), doodads, Units::default(), views), bridge)
+    }
+
+    #[allow(clippy::field_reassign_with_default)] // the other fields are private
+    fn flying() -> crate::ingame::glide::Gliding {
+        use crate::ingame::glide::{Active, Flight, GlideParams, Gliding, Pose};
+        let mut gliding = Gliding::default();
+        gliding.active = Some(Active {
+            flight: Flight::start(GlideParams::EXPERIMENTAL),
+            buff_id: 1029,
+            buff_index: 0,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        });
+        gliding
+    }
+
+    fn seat(cart: bool) -> crate::ingame::LocalMount {
+        crate::ingame::LocalMount(Some(crate::ingame::LocalSeat {
+            mount: 9,
+            point: 1,
+            drives: true,
+            cart,
+            ship: false,
+            turret: false,
+            speed: Default::default(),
+            lift: 0.0,
+        }))
+    }
+
+    fn refusals(app: &mut App) -> Vec<i16> {
+        app.world_mut().resource_mut::<Messages<crate::hud::alerts::ShowError>>().drain().map(|e| e.0).collect()
+    }
+
+    /// `FUN_393b3d50`: the order of the refusals and the `source_mount` / `source_mount_mate` flags.
+    #[test]
+    fn the_use_gate_follows_the_native_order() {
+        let on_mate = UseState { attached: Some(false), ..default() };
+        let on_slave = UseState { attached: Some(true), ..default() };
+        assert_eq!(use_gate(UseState::default(), Some((false, false)), false), Gate::Pass, "on foot");
+        assert_eq!(use_gate(on_mate, Some((false, false)), false), Gate::Refuse(222));
+        assert_eq!(use_gate(on_mate, Some((true, false)), false), Gate::Pass, "source_mount");
+        assert_eq!(use_gate(on_mate, Some((false, true)), false), Gate::Pass, "source_mount_mate on a mate");
+        assert_eq!(use_gate(on_slave, Some((false, true)), false), Gate::Refuse(102), "a slave unbinds first");
+        assert_eq!(use_gate(on_slave, Some((true, false)), false), Gate::Pass);
+        assert_eq!(use_gate(on_mate, None, false), Gate::Pass, "unknown skill: the server decides");
+        assert_eq!(use_gate(on_mate, Some((false, false)), true), Gate::Dismount);
+        let all = UseState { dead: true, gliding: true, climbing: true, attached: Some(false) };
+        assert_eq!(use_gate(all, Some((true, true)), false), Gate::Refuse(332));
+        assert_eq!(use_gate(UseState { dead: false, ..all }, Some((true, true)), false), Gate::Refuse(334));
+        assert_eq!(use_gate(UseState { dead: false, gliding: false, ..all }, Some((true, true)), false), Gate::Refuse(223));
+    }
+
+    /// The flags of real skills of the game database.
+    #[test]
+    fn the_mount_flags_load_from_the_skills_table() {
+        let Ok(conn) = Connection::open_with_flags("compact.sqlite3", rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+        let tables = Tables::load(&conn).unwrap();
+        assert_eq!(tables.mount_flags(15706), Some((false, false)));
+        assert_eq!(tables.mount_flags(11453), Some((true, false)));
+        assert_eq!(tables.mount_flags(10723), Some((false, true)));
+        assert_eq!(tables.mount_flags(1), None);
+    }
+
+    #[test]
+    fn a_doodad_use_while_mounted_is_refused_locally() {
+        let (mut app, _) = gated_app(false, Some((false, false)));
+        app.insert_resource(seat(false));
+        app.update();
+        assert!(sent_commands(&mut app).is_empty());
+        assert_eq!(refusals(&mut app), [222]);
+
+        let (mut app, _) = gated_app(false, Some((false, false)));
+        app.insert_resource(seat(true));
+        app.update();
+        assert!(sent_commands(&mut app).is_empty());
+        assert_eq!(refusals(&mut app), [102], "a slave asks to unbind first");
+    }
+
+    /// A ship's seat and a manned cannon are slave seats (unit type 2) too, though `LocalSeat.cart` is off for them:
+    /// 102, and `source_mount_mate` does not cover them.
+    #[test]
+    fn a_ship_or_turret_seat_is_a_slave_for_the_gate() {
+        for (ship, turret) in [(true, false), (false, true)] {
+            for flags in [(false, false), (false, true)] {
+                let (mut app, _) = gated_app(false, Some(flags));
+                let mut mount = seat(false);
+                if let Some(s) = mount.0.as_mut() {
+                    (s.ship, s.turret) = (ship, turret);
+                }
+                app.insert_resource(mount);
+                app.update();
+                assert!(sent_commands(&mut app).is_empty(), "ship {ship} turret {turret} {flags:?}");
+                assert_eq!(refusals(&mut app), [102], "ship {ship} turret {turret} {flags:?}");
+            }
+        }
+    }
+
+    /// `FUN_393b3ec0` runs `FUN_393b3d50` before its range check: a refused bar use out of reach does not walk there
+    /// first (riding, gliding or climbing toward it) to refuse on arrival.
+    #[test]
+    fn a_refused_use_out_of_reach_does_not_walk() {
+        let (mut app, bridge) = gated_app(true, Some((false, false)));
+        app.insert_resource(seat(false));
+        app.update();
+        assert_eq!(refusals(&mut app), [222]);
+        assert!(sent_commands(&mut app).is_empty());
+        let d = bridge.borrow();
+        assert!(d.doodad.approach.is_none(), "no walk");
+        assert!(d.doodad.pending.is_none(), "no pending use");
+        drop(d);
+
+        // the same use with a mount skill walks as on foot
+        let (mut app, bridge) = gated_app(true, Some((true, false)));
+        app.insert_resource(seat(false));
+        app.update();
+        assert!(refusals(&mut app).is_empty());
+        assert!(bridge.borrow().doodad.pending.is_some(), "a source_mount use walks first");
+    }
+
+    #[test]
+    fn mount_skills_pass_while_mounted() {
+        for (cart, flags) in [(false, (true, false)), (true, (true, false)), (false, (false, true))] {
+            let (mut app, _) = gated_app(false, Some(flags));
+            app.insert_resource(seat(cart));
+            app.update();
+            assert_eq!(sent_commands(&mut app).len(), 1, "cart {cart} {flags:?}");
+            assert!(refusals(&mut app).is_empty());
+        }
+        let (mut app, _) = gated_app(false, Some((false, true)));
+        app.insert_resource(seat(true));
+        app.update();
+        assert!(sent_commands(&mut app).is_empty(), "source_mount_mate does not cover a slave");
+        assert_eq!(refusals(&mut app), [102]);
+    }
+
+    #[test]
+    fn dead_and_gliding_players_send_no_doodad_use() {
+        let (mut app, bridge) = gated_app(false, None);
+        bridge.borrow_mut().snapshot.dead = true;
+        app.update();
+        assert!(sent_commands(&mut app).is_empty());
+        assert_eq!(refusals(&mut app), [332]);
+
+        let (mut app, _) = gated_app(false, None);
+        app.insert_resource(flying());
+        app.update();
+        assert!(sent_commands(&mut app).is_empty());
+        assert_eq!(refusals(&mut app), [334]);
+
+        let (mut app, _) = gated_app(false, None);
+        app.update();
+        assert_eq!(sent_commands(&mut app).len(), 1, "on foot the use goes out");
+    }
+
+    /// With the option on, `FUN_393b3d50` skips the messages and returns 1 in or out of its 3.0 m dismount range: the
+    /// use goes on either way (only the dismount itself needs the 3 m).
+    #[test]
+    fn the_auto_dismount_option_goes_on_with_the_use() {
+        let (mut app, bridge) = gated_app(false, Some((false, false)));
+        app.insert_resource(seat(false));
+        bridge.borrow_mut().doodad.auto_dismount = true;
+        bridge.borrow_mut().pos = Vec3::new(0.0, 1.0, 0.0);
+        app.update();
+        assert!(refusals(&mut app).is_empty(), "the option skips the messages");
+        assert_eq!(sent_commands(&mut app).len(), 1);
+
+        let (mut app, bridge) = gated_app(false, Some((false, false)));
+        app.insert_resource(seat(false));
+        bridge.borrow_mut().doodad.auto_dismount = true;
+        app.update();
+        assert!(refusals(&mut app).is_empty());
+        assert_eq!(sent_commands(&mut app).len(), 1, "out of 3 m the use still goes on, still mounted");
     }
 
     /// The sim-radius fallback (no drawn model bounds, or a parented doodad) is not the native

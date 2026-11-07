@@ -19,6 +19,9 @@
 //! * the **local player** is moved by `drive_local` instead of `player::control_player` (input is locked while a move runs), sends
 //!   its movement packets on the way (jump / fall state, velocity) and a standing one at the end, so the server and the other
 //!   players see the same flight; a `Teleported` event from the server cancels it ([`player::follow_server`] puts the player there);
+//! * the **mate the player drives** runs its own controllers (the mount skills Elegant Leap, Drop Back, Dash, ...: `SCSkillFired`
+//!   names the mate as the caster): the player's mover carries the mate (`mount::drive_mount`), so the move is played on the mover
+//!   as the player's is and reported as the mate's (`CSMoveUnit` with the mate's object id);
 //! * a **remote NPC** that is knocked back has one report at the end: the move waits for that report (or, after
 //!   [`REPORT_WAIT`], the predicted end point) and plays the flight to it, then holds the unit there. Remote controllers (other
 //!   players, NPC leaps) arrive as movement reports and are played by [`remote::Track`]; they are only simulated with
@@ -47,6 +50,8 @@ use bevy::prelude::*;
 
 use super::anim::{Locomotion, Motion, bind_action_clip};
 use super::combat::{Acting, Dead};
+use super::data::MountSpeed;
+use super::mount::LocalMount;
 use super::tools::SkillTool;
 use super::player::{LocalPlayer, Mover, floor_at, placement};
 use super::units::RemoteUnit;
@@ -153,6 +158,14 @@ pub struct SkillMove {
     /// Only actual admitted kind1/2/4 controller producers set this. Blink and
     /// impulse approximations do not establish native actor+58 activity.
     controller_kind: Option<u32>,
+    /// The mate the local player drives: the move is that mate's controller, and its reports name the mate.
+    unit: Option<u32>,
+    /// Fall speed of a dash that ran off a ledge, or of a unit that falls on after its path (m/s).
+    fall: f32,
+    /// The path is over with the unit still in the air: it falls to the floor.
+    falling_on: bool,
+    /// The mover's gravity (m/s^2): a mate falls with its own.
+    gravity: f32,
 }
 
 /// `Floating` skill controller of a buff (`value1` mm up, at `value2` mm/s): the unit rises, hangs while the buff lasts and falls
@@ -172,7 +185,7 @@ struct Hover {
 impl SkillMove {
     fn new(flight: Flight, kind: Kind, rotate: bool) -> SkillMove {
         let recover = if kind == Kind::Knock { GET_UP } else { 0.0 };
-        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None }
+        SkillMove { flight, kind, t: 0.0, rotate, recover, landed: false, sent: SEND_INTERVAL, clip_phase: 0, hover: None, controller_kind: None, unit: None, fall: 0.0, falling_on: false, gravity: path::GRAVITY }
     }
 
     /// A settled skill move for the deck tests: only its presence matters there.
@@ -210,9 +223,36 @@ impl SkillMove {
             || (self.controller_kind == Some(1) && self.hover.is_some_and(|h| !h.released))
     }
 
+    /// The move runs for the mate the local player drives (if `who` stands in for one): its reports name the mate, and it falls
+    /// with the mate's gravity.
+    fn carried(mut self, who: &Who) -> SkillMove {
+        if let Some((mate, speed)) = who.mate {
+            self.unit = Some(mate);
+            self.gravity = speed.gravity;
+        }
+        self
+    }
+
     /// Seconds until the move is over.
     fn remaining(&self) -> f32 {
         (self.flight.eta - self.t).max(0.0) + self.recover
+    }
+
+    /// The height of a dash over `floor` (from `z`): 1.2 runs it as held-forward movement (`390A8EE0` hands the actor's movement
+    /// controller a forward request), so it keeps to the ground and runs off a ledge into a fall.
+    fn run_height(&mut self, z: f32, floor: f32, dt: f32) -> f32 {
+        if !floor.is_finite() {
+            return z;
+        }
+        if self.fall == 0.0 && z - floor <= STEP_UP {
+            return floor;
+        }
+        self.fall += self.gravity * dt;
+        let z = (z - self.fall * dt).max(floor);
+        if z <= floor {
+            self.fall = 0.0;
+        }
+        z
     }
 }
 
@@ -228,6 +268,7 @@ struct Stepped {
 
 /// Moves `mv` on by `dt` from `pos`: along its path, stopped by walls, never under the floor.
 fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, collision: &WorldCollision) -> Stepped {
+    let gravity = mv.gravity;
     if let Some(h) = &mut mv.hover {
         if !h.released {
             let z = (pos.z + h.speed * dt).min(h.top);
@@ -235,7 +276,7 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
             return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity: Vec3::new(0.0, 0.0, vz), done: false, airborne: true };
         }
         // the buff is gone: the unit falls to the floor
-        h.fall += path::GRAVITY * dt;
+        h.fall += gravity * dt;
         let floor = floor_at(terrain, collision, pos, STEP_UP);
         let z = pos.z - h.fall * dt;
         let landed = floor.is_finite() && z <= floor;
@@ -246,6 +287,16 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
     if mv.landed {
         mv.recover -= dt;
         return Stepped { pos, velocity: Vec3::ZERO, done: mv.recover <= 0.0, airborne: false };
+    }
+    if mv.falling_on {
+        mv.fall += gravity * dt;
+        let floor = floor_at(terrain, collision, pos, STEP_UP);
+        let z = pos.z - mv.fall * dt;
+        // no floor under it (a hole): it stays where it is, as the path's end did before
+        mv.landed = !floor.is_finite() || z <= floor;
+        let z = if floor.is_finite() { z.max(floor) } else { pos.z };
+        let velocity = if mv.landed { Vec3::ZERO } else { Vec3::new(0.0, 0.0, -mv.fall) };
+        return Stepped { pos: Vec3::new(pos.x, pos.y, z), velocity, done: mv.landed && mv.recover <= 0.0, airborne: !mv.landed };
     }
     mv.t += dt;
     let want = mv.flight.at(mv.t);
@@ -258,14 +309,24 @@ fn advance(mv: &mut SkillMove, pos: Vec3, dt: f32, terrain: &TerrainQuery, colli
         blocked = pushed.blocked && reached.distance(xy) > 0.2;
         xy = reached;
     }
-    let floor = floor_at(terrain, collision, Vec3::new(xy.x, xy.y, pos.z.max(want.z)), STEP_UP);
-    let mut z = want.z;
+    let dash = mv.controller_kind == Some(4);
+    let floor = floor_at(terrain, collision, Vec3::new(xy.x, xy.y, if dash { pos.z } else { pos.z.max(want.z) }), STEP_UP);
+    let mut z = if dash { mv.run_height(pos.z, floor, dt) } else { want.z };
     if floor.is_finite() {
         z = z.max(floor);
     }
     mv.landed = mv.t >= mv.flight.eta || blocked;
     if mv.landed && floor.is_finite() {
-        z = floor;
+        if z - floor > STEP_UP {
+            // still in the air when the path ends (a leap over falling ground: its arc ends at the height it left from; a dash
+            // off a ledge; a wall in the way of an arc): it falls on from there at the speed it came down with, instead of being
+            // put on the floor in one frame (metres for a mount's 25 m leap down a slope)
+            mv.landed = false;
+            mv.falling_on = true;
+            mv.fall = if dt > 0.0 { ((pos.z - z) / dt).max(0.0) } else { 0.0 };
+        } else {
+            z = floor;
+        }
     }
     let next = Vec3::new(xy.x, xy.y, z);
     let velocity = if dt > 0.0 { (next - pos) / dt } else { Vec3::ZERO };
@@ -314,7 +375,7 @@ pub fn plugin(app: &mut App) {
             (
                 start_moves.after(super::seating::SeatSet::Follow).before(super::player::control_player),
                 drive_local.after(super::player::control_player).after(super::seating::SeatSet::Pose)
-                    .before(super::anim::drive_locomotion).before(super::camera::follow_player),
+                    .before(super::mount::drive_mount).before(super::anim::drive_locomotion).before(super::camera::follow_player),
                 drive_remote.after(super::units::move_units),
                 dev_script.before(super::player::control_player),
                 decay_lag.after(drive_local).before(super::camera::follow_player),
@@ -332,6 +393,8 @@ struct Who {
     local: bool,
     /// An NPC or creature (the server moves it), not a player character.
     npc: bool,
+    /// The local player stands in for the mate it drives, which goes at its own speed.
+    mate: Option<(u32, MountSpeed)>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -343,6 +406,7 @@ struct Roster<'w, 's> {
     transforms: Query<'w, 's, &'static Transform>,
     parents: Query<'w, 's, &'static ChildOf>,
     buffs: Option<Res<'w, Buffs>>,
+    mount: Option<Res<'w, LocalMount>>,
 }
 
 impl Roster<'_, '_> {
@@ -351,7 +415,7 @@ impl Roster<'_, '_> {
             return None;
         }
         if let Some((entity, _, m)) = self.locals.iter().find(|(_, l, _)| l.obj_id == obj) {
-            return Some(Who { entity, pos: m.pos, yaw: m.facing, local: true, npc: false });
+            return Some(Who { entity, pos: m.pos, yaw: m.facing, local: true, npc: false, mate: None });
         }
         let (entity, r, dead) = self.remotes.iter().find(|(_, r, _)| r.obj_id == obj)?;
         if dead {
@@ -378,7 +442,21 @@ impl Roster<'_, '_> {
             yaw,
             local: false,
             npc: !r.is_character(),
+            mate: None,
         })
+    }
+
+    /// The unit that runs a controller of `obj`. The mate the player drives runs it on the player's mover, which carries it: in 1.2
+    /// the owned mate's `ActorUnitModel` (actor +0x3be8, vtable `0x399A4F68`) admits every controller kind (`StartSkillController`
+    /// `0x390CA700` checks its virtual +4, `0x390E54D0` returns 1), and the AAEmu server runs no controller for a mate. A passenger's
+    /// mount, a cart, a ship or a turret is not a driven mate (`LocalMount::driving`).
+    fn runner(&self, obj: u32) -> Option<Who> {
+        if let Some((mate, speed)) = self.mount.as_ref().and_then(|m| m.driving()).filter(|&(mate, _)| obj != 0 && mate == obj)
+            && let Some((entity, _, m)) = self.locals.iter().next()
+        {
+            return Some(Who { entity, pos: m.pos, yaw: m.facing, local: true, npc: false, mate: Some((mate, speed)) });
+        }
+        self.who(obj)
     }
 
     /// A buff of the unit stuns, puts to sleep or roots it.
@@ -450,7 +528,7 @@ fn start_moves(
             }
             // the buff that holds a unit up is gone: it falls
             Event::BuffRemoved { obj_id, index } => {
-                if let Some(w) = start.roster.who(obj_id) {
+                if let Some(w) = start.roster.runner(obj_id) {
                     start.commands.queue(move |world: &mut World| {
                         if let Some(mut mv) = world.get_mut::<SkillMove>(w.entity)
                             && let Some(h) = mv.hover.as_mut().filter(|h| h.index == index)
@@ -629,7 +707,7 @@ impl Starter<'_, '_, '_, '_, '_> {
 
     /// A floating controller of buff `index` lifts `mover`.
     fn float(&mut self, c: &Controller, mover: u32, index: u32) {
-        let Some(who) = self.roster.who(mover) else { return };
+        let Some(who) = self.roster.runner(mover) else { return };
         // other units move by the server's reports; only made-up events need the simulation
         if (!who.local && !simulate_remote()) || (self.roster.rooted(mover, self.book) && c.kind != 2) {
             return;
@@ -637,12 +715,12 @@ impl Starter<'_, '_, '_, '_, '_> {
         if log() {
             info!("skill motion: controller {} lifts unit {mover} {:.1} m at {:.1} m/s", c.id, c.v[0] as f32 * 0.001, c.v[1] as f32 * 0.001);
         }
-        self.commands.entity(who.entity).insert(SkillMove::float(who.pos, index, c));
+        self.commands.entity(who.entity).insert(SkillMove::float(who.pos, index, c).carried(&who));
     }
 
     /// `mover` runs controller `c` towards `reference` (a unit, else the spot `at`, else itself).
     fn controller(&mut self, c: &Controller, mover: u32, reference_unit: Option<u32>, at: Option<Vec3>, caster: bool) {
-        let Some(who) = self.roster.who(mover) else { return };
+        let Some(who) = self.roster.runner(mover) else { return };
         // other units move by the server's reports; only made-up events need the simulation
         if !who.local && !simulate_remote() {
             return;
@@ -654,7 +732,8 @@ impl Starter<'_, '_, '_, '_, '_> {
         let target = reference_unit.and_then(|u| self.roster.point(u)).or(at);
         let flight = match c.kind {
             2 => path::leap_end(c, who.pos, who.yaw, target).and_then(|end| path::leap(c, who.pos, end, 1.0)),
-            4 => path::dash(c, who.pos, who.yaw),
+            // a mate dashes at its own run speed (`re-skills.md` section 1.3: full run speed)
+            4 => path::dash(c, who.pos, who.yaw, who.mate.map_or(path::DASH_SPEED, |(_, speed)| speed.run)),
             _ => None,
         };
         let Some(flight) = flight else {
@@ -667,7 +746,7 @@ impl Starter<'_, '_, '_, '_, '_> {
             info!("skill motion: controller {} moves unit {mover} {:.1} m in {:.2} s ({:.1} m/s, lift {:.2} m)", c.id, flight.dist, flight.eta, flight.hs, flight.lift());
         }
         let kind = if caster { Kind::Dash } else { Kind::Pull };
-        let mut movement = SkillMove::new(flight, kind, c.rotates());
+        let mut movement = SkillMove::new(flight, kind, c.rotates()).carried(&who);
         movement.controller_kind = Some(c.kind);
         self.commands.entity(who.entity).insert(movement);
     }
@@ -751,10 +830,17 @@ pub(super) fn drive_local(
     mut commands: Commands,
     mut players: Query<(Entity, &LocalPlayer, &mut Mover, &mut Transform, &mut SkillMove, &mut Motion, Option<&mut Animator>, Option<&Locomotion>, Has<super::seating::Seated>), Without<Dead>>,
     seats: Option<Res<super::seating::Seats>>,
+    mount: Option<Res<LocalMount>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let now = time.elapsed_secs_f64();
+    let driving = mount.as_ref().and_then(|m| m.driving()).map(|(mate, _)| mate);
     for (entity, local, mut mover, mut transform, mut mv, mut motion, animator, loco, seated) in &mut players {
+        if mv.unit.is_some() && mv.unit != driving {
+            // the player left the mate whose controller it carried: that move is over, and no report names the mate
+            commands.entity(entity).try_remove::<SkillMove>();
+            continue;
+        }
         if seated && !mv.controller_activity() {
             // Native parented Blink refuses translation and sends no unbond. A
             // bound impulse flight has no proven solver here: decline that
@@ -792,24 +878,28 @@ pub(super) fn drive_local(
             let flying = !ending && !mv.landed;
             let state = if !step.airborne { MoveState::Ground } else if step.velocity.z > 0.0 { MoveState::Jump } else { MoveState::Fall };
             let velocity = if flying { [to_wire(step.velocity.x), to_wire(step.velocity.y), to_wire(step.velocity.z)] } else { [0; 3] };
-            out.write(NetCommand(Command::Move(
-                MoveCommand {
-                    pos: Pos::new(mover.pos.x, mover.pos.y, mover.pos.z),
-                    yaw: mover.facing,
-                    moving: flying,
-                    stance: aa_net::model::stance::RELAXED,
-                    velocity,
-                    delta_movement: [0, if flying { 127 } else { 0 }, 0],
-                    ..MoveCommand::default()
-                }
-                .with_state(state),
-            )));
+            let movement = MoveCommand {
+                pos: Pos::new(mover.pos.x, mover.pos.y, mover.pos.z),
+                yaw: mover.facing,
+                moving: flying,
+                stance: aa_net::model::stance::RELAXED,
+                velocity,
+                delta_movement: [0, if flying { 127 } else { 0 }, 0],
+                ..MoveCommand::default()
+            }
+            .with_state(state);
+            // the driven mate's controller is the mate's movement, as `control_player` reports a ride
+            out.write(NetCommand(match mv.unit {
+                Some(mate) => Command::MoveUnit { obj_id: mate, movement },
+                None => Command::Move(movement),
+            }));
         }
         if ending {
             mover.velocity = Vec3::ZERO;
             mover.vz = 0.0;
             if log() {
-                info!("skill motion: the player lands at ({:.1}, {:.1}, {:.2})", mover.pos.x, mover.pos.y, mover.pos.z);
+                let who = mv.unit.map_or_else(|| "the player".to_string(), |mate| format!("the player's mate {mate}"));
+                info!("skill motion: {who} lands at ({:.1}, {:.1}, {:.2})", mover.pos.x, mover.pos.y, mover.pos.z);
             }
             commands.entity(entity).try_remove::<SkillMove>();
         }
@@ -983,6 +1073,46 @@ mod tests {
         assert!(mv.landed);
     }
 
+    /// A dash is running, not a flight: east of the spawn the ground falls about 3 m over its 16 m, and it stays on the ground.
+    #[test]
+    fn a_dash_keeps_to_the_ground() {
+        let terrain = TerrainQuery::new("main_world");
+        let collision = WorldCollision::new("main_world", terrain.clone());
+        let (x, y) = (15480.0f32, 15282.0f32);
+        let Some(z) = terrain.height_at(x, y) else { return };
+        let mut v = [0; 13];
+        v[0] = 3000;
+        let c = Controller { id: 6585, kind: 4, v, start_anim: 0 };
+        let from = Vec3::new(x, y, z);
+        let mut mv = SkillMove::new(path::dash(&c, from, -std::f32::consts::FRAC_PI_2, path::DASH_SPEED).unwrap(), Kind::Dash, false);
+        mv.controller_kind = Some(4);
+        let mut pos = from;
+        for _ in 0..240 {
+            let step = advance(&mut mv, pos, 1.0 / 60.0, &terrain, &collision);
+            let ground = terrain.height_at(step.pos.x, step.pos.y).unwrap();
+            assert!((step.pos.z - ground).abs() < 0.3 && !step.airborne, "{} over {ground}", step.pos.z);
+            pos = step.pos;
+            if step.done {
+                break;
+            }
+        }
+        assert!(mv.landed && (pos.x - x - path::DASH_SPEED * 3.0).abs() < 0.2, "{pos}");
+        assert!(z - pos.z > 1.0, "downhill: {z} -> {}", pos.z);
+    }
+
+    #[test]
+    fn a_dash_off_a_ledge_falls_with_the_movers_gravity() {
+        let mut mv = SkillMove::fixture();
+        // within a step of the floor it keeps to it
+        assert_eq!(mv.run_height(0.4, 0.0, 0.1), 0.0);
+        // 2 m over it, a horse (gravity 30) falls 0.3 m in the first 0.1 s and faster after
+        mv.gravity = 30.0;
+        assert!((mv.run_height(2.0, 0.0, 0.1) - 1.7).abs() < 1e-4);
+        assert!((mv.run_height(1.7, 0.0, 0.1) - 1.1).abs() < 1e-4);
+        assert_eq!(mv.run_height(1.1, 0.0, 0.5), 0.0, "it lands on the floor");
+        assert_eq!(mv.fall, 0.0);
+    }
+
     #[test]
     fn only_the_events_that_move_units_are_queued() {
         let mut inbox = Inbox::default();
@@ -995,3 +1125,7 @@ mod tests {
 #[cfg(test)]
 #[path = "skill_motion/seating_tests.rs"]
 mod seating_tests;
+
+#[cfg(test)]
+#[path = "skill_motion/mount_tests.rs"]
+mod mount_tests;

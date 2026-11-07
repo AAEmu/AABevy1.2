@@ -3,6 +3,11 @@
 //! standing vertical on the character's `item_glider` bone).
 //!
 //! `AA_EQUIP_VIEW=back|side|front|top` picks the camera.
+//! `AA_GLIDER_SHEET=1` draws a contact sheet instead: eight of the distinct glider models of the `item_backpacks` type-2
+//! rows (spread over all 26 besides `glider_bx`), side by side as bare models (`creature::spawn`, not on a character's
+//! `item_glider` bone), for a look at the set. The per-item resolve / clip checks and the per-model wing-level check are
+//! the `every_glider_item_resolves_and_binds_its_clips` / `every_glider_model_opens_level_on_the_item_glider_bone` tests in
+//! `src/ingame/glide.rs`.
 //! `cargo run -p aa-client --example glider_look -- --mute --offscreen-shot shots/aa-client/glider_look.png --shot-after 3`
 #![allow(dead_code)]
 #[path = "../src/hud/mod.rs"]
@@ -82,6 +87,10 @@ fn main() {
 }
 
 fn setup(mut commands: Commands, mut cry: CryAssets, clips: Res<aa_anim::ClipLibrary>) {
+    if std::env::var_os("AA_GLIDER_SHEET").is_some() {
+        contact_sheet(&mut commands, &mut cry, &clips);
+        return;
+    }
     let db = GameDb::open().expect("read-only original database");
     let client_db = ingame::data::Db::open().expect("game database");
     let mut equipment = Equipment::default();
@@ -169,4 +178,38 @@ fn check_wing(world: &mut World) {
     );
     println!("glider_look: PASS wing plane {degrees:.1} deg from horizontal");
     world.resource_mut::<WingChecked>().0 = true;
+}
+
+/// Eight distinct glider models in two rows, bare (not on a character), seen from above.
+fn contact_sheet(commands: &mut Commands, cry: &mut CryAssets, clips: &aa_anim::ClipLibrary) {
+    let db = ingame::data::Db::open().expect("game database");
+    let mut models: Vec<String> = Vec::new();
+    for id in db.glider_items() {
+        if let Some(glider) = db.glider(id)
+            && !models.contains(&glider.model)
+            && !glider.model.ends_with("glider_bx.chr")
+        {
+            models.push(glider.model);
+        }
+    }
+    // eight models spread over the whole list (26 distinct ones besides glider_bx)
+    let count = models.len().min(8);
+    let picked: Vec<_> = (0..count).map(|k| &models[k * models.len() / count]).collect();
+    for (i, model) in picked.iter().enumerate() {
+        let (column, row) = ((i % 4) as f32 - 1.5, (i / 4) as f32 - 0.5);
+        let spawned = ingame::creature::spawn(commands, cry, clips, model, None, Transform::from_xyz(column * 14.0, 0.0, row * 14.0));
+        println!("glider_look: sheet {i} {model}: {}", if spawned.is_some() { "spawned" } else { "FAILED to spawn" });
+    }
+    // the flight systems still run: they need their resources, and no glider is equipped
+    commands.insert_resource(Gliding::default());
+    commands.insert_resource(Inventory::default());
+    commands.insert_resource(db);
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 44.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.spawn((
+        DirectionalLight { illuminance: 12_000.0, ..default() },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, -0.5, 0.0)),
+    ));
 }

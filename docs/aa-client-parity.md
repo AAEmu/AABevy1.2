@@ -1,5 +1,40 @@
 # ArcheAge 1.2 feature parity
 
+## Mounted movement and transport checkpoint, 2026-11-07
+
+Branch `feat/mounted-transport` (base f6efb132) closes most of the README's "ships, vehicles and gliders; mount skills and
+mounted jumping/swimming" line from the 1.2 decompile and data. Every slice was built from `x2game12.c`, the DB and the pak and
+checked by unit tests and offline examples only: **nothing here has a live-server or original-client check yet** (capture-pending
+details are listed in each owning doc).
+
+- **Mounted jump and rear** (`player.rs`, `mount.rs`, `anim.rs`, `jump.rs`; [movement](aa-client-movement.md), [units](aa-client-units.md)):
+  Space on the driver's seat jumps the mate at `sqrt(2gh)` from its own `actor_models` row (`sub_390CB440`, `sub_3912B330`; the Lilyut
+  horse 1.3 m and gravity 30), sent as the mate's `CSMoveUnit` with the on-foot flags (inferred); a standing Space rears it
+  (`fist_em_jump_in_place`, the rider's `*_em_jump_in_place`); the horse graph's take-off, loop, landing and freefall clips play on the
+  driven and remote mates, the rider takes off and lands with it, and the jump cancels a cast. 071b9938 (also carries the jump's
+  player/data hunks), 2ba4d075, 28f2064f, a19d7ae9; `examples/mount_jump`.
+- **Mounted swimming** (`player.rs`, `swim.rs`, `mount.rs`): a driven mount swims at its own swim level and speed instead of walking
+  the sea bed, plays the horse graph's swim clips, its riders idle in the water, getting off leaves the rider swimming, and
+  `SwimSpeedMul` buffs scale the swim speed. ed39286b, e11cbc60, 159fc7b5, f156d1a0, 0160d737; `examples/mount_swim`. Open: the
+  submarine/porpoise dive.
+- **Mount skills** (`skill_motion.rs`, `combat`, `hud/pets`): Leap and Dash controllers (Elegant Leap, Drop Back, Overrun, Dash...)
+  move the driven mate (`StartSkillController`, `390CA700`); seated riders play skill, attack and hit clips on the upper body
+  (`anims.ride_ub`); pet slots show the mount skill's cooldown and a right click toggles auto-use. 071b9938, 831c7a9f, 372a1097,
+  c256ce2d; `examples/rider_attack`.
+- **Ships**: a walkable deck from every hull and deck brush of a prefab (edc576fb), speed-driven bow spray, side wash and wake
+  emitters and the slave despawn effect (495a0250), rudder, helm wheel and throttle clips from the steering (e2dc323b), the run loop
+  above 1 m/s and the steering loop (2b064be7); `examples/ship_wake`, `examples/ship_helm`. Open: the helmsman's steer clips, sails,
+  the fishboat paddle wheel, hulls missing from the pak (caravel, ray), a small spray seen above the deck amidships in the
+  `ship_wake` shot (to compare with 1.2).
+- **Land vehicles**: each model drives with its own `vehicle_models` speed, turn rate and wheel layout (5fb9b8b5), stops and slides at
+  walls, trees and rocks (8538427b), and its engine sounds gate on the dying state (2b064be7). Open: unit/vehicle collision and the
+  wheeled-car simulation.
+- **Gliders and doodads**: the gliding sound mood follows a flight (4050039a), the local doodad-use gate and the glider back-slot
+  refusal raise the 1.2 messages (b117a88f), and tests sweep every glider item, gliding buff and gliding effect group
+  (18cc450a, f05f777f).
+
+Tests: `cargo test -p aa-client` 1854 passed / 0 failed (base 1746), `cargo test -p aa-net` 838 passed; clippy adds no warnings.
+
 ## Combat stance and auto-attack checkpoint, 2026-11-01
 
 The 1.2 decompile settles the combat state; the K2 capture (2026-11-01-combat-k2k3) only supplies the client's outbound packets.
@@ -1265,7 +1300,7 @@ not turn it into a current completion claim.
 | Character selection and creation | All four 1.2 races and both genders; appearance controls and server creation/re-entry; real captures; all eight preview heads use authored facial idle overlays | Remaining appearance/material differences, hat/beard variants, training-field animation/wind |
 | Loading and screen lifecycle | Full flow, prebuilt HUD, return-to-list/logout/disconnect, spawn focus tests | Broader interruption/race coverage and persistent driver pipeline cache |
 | Ground movement and camera | Walk/run/back/strafe/turn/jump/fall, collision/steps, clipped camera, server movement; original primary/secondary bindings drive movement and zoom | Camera preset actions, click-to-move/native interactions and less common locomotion modes need audit; later: PR #60 (stacked on #58, in review) fixes vehicle targeting, where a 1.1 m sphere misses most of a ~4 m wagon |
-| Water and mounted movement | Wading/swimming/diving; original breath bar on underwater reports/corrections and calculated capacity; remote mount/rider placement and movement packets | Natural live breath/drowning QA, local owned mounts/pets, mounting UI, ships/vehicles, gliders, hanging/moving supports |
+| Water and mounted movement | Wading/swimming/diving; original breath bar on underwater reports/corrections and calculated capacity; remote mount/rider placement and movement packets; the driven mount jumps, rears and swims with its own actor data and horse-graph clips, riders follow, getting off in water swims on, `SwimSpeedMul` buffs (2026-11-07 checkpoint, test-only) | Natural live breath/drowning QA, a live and original-client check of the mounted jump/rear/swim, the swimming mount's dive (submarine, porpoise), hanging/moving supports |
 | World geometry | Terrain with native heightmap-distance alpha order, exterior and visarea interior brushes, vegetation with native vertex AO/authored group brightness, roads, forward and deferred/wrapped diffuse decals including interior placements, authored static entity props/local lights/projectors, verified rigid CGA windmills, streaming, native baked-colour cave base geometry and seven compiled cave collision proxies with verified surfaces/transforms and unload; reference captures | Remaining voxel cover/detail/atlas variants; portal/area receiver lighting; decal normal/specular accumulation and receiver variants; other animated entities/controllers/FlowGraph, far impostors/HLOD, remaining placement types and procedural grass |
 | Environment | Native Bezier curves and 147-slot defaults/ranges, spatial zone/raw-curve lighting blend, distant-cloud motion/geometry/lifecycle, original 8,912-star catalogue and native viewport sizing, moon discs/coronas/orbit and sky draw order, fog, water, music/ambient/reverb/moods | Area/relic overrides and legacy XML color migration, discrete skybox/cloud fades, shafts/glow/adaptation, underwater fidelity and remaining mood triggers |
 | Character and animation rendering | Real assembled meshes/skeletons, locomotion/combat layers, equipment, customization; authored body-clock facial overlays/blinks for all eight playable local-player/preview heads and supported NPC heads, source-verified facial bone controllers, explicit received NPC body slots and rigid CDF bone attachments; creature and resolved-part CDF effects with visibility/unload lifetime; authored static UCC composition/native default, iris color and conservative alpha cutouts | Voice lip sync; appearance-change rebuilding, full-world selected remote facial and attachment QA, CDF entity bindings; further render reference checks, fur/hair/skin shading differences, clothing clipping, dynamic UCC/gameplay texture overrides and remaining clips |

@@ -103,10 +103,20 @@ pub struct MountSpeed {
     pub inertia: f32,
     /// `actor_models.game_inertia_accel`: response rate (1/s) for a move request; 0 means no inertia.
     pub accel: f32,
+    /// `actor_models.game_jump_height` (m) and `physics_living_gravity` (m/s^2): every actor copies its own `jumpHeight`
+    /// (`sub_390CB440`, x2game12.c:174729-174739), so a driven mount jumps and falls with its row, not the rider's.
+    pub jump_height: f32,
+    pub gravity: f32,
+    /// `game_stances.max_speed` of the swim stance (stance 3, m/s): the player's row is the 3.0 of
+    /// [`super::swim::BASE_SPEED`], a Lilyut horse's 1.8, a donkey's 4.0.
+    pub swim: f32,
+    /// The mount's swim level over its feet (m, [`super::swim::swim_level`]): the water it swims in is at least this deep and
+    /// its origin floats this far under the surface; a horse's `swim_height` 0.3 plus its spine's 1.843.
+    pub swim_level: f32,
 }
 
 impl Default for MountSpeed {
-    /// A horse's.
+    /// A horse's (the Lilyut horse, actor model 42).
     fn default() -> Self {
         MountSpeed {
             run: 9.0,
@@ -114,6 +124,10 @@ impl Default for MountSpeed {
             backward: 0.2,
             inertia: 4.0,
             accel: 11.0,
+            jump_height: 1.3,
+            gravity: 30.0,
+            swim: 1.8,
+            swim_level: 2.143,
         }
     }
 }
@@ -127,6 +141,21 @@ impl MountSpeed {
         let back = if local_dir.y < -0.1 { self.backward } else { 1.0 };
         let walk = if walking { self.walk } else { 1.0 };
         self.run * back * walk
+    }
+
+    /// The swim speed for a pressed direction: the swim stance's, slower backwards by `swim_back_speed_mul` as a player's
+    /// (that the cvar holds for a mount is inferred); there is no walking in the water.
+    pub fn swim_of(&self, local_dir: Vec2) -> f32 {
+        if local_dir == Vec2::ZERO {
+            return 0.0;
+        }
+        self.swim * super::swim::back_factor(local_dir)
+    }
+
+    /// The same for a mount drawn at `scale` (its unit's scale, `npcs.scale`: 0.9 for a snow lion, 0.8 for a tare): 1.2's
+    /// swim level `vfunc108` (`sub_39113EE0`, x2game12.c:230585-230589) is the actor's level times its entity scale.
+    pub fn at_scale(self, scale: f32) -> MountSpeed {
+        MountSpeed { swim_level: self.swim_level * scale, ..self }
     }
 }
 
@@ -1053,6 +1082,37 @@ impl Db {
         })
     }
 
+    /// Whether a slave template names a despawn portal group (`slaves.portal_despawn_fx_id`). `FUN_393497C0`
+    /// (`OnSlaveDespawn`) plays that group when the row has one and the prefab's `_despawn_effect` entities
+    /// (`FUN_391091A0`) when it does not. About half of the vehicle and ship rows have none.
+    pub fn slave_has_despawn_portal(&self, template_id: u32) -> bool {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT portal_despawn_fx_id FROM slaves WHERE id = ?1",
+                params![template_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .ok()
+            .flatten()
+            .is_some_and(|fx| fx > 0)
+    }
+
+    /// The top speed of a ship model (`ship_models.velocity`, m/s) through its `models` row: the denominator of
+    /// `UpdateExhaustEffect`'s exhaust factor (`FUN_390c78d0`). `None` for a model that is not a ship.
+    pub fn ship_max_speed(&self, model_id: u32) -> Option<f32> {
+        let l = self.lookups.lock().unwrap();
+        l.conn
+            .query_row(
+                "SELECT s.velocity FROM models m JOIN ship_models s ON s.id = m.sub_id AND m.sub_type = 'ShipModel' WHERE m.id = ?1",
+                params![model_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .ok()
+            .flatten()
+            .map(|v| v as f32)
+    }
+
     /// The maximum health of a slave template: its unit attribute 6 (`MaxHealth`) as the 1.2 client's
     /// `FUN_390b4a70` reads it (`FUN_398a0bc0`): the `unit_formulas` base of the attribute, plus the flat
     /// `unit_modifiers` rows, then one summed percent multiplier on that sum.
@@ -1262,17 +1322,36 @@ impl Db {
             return *s;
         }
         let d = MountSpeed::default();
-        let speed = l
+        let row = l
             .conn
             .query_row(
-                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier, a.game_inertia, a.game_inertia_accel FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2 WHERE m.id = ?1",
+                "SELECT g.ai_move_speed_run, a.game_walk_multiplier, a.game_backward_multiplier, a.game_inertia, a.game_inertia_accel, a.game_jump_height, a.physics_living_gravity, s.max_speed, a.swim_height, a.model_file FROM models m                  JOIN actor_models a ON a.id = m.sub_id AND m.sub_type = 'ActorModel'                  LEFT JOIN game_stances g ON g.actor_model_id = a.id AND g.stance_id = 2                  LEFT JOIN game_stances s ON s.actor_model_id = a.id AND s.stance_id = 3 WHERE m.id = ?1",
                 params![model_id],
                 |r| {
                     let f = |i: usize, default: f32| -> rusqlite::Result<f32> { Ok(r.get::<_, Option<f64>>(i)?.map_or(default, |v| v as f32)) };
-                    Ok(MountSpeed { run: f(0, d.run)?, walk: f(1, d.walk)?, backward: f(2, d.backward)?, inertia: f(3, d.inertia)?, accel: f(4, d.accel)? })
+                    let speed = MountSpeed {
+                        run: f(0, d.run)?,
+                        walk: f(1, d.walk)?,
+                        backward: f(2, d.backward)?,
+                        inertia: f(3, d.inertia)?,
+                        accel: f(4, d.accel)?,
+                        jump_height: f(5, d.jump_height)?,
+                        gravity: f(6, d.gravity)?,
+                        swim: f(7, d.swim)?,
+                        swim_level: d.swim_level,
+                    };
+                    Ok((speed, r.get::<_, Option<f64>>(8)?, r.get::<_, Option<String>>(9)?))
                 },
             )
-            .unwrap_or(d);
+            .ok();
+        // the swim level needs the skeleton: without the pak a mount keeps the horse's
+        let speed = row.map_or(d, |(speed, swim_height, file)| MountSpeed {
+            swim_level: swim_height
+                .zip(file)
+                .and_then(|(h, file)| super::swim::swim_level(&file, h as f32))
+                .unwrap_or(d.swim_level),
+            ..speed
+        });
         l.mount_speeds.insert(model_id, speed);
         speed
     }
@@ -1350,6 +1429,19 @@ impl Db {
             .ok();
         l.gliders.insert(item_id, glider.clone());
         glider
+    }
+
+    /// Every glider item template that casts a skill (`item_backpacks.backpack_type_id = 2`, `items.use_skill_id` set), by id.
+    /// Only the glider coverage sweep (`glide` tests) and the `glider_look` example list them.
+    #[allow(dead_code)]
+    pub fn glider_items(&self) -> Vec<u32> {
+        let l = self.lookups.lock().unwrap();
+        let read = l.conn.prepare(
+            "SELECT b.item_id FROM item_backpacks b JOIN items i ON i.id = b.item_id
+             WHERE b.backpack_type_id = 2 AND i.use_skill_id > 0 ORDER BY b.item_id",
+        );
+        read.and_then(|mut st| st.query_map([], |r| Ok(r.get::<_, i64>(0)? as u32))?.collect())
+            .unwrap_or_default()
     }
 
     /// The equip slot a skill is cast through (`skills.link_equip_slot_id` >= 0) and the backpack type the item there
@@ -2081,12 +2173,39 @@ mod tests {
         assert_eq!(horse.of(Vec2::ZERO, false), 0.0);
     }
 
-    /// The Lilyut horse (model 139) and the donkey (953) as the database has them.
+    /// The Lilyut horse (model 139, actor 42) and the donkey (953, actor 429) as the database has them: the horse jumps
+    /// 1.3 m under gravity 30 (8.83 m/s), the donkey under 20 (7.21 m/s); in the water the horse swims at 1.8 m/s and the
+    /// donkey at 4.0 (`game_stances` stance 3).
     #[test]
     fn the_database_holds_the_mount_speeds() {
         let Some(db) = Db::open() else { return };
-        assert_eq!(db.mount_speed(139), MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0 });
-        assert!((db.mount_speed(953).run - 7.2).abs() < 1e-5);
+        let horse = db.mount_speed(139);
+        assert_eq!(
+            MountSpeed { swim_level: 0.0, ..horse },
+            MountSpeed { run: 9.0, walk: 0.2, backward: 0.2, inertia: 4.0, accel: 11.0, jump_height: 1.3, gravity: 30.0, swim: 1.8, swim_level: 0.0 }
+        );
+        // swim_height 0.3 plus the spine's bind-pose height (the horse's default when the pak is missing)
+        assert!((horse.swim_level - 2.143).abs() < 0.01, "{}", horse.swim_level);
+        let donkey = db.mount_speed(953);
+        assert!((donkey.run - 7.2).abs() < 1e-5);
+        assert_eq!((donkey.jump_height, donkey.gravity, donkey.swim), (1.3, 20.0, 4.0));
+        if aa_cry::pak_available() {
+            // swim_height 0.2 plus the donkey's spine (1.194 m)
+            assert!((donkey.swim_level - 1.394).abs() < 0.01, "{}", donkey.swim_level);
+        }
+        // the other stance-3 rows the slice was checked against: the white horse 1.9, the snow lion 2.2, the polar bear 1.8
+        for (model, swim) in [(454, 1.9), (1070, 2.2), (1436, 1.8)] {
+            assert!((db.mount_speed(model).swim - swim).abs() < 1e-5, "model {model}");
+        }
+    }
+
+    #[test]
+    fn a_mount_swims_at_its_swim_stance_speed_and_slower_backward() {
+        let horse = MountSpeed::default();
+        assert_eq!(horse.swim_of(Vec2::Y), 1.8);
+        assert_eq!(horse.swim_of(Vec2::X), 1.8);
+        assert!((horse.swim_of(-Vec2::Y) - 1.44).abs() < 1e-5);
+        assert_eq!(horse.swim_of(Vec2::ZERO), 0.0);
     }
 
     /// The training dummies are prefab models: their model file is the `object_Model` of the prefab.

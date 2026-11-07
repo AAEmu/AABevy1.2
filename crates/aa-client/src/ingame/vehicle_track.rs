@@ -175,6 +175,13 @@ impl VehicleTrack {
         }
     }
 
+    /// The pose last drawn: its steering and throttle are what the 1.2 controller writes into the
+    /// ship model every frame (`sub_390B0040` -> `sub_390BE0B0` / `sub_390BE0D0`), the helm inputs
+    /// of [`super::ship::helm`].
+    pub fn display(&self) -> VehiclePose {
+        self.display
+    }
+
     /// Where the newest accepted sample puts the vehicle.
     pub fn latest_pos(&self) -> Vec3 {
         self.queue
@@ -296,7 +303,11 @@ impl VehicleTrack {
             return self.display;
         };
         if now - last_arrival > TIMEOUT {
-            // FUN_390b2420 destroyed the controller; the drawing keeps its last pose.
+            // FUN_390b2420 reset the controller (`sub_390AFF70` clears the arrival time); the drawing
+            // keeps its last pose, but from then on the controller writes steering and throttle 0 into
+            // the model (`sub_390B2420`'s no-sample branch: `sub_390BE0B0(0)` / `sub_390BE0D0(0)`).
+            self.display.steering = 0.0;
+            self.display.throttle = 0.0;
             return self.display;
         }
         // FUN_39098780 is called per frame from FUN_390ad150, not per packet.

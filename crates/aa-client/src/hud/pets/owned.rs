@@ -17,6 +17,9 @@ pub(super) struct Tables {
 struct Skill {
     combat: u32,
     first_seat: Option<u32>,
+    /// The first `mount_attached_skills` rider skill for attach point 0 and 1: `sub_3933c3b0` takes the first row whose
+    /// point equals the seat (1 while the player drives this mate, else 0) and its cooldown joins the slot's.
+    rider: [Option<u32>; 2],
     level: i32,
     target_type: u32,
 }
@@ -43,10 +46,14 @@ impl Tables {
             out.levels.push((any_int(row, 0)? as u32, any_int(row, 1)? as i32));
         }
         let mut first = HashMap::new();
+        let mut rider: HashMap<u32, [Option<u32>; 2]> = HashMap::new();
         let mut query = conn.prepare("SELECT id,attach_point_id,mount_skill_id,skill_id FROM mount_attached_skills")?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
             first.entry(any_int(row, 2)? as u32).or_insert(any_int(row, 1)? as u32);
+            if let Some(seat) = rider.entry(any_int(row, 2)? as u32).or_default().get_mut(any_int(row, 1)? as usize) {
+                seat.get_or_insert(any_int(row, 3)? as u32);
+            }
         }
         let mut query =
             conn.prepare("SELECT m.id,m.skill_id,s.ability_level,s.target_type_id FROM mount_skills m INNER JOIN skills s ON s.id=m.skill_id ORDER BY m.id")?;
@@ -58,6 +65,7 @@ impl Tables {
                 Skill {
                     combat: any_int(row, 1)? as u32,
                     first_seat: first.get(&id).copied(),
+                    rider: rider.get(&id).copied().unwrap_or_default(),
                     level: any_int(row, 2)? as i32,
                     target_type: any_int(row, 3)? as u32,
                 },
@@ -170,6 +178,11 @@ pub(super) struct View {
     /// The teleport counter when the HUD last refreshed ([`crate::ingame::teleport::Teleport::jumps`]): a jump
     /// between the walk's start and this frame cancels it (capture-pending, A1b).
     pub(super) teleports: u64,
+    /// The auto-use byte of each raw slot (`+96 + 8 * raw slot`): [`auto_defaults`] for a new mate, flipped by a
+    /// right click, cleared while the AI mode is under 2 ([`settle_auto`]).
+    auto: [bool; aa_net::mate::MATE_SKILL_SLOTS],
+    /// The displayed slots' cooldowns when the slots were last pushed ([`slot_cooldowns`]): a change redraws them.
+    slot_cooldowns: [Option<(u64, u32)>; aa_net::mate::MATE_SKILL_SLOTS],
     requests: Vec<(u32, (u32, u16, u32), MateCommand)>,
     casts: Vec<(u32, (u32, u16, u32), PendingCast)>,
 }
@@ -302,8 +315,11 @@ pub(super) fn refresh(world: &World, data: &mut HudData) {
         data.pets.owned.local_state = None;
         data.pets.owned.commanded_skill = 0;
         data.pets.owned.casts.clear();
+        let auto = next.as_ref().map(|pet| auto_defaults(data.game.get().map(|g| &g.pets.owned), &pet.spawn));
+        data.pets.owned.auto = auto.unwrap_or_default();
     }
     data.pets.owned.current = next;
+    settle_auto(data);
     data.pets.owned.pet_pos = (|| {
         let unit = current(world.get_resource::<Mates>()?, world.get_resource::<Units>()?, data.character_id)?.0;
         Some((Vec3::new(unit.pos.x, unit.pos.y, unit.pos.z), unit.rotation[2]))
@@ -732,31 +748,40 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = bridge.clone();
     mate.set(
         "GetAutoStartMountSkill",
-        lua.create_function(move |_, _: MultiValue| {
-            Ok(if state.borrow().pets.owned.current.is_some() {
-                MultiValue::from_iter([Value::Boolean(false)])
-            } else {
-                MultiValue::new()
-            })
+        lua.create_function(move |_, (_, index): (Value, usize)| {
+            Ok(auto_start(&state.borrow(), index).map_or_else(MultiValue::new, |on| MultiValue::from_iter([Value::Boolean(on)])))
         })?,
     )?;
     let state = bridge.clone();
     mate.set(
         "PassiveMode",
-        lua.create_function(move |_, _: Value| {
-            let mut data = state.borrow_mut();
-            let Some(pet) = &data.pets.owned.current else { return Ok(false) };
-            let identity = pet.identity();
-            let tl_id = pet.spawn.tl_id;
-            let owner = data.character_id;
-            data.pets.owned.local_state = Some((identity, 1));
-            data.pets.owned.requests.push((owner, identity, MateCommand::UserState { tl_id, state: 1 }));
+        lua.create_function(move |lua, _: Value| {
+            {
+                let mut data = state.borrow_mut();
+                let Some(pet) = &data.pets.owned.current else { return Ok(false) };
+                let identity = pet.identity();
+                let tl_id = pet.spawn.tl_id;
+                let owner = data.character_id;
+                data.pets.owned.local_state = Some((identity, 1));
+                data.pets.owned.requests.push((owner, identity, MateCommand::UserState { tl_id, state: 1 }));
+                settle_auto(&mut data);
+            }
+            mode_changed(lua, &state);
             Ok(true)
         })?,
     )?;
     for (name, mode) in [("StandMode", 0), ("ProtectiveMode", 2), ("AggressiveMode", 3)] {
         let state = bridge.clone();
-        mate.set(name, lua.create_function(move |_, _: Value| Ok(request_mode(&mut state.borrow_mut(), mode)))?)?;
+        mate.set(
+            name,
+            lua.create_function(move |lua, _: Value| {
+                let changed = request_mode(&mut state.borrow_mut(), mode);
+                if changed {
+                    mode_changed(lua, &state);
+                }
+                Ok(changed)
+            })?,
+        )?;
     }
     let x2: Table = lua.globals().get("X2")?;
     let state = bridge.clone();
@@ -794,7 +819,25 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             out.set("learned", i32::from(pet.level) >= skill.level)?;
             out.set("canUse", usable(skill, pet))?;
             out.set("type", "pet_skill")?;
+            if let Some((end, total)) = slot_cooldown(&data, game, pet, skill) {
+                out.set("cd_end", end as f64)?;
+                out.set("cd_total", i64::from(total))?;
+            }
             Ok(Some(out))
+        })?,
+    )?;
+    // A right click on a pet slot (`AAUI.UseSlot`): the toggle raises 282 or 283 and never casts.
+    let state = bridge.clone();
+    hud.set(
+        "pet_toggle_auto",
+        lua.create_function(move |lua, slot: usize| {
+            let result = toggle_auto(&mut state.borrow_mut(), slot);
+            match result {
+                Some(true) => aa_ui::lua::fire_ui_event(lua, "PET_AUTO_SKILL_CHANGED", Vec::new()),
+                Some(false) => aa_ui::lua::fire_ui_event(lua, "FAILED_TO_SET_PET_AUTO_SKILL", Vec::new()),
+                None => {}
+            }
+            Ok(())
         })?,
     )?;
     hud.set("pet_target", {
@@ -814,7 +857,13 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
         AAUI.SlotContent=function(kind,index)
           if kind==ISLOT_PET_ACTION then
             local slot=HUD.pet_slot(index)
-            if slot then slot.tooltip=X2Mate:GetMountSkill(index) end
+            if slot then
+              slot.tooltip=X2Mate:GetMountSkill(index)
+              if slot.cd_end then
+                local remain=slot.cd_end-HUD.now_ms()
+                if remain>0 then slot.cooldown={remain=remain,total=math.max(slot.cd_total,remain)} end
+              end
+            end
             return slot
           end
           return content(kind,index)
@@ -844,7 +893,16 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
 pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
     let (old, next) = {
         let mut data = bridge.borrow_mut();
+        // The slots ask `AAUI.SlotContent` only on a refresh, and a mate's cooldown starting (the cast receipt, an
+        // `SCMateState` seed) or a rider cooldown changes no `Pet`: redraw them as the slave bar's `slots_dirty` does.
+        let cooldowns = slot_cooldowns(&data);
+        let cooled = data.pets.owned.slot_cooldowns != cooldowns;
+        data.pets.owned.slot_cooldowns = cooldowns;
         if data.pets.owned.current == data.pets.owned.pushed {
+            drop(data);
+            if cooled && let Err(error) = rt.refresh_slots() {
+                warn!("hud: pet slots: {error}");
+            }
             return;
         }
         let next = data.pets.owned.current.clone();
@@ -870,6 +928,11 @@ pub(super) fn push(rt: &UiRuntime, bridge: &Shared) {
     } else if let (Some(old), Some(next)) = (&old, &next) {
         if old.driving != next.driving {
             rt.fire_event(if next.driving { "MOUNT_PET" } else { "UNMOUNT_PET" }, true);
+        }
+        // Getting on the own mate sets its AI mode to 0 and getting off restores it (`sub_3933e600` /
+        // `sub_3933e3a0`), and `sub_3933c8f0` raises 282 for that; `refresh` has already cleared the bytes.
+        if old.attached_to_own != next.attached_to_own && auto_capable(&bridge.borrow(), next) {
+            rt.fire_event("PET_AUTO_SKILL_CHANGED", ());
         }
         if old.passenger != next.passenger {
             rt.fire_event(if next.passenger { "PASSENGER_MOUNT_PET" } else { "PASSENGER_UNMOUNT_PET" }, ());
@@ -905,6 +968,106 @@ fn displayed<'a>(tables: &'a Tables, pet: &Pet, index: usize) -> Option<(usize, 
             (skill.first_seat.is_none() || skill.first_seat == Some(context) || (context == 0 && skill.first_seat == Some(1))).then_some((raw, skill))
         })
         .nth(index.checked_sub(1)?)
+}
+
+/// `sub_3933c3b0`: a pet slot's cooldown is the larger of the mount skill's own (the slave bar's estimate plus the
+/// `SCMateState` seed) and that of the first rider skill attached at the player's seat (the player's cooldown; seat 1
+/// while driving this mate, else 0); none before the mate's level reaches the skill's. Display only, since the cast
+/// sends without a local cooldown refusal (`FUN_3933e630`). Returns the slot's `(end ms, total ms)`.
+fn slot_cooldown(data: &HudData, game: &super::super::data::GameData, pet: &Pet, skill: &Skill) -> Option<(u64, u32)> {
+    if i32::from(pet.level) < skill.level {
+        return None;
+    }
+    let now = web_time::Instant::now();
+    let mount = super::super::cooldown::mount_display_at(game, &data.cooldowns, pet.object, skill.combat, now);
+    let rider = skill.rider[usize::from(pet.driving)]
+        .and_then(|id| super::super::cooldown::display_at(game, &data.cooldowns, id, now));
+    let best = [mount, rider].into_iter().flatten().max_by_key(|&(left, _)| left);
+    super::super::panels::cooldown_slot(best, data.start)
+}
+
+/// [`slot_cooldown`] of each displayed slot (index 1 first), as `HUD.pet_slot` reports it.
+fn slot_cooldowns(data: &HudData) -> [Option<(u64, u32)>; aa_net::mate::MATE_SKILL_SLOTS] {
+    let Some((pet, game)) = data.pets.owned.current.as_ref().zip(data.game.get()) else {
+        return Default::default();
+    };
+    std::array::from_fn(|i| {
+        displayed(&game.pets.owned, pet, i + 1).and_then(|(_, skill)| slot_cooldown(data, game, pet, skill))
+    })
+}
+
+/// Mate field `+52`, the AI mode: `sub_3989a910` reads the spawn's `userState` (struct `+16`) and `sub_3933ac10` stores
+/// it (`a7`); `sub_3933c8f0` rewrites it on each mode command (0 stand, 1 passive, 2 protective, 3 aggressive), and the
+/// owner getting on the mate sets 0 until they get off (`sub_3933e600` saves it, `sub_3933e3a0` restores it).
+fn ai_mode(data: &HudData, pet: &Pet) -> u8 {
+    if pet.attached_to_own {
+        return 0;
+    }
+    data.pets.owned.local_state.filter(|s| s.0 == pet.identity()).map_or(pet.spawn.user_state, |s| s.1)
+}
+
+/// `sub_3933ac10`'s auto-use bytes for a new mate: 1 only when the spawn's item id (`+24` / `+28`, `sub_3989a910`'s
+/// `itemId`) is 0, and never for a slot whose first attach row is not the driver's (point 1).
+fn auto_defaults(tables: Option<&Tables>, spawn: &MateSpawn) -> [bool; aa_net::mate::MATE_SKILL_SLOTS] {
+    std::array::from_fn(|raw| {
+        spawn.item_id == 0
+            && tables
+                .and_then(|t| t.skills.get(&spawn.skills[raw]))
+                .is_none_or(|s| s.first_seat.is_none_or(|point| point == 1))
+    })
+}
+
+/// `sub_3933c4e0`: an AI mode under 2 (stand, passive, or the owner riding) clears every auto-use byte.
+fn settle_auto(data: &mut HudData) {
+    if data.pets.owned.current.as_ref().is_some_and(|pet| ai_mode(data, pet) < 2) {
+        data.pets.owned.auto = [false; aa_net::mate::MATE_SKILL_SLOTS];
+    }
+}
+
+/// Mate field `+36` (`sub_3933ac10`: a slot whose mount skill has no attach rows): `sub_3933bbf0` / `sub_3933c4e0`
+/// raise 282 only for such a mate.
+fn auto_capable(data: &HudData, pet: &Pet) -> bool {
+    data.game.get().is_some_and(|g| {
+        pet.spawn.skills.iter().any(|id| g.pets.owned.skills.get(id).is_some_and(|s| s.first_seat.is_none()))
+    })
+}
+
+/// A mode command went through `sub_3933c8f0`, which raises 282 for a capable mate (the bar re-reads every slot).
+fn mode_changed(lua: &Lua, state: &Shared) {
+    let capable = {
+        let data = state.borrow();
+        data.pets.owned.current.as_ref().is_some_and(|pet| auto_capable(&data, pet))
+    };
+    if capable {
+        aa_ui::lua::fire_ui_event(lua, "PET_AUTO_SKILL_CHANGED", Vec::new());
+    }
+}
+
+/// `X2Mate:GetAutoStartMountSkill(i)` (`3906ab50`): the auto-use byte of displayed slot `i` (`sub_3933ae60` ->
+/// `sub_3933a950`), false for a slot the bar does not show; `None` without a mate.
+fn auto_start(data: &HudData, index: usize) -> Option<bool> {
+    let pet = data.pets.owned.current.as_ref()?;
+    let raw = data.game.get().and_then(|game| displayed(&game.pets.owned, pet, index)).map(|(raw, _)| raw);
+    Some(raw.is_some_and(|raw| data.pets.owned.auto[raw]))
+}
+
+/// `sub_3933c750` for a displayed slot: the slot and level checks of the cast, then with the AI mode (mate field `+52`,
+/// [`ai_mode`]) at 2 or more (protective, aggressive) it flips the slot's byte (`Some(true)`, event 282); under 2 it
+/// fails (`Some(false)`, event 283: the original `pet.lua` says "Auto use is only allowed during attack and defense",
+/// or for a mountable pet "Skills that require a rider can't be auto-cast"). `None` is a slot the bar does not show or
+/// one above the mate's level (1.2 shows the 0x2c refusal there; not raised here).
+fn toggle_auto(data: &mut HudData, slot: usize) -> Option<bool> {
+    let (pet, game) = data.pets.owned.current.as_ref().zip(data.game.get())?;
+    let (raw, skill) = displayed(&game.pets.owned, pet, slot)?;
+    if i32::from(pet.level) < skill.level {
+        return None;
+    }
+    if ai_mode(data, pet) < 2 {
+        return Some(false);
+    }
+    let byte = &mut data.pets.owned.auto[raw];
+    *byte = !*byte;
+    Some(true)
 }
 
 /// `FUN_3933c340`'s display state: a shown row is usable only while riding (live capture 2026-10-28: on foot every
@@ -992,6 +1155,7 @@ fn request_mode(data: &mut HudData, mode: u8) -> bool {
     data.pets.owned.local_state = Some((identity, mode));
     data.pets.owned.commanded_skill = 0;
     data.pets.owned.requests.push((owner, identity, command));
+    settle_auto(data);
     true
 }
 

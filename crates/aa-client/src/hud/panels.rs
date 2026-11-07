@@ -192,7 +192,7 @@ impl SlotSnap {
     }
 }
 
-fn cooldown_slot(cooldown: Option<(u32, u32)>, start: Instant) -> Option<(u64, u32)> {
+pub(in crate::hud) fn cooldown_slot(cooldown: Option<(u32, u32)>, start: Instant) -> Option<(u64, u32)> {
     // quantized to a quarter second: the end time of a running cooldown must not jitter
     let (left, total) = cooldown?;
     if left == 0 {

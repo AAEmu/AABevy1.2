@@ -32,7 +32,7 @@
 //! the unit views, puts the UI cameras back to what the login screens need and gives the world its anchor back, so the
 //! cells unload. The character list is then built again by `login`.
 
-mod anim;
+pub(crate) mod anim;
 pub(crate) mod cam_fov;
 mod jump;
 pub(crate) mod ladder;
@@ -74,7 +74,7 @@ pub(crate) mod quest_depth_of_field;
 pub(crate) mod quest_framing;
 mod remote;
 pub(crate) mod seating;
-mod ship;
+pub(crate) mod ship;
 pub(crate) mod shipyard;
 mod skill_motion;
 mod sounds;
@@ -167,6 +167,7 @@ impl Plugin for InGamePlugin {
             .init_resource::<mount::LocalMount>()
             .init_resource::<cart::CartDrive>()
             .init_resource::<mount::MountReason>()
+            .add_message::<mount::MountRear>()
             .init_resource::<ship::ShipDrive>()
             .init_resource::<cam_fov::CamFov>()
             .init_resource::<camera::VehicleCamera>()
@@ -256,6 +257,8 @@ impl Plugin for InGamePlugin {
                         .after(units::move_units)
                         .after(cart::drive_cart),
                     vehicle::spin_wheels.after(vehicle::track_motion),
+                    vehicle::drive_speed_emitters.after(vehicle::track_motion),
+                    vehicle::play_despawn_effects.before(units::sync_views),
                     (anim::drive_locomotion, glide::drive_glide, glide::draw_remote_gliders).chain(),
                     sprint::apply_blur.after(sprint::drive_sprint),
                     cam_fov::drive_cam_fov.after(camera::follow_player),
@@ -271,6 +274,13 @@ impl Plugin for InGamePlugin {
                     .run_if(world_screens),
             )
             .add_systems(Update, (camera::show_world, leave_after).run_if(in_state(Screen::InGame)))
+            // a standing Space on the own mount rears it and its rider
+            .add_systems(
+                Update,
+                (mount::rear_local_rider.before(mount::pose_local_rider), anim::rear_driven_mate.before(anim::drive_locomotion))
+                    .after(player::control_player)
+                    .run_if(world_screens),
+            )
             // the camera log reads the frame as it is drawn: after the transforms are propagated and the projection is made
             .add_systems(
                 PostUpdate,
