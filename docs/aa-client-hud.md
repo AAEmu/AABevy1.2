@@ -3523,7 +3523,12 @@ server. Refusals go through `ShowError` (an `ErrorMessageType`, as 102 is elsewh
 `hud/drag.rs` (`FUN_394e41f0`): wearing a glider (`item_backpacks.backpack_type_id` 2) in the back slot while the
 worn backpack is a glider too raises 543 `CANNOT_CHANGE_BACKPACK_IN_GLIDING` during a flight and sends no `SwapItems`
 (bag move and equip alike). The decompile limits it to glider for glider; a worn backpack of another kind raises 315
-`BACKPACK_OCCUPIED` first, flying or not, which is not checked here (the server answers it).
+`BACKPACK_OCCUPIED` first, flying or not, which is not checked here (the server answers it). Taking the worn glider off
+into an empty bag slot is not refused locally either: both worn-slot moves (`FUN_394e88e0`, x2game12.c:1042630, and
+`FUN_394e8b30`) call `FUN_394e41f0` only for an item going into the worn slot; with an empty bag side they check only 323,
+208 and 202 (none of them the flight) and send, and 543 has no other raise site in x2game. So `Req::Unequip` in flight
+goes out and the player sees the server's 543, as in 1.2 (the live check's `HUD.drag_unequip(27)`, 2026-11-07,
+`data/local/transport/live/glider/s14.log`, is the original's behaviour).
 
 Approximate / capture-pending:
 
