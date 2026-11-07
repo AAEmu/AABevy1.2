@@ -396,6 +396,20 @@ pub fn mount_swim_side(local_dir: Vec2) -> usize {
     }
 }
 
+/// Which of the horse graph's f / b states a request to `side` is in: -1 the left diagonal (fl, bl: `SwimControlX`
+/// -10..-0.4), 1 the right one (fr, br: 0.4..10), 0 the straight state (-0.3..0.3; the 0.3..0.4 gap, where the graph keeps
+/// its state, counts as straight); always 0 for l and r. The diagonals play the straight state's clip, but they are other
+/// states: `SwimMovement` sets `AllowAnimRestart` (`swimmovement.xml`), so going from f to fl starts `fist_mo_swim_f` again.
+pub fn mount_swim_lean(local_dir: Vec2, side: usize) -> i8 {
+    if side > 1 || local_dir.x.abs() < 0.4 {
+        0
+    } else if local_dir.x < 0.0 {
+        -1
+    } else {
+        1
+    }
+}
+
 /// Metres per second the root bone travels in a forward clip.
 fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
     let root = rig.skeleton.bones.get(rig.root).map(|b| b.controller_id);
@@ -478,6 +492,13 @@ mod tests {
         assert_eq!([side(0.0, 1.0), side(-1.0, 1.0), side(1.0, 1.0), side(0.99, 0.1)], ["f"; 4]);
         assert_eq!([side(0.0, -1.0), side(-1.0, -1.0), side(1.0, -1.0)], ["b"; 3]);
         assert_eq!([side(-1.0, 0.0), side(1.0, 0.0)], ["l", "r"]);
+        // fl / fr and bl / br are states of their own (their clip starts again), a pure strafe has no lean
+        let lean = |x: f32, y: f32| {
+            let dir = Vec2::new(x, y).normalize();
+            mount_swim_lean(dir, mount_swim_side(dir))
+        };
+        assert_eq!([lean(0.0, 1.0), lean(-1.0, 1.0), lean(1.0, 1.0), lean(0.2, 1.0)], [0, -1, 1, 0]);
+        assert_eq!([lean(-1.0, -1.0), lean(1.0, -1.0), lean(-1.0, 0.0), lean(1.0, 0.0)], [-1, 1, 0, 0]);
     }
 
     #[test]

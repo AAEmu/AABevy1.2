@@ -462,8 +462,9 @@ enum State {
     Moving(usize, bool, bool),
     /// A phase of a jump, the direction it was chosen with and what the unit jumps as.
     Jump(JumpPhase, JumpDir, JumpKind),
-    /// A clip of the horse graph's swim set ([`MountSwimClips`]).
-    Swim,
+    /// A state of the horse graph's swim set ([`MountSwimClips`]): `None` the swim idle, else the side
+    /// ([`mount_swim_side`]), its lean ([`super::swim::mount_swim_lean`]) and whether it is a `_deep` state.
+    Swim(Option<(usize, i8, bool)>),
 }
 
 const JUMP_DIRS: [JumpDir; 9] = [JumpDir::S, JumpDir::F, JumpDir::B, JumpDir::L, JumpDir::R, JumpDir::Fl, JumpDir::Fr, JumpDir::Bl, JumpDir::Br];
@@ -563,13 +564,15 @@ pub fn drive_locomotion(
             loco.jump = JumpTrack::default();
             let side = (motion.speed > 0.3 && motion.local_dir != Vec2::ZERO).then(|| mount_swim_side(motion.local_dir));
             let clip = set.pick(side, swimming.level);
-            // a new request with the same clip plays it on (the up and down states are the idle's clip)
-            let playing = loco.state == State::Swim && animator.current.as_ref().is_some_and(|p| Arc::ptr_eq(&p.clip.clip, &clip.clip));
+            // the clip plays on while the graph stays in its state; a new state starts its clip again even when it is the same
+            // one (f to fl: `SwimMovement` sets `AllowAnimRestart`, `swimmovement.xml`)
+            let state = State::Swim(side.map(|s| (s, super::swim::mount_swim_lean(motion.local_dir, s), swimming.level < super::swim::MOUNT_DEEP_LEVEL)));
+            let playing = loco.state == state && animator.current.as_ref().is_some_and(|p| Arc::ptr_eq(&p.clip.clip, &clip.clip));
             if !playing {
                 animator.play(clip.clone(), true, super::swim::MOUNT_SWIM_BLEND);
                 animator.random_idle = None;
             }
-            loco.state = State::Swim;
+            loco.state = state;
             loco.action_exit = None;
             animator.speed = 1.0;
             continue;
@@ -678,7 +681,7 @@ pub fn drive_locomotion(
             }
             let clip = match wanted {
                 State::Unknown | State::Idle => stance_clips.and_then(|c| c.idle.clone()).or_else(|| Some(loco.clips.idle.clone())),
-                State::Jump(..) | State::Swim => None,
+                State::Jump(..) | State::Swim(_) => None,
                 State::Moving(d, walk, sprint) => {
                     let (primary, secondary) = if walk { (&loco.clips.walk, &loco.clips.run) } else { (&loco.clips.run, &loco.clips.walk) };
                     let combat_run = stance_clips.filter(|_| !walk).and_then(|c| if sprint { c.sprint.clips[d].clone().or_else(|| c.run[d].clone()) } else { c.run[d].clone() });
@@ -975,8 +978,8 @@ mod tests {
 
     /// A mount's `.cal` binds the horse graph's swim set from `global_horse.cal` (a character's does not: its swim is
     /// `swim::drive_swim`'s). A [`Swimming`] horse plays the swim idle with no request, the side's clip moving (a diagonal
-    /// plays on the forward clip), the `_deep` one under `waterLevel` -1.01, and its land clips again out of the water
-    /// (needs `AA_PAK`).
+    /// on the forward clip, started again as the graph's own state), the `_deep` one under `waterLevel` -1.01, and its land
+    /// clips again out of the water (needs `AA_PAK`).
     #[test]
     fn a_mount_swims_with_the_horse_graphs_clips() {
         if !aa_cry::pak_available() {
@@ -1018,16 +1021,23 @@ mod tests {
         };
         step(&mut app, 0.1);
         assert_eq!(playing(&app).0, "fist_ba_idle_swim.caf");
-        // swimming forward at the horse's 1.8 m/s, then forward left: the same clip plays on
+        // swimming forward at the horse's 1.8 m/s: the clip plays on in its state
         *app.world_mut().get_mut::<Motion>(horse).unwrap() = Motion { speed: 1.8, local_dir: Vec2::Y, ..Motion::default() };
-        step(&mut app, 0.1);
         step(&mut app, 0.1);
         let (clip, before) = playing(&app);
         assert_eq!(clip, "fist_mo_swim_f.caf");
-        app.world_mut().get_mut::<Motion>(horse).unwrap().local_dir = Vec2::new(-1.0, 1.0).normalize();
         step(&mut app, 0.1);
         let (clip, after) = playing(&app);
-        assert!(clip == "fist_mo_swim_f.caf" && after > before, "the diagonal restarted the clip: {clip} {after} after {before}");
+        assert!(clip == "fist_mo_swim_f.caf" && after > before, "the forward swim restarted in its state: {clip} {after} after {before}");
+        // forward left is the graph's fl state on the same clip: `SwimMovement`'s `AllowAnimRestart` starts it again, and it
+        // plays on in fl
+        app.world_mut().get_mut::<Motion>(horse).unwrap().local_dir = Vec2::new(-1.0, 1.0).normalize();
+        step(&mut app, 0.1);
+        let (clip, restarted) = playing(&app);
+        assert!(clip == "fist_mo_swim_f.caf" && restarted < after, "the diagonal did not start the clip again: {clip} {restarted} after {after}");
+        step(&mut app, 0.1);
+        let (clip, on) = playing(&app);
+        assert!(clip == "fist_mo_swim_f.caf" && on > restarted, "{clip} {on} after {restarted}");
         app.world_mut().get_mut::<Motion>(horse).unwrap().local_dir = Vec2::X;
         step(&mut app, 0.1);
         assert_eq!(playing(&app).0, "fist_mo_swim_r.caf");

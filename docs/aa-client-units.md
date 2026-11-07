@@ -101,7 +101,10 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
   * a request: the side's clip (`SwimMovement`). The swim mode (`sub_3912CE00`, x2game12.c:246966-246973) lifts any
     forward or backward share of the request to 1.1, so fl and fr swim `fist_mo_swim_f`, bl and br `fist_mo_swim_b` (the
     graph turns their pelvis by 45 / 40 degrees, which is not drawn: **approximate**), and only a pure strafe swims l or
-    r. A new request with the same clip plays it on;
+    r. The clip plays on while the graph stays in its state; a new state starts its clip again even when it is the same
+    one (f to fl or fr, b to bl or br: `SwimMovement` sets `AllowAnimRestart`, `swimmovement.xml`, unlike `JumpLoop`
+    above). The diagonals take `SwimControlX` beyond 0.4 (`swim::mount_swim_lean`; the 0.3..0.4 gap, where the graph
+    keeps its state, counts as straight, and the scale of `SwimControlX` against the request is not traced);
   * `_deep` under `waterLevel` -1.01 (the shallow states want -1..1000). `waterLevel` is `CActor::UpdateSwimStats`'
     `relativeWaterLevel` (`sub_39120300`, x2game12.c:239760-239772, the graph input at `this + 2222`), 0 for a body
     floating at its swim level, so a mount at the surface never plays them;
