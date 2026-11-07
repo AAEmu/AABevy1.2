@@ -1941,8 +1941,16 @@ which previously stopped DD04 before following unit state/points:
 raw triples. Native397b7790 /397b7670 share397b2350, which reads i32 skillCount, that many
 three-u32 entries, i32 tagCount and that many three-u32 entries. Each inline native array
 holds 150 entries (second count offset0x70c). Counts must be nonnegative, <=150 and fit the
-remaining bytes before allocation. Triple field meanings remain unverified; no guessed
-skill levels, cooldowns, learned skills or active tags are created from them.
+remaining bytes before allocation. The skill triples are cooldowns: `OnMateState` (391DF0E0) -> `sub_39899D40`
+(x2game12.c:1985040) appends wire `[e0, e1, e2]` as `{skill_id = e0, remaining = e2, total = e1}` (up to 150, never
+clearing the earlier entries) to the unit's cooldown container, `sub_39899E50` counts `remaining` down, and
+`sub_3989A290` answers the matching entry with the most time left together with its `+8` total (the same
+`[id, total, remaining]` order as `SCCooldowns`). `DynamicUnitState::cooldowns()` yields `(skill_id, remaining_ms,
+total_ms)`, and `Skills` keeps `mount_seeded[(mate obj, skill)] = (end, total)`: a later `SCMateState` only replaces
+an entry that ends later, and a despawn drops the mate's entries. `mount_cooldown_at` answers whichever of that and the
+cast receipt has more time left, the seed with its received total. The tag list stays raw (1.2 also matches it by the
+skill's tags); `SCSlaveState` (`OnSlaveState`, same function) is not seeded. AAEmu always sends 0 triples, so the seed
+is not live-checked.
 
 `Mates` is available as a Bevy resource and `WorldState.mates`. Its public
 `own: Option<OwnedMate>` holds `spawn: MateSpawn`, `obj_id: Option<u32>` and

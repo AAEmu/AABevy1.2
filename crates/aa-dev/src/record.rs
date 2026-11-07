@@ -55,6 +55,21 @@ impl RecordGate {
     pub fn open(&mut self, now: f64) {
         self.opened_at.get_or_insert(now);
     }
+
+    /// Has [`RecordGate::open`] been called (or [`open_video_gate`])? `--video-gate` starts the video then.
+    pub fn is_open(&self) -> bool {
+        self.opened_at.is_some() || VIDEO_GATE.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// The label of the script mark (`trace video-start`) that opens the gate of `--video-gate`.
+pub const GATE_MARK: &str = "video-start";
+
+static VIDEO_GATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Opens the gate for `--video-gate` from code that has no [`RecordGate`] resource at hand (the script runner, at [`GATE_MARK`]).
+pub fn open_video_gate() {
+    VIDEO_GATE.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[derive(Resource, Default)]

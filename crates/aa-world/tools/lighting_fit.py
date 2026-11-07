@@ -4,8 +4,8 @@
     python -I crates/aa-world/tools/lighting_fit.py compare [--tag base] [--views ...]
     python -I crates/aa-world/tools/lighting_fit.py sheet [--tag base]          one image: real | ours per view
 
-Needs `cargo build -p aa-world --example fly` and AA_PAK. Renders go to shots/aa-world/lighting_fit/<tag>/<view>.png (git-ignored);
-the real pictures are the local-only `reference/ingame/*/real*.png`. Each view is the capture's own camera (`camera*.json`), its
+Needs `cargo build -p aa-world --example fly` (or AA_FLY = another build of it) and AA_PAK. Renders go to shots/aa-world/lighting_fit/<tag>/<view>.png (git-ignored);
+the real pictures are the local-only `reference/ingame/*/real*.png` (AA_REF = another `reference/ingame`). Each view is the capture's own camera (`camera*.json`), its
 client-local origin shift and its game hour, with the camera as the time of day area subject (`--subject`, as the player). Regions are
 boxes in 1920 x 1080 pixels chosen clear of the HUD and the player character; the score is the mean absolute difference of the
 regions' sRGB means, and the log2 ratio of their linear luminance (stops; positive = ours brighter).
@@ -13,9 +13,9 @@ regions' sRGB means, and the log2 ratio of their linear luminance (stops; positi
 import argparse, json, os, subprocess, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-REF = os.path.join(ROOT, 'reference', 'ingame')
+REF = os.environ.get('AA_REF') or os.path.join(ROOT, 'reference', 'ingame')
 OUT = os.path.join(ROOT, 'shots', 'aa-world', 'lighting_fit')
-FLY = os.path.join(ROOT, 'target', 'debug', 'examples', 'fly.exe' if os.name == 'nt' else 'fly')
+FLY = os.environ.get('AA_FLY') or os.path.join(ROOT, 'target', 'debug', 'examples', 'fly.exe' if os.name == 'nt' else 'fly')
 
 # name: (world, reference dir, picture, camera json, shift, regions {name: (x0, y0, x1, y1)})
 VIEWS = {

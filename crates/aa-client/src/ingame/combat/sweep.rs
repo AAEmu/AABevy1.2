@@ -119,7 +119,7 @@ impl Sweep {
             let steps = self.steps(book, id);
             for (k, step) in steps.iter().enumerate() {
                 let at = t0 + k as f64 * STEP_GAP;
-                script.push((at, Due::Event(Event::PlotEvent(PlotEvent { tl, event_id: *step, skill_id: id, caster_obj_id: me, target_obj_id: other, caster_pos: None, target_pos: (other == 0).then_some(point), casting_ms: 0 }))));
+                script.push((at, Due::Event(Event::PlotEvent(PlotEvent { tl, event_id: *step, skill_id: id, caster_obj_id: me, target_obj_id: other, caster_pos: None, target_pos: (other == 0).then_some(point), casting_ms: 0, targets: if other == 0 { Vec::new() } else { vec![other] } }))));
                 if k < 4 {
                     shot(&mut script, at + 0.35, k as u32);
                 }

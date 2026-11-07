@@ -1846,7 +1846,33 @@ mate attachment, including another owner's/passenger seat. PetState is a string,
 any seat on the same owned pet. GetMountSkill returns BOOL learned/needdiver and NUMBER skillUsable;
 required level is source-proven skills.ability_level. Live capture 2026-10-28: skillUsable is1 only
 while mounted (0 on foot); the target_type_id6 display-usability bypass (3933b7a7) stays ready in
-either state. The server's cooldowns are not modeled locally.
+either state.
+
+Pet slot cooldowns and auto-use (2026-11-06). `sub_3933c3b0` (x2game12.c:681096) answers a slot's cooldown as the
+larger of the mount skill's and that of the first `mount_attached_skills` rider skill whose attach point is the
+player's seat (1 while driving this mate, else 0; `sub_3989a3e0` on each), and none while the mate's level is under
+the skill's. The cast sends without a local cooldown refusal (`FUN_3933e630`), so it is display only.
+`HUD.pet_slot` sets `cd_end` / `cd_total` from `cooldown::mount_display_at` (the slave bar's estimate, which also
+holds the `SCMateState` seed with its received total, see docs/aa-net.md) against `cooldown::display_at` of that
+rider skill, and the pet `AAUI.SlotContent` wrapper turns them into the slot's `cooldown`. The slots ask for their
+content only on a refresh and a mate's cooldown changes no `Pet`, so `owned::push` compares the displayed slots'
+cooldowns each frame and refreshes the slots when one starts or ends (the slave bar's `slots_dirty`).
+
+A right click on a pet slot (`AAUI.UseSlot`, `HUD.pet_toggle_auto`) never casts: it runs the slot and level checks of
+the cast and then reads mate field `+52`, the AI mode. That field is the spawn's `userState` (`sub_3989a910` reads it
+at struct `+16`, `sub_3933fd00` passes it to `sub_3933ac10` as `a7`), `sub_3933c8f0` rewrites it on every mode
+command (0 stand, 1 passive, 2 protective, 3 aggressive) and the owner getting on the mate sets it to 0 until they get
+off (`sub_3933e600` saves it, `sub_3933e3a0` restores it). With the mode at 2 or more, `sub_3933c750` flips the slot's
+auto-use byte and `sub_3933bbf0` fires 282 `PET_AUTO_SKILL_CHANGED`; under 2 it fires 283
+`FAILED_TO_SET_PET_AUTO_SKILL` and changes nothing (the original `pet.lua` then says "Skills that require a rider
+can't be auto-cast." for a mountable pet and "Auto use is only allowed during attack and defense." for another).
+`X2Mate:GetAutoStartMountSkill(i)` returns the byte of displayed slot `i`. `sub_3933ac10` starts it at 1 only when
+the spawn's `itemId` (`+24` / `+28`) is 0 and never for a slot whose first attach row is not the driver's, so an
+item-summoned mate starts with every byte 0; a mode under 2 (stand, passive, riding) clears every byte
+(`sub_3933c4e0`). A mode command and getting on or off fire 282 again for a mate with a seatless skill (`+36`), so
+the bar re-reads the bytes. Approximate: action 3 is mapped to the right button (inferred); a toggle on a slot above
+the mate's level shows no 0x2c refusal (1.2 does, `LABEL_6`); the 282 of a mode change also needs the mate's AI
+table in 1.2, which is not modeled; the auto-used skills are not cast (needs the battle-pet AI).
 
 Rename uses the original dialog and sends the current mate timeline, with character/object/TL/
 stored-mate identity checked again at dispatch. Receipt remains name authority. Passive requests
@@ -3473,3 +3499,46 @@ helm camera is captured (doodads, 2026-10-30): camera mode 1, wanted = max 25.0 
 `cargo run -p aa-client --example options_hang -- --headless --mute` boots the real World-stage HUD,
 raises `open_config`, opens the original Options frame and fails if the open plus the next tick take
 more than 3 s. The incremental TextBox refit it guards is described in `docs/aa-ui.md`.
+
+## Local doodad-use gate and glider back slot (2026-11-06)
+
+`FUN_393b3d50` (`x2game12.c:784121`, called from the doodad-use paths `FUN_393b3ec0` and `FUN_393b7440`) refuses a doodad
+use before any packet. `sub_39428370` raises the alert and does not return, so each refusal is the only message:
+dead 332 (`player+0x3c26`), gliding 334 (buff list holds the gliding record `off_3999CFDC`), hanging 223; then a skill
+with `source_mount` (`desc +0x14B`, `skills.source_mount`, loader `39731870` column 0x61) passes. Any other use while
+the player is attached (`player+0x3af0`) refuses with 102 `SLAVE_UNBIND_FIRST` when the unit is a slave and 222
+`CANNOT_INTERACT_WHILE_MOUNTING` otherwise, except `source_mount_mate` skills (`desc +0x14C`, column 0x62) on a mate.
+If the option object `dword_39ADB2A0` (vfunc +8) returns 1 the messages are skipped and, within 3.0 m of the doodad
+(`sub_39093800`), the mate is left with `CSUnMountMate` reason 9 (`sub_39361E80(9)`) or the slave unbound
+(`sub_39345AA0`); in or out of the 3 m the function returns 1 and the use goes on. `FUN_393b3ec0` (the bar / key use)
+runs the gate before its range check, so a refused use never walks; `FUN_393b7440` (a pick from the interaction list)
+walks first and gates after its range check.
+
+`hud/doodad.rs` runs `use_gate` in `execute` before the labor and attachment checks, and for a bar use out of reach
+before `defer_action` starts the walk. The state comes from `HudData.snapshot.dead`, `Gliding::flying()`, a `Ladder`
+on the player and `LocalMount` / the spawn's `attached_to`; the unit is a slave when the seat is a cart, a ship or a
+turret (`LocalSeat.cart || ship || turret`, all `UnitKind::Slave`). The flags come from `Tables::mount_flags` (`skills.source_mount`, `source_mount_mate`; 1741
+skills have `source_mount` t only, 45 both, 10 `source_mount_mate` only); a skill missing from the table is left to the
+server. Refusals go through `ShowError` (an `ErrorMessageType`, as 102 is elsewhere) and send no `CSStartSkill`.
+
+`hud/drag.rs` (`FUN_394e41f0`): wearing a glider (`item_backpacks.backpack_type_id` 2) in the back slot while the
+worn backpack is a glider too raises 543 `CANNOT_CHANGE_BACKPACK_IN_GLIDING` during a flight and sends no `SwapItems`
+(bag move and equip alike). The decompile limits it to glider for glider; a worn backpack of another kind raises 315
+`BACKPACK_OCCUPIED` first, flying or not, which is not checked here (the server answers it). Taking the worn glider off
+into an empty bag slot is not refused locally either: both worn-slot moves (`FUN_394e88e0`, x2game12.c:1042630, and
+`FUN_394e8b30`) call `FUN_394e41f0` only for an item going into the worn slot; with an empty bag side they check only 323,
+208 and 202 (none of them the flight) and send, and 543 has no other raise site in x2game. So `Req::Unequip` in flight
+goes out and the player sees the server's 543, as in 1.2 (the live check's `HUD.drag_unequip(27)`, 2026-11-07,
+`data/local/transport/live/glider/s14.log`, is the original's behaviour).
+
+Approximate / capture-pending:
+
+* The auto-dismount option `dword_39ADB2A0` is not identified: `hud::doodad::View.auto_dismount` defaults off, so the message
+  branch runs. When on, only the mate (`unmount`, reason 9) is wired; the slave unbind is not. Out of 3 m the use goes
+  on still mounted, as natively. A bar use between the 2.1 m reach and 3 m walks first and dismounts on arrival, where
+  the native client dismounts before the walk.
+* The right-click path (`right_click`) still walks to an out-of-reach doodad before the gate runs on arrival; which native
+  path a right click takes is not traced.
+* The hanging refusal also requires `*(doodad+128) == dword_39AC785C` natively (not identified); any ladder grab refuses.
+* A spawn attached without a `LocalMount` counts as a mate.
+* Local NPC interactions (`Command::Interact`, `hud/api.rs`) are not on this path and are unchanged.

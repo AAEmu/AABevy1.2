@@ -100,6 +100,8 @@ pub struct AtmosphereTuning {
     pub ssao: f32,
     /// Cloud sprites: brightness multiplier on top of `sky_gain` (0 = no clouds visible).
     pub cloud_gain: f32,
+    /// Sun light: multiplier on `sun_lux_scale` (the balance of the sun against the ambient light).
+    pub sun_gain: f32,
     /// Ambient light: 1 = hemisphere environment light (sky above, ground below), 0 = Bevy's flat `GlobalAmbientLight`.
     pub ambient_env: f32,
     /// Ambient light: brightness multiplier on `ambient_scale x luminance`.
@@ -116,6 +118,15 @@ pub struct AtmosphereTuning {
     pub ambient_rel: f32,
     /// Ambient light: how much of the sky dome's colour (horizon / zenith, blue grey) replaces `Sky color` (green yellow in the data).
     pub ambient_dome: f32,
+    /// Ambient light: hue of `Sky color` as the engine uses it (the raw curve value, 1) or IEC decoded (0); the brightness stays the
+    /// decoded one. The decode turns the data's pale cyan into a saturated green.
+    pub ambient_native: f32,
+    /// Fog: hue of the fog colour as the engine uses it (raw `Fog color`, 1) or IEC decoded (0, a deep blue); same brightness.
+    pub fog_native: f32,
+    /// Clouds: how much of the sky dome's colour replaces the `Sky color` that shades them (as `ambient_dome` did before the
+    /// ambient light took the data's colour), and their saturation.
+    pub cloud_dome: f32,
+    pub cloud_sat: f32,
     /// Water volumes: multiplier of the volume's fog colour (the engine's fog colour is constant and unlit).
     pub water_body: f32,
     /// Water volumes: how much of the sun's colour (next to the sky's) lights the fog colour.
@@ -213,10 +224,17 @@ impl Default for AtmosphereTuning {
             exposure: 1.15,
             ssao: 0.0,
             cloud_gain: 1.0,
+            sun_gain: 1.0,
             ambient_env: 1.0,
-            ambient_gain: 1.3,
-            ambient_sat: 0.75,
-            ambient_dome: 1.0,
+            // the engine's balance: on flat sunlit ground the ambient light is about a quarter of the light (the shadows of the
+            // 1.2 client's spec 4 are 0.2 to 0.3 of the lit ground; `tools/worldlook`, docs/aa-world.md "Sun against ambient")
+            ambient_gain: 0.75,
+            ambient_sat: 1.0,
+            ambient_dome: 0.0,
+            ambient_native: 1.0,
+            fog_native: 0.0,
+            cloud_dome: 1.0,
+            cloud_sat: 0.75,
             ambient_spec: 0.2,
             ambient_height: 1.0,
             ambient_rel: 1.0,
@@ -287,10 +305,15 @@ impl AtmosphereTuning {
                 "exposure" => t.exposure = v,
                 "ssao" => t.ssao = v,
                 "cloud_gain" => t.cloud_gain = v,
+                "sun_gain" => t.sun_gain = v,
                 "ambient_env" => t.ambient_env = v,
                 "ambient_gain" => t.ambient_gain = v,
                 "ambient_sat" => t.ambient_sat = v,
                 "ambient_dome" => t.ambient_dome = v,
+                "ambient_native" => t.ambient_native = v,
+                "fog_native" => t.fog_native = v,
+                "cloud_dome" => t.cloud_dome = v,
+                "cloud_sat" => t.cloud_sat = v,
                 "ambient_spec" => t.ambient_spec = v,
                 "ambient_height" => t.ambient_height = v,
                 "ambient_rel" => t.ambient_rel = v,
@@ -638,8 +661,8 @@ pub fn update_environment(
         return;
     };
     selection.update(&cfg.world, &weights, clock.layer, time.delta_secs());
-    // the clouds are shaded by the sky colour, which some zones keep green (see `update_ambient`): same hue as the ambient light
-    cur.cloud_sky = ambient_hue(&cur, &tuning, cur.cloud_sky);
+    // the clouds are shaded by the sky colour, which some zones keep green: towards the dome's blue grey
+    cur.cloud_sky = cloud_hue(&cur, &tuning, cur.cloud_sky);
     if tuning.sun_az.is_finite() && tuning.sun_el.is_finite() {
         let (az, el) = (tuning.sun_az.to_radians(), tuning.sun_el.to_radians());
         cur.sun_dir = Vec3::new(az.sin() * el.cos(), az.cos() * el.cos(), el.sin());
@@ -662,7 +685,7 @@ pub fn update_environment(
     for (mut light, mut tf) in &mut sun {
         let col = cur.sun / sun_lum.max(1e-4);
         light.color = Color::linear_rgb(col.x.min(1.5), col.y.min(1.5), col.z.min(1.5));
-        light.illuminance = cfg.sun_lux_scale * sun_lum * horizon_fade * (0.3 + 0.7 * cur.day);
+        light.illuminance = cfg.sun_lux_scale * tuning.sun_gain * sun_lum * horizon_fade * (0.3 + 0.7 * cur.day);
         *tf = Transform::IDENTITY.looking_to(-to_light, Vec3::Y);
     }
     // --- ambient: a flat light, or (default) the hemisphere environment light of `update_ambient` ---
@@ -698,10 +721,10 @@ pub fn update_environment(
     env.sample = Some(cur);
 }
 
-/// `colour` with the hue of the sky dome mixed in (`ambient_dome`) and desaturated (`ambient_sat`), at the same luminance.
-fn ambient_hue(sample: &EnvSample, tuning: &AtmosphereTuning, colour: Vec3) -> Vec3 {
+/// `colour` with the hue of the sky dome mixed in (`cloud_dome`) and desaturated (`cloud_sat`), at the same luminance.
+fn cloud_hue(sample: &EnvSample, tuning: &AtmosphereTuning, colour: Vec3) -> Vec3 {
     let dome = unit_luminance(sample.horizon * 0.6 + sample.zenith * 0.4);
-    desaturate(lerp3(unit_luminance(colour), dome, tuning.ambient_dome), tuning.ambient_sat) * luminance(colour)
+    desaturate(lerp3(unit_luminance(colour), dome, tuning.cloud_dome), tuning.cloud_sat) * luminance(colour)
 }
 
 fn desaturate(c: Vec3, s: f32) -> Vec3 {
@@ -727,9 +750,9 @@ fn unit_luminance(c: Vec3) -> Vec3 {
 
 /// The ambient light: an environment light on the camera with a hemisphere gradient, sky colour above, ground colour below.
 ///
-/// The data's `Sky color` is a yellow green and its ambient flat, the real picture has blue grey shade (sky brightening): the
-/// colour is mixed towards the dome's horizon / zenith colour and desaturated, the brightness keeps the old
-/// `ambient_scale x luminance`. The cube maps are 1 x 1 pixels per face and rebuilt only when a colour changes by 1.5 %.
+/// The colour is the data's `Sky color` with the hue the engine gives it (the raw curve value, `ambient_native`; the IEC decode
+/// makes it a saturated green), optionally mixed towards the dome's horizon / zenith colour (`ambient_dome`) and desaturated
+/// (`ambient_sat`); the brightness is `ambient_scale x ambient_gain x` the decoded luminance. The cube maps are 1 x 1 pixels per face and rebuilt only when a colour changes by 1.5 %.
 #[allow(clippy::too_many_arguments)]
 fn update_ambient(
     mut commands: Commands,
@@ -756,7 +779,8 @@ fn update_ambient(
         })) else { return };
 
     let dome = unit_luminance(cur.horizon * 0.6 + cur.zenith * 0.4);
-    let sky_dir = lerp3(unit_luminance(cur.sky), dome, tuning.ambient_dome);
+    let sky_hue = lerp3(unit_luminance(cur.sky), unit_luminance(cur.sky_srgb), tuning.ambient_native);
+    let sky_dir = lerp3(sky_hue, dome, tuning.ambient_dome);
     let ground_dir = lerp3(unit_luminance(cur.ambient_ground), dome, tuning.ambient_dome * 0.5);
     let scale = cfg.ambient_scale * tuning.ambient_gain;
     let top = desaturate(sky_dir, tuning.ambient_sat) * luminance(cur.sky) * scale;
@@ -963,7 +987,8 @@ fn update_post(
         let rs = tuning.radiance * expo;
         let (film, grade, balance) = PostUniform::film_from(cur, 2f32.powf(post.exposure_ev));
         let sun_bevy = cry_to_bevy(cur.sun_dir).normalize();
-        let fog_low = lerp3(cur.fog, cur.horizon, tuning.fog_sky_mix);
+        let fog_hue = lerp3(cur.fog, unit_luminance(cur.native_fog) * luminance(cur.fog), tuning.fog_native);
+        let fog_low = lerp3(fog_hue, cur.horizon, tuning.fog_sky_mix);
         u.fog_color = (fog_low * rs * tuning.fog_gain).extend(cur.fog_density);
         u.fog_top = (cur.fog_top * rs * tuning.fog_gain).extend(0.0);
         u.fog_layer = cur.fog_layer;

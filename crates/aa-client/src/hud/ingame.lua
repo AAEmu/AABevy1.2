@@ -688,7 +688,8 @@ AAUI.UseSlot = function(slotType, slotIdx, button)
   elseif slotType == ISLOT_MODE_ACTION then
     HUD.request("use_mode_action", slotIdx)
   elseif slotType == ISLOT_PET_ACTION then
-    HUD.request("use_pet_action", slotIdx)
+    -- the pet slot accessor's action 3 (toggle auto-use, sub_3933c750); mapping it to the right button is inferred
+    if button == "RightButton" then HUD.pet_toggle_auto(slotIdx) else HUD.request("use_pet_action", slotIdx) end
   elseif slotType == ISLOT_BAG and button == "RightButton" then
     HUD.request("use_bag", slotIdx)
   end

@@ -576,6 +576,7 @@ mod tests {
                 caster_pos: None,
                 target_pos: None,
                 casting_ms: 1000,
+                targets: Vec::new(),
             }),
             100,
         );

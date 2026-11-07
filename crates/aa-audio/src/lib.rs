@@ -38,6 +38,7 @@ mod playback;
 pub mod plugin;
 pub mod reverb;
 pub mod stream;
+pub mod trace;
 pub mod vorbis;
 
 pub use decode::{Pcm, decode, decode_data};

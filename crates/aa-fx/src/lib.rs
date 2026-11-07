@@ -349,6 +349,11 @@ impl FxRun {
         self.def.as_ref().map(|def| def.max_particle_life())
     }
 
+    /// Whether no emitter of the effect is `Continuous` ([`EffectDef::one_shot`]), when its library def is resolved.
+    pub fn one_shot(&self) -> Option<bool> {
+        self.def.as_ref().map(|def| def.one_shot())
+    }
+
     /// Whether a finished simulation starts again: a looping (or dev-forced) effect that has not been stopped.
     pub(crate) fn restarts(&self, effect: &Effect) -> bool {
         !self.stopped && (effect.force_loop || self.def.as_ref().is_some_and(|d| d.loops()))
