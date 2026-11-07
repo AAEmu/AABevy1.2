@@ -1432,6 +1432,8 @@ impl Db {
     }
 
     /// Every glider item template that casts a skill (`item_backpacks.backpack_type_id = 2`, `items.use_skill_id` set), by id.
+    /// Only the glider coverage sweep (`glide` tests) and the `glider_look` example list them.
+    #[allow(dead_code)]
     pub fn glider_items(&self) -> Vec<u32> {
         let l = self.lookups.lock().unwrap();
         let read = l.conn.prepare(
