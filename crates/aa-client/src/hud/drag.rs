@@ -605,8 +605,10 @@ mod tests {
                 USED = nil
                 USE_OK = true
                 AAUI = { UseSlot = function(kind, slot, button) USED = { kind, slot, button }; return USE_OK end }
+                ITEM_IMPL = 22
                 HUD = { bag_slots = 4, bag = { [2] = { id = 777, count = 1 } }, equipment = { [4] = { id = 777 } },
-                        requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot } end }
+                        item_impl = function(id) return ITEM_IMPL end,
+                        requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot }; return true end }
                 "#,
             )
             .exec()
@@ -626,6 +628,9 @@ mod tests {
                 assert(X2Equipment:UseEquippedItemByType(777) == true)
                 assert(HUD.requests[1][1] == "use_equip" and HUD.requests[1][2] == 4)
                 assert(X2Equipment:UseEquippedItemByType(9) == false)
+                ITEM_IMPL = 5
+                assert(X2Equipment:UseEquippedItemByType(777) == false, 'FUN_3946e770 refuses an impl it cannot use worn')
+                assert(#HUD.requests == 1, 'and sends nothing')
                 "#,
             )
             .exec()

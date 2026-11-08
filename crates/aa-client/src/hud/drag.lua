@@ -199,12 +199,15 @@ X2Equipment.FindEquippedItemByType = function(self, itemType)
   return nil
 end
 
--- `X2Equipment.UseEquippedItemByType` (`FUN_39470aa0`): use the worn item of the type.
+-- `X2Equipment.UseEquippedItemByType` (`FUN_39470aa0`): use the worn item of the type. False when
+-- `FUN_3946e770` refuses it: only impl 1, 2, 22 and 24 can be used worn (the use skill check is in
+-- `panels::use_equipped_slot`; the "Fists" refusal and the grade skill are not modelled).
 X2Equipment.UseEquippedItemByType = function(self, itemType)
   local es = X2Equipment:FindEquippedItemByType(itemType)
   if es == nil then return false end
-  HUD.request("use_equip", es)
-  return true
+  local impl = HUD.item_impl(tonumber(itemType))
+  if impl ~= 1 and impl ~= 2 and impl ~= 22 and impl ~= 24 then return false end
+  return HUD.request("use_equip", es)
 end
 
 X2Equipment.IsInventoriable = function(self, es) return true end

@@ -806,10 +806,15 @@ pub fn use_bag_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inven
 }
 
 /// Use a worn item (the tracker's item of an equipment slot, `X2Equipment.UseEquippedItemByType`).
+/// `FUN_3946e770` refuses before any send when the use skill does not resolve (`FUN_396f6390`); it
+/// takes `items.use_skill_id`, not the grade skill `FUN_397cf7a0` picks for impl 1 / 2 / 24.
 pub fn use_equipped_slot(slot: usize, env: &Env, flight: &InFlight, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
-    if let Some(Some(item)) = inventory.equipment.slots.get(slot) {
-        use_item(item, env, flight, target.obj_id.unwrap_or(0), net, failed);
+    let Some(Some(item)) = inventory.equipment.slots.get(slot) else { return };
+    let Some(game) = env.game else { return };
+    if !game.items.get(&item.template_id).is_some_and(|i| i.use_skill != 0 && game.skills.contains_key(&i.use_skill)) {
+        return;
     }
+    use_item(item, env, flight, target.obj_id.unwrap_or(0), net, failed);
 }
 
 fn use_item(item: &aa_net::model::Item, env: &Env, flight: &InFlight, target_obj_id: u32, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {

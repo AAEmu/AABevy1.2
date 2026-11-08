@@ -637,7 +637,12 @@ HUD state is released so the original handlers can query it and close their wind
   `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
   `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
   bag / worn item use (`HUD.request("use_bag")` / `"use_equip"`). The tests drive the original
-  notifier helper (proto 47) and the original added-item message.
+  notifier helper (proto 47) and the original added-item message. `UseEquippedItemByType` is false,
+  and nothing is sent, when `FUN_3946e770` refuses the worn item: its `items.impl_id` is not 1, 2, 22
+  or 24 (Lua), or its use skill does not resolve (`panels::use_equipped_slot`). The skill is
+  `items.use_skill_id`: `FUN_397cf7a0`'s `item_grade_skills` choice for impl 1 / 2 / 24 and the
+  "Fists" refusal are not modelled (no tracker item in the DB has grade skills). A worn item whose
+  skill does not resolve still answers true in Lua, as the check runs after the request.
 
 ### Restarting a main quest
 
