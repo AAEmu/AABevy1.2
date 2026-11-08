@@ -192,20 +192,24 @@ impl Tables {
         let mut t = Tables::default();
         let detail = gather::DetailSkills::load(conn)?;
         let local = local::LocalFuncs::load(conn);
-        let mut q = conn.prepare("SELECT doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
+        let mut q = conn.prepare("SELECT id, doodad_func_group_id, func_skill_id, actual_func_type, actual_func_id, perm_id, next_phase FROM doodad_funcs ORDER BY doodad_func_group_id, id")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
-            let group = super::data::any_int(r, 0)? as u32;
-            let skill = super::data::any_int(r, 1)? as u32;
-            let kind: Option<String> = r.get(2)?;
-            let func_id = super::data::any_int(r, 3)? as u32;
-            let perm = super::data::any_int(r, 4)? as u8;
+            let row_id = super::data::any_int(r, 0)? as u32;
+            let group = super::data::any_int(r, 1)? as u32;
+            let skill = super::data::any_int(r, 2)? as u32;
+            let kind: Option<String> = r.get(3)?;
+            let func_id = super::data::any_int(r, 4)? as u32;
+            let perm = super::data::any_int(r, 5)? as u8;
+            let next_phase = super::data::any_int(r, 6)? as i32;
             t.add_resolved_local(
                 group,
                 skill,
                 kind.as_deref().unwrap_or(""),
                 func_id,
+                row_id,
                 perm,
+                next_phase,
                 &detail,
                 &local,
             );
@@ -277,7 +281,7 @@ impl Tables {
         perm: u8,
         detail: &gather::DetailSkills,
     ) {
-        self.add_resolved_local(group, skill, kind, func_id, perm, detail, &local::LocalFuncs::default());
+        self.add_resolved_local(group, skill, kind, func_id, func_id, perm, 0, detail, &local::LocalFuncs::default());
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -287,7 +291,9 @@ impl Tables {
         skill: u32,
         kind: &str,
         func_id: u32,
+        row_id: u32,
         perm: u8,
+        next_phase: i32,
         detail: &gather::DetailSkills,
         local: &local::LocalFuncs,
     ) {
@@ -297,19 +303,23 @@ impl Tables {
             // Native FUN_397aa970 maps the func type to 11400 "Open Mailbox"; the func row itself
             // has no `func_skill_id`.
             local::MAILBOX_ACTION
+        } else if kind == "DoodadFuncEvidenceItemLoot" {
+            // Native FUN_393b7eb0 case 0x34 reads detail+8, the row's `skill_id`.
+            local.evidence_action(func_id).unwrap_or(0)
         } else {
             detail.skill(kind, func_id).unwrap_or(0)
         };
         self.add_fish_func(group, skill, kind, func_id);
-        self.add_full(group, skill, kind, perm, func_id, local);
+        self.add_full(group, skill, kind, perm, func_id, row_id, next_phase, local);
     }
 
     #[cfg(test)]
     fn add(&mut self, group: u32, skill: u32, kind: &str) {
-        self.add_full(group, skill, kind, 0, 0, &local::LocalFuncs::default());
+        self.add_full(group, skill, kind, 0, 0, 0, 0, &local::LocalFuncs::default());
     }
 
-    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8, func_id: u32, local_funcs: &local::LocalFuncs) {
+    #[allow(clippy::too_many_arguments)]
+    fn add_full(&mut self, group: u32, skill: u32, kind: &str, perm: u8, func_id: u32, row_id: u32, next_phase: i32, local_funcs: &local::LocalFuncs) {
         if skill != 0 && kind == "DoodadFuncAttachment" {
             self.attachment_skills.insert((group, skill));
         }
@@ -339,7 +349,7 @@ impl Tables {
             uses.craft.push(perm);
         }
         if skill != 0 {
-            if let Some(action) = local_funcs.local(kind, func_id) {
+            if let Some(action) = local_funcs.local(kind, func_id, row_id, next_phase) {
                 self.locals
                     .insert((group, skill), local::LocalUse { action, perm });
             }
@@ -450,11 +460,29 @@ struct Focus {
     dist: f32,
 }
 
+/// The context `FUN_393bb090` stores at `DAT_39aff990+0x140..0x14c` for `X2Trial.ReportCrime`:
+/// doodad object id, the action/skill id, the func's next phase and the func row id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CrimeReport {
+    pub obj_id: u32,
+    pub skill_id: u32,
+    pub next_phase: i32,
+    pub func_id: u32,
+}
+
 /// One row of the interaction list.
 #[derive(Clone, Debug, PartialEq)]
 struct Entry {
     id: i64,
     name: String,
+}
+
+/// The local interaction `FUN_393b7b10(state, obj_id)` remembers: `DAT_3a17e6a0` and
+/// `DAT_3a17e6a4`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LocalState {
+    pub state: u8,
+    pub obj_id: u32,
 }
 
 #[derive(Default)]
@@ -497,10 +525,21 @@ pub(super) struct View {
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
     coffer_close: bool,
-    /// The doodad of the local window that is the active interaction without a state of its own
-    /// elsewhere: the mailbox (`FUN_393b1040`, state 4) or the farm board (`FUN_393b8700`,
-    /// state 10). `FUN_393b7e40` ends it on walk-away, and the next interaction ends it first.
-    local_active: Option<u32>,
+    /// The `DoodadFuncEvidenceItemLoot` context for `X2Trial.ReportCrime`.
+    pub(super) crime_report: Option<CrimeReport>,
+    /// `X2Trial.ReportCrime` calls since the last `execute`: context and report text.
+    pub(super) crime_reports: Vec<(CrimeReport, String)>,
+    /// The interaction state (`DAT_3a17e6a0`) of an open local window (open paper 1, renew 2,
+    /// mailbox 4 `FUN_393b1040`, stamp 7, purchase 8, farm board 10 `FUN_393b8700`, coffer
+    /// permission 0xd, auction 0xe) and the object it belongs to (`DAT_3a17e6a4`,
+    /// `FUN_393b7b10`); the next `end_interaction` (`FUN_393b7aa0`) ends it, and so does
+    /// `FUN_393b7e40` on walk-away.
+    pub(super) local_state: Option<LocalState>,
+    /// Purchase dialogs confirmed since the last `execute`; each sends its native packet.
+    pub(super) purchases: Vec<local::PurchaseOrder>,
+    /// The later lines of a doodad's bubble conversation (`DoodadFuncBubble`), said by `execute`
+    /// when their time comes.
+    pub(super) bubble_lines: Vec<local::BubbleLine>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
     /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
     bounds: HashMap<u32, (Vec3, Vec3)>,
@@ -851,42 +890,90 @@ pub(super) fn left_interaction(
     }
 }
 
+/// Closes the parts of the active interaction that live in the HUD data: the bench, a shown
+/// interaction list and the coffer (state 5, `FUN_394d08c0` sends the `CSCofferInteraction` close
+/// packet at the top of the next `execute`, or before a new coffer opens in the same one), and
+/// takes the local window state. The caller raises the events once its borrow of the data ends
+/// (see [`finish_interaction`]).
+fn end_windows(data: &mut HudData, inventory: &Inventory) -> (Option<LocalState>, bool) {
+    let bench = super::crafting::close_bench(data);
+    // The local window states FUN_393b7b10 ends (`DAT_3a17e6a0`: open paper 1, renew 2,
+    // mailbox 4, stamp 7, purchase 8, farm board 10, coffer permission 0xd, auction 0xe).
+    let state = data.doodad.local_state.take();
+    // Only a list that was shown (`other_interaction`) is an active interaction; a single action
+    // kept in `menu` for the immediate-use path is not.
+    let menu = std::mem::take(&mut data.doodad.menu_shown);
+    if menu {
+        data.doodad.menu = None;
+    }
+    let coffer = inventory.coffer.is_open();
+    if coffer {
+        data.doodad.coffer_close = true;
+    }
+    (state, bench || menu || coffer || state.is_some())
+}
+
+/// The event half of the native `FUN_393b7aa0` (774053): `NPC_INTERACTION_END` (0x6c) for states
+/// 0xe/0xf/0x11 first, then `INTERACTION_END` (0xd2) once when something was active. The
+/// store/bank that `store::end_interaction` closes raises its own `NPC_INTERACTION_END`; a farm
+/// board (state 10) drops its shown doodad info first.
+fn finish_interaction(
+    rt: Option<&UiRuntime>,
+    bridge: &Shared,
+    state: Option<LocalState>,
+    windows: bool,
+) -> bool {
+    if let Some(rt) = rt
+        && state.is_some_and(|state| state.state == 10)
+    {
+        super::farm::end_doodad(rt);
+    }
+    let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
+    let ended = windows || store;
+    if let Some(rt) = rt {
+        if state.is_some_and(|state| matches!(state.state, 0xe | 0xf | 0x11)) {
+            rt.fire_event("NPC_INTERACTION_END", ());
+        }
+        if ended {
+            rt.fire_event("INTERACTION_END", ());
+        }
+    }
+    ended
+}
+
+/// `end_windows` once per `execute`: `FUN_393b7b10` ends the active interaction only before the
+/// first new bench or coffer of the frame.
+fn end_once(
+    data: &mut HudData,
+    inventory: &Inventory,
+    done: &mut bool,
+    state: &mut Option<LocalState>,
+    windows: &mut bool,
+) {
+    if *done {
+        return;
+    }
+    *done = true;
+    let (taken, ended) = end_windows(data, inventory);
+    *state = taken;
+    *windows = ended;
+}
+
 /// Ends the interaction that is active before a new local window, the native `FUN_393b7aa0`
-/// (774053): the bench and the shown interaction list, the coffer (state 5, `FUN_394d08c0` sends
-/// the `CSCofferInteraction` close packet), the mailbox and the farm board (states 4 and 10), and
-/// the store/bank (states 0xe/0xf/0x11, which raise `NPC_INTERACTION_END`). It then raises
-/// `INTERACTION_END` (0xd2) once when something was active.
+/// (774053): the bench and the shown interaction list, the coffer (state 5), the store/bank and
+/// the local window state. Raises `NPC_INTERACTION_END` first for states 0xe/0xf/0x11, then
+/// `INTERACTION_END` (0xd2) once when something was active. Returns the taken state.
 pub(super) fn end_interaction(
     rt: Option<&UiRuntime>,
     bridge: &Shared,
     inventory: &Inventory,
-) -> bool {
-    let (bench, menu, coffer, local) = {
+) -> Option<LocalState> {
+    let (state, windows) = {
         let mut data = bridge.borrow_mut();
-        let bench = super::crafting::close_bench(&mut data);
-        // Only a list that was shown (`other_interaction`) is an active interaction; a single
-        // action kept in `menu` for the immediate-use path is not.
-        let menu = std::mem::take(&mut data.doodad.menu_shown);
-        if menu {
-            data.doodad.menu = None;
-        }
-        let coffer = inventory.coffer.is_open();
-        if coffer {
-            // execute sends `CSCofferInteraction` for the flag.
-            data.doodad.coffer_close = true;
-        }
-        let local = data.doodad.local_active.take().is_some();
-        (bench, menu, coffer, local)
+        end_windows(&mut data, inventory)
     };
-    if local && let Some(rt) = rt {
-        super::farm::end_doodad(rt);
-    }
-    let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
-    let ended = bench || menu || coffer || local || store;
-    if ended && let Some(rt) = rt {
-        rt.fire_event("INTERACTION_END", ());
-    }
-    ended
+    finish_interaction(rt, bridge, state, windows);
+    state
 }
 
 /// Whether a use must walk first: the gap measured the drawn model's real bounds and is out of the
@@ -2157,7 +2244,69 @@ pub(super) fn execute(
     mut errors: Option<MessageWriter<crate::hud::ShowError>>,
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
+    // `FUN_393b7e40` (polled every 1000 ms by `FUN_393b5f60`; checked every frame here): any active
+    // local window state (`DAT_3a17e6a0`) whose doodad is gone or out of the interaction reach ends
+    // through `FUN_393b7aa0` (`NPC_INTERACTION_END` for the auction, then `INTERACTION_END`, which
+    // `dialog_handler.lua` answers by cancelling an open purchase dialog). It runs before the
+    // queued confirmations: a purchase OK for the doodad the player walked away from is dropped.
+    let walked_off = {
+        let data = bridge.0.borrow();
+        data.doodad
+            .local_state
+            .is_some_and(|state| left_interaction(&data, &doodads, &units, state.obj_id))
+    };
+    if walked_off
+        && let Some(ended) = end_interaction(rt.as_deref(), &bridge.0, &inventory)
+    {
+        bridge.0.borrow_mut().doodad.purchases.retain(|order| {
+            let (local::PurchaseOrder::Buy { obj_id, .. } | local::PurchaseOrder::Coin { obj_id, .. }) = order;
+            *obj_id != ended.obj_id
+        });
+    }
     let mut d = bridge.0.borrow_mut();
+    // Dialog confirmations queued by the scripts: a purchase OK (`FUN_393bc4e0` /
+    // `FUN_393bac20`) and `X2Trial.ReportCrime` both send here.
+    let mut coin_notices: Vec<(String, i32)> = Vec::new();
+    for (context, msg) in std::mem::take(&mut d.doodad.crime_reports) {
+        out.write(NetCommand(Command::ReportCrime {
+            obj_id: context.obj_id,
+            skill_id: context.skill_id,
+            next_phase: context.next_phase,
+            func_id: context.func_id,
+            msg,
+        }));
+    }
+    for order in std::mem::take(&mut d.doodad.purchases) {
+        match local::purchase_command(order, &inventory, d.game.get(), d.snapshot.money) {
+            Ok((command, short_of_money)) => {
+                // `FUN_394f0eb0` shows the shortage and `FUN_393bc4e0` still sends; the server
+                // refuses the buy.
+                if short_of_money && let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_MONEY));
+                }
+                out.write(NetCommand(command));
+            }
+            Err(local::PurchaseRefusal::InvalidItem) => {
+                if let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::STORE_INVALID_ITEM));
+                }
+            }
+            Err(local::PurchaseRefusal::UnknownCoin) => {
+                if let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_ITEM));
+                }
+            }
+            Err(local::PurchaseRefusal::NotEnoughCoin { coin_item, count }) => {
+                let name = d
+                    .game
+                    .get()
+                    .and_then(|g| g.items.get(&coin_item))
+                    .map(|i| i.named.name.clone())
+                    .unwrap_or_default();
+                coin_notices.push((name, count));
+            }
+        }
+    }
     if std::mem::take(&mut d.doodad.coffer_close) && inventory.coffer.is_open() {
         let obj_id = inventory.coffer.obj_id;
         info!("doodad: coffer {obj_id} closed");
@@ -2165,8 +2314,11 @@ pub(super) fn execute(
         inventory.coffer.close();
     }
     // Native `FUN_393b7b10` runs `FUN_393b7aa0` first when any interaction is active, not only
-    // another bench: the shown interaction list and the coffer window are interactions too.
-    let other_interaction = d.doodad.menu_shown || inventory.coffer.is_open();
+    // another bench: a shown interaction list, the coffer and every local window state are
+    // interactions too. `end_windows` needs the data borrow, so the events are raised after it.
+    let mut ended_state = None;
+    let mut ended_windows = false;
+    let mut ended = false;
     let execute = match d.dynamic_actions.shown().map(|s| s.source) {
         Some(super::dynamic_actions::Source::Doodad { .. })
         | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
@@ -2193,8 +2345,6 @@ pub(super) fn execute(
     }
     let mut commands = Vec::new();
     let mut opens: Vec<(u32, usize, bool)> = Vec::new();
-    // A mailbox or farm board the coffer or a bench replaces (`FUN_393b7b10`).
-    let mut local_ended = false;
     let auto_dismount = d.doodad.auto_dismount;
     let seat = world.mount.as_deref().and_then(|m| m.0);
     let attached = seat.is_some() || player.as_ref().and_then(|p| p.spawn.as_ref()).is_some_and(|s| s.unit.attached_to.is_some());
@@ -2221,6 +2371,18 @@ pub(super) fn execute(
                         f.obj_id == obj_id && f.skills.get(pick.index - 1) == Some(&pick.skill)
                     });
                 if current && pick.skill == CRAFT_ACTION {
+                    if !needs_walk(&d, &doodads, &units, obj_id)
+                        && d.game.get().is_some()
+                        && doodads.by_id.contains_key(&obj_id)
+                    {
+                        end_once(
+                            &mut d,
+                            &inventory,
+                            &mut ended,
+                            &mut ended_state,
+                            &mut ended_windows,
+                        );
+                    }
                     if let Some(open) =
                         use_bench(&mut d, &doodads, &units, obj_id, now, Some(generation))
                     {
@@ -2283,12 +2445,25 @@ pub(super) fn execute(
     {
         for id in chosen {
             if id == i64::from(CRAFT_ACTION) {
+                if !needs_walk(&d, &doodads, &units, obj_id)
+                    && d.game.get().is_some()
+                    && doodads.by_id.contains_key(&obj_id)
+                {
+                    end_once(
+                        &mut d,
+                        &inventory,
+                        &mut ended,
+                        &mut ended_state,
+                        &mut ended_windows,
+                    );
+                }
                 let generation = views.doodad_generation(obj_id);
                 if let Some(open) = use_bench(&mut d, &doodads, &units, obj_id, now, generation) {
                     opens.push(open);
                 }
                 continue;
             }
+            let coffer = id - NAVI_ID == Navi::Coffer as i64;
             let navi = match id - NAVI_ID {
                 x if x == Navi::Teleport as i64 => Some(Command::Interact(Interact::NaviTeleport { doodad_obj_id: obj_id })),
                 x if x == Navi::OpenPortal as i64 => Some(Command::Interact(Interact::NaviOpenPortal { doodad_obj_id: obj_id })),
@@ -2296,9 +2471,28 @@ pub(super) fn execute(
                 _ => None,
             };
             if let Some(command) = navi {
-                // The coffer is interaction state 5: `FUN_393b7b10` ends a mailbox or farm board first.
-                if matches!(command, Command::Coffer(_)) {
-                    local_ended |= d.doodad.local_active.take().is_some();
+                if coffer {
+                    // `FUN_393b7b10(5, obj)` runs `FUN_393b7aa0` first: the coffer open is a new
+                    // interaction like the bench.
+                    end_once(
+                        &mut d,
+                        &inventory,
+                        &mut ended,
+                        &mut ended_state,
+                        &mut ended_windows,
+                    );
+                    // The open coffer is state 5: `FUN_393b7aa0` closes it (`FUN_394d08c0`)
+                    // before the new `CSCofferInteraction` open leaves.
+                    if inventory.coffer.is_open() {
+                        let open_id = inventory.coffer.obj_id;
+                        info!("doodad: coffer {open_id} closed");
+                        d.doodad.coffer_close = false;
+                        out.write(NetCommand(Command::Coffer(CofferCommand::Interact {
+                            obj_id: open_id,
+                            open: false,
+                        })));
+                        inventory.coffer.close();
+                    }
                 }
                 commands.push((obj_id, command));
                 continue;
@@ -2331,39 +2525,26 @@ pub(super) fn execute(
     // No bag-space check: every herb gather of the 2026-10-30 capture ran with a full 50/50 bag. The use was sent, the
     // cast ran and the phase changed to 4514; the server only added `SCErrorMsg` BAG_FULL after it
     // (`tools/evidence/gather/capture-results.txt`).
-    if !opens.is_empty() {
-        if other_interaction && inventory.coffer.is_open() {
-            d.doodad.coffer_close = true;
-        }
-        d.doodad.menu_shown = false;
-        local_ended |= d.doodad.local_active.take().is_some();
-    }
     let game_slot = d.game.clone();
     let labor = d.snapshot.labor;
     drop(d);
-    // `FUN_394dc360` opens the bench through `FUN_393b7b10` (state 3): a doodad store or bank
-    // that is open ends first, with its `NPC_INTERACTION_END` (`FUN_393b7aa0`).
-    let store_ended = !opens.is_empty() && rt.as_deref().is_some_and(|rt| super::store::end_interaction(rt, &bridge.0));
-    if local_ended && let Some(rt) = rt.as_deref() {
-        super::farm::end_doodad(rt);
-        if opens.is_empty() {
-            // the coffer replaced it; a bench raises the end with its `CRAFTING_START` below
-            rt.fire_event("INTERACTION_END", ());
-        }
+    if ended {
+        // A new bench or coffer started: `FUN_393b7aa0` (with the store it also closes).
+        finish_interaction(rt.as_deref(), &bridge.0, ended_state, ended_windows);
     }
-    // `FUN_393b7e40` (polled every 1000 ms; checked every frame here) ends the mailbox or farm
-    // board when the doodad is gone or out of the interaction reach.
-    let walked_off = {
-        let data = bridge.0.borrow();
-        data.doodad
-            .local_active
-            .is_some_and(|id| left_interaction(&data, &doodads, &units, id))
-    };
-    if walked_off {
-        bridge.0.borrow_mut().doodad.local_active = None;
-        if let Some(rt) = rt.as_deref() {
-            super::farm::end_doodad(rt);
-            rt.fire_event("INTERACTION_END", ());
+    if let Some(rt) = rt.as_deref() {
+        for line in local::due_bubble_lines(&bridge.0, now) {
+            local::say_line(rt, &line);
+        }
+        for (coin, count) in coin_notices {
+            let text = super::alerts::localized_args(
+                rt,
+                "ERROR_MSG",
+                "not_enough_coin",
+                &[coin, count.to_string()],
+            )
+            .unwrap_or_else(|| "not_enough_coin".to_owned());
+            rt.fire_event("SYSMSG", text);
         }
     }
     let game = game_slot.get();
@@ -2423,15 +2604,21 @@ pub(super) fn execute(
                     }
                     None => continue,
                 }
-                local::run(
+                let phase = local::run(
                     rt.as_deref(),
                     &bridge.0,
                     &doodads,
                     &units,
                     &inventory,
+                    env_res.houses.as_deref(),
                     obj_id,
+                    *skill_id,
                     local.action,
+                    now,
                 );
+                if let Some(command) = phase {
+                    out.write(NetCommand(command));
+                }
                 continue;
             }
             if let Some(counter) = group
@@ -2500,14 +2687,7 @@ pub(super) fn execute(
         // `FUN_394dc360` then fires event 0x78 with the doodad object id and the unique recipe
         // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
         // count) treats either argument nil/zero as the general recipe book.
-        // A doodad store/bank or a mailbox/farm board the bench replaced ends once, before the
-        // first `CRAFTING_START`.
-        let mut ended = store_ended || local_ended;
-        for (object, count, replaced) in opens {
-            let first = std::mem::take(&mut ended);
-            if replaced || other_interaction || first {
-                rt.fire_event("INTERACTION_END", ());
-            }
+        for (object, count, _) in opens {
             rt.fire_event("CRAFTING_START", (object, count));
         }
     }
@@ -2938,7 +3118,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE doodad_almighties (id INTEGER, use_target_highlight TEXT, use_target_silhouette TEXT, use_target_decal TEXT, target_decal_size REAL, sim_radius REAL);
-             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER);
+             CREATE TABLE doodad_funcs (id INTEGER, doodad_func_group_id INTEGER, func_skill_id INTEGER, actual_func_type TEXT, actual_func_id INTEGER, perm_id INTEGER, next_phase INTEGER);
              CREATE TABLE skills (id INTEGER, source_mount TEXT, source_mount_mate TEXT);
              CREATE TABLE doodad_func_uses (id INTEGER, skill_id INTEGER);
              CREATE TABLE doodad_func_fake_uses (id INTEGER, fake_skill_id INTEGER);
@@ -4275,7 +4455,7 @@ mod tests {
     }
     fn craft_tables(group: u32, perm: u8) -> GameData {
         let mut tables = Tables::default();
-        tables.add_full(group, 0, "DoodadFuncCraftPack", perm, 0, &local::LocalFuncs::default());
+        tables.add_full(group, 0, "DoodadFuncCraftPack", perm, 0, 0, 0, &local::LocalFuncs::default());
         GameData {
             doodad: tables,
             crafting: crate::hud::crafting::fixture_tables([(568, vec![5557]), (2241, vec![6666])]),
@@ -4539,7 +4719,7 @@ mod tests {
 
     fn mixed_tables(group: u32, skill: u32, perm: u8) -> GameData {
         let mut game = craft_tables(group, perm);
-        game.doodad.add_full(group, skill, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+        game.doodad.add_full(group, skill, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
         game
     }
 
@@ -4595,7 +4775,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.focus = Some(Focus {
                 obj_id: 300,
@@ -4678,7 +4858,7 @@ mod tests {
             d.pos = Vec3::ZERO;
             d.player_radius = 0.0;
             let mut game = GameData::default();
-            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(1, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             if let Some(flags) = flags {
                 game.doodad.mount_flags.insert(14602, flags);
             }
@@ -5154,7 +5334,7 @@ mod tests {
             d.character_id = 47;
             d.pos = Vec3::ZERO;
             let mut game = craft_tables(1088, craft_perm::ANY);
-            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0, 0, &local::LocalFuncs::default());
+            game.doodad.add_full(2, 14602, "DoodadFuncUse", 0, 0, 0, 0, &local::LocalFuncs::default());
             assert!(d.game.0.set(game).is_ok());
             d.doodad.pending = Some(Pending {
                 obj_id: 300,

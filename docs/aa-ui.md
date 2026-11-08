@@ -925,7 +925,9 @@ App::new()
   dialog (`DLG_TASK_*`, the handlers of `dialog_handler.lua`) with `info` merged before default
   decoration. Omitted `buttonType` / `isModal` retain OK / Cancel and modal defaults; explicit
   `DBT_CUSTOM` (2), `DBT_OK` (1), or `isModal = false` reach the original decorator unchanged.
-  Set `wnd.OkProc` on the result for what OK does. The native battlefield invitation task
+  Set `wnd.OkProc` on the result for what OK does. `X2DialogManager:Delete(task)` closes every
+  dialog requested with that task (native `FUN_3902db50` / `FUN_3902cef0`); a closed dialog
+  window (OK, Cancel, Delete) gets `__dialog_closed = true`, which a late `OkProc` can test. The native battlefield invitation task
   (`3936d620`, vtable `399d0d1c`) supplies task 5, custom buttons, and nonmodal state through
   virtuals `3936ced0`, `3936cee0`, and `3936cef0`. The manager writes these fields before
   decoration (`3902d400`). Its unchanged `DialogJoinBattleFieldHandler` adds the original
@@ -1082,6 +1084,8 @@ converted with `.map_err(|e| anyhow::anyhow!("{e}"))`.
   windows (`check_ingame.sh`): mean absolute error 1.8 (bag, character info) to 4.1 of 255
   (continent map), mostly the 3D world that shows through the windows' translucent
   backgrounds in the client.
+* `CreateThreeColorDrawable` (the UCC preview background) draws `Textures/Defaults/White.dds`;
+  the three colours are not applied yet.
 * Many natives are stubs (table below): mostly in-game widgets (model view, the chat window's
   options, map markers fed by game data) and rarely used setters.
 

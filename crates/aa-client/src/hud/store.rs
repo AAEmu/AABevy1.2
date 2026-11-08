@@ -419,6 +419,7 @@ fn build_command(
         Req::BuyBack(index) if index > 0 && index <= sold.len() => ShopCommand::Buy {
             npc_obj_id,
             doodad_obj_id,
+            func_id: 0,
             buy: vec![],
             buy_back: vec![(index - 1) as i32],
             use_aa_point: false,
@@ -441,6 +442,7 @@ fn build_command(
             ShopCommand::Buy {
                 npc_obj_id,
                 doodad_obj_id,
+                func_id: 0,
                 buy,
                 buy_back: vec![],
                 use_aa_point: false,

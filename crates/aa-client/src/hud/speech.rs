@@ -26,7 +26,7 @@ use mlua::{Function, Lua, Table, Value};
 use rusqlite::Connection;
 
 use super::api::{HudBridge, Shared};
-use super::data::any_int;
+use super::data::{any_flag, any_int};
 use super::plates::{PlateState, head_gap, relation_of, unit_height};
 use crate::ingame::emote::{Emotes, fill};
 
@@ -39,11 +39,29 @@ const FADE_PER_CODEPOINT: f32 = f32::from_bits(0x3aaae3a1);
 const ABOVE_CHARACTER: f32 = 62.0;
 const ABOVE_NPC: f32 = 30.0;
 
-/// Localized `bubble_effects.speech`, indexed by the effect ID received in 0x154.
-/// `bubbles` / `bubble_chats` are separate dialogue data, not this packet's table.
+/// One `bubble_chats` row: a line of a `bubbles` conversation (`DoodadFuncBubble`, `FUN_393703b0`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct BubbleChat {
+    pub id: u32,
+    /// `START`: the conversation begins here (`FUN_39375140` looks for the line with byte +52 set).
+    pub start: bool,
+    /// The `bubble_chats.id` said after this one (0: the last).
+    pub next: u32,
+    /// The speaker: an NPC template, a doodad template, or neither (the player, `FUN_39371fc0`).
+    pub npc: u32,
+    pub doodad: u32,
+    /// The bubble's tail kind (1 normal, 2 think).
+    pub kind: u8,
+    /// Localized `speech` (the raw column when there is no translation).
+    pub text: String,
+}
+
+/// Localized `bubble_effects.speech`, indexed by the effect ID received in 0x154, and the
+/// `bubbles` / `bubble_chats` conversations (separate dialogue data, keyed by `bubble_id`).
 #[derive(Default)]
 pub(super) struct Tables {
     effects: HashMap<u32, String>,
+    chats: HashMap<u32, Vec<BubbleChat>>,
 }
 
 impl Tables {
@@ -63,12 +81,73 @@ impl Tables {
                 .unwrap_or_else(|| cstr(&raw).to_owned());
             effects.insert(id, text);
         }
-        Ok(Self { effects })
+        Ok(Self { effects, chats: load_chats(conn) })
     }
 
-    fn text(&self, id: u32) -> Option<&str> {
+    pub(super) fn text(&self, id: u32) -> Option<&str> {
         self.effects.get(&id).map(String::as_str)
     }
+
+    /// The conversation of `bubbles.id`: its `START` line, then along `next` (each line once).
+    /// Empty when the bubble has no lines.
+    pub(super) fn bubble_chain(&self, bubble: u32) -> Vec<&BubbleChat> {
+        let Some(chats) = self.chats.get(&bubble) else { return Vec::new() };
+        let mut chain = Vec::new();
+        let mut line = chats.iter().find(|c| c.start);
+        while let Some(chat) = line {
+            if chain.iter().any(|c: &&BubbleChat| c.id == chat.id) {
+                break;
+            }
+            chain.push(chat);
+            line = (chat.next != 0)
+                .then(|| chats.iter().find(|c| c.id == chat.next))
+                .flatten();
+        }
+        chain
+    }
+}
+
+/// `bubble_chats` by `bubble_id`, with the localized `speech`. A database without the table has no
+/// conversations.
+fn load_chats(conn: &Connection) -> HashMap<u32, Vec<BubbleChat>> {
+    let mut localized = HashMap::new();
+    if let Ok(mut q) = conn.prepare("SELECT idx, en_us FROM localized_texts WHERE tbl_name = 'bubble_chats' AND tbl_column_name = 'speech' AND en_us IS NOT NULL")
+        && let Ok(rows) = q.query_map([], |r| Ok((any_int(r, 0)? as u32, r.get::<_, String>(1)?)))
+    {
+        localized.extend(rows.flatten());
+    }
+    let mut chats: HashMap<u32, Vec<BubbleChat>> = HashMap::new();
+    let Ok(mut q) = conn.prepare("SELECT id, bubble_id, START, next, npc_id, doodad_id, kind_id, speech FROM bubble_chats ORDER BY id") else {
+        return chats;
+    };
+    let Ok(rows) = q.query_map([], |r| {
+        let id = any_int(r, 0)? as u32;
+        let raw = r.get::<_, Option<String>>(7)?.unwrap_or_default();
+        Ok((
+            any_int(r, 1)? as u32,
+            BubbleChat {
+                id,
+                start: any_flag(r, 2)?,
+                next: any_int(r, 3)?.max(0) as u32,
+                npc: any_int(r, 4)?.max(0) as u32,
+                doodad: any_int(r, 5)?.max(0) as u32,
+                kind: any_int(r, 6)?.clamp(0, 255) as u8,
+                text: raw,
+            },
+        ))
+    }) else {
+        return chats;
+    };
+    for (bubble, mut chat) in rows.flatten() {
+        // as `bubble_effects`: an empty translation falls back to the raw column
+        if let Some(text) = localized.get(&chat.id).map(String::as_str).map(cstr).filter(|s| !s.is_empty()) {
+            chat.text = text.to_owned();
+        } else {
+            chat.text = cstr(&chat.text).to_owned();
+        }
+        chats.entry(bubble).or_default().push(chat);
+    }
+    chats
 }
 
 #[derive(Default)]
@@ -151,7 +230,34 @@ fn timing(text: &str) -> (f32, f32) {
     (n.wrapping_mul(MS_PER_CODEPOINT).max(500) as f32, fade)
 }
 
-fn say(rt: &UiRuntime, obj_id: u32, author: &str, text: &str, kind: u8) {
+/// The seconds from one line of a `bubbles` conversation to the next: `FUN_393745c0` starts the
+/// next line after this one's show and fade times, and the conversation (chain kind 2,
+/// `FUN_39375140`) shows each line 950 ms longer than a unit's own bubble (`FUN_39372050`).
+pub(super) fn bubble_line_secs(text: &str) -> f32 {
+    let (show, fade) = timing(cstr(text));
+    (show + BUBBLE_EXTRA_MS + fade) / 1000.0
+}
+
+/// `FUN_39372050`: the extra show time of a chain of kind 2 (a `bubbles` conversation).
+const BUBBLE_EXTRA_MS: f32 = 950.0;
+
+/// One line of a `bubbles` conversation: a doodad's raises `CHAT_MSG_DOODAD` (event 14,
+/// `FUN_39374960`) with the doodad's object id, a unit's (an NPC, the player) `CHAT_MSG_QUEST`.
+pub(super) fn say_bubble_line(rt: &UiRuntime, doodad: bool, obj_id: u32, author: &str, text: &str, kind: u8) {
+    let text = cstr(text);
+    if text.is_empty() {
+        return;
+    }
+    let (show, fade) = timing(text);
+    let show = show + BUBBLE_EXTRA_MS;
+    if doodad {
+        rt.fire_event("CHAT_MSG_DOODAD", (text.to_owned(), cstr(author).to_owned(), obj_id, kind as f32, show, fade));
+    } else {
+        rt.fire_event("CHAT_MSG_QUEST", (text.to_owned(), cstr(author).to_owned(), format!("{obj_id:x}"), kind as f32, show, fade));
+    }
+}
+
+pub(super) fn say(rt: &UiRuntime, obj_id: u32, author: &str, text: &str, kind: u8) {
     let text = cstr(text);
     if text.is_empty() { return; }
     if kind == 4 {

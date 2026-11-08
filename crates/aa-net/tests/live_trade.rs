@@ -205,6 +205,7 @@ async fn fund(peer: &mut Peer) -> Result<()> {
     peer.client.send(Command::Shop(ShopCommand::Buy {
         npc_obj_id: npc.obj_id,
         doodad_obj_id: 0,
+        func_id: 0,
         buy: vec![BuyEntry {
             item_id: 15659,
             grade: 0,
