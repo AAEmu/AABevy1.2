@@ -78,7 +78,9 @@ impl HairParams {
 /// `step2_*` captures (`compare`, mean and 10 / 50 / 90 % brightness of the lit top of the hair; 1 = the shader).
 /// The stage lights are brighter than the engine's for hair (the skins carry per model tunes for the same reason):
 /// at 1 / 1 the blond hair came out 1.7 times too bright, with too little contrast between strands and grooves.
-const SPEC_GAIN: f32 = 1.3;
+/// `SPEC_GAIN` was 1.3 while the Specular map was read as linear; read as sRGB (as the engine does) the strand mask is
+/// darker and the highlight breaks into strands like the captures', at twice the gain.
+const SPEC_GAIN: f32 = 2.6;
 const DIFFUSE_GAIN: f32 = 0.55;
 
 /// What [`prepare`] registered: the parameters and the Specular map of each distinct hair material.
@@ -107,7 +109,8 @@ pub(crate) fn prepare(prep: &mut crate::loader::Prep<'_>, m: &CryMaterial, out: 
         return;
     }
     let spec_path = m.texture(&TextureMap::Specular).map(|t| t.pak_path());
-    let spec_map = spec_path.as_deref().and_then(|p| prep.texture(p, false));
+    // `glossMapSampler` is `sRGBLookup = true` (`fxsamplerdefs.cfi` GLOSSMAP); the alpha (shift noise) stays linear
+    let spec_map = spec_path.as_deref().and_then(|p| prep.texture(p, true));
     let params = HairParams::from_material(m, spec_map.is_some());
     let key = format!("{}|{params:?}", spec_path.unwrap_or_default());
     let index = registry(|r| {

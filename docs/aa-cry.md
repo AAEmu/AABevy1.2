@@ -915,7 +915,10 @@ The client's `Hair` shader (`shaders/hwscripts/cryfx/hair.cfx` in the pak, see `
   pale bright blond.
 * **Colour parameters** go through `hair_colour` (hue as written, brightness `^1.5`): plain `^1.5` per channel made
   blond a saturated gold, plain values made dark hair olive grey; the captures have ash blond and near black.
-* **Calibration** `DIFFUSE_GAIN` 0.55, `SPEC_GAIN` 1.3: fitted to the lit top of the hair in the `step2_*` captures
+* **Specular map** read as sRGB (its alpha, the shift noise, stays linear): the engine's `glossMapSampler` is
+  `sRGBLookup = true` (`fxsamplerdefs.cfi` `GLOSSMAP`, used by `hair.cfx`). Read as linear, the strand mask came out
+  nearly white and the highlight was one broad band where the captures have it broken into strands.
+* **Calibration** `DIFFUSE_GAIN` 0.55, `SPEC_GAIN` 2.6 (1.3 with the linear Specular map): fitted to the lit top of the hair in the `step2_*` captures
   (at 1 / 1 the blond came out about 1.7 times too bright and too flat; the stage rig is brighter than the engine's
   for hair, the skins carry per-model tunes for the same reason).
 * **Alpha.** The hair mesh stays the opaque pass: `Mask(0.5)` on the doubled alpha, safe in the depth and normal
