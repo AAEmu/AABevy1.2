@@ -80,7 +80,7 @@ fn area_geometry_enabled() -> bool {
 }
 
 /// The native per-frame draw (`FUN_393822f0`): a red sphere and the `stype` label per area.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 fn draw_areas(
     bridge: NonSend<HudBridge>,
     mut shown: ResMut<Shown>,
