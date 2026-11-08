@@ -729,7 +729,9 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   category-0x5c part is not identified and is left out. The action id is the row's
   `skill_id` (11672 on all shipped rows, `FUN_393b7eb0` case 0x34). The report button's
   `X2Trial.ReportCrime(text)` sends `CSReportCrimePacket` 0x76 with the context `FUN_393bb090` stored
-  (object, skill, next phase, func row).
+  (object, skill, next phase, func row). `X2Time.GetLocalTime` returns a decimal string like the native
+  `FUN_394b33b0` (here Unix seconds, `TimeToDate` takes it as a string or a number); `X2Time.GetLocalTime` /
+  `TimeToDate` use UTC (no time zone database), so the report time is off by the local offset.
 * **Doodad bubbles**: the `bubbles` / `bubble_chats` conversation is raised line by line (the speaker
   per `FUN_39371fc0`: the `doodad_id` doodad in view, else the player for a line with no NPC, else the
   nearest unit of `npc_id`; a line whose NPC is not in view is skipped). `change_speaker_name` is not

@@ -316,8 +316,11 @@ pub(super) const RESURRECT_RETRY_MS: u64 = 10_000;
 const ROAD_FRAMES_LUA: &str = include_str!("road_frames.lua");
 
 /// `X2Time.GetLocalTime` / `TimeToDate`: the report and mail windows' date fields. The native
-/// returns the local clock as a Unix timestamp and its civil date; this uses UTC (the client has
-/// no time zone database; the offset is at most a day).
+/// `GetLocalTime` (`FUN_394b33b0`) formats the current file time with `XlUI64toA` and returns a
+/// decimal string, which `TimeToDate(timeString)` (`FUN_394b3600`) parses back with `XlAtoUI64`;
+/// this returns the Unix seconds as that string and takes a string or a number. The native reads
+/// the local clock; this uses UTC (no time zone database: no crate in the build gives the local
+/// offset on the desktop), so a shown time is off by the player's UTC offset.
 fn install_time(lua: &Lua) -> mlua::Result<()> {
     let time: Table = lua.globals().get("X2Time")?;
     time.set(
@@ -327,12 +330,18 @@ fn install_time(lua: &Lua) -> mlua::Result<()> {
                 .duration_since(web_time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            Ok(secs)
+            Ok(secs.to_string())
         })?,
     )?;
     time.set(
         "TimeToDate",
-        lua.create_function(|lua, (_this, ts): (Value, i64)| {
+        lua.create_function(|lua, (_this, ts): (Value, Value)| {
+            let ts = match ts {
+                Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(0),
+                Value::Integer(n) => i64::from(n),
+                Value::Number(n) => n as i64,
+                _ => 0,
+            };
             let days = ts.div_euclid(86_400);
             let secs = ts.rem_euclid(86_400);
             let z = days + 719_468;

@@ -1586,6 +1586,24 @@ fn the_evidence_loot_opens_the_crime_report() {
         "the crime report window did not open"
     );
     assert!(sent(&mut app).is_empty(), "the report use sends nothing");
+    // The report time line: `FUN_394b33b0` returns a decimal string that `TimeToDate` parses.
+    assert_eq!(
+        lua(&app, "return type(X2Time:GetLocalTime())")
+            .unwrap()
+            .as_string()
+            .and_then(|s| s.to_str().ok().map(|s| s.to_string()))
+            .as_deref(),
+        Some("string")
+    );
+    assert_eq!(
+        lua(
+            &app,
+            "local a, b = X2Time:TimeToDate('86461'), X2Time:TimeToDate(86461);             return a.year == 1970 and a.day == 2 and a.minute == 1 and b.second == 1 and b.day == a.day"
+        )
+        .unwrap()
+        .as_boolean(),
+        Some(true)
+    );
 
     // The report button (`report_crime.alb`) calls X2Trial.ReportCrime(text); FUN_3907bfd0 sends
     // the context FUN_393bb090 stored with opcode 0x76.
