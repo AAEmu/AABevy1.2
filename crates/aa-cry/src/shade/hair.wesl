@@ -126,13 +126,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 @else
     let noise = textureSample(hair_spec_map, hair_spec_sampler, uv * p.shape.w).a;
     // the blended fringe (the engine's front / back passes): only the strand ends the opaque mask cuts away,
-    // `clip(alpha - 0.05)`, blended with `saturate(alpha * 2)` (the base colour's alpha is already doubled)
+    // `clip(alpha - 0.05)`
     let fringe = p.mode.x > 0.5;
     let alpha2 = pbr_input.material.base_color.a;
     if fringe && (alpha2 >= p.mode.y || alpha2 < 0.1) {
         discard;
     }
-    let out_alpha = select(pbr_input.material.base_color.a, saturate(alpha2), fringe);
+    // the fringe reaches full opacity where the opaque pass begins (`alpha2 / cut`), so the two passes join without a step;
+    // with `saturate(alpha2)` it ended at 50 % against the opaque hair and the hairline showed hard spikes where the
+    // captures have a soft, covered edge (`docs/aa-cry.md`, Hair, Alpha)
+    let out_alpha = select(pbr_input.material.base_color.a, saturate(alpha2 / max(p.mode.y, 0.1)), fringe);
     let has_map = p.light.w > 0.5;
     let gloss_rgb = select(vec3<f32>(0.5), gloss.rgb, has_map);
     let shift_noise = select(0.5, noise, has_map);

@@ -921,8 +921,11 @@ The client's `Hair` shader (`shaders/hwscripts/cryfx/hair.cfx` in the pak, see `
 * **Alpha.** The hair mesh stays the opaque pass: `Mask(0.5)` on the doubled alpha, safe in the depth and normal
   prepasses (SSAO checked: `compare --ssao medium`). A child entity `HairFringe` (same mesh, `SkinnedMesh` copied,
   `NotShadowCaster`) draws the engine's blended passes: `AlphaMode::Blend`, only the texels the mask cuts away and
-  above `clip(a - 0.05)`, alpha `saturate(2a)`. Blend materials are not in the prepasses, so nothing changes there;
-  the hairline is soft like in the captures instead of spiky.
+  above `clip(a - 0.05)`, alpha `saturate(2a / cut)` (the engine's `saturate(2a)` scaled so the fringe is opaque where
+  the opaque pass begins: with the plain `2a` it ended at 50 % against the opaque hair, and the hairline of
+  `step2_nuian_female` was a row of hard spikes over bare skin where the capture has a soft, covered edge; the engine's
+  blend state is unverified, so this is fitted to the capture). Blend materials are not in the prepasses, so nothing
+  changes there.
 
 Wiring: `convert_material` (`Shading::Full`) calls `hair::prepare`, which registers the parameters and the Specular
 map and stores the index in `lightmap_exposure` (`4 + index`; the back light tags are below 3). `HairPlugin`, added by
