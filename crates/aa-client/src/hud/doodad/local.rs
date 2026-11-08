@@ -13,10 +13,13 @@
 //! * `DoodadFuncBankUi` (0x56) -> `FUN_393b8c20` (775139) sets state 0xf and raises
 //!   `NPC_INTERACTION_START("bank")`.
 //! * `DoodadFuncNaviOpenMailbox` (0x2c): `FUN_393bd290` (779073) lists it as skill 11400 through
-//!   the func-type map of `FUN_397aa970` (1699182), and using it reaches `FUN_393b1040` (767979),
-//!   which sets state 4 and raises `TOGGLE_MAIL(doodadObjId, true)`. The handler is reached through
-//!   the pointer table `0x399d2c58` (direct caller not recovered), calls `FUN_393ccdd0` (not ported)
-//!   and mailbox group 107 has `next_phase` 10279, so whether it sends a packet is unverified.
+//!   the func-type map of `FUN_397aa970` (1699182). 11400 is dispatched by the action-handler map
+//!   before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` ->
+//!   `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040` 767979), so no `CSStartSkill` is sent.
+//!   `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL(doodadObjId, true)` and calls
+//!   `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not
+//!   all loaded. `mail::open_at`'s `MailCommand::List` stands in for it, queued whenever the
+//!   window is hidden. It runs here with the other local windows.
 //!
 //! `DoodadFuncInsertCounter` (0x54) is the pre-check of its case: when both the bag count
 //! (`FUN_397ccda0`) and the 28 equipment slots (`FUN_393b8f00`) hold fewer than

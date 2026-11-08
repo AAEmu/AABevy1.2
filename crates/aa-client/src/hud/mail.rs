@@ -567,7 +567,8 @@ fn failure(rt: &UiRuntime, message: &str) {
 }
 
 /// Native `FUN_393b1040` (767979) opens the mailbox of the doodad it was used on:
-/// `TOGGLE_MAIL(numeric object ID, true)`. The list request is the window's own (`X2Mail`).
+/// `TOGGLE_MAIL(numeric object ID, true)`. The native handler requests the list
+/// (`CSListMailPacket` via `FUN_393ccdd0`); here it is queued when the window opens.
 pub(super) fn open_at(rt: &UiRuntime, obj_id: u32) {
     let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
         return;

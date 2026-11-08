@@ -669,7 +669,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | missing (`auction.rs` needs a unit auctioneer and its scope) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
-| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | state 4, `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)`; the handler also calls `FUN_393ccdd0` (not ported). Mailbox group 107 has `next_phase` 10279; the handler is reached through the pointer table `0x399d2c58` and its direct caller is not recovered, so "no packet" is **unverified** | **done** (`local.rs`, `mail::open_at`) |
+| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | 11400 is dispatched by the action-handler map before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` -> `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040`), so no `CSStartSkill` is sent. `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)` and calls `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not all loaded | **done** (`local.rs`, `mail::open_at`; its `MailCommand::List` stands in for `FUN_393ccdd0` and is queued whenever the window is hidden) |
 
 The non-skill action ids of `FUN_393bd290` (779073): the func-type map gives Butcher, Cutdown, Dig, Feed,
 Harvest, Mow, Shear, Use, Binding, CraftStart, CraftInfo, CraftCancel, CraftGetItem, the collect types,
@@ -677,10 +677,12 @@ MachinePartsCollect, RemoveItem, NaviNaming/MarkPosToMap/Donation/Remove/OpenPor
 OpenBounty, LootPack, Enter/RemoveInstance, LogicDisplay, CleanupLogicLink, CraftPack and Coffer their
 interaction ids; `FUN_393b7eb0` gives Climb, LootItem, Quest, CraftAct, FakeUse, RecoverItem, ConditionalUse
 and EvidenceItemLoot theirs. Of those, the client-side paths aa-client has are the mailbox (above), the
-workbench (`CraftStart`/`CraftPack`, #94), fishing (#98), the coffer (`CSCofferInteraction`), fake use
-(`gather.rs` detail skill), climb (`ingame/ladder`), loot (`hud/loot`) and the generic skill sends. The
-Navi naming/mark/donation/remove/open-bounty entries, RecoverItem and ConditionalUse still fall through to a
-plain skill send; the server owns their effect.
+workbench (`CraftStart`/`CraftPack`, #94), fishing (#98), the coffer (`CSCofferInteraction`), `CSNaviTeleport`
+and `CSNaviOpenPortal`, fake use (`gather.rs` detail skill), climb (`ingame/ladder`), loot (`hud/loot`) and the
+generic skill sends. `DoodadFuncNaviOpenBounty` is a client-side handler too (`FUN_393b1140`, slot 4 of table
+`0x399d2c58`): it sends `CSNaviOpenBountyPacket` 0x0ea with the doodad id and no skill. It is **not implemented**
+here: the port falls through to the skill send. The Navi naming/mark/donation/remove entries, RecoverItem and
+ConditionalUse fall through to a plain skill send; the server owns their effect.
 
 The windows are interactions (`FUN_393b7b10` stores the state): the mailbox (4) and the farm board (10) are kept as
 `View::local_active`, the store/bank (0xf/0x11) as the store view. `FUN_393b7e40` (polled every 1000 ms) ends the active one
