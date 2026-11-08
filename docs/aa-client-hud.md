@@ -1122,9 +1122,12 @@ the item-count query counts only nonzero instances with valid item definitions
 
 Ctrl-E opens the original mailbox locally. It chooses a currently visible NaviOpenMailbox
 function group within the lane's five-metre 2D send radius, when available; inbox reading also
-works without a mailbox. Native393b1040 emits numeric doodad ID plus boolean true; there is no
-invented interaction acknowledgement. The broader native interaction chooser and exact automatic
-end-distance behavior are still pending.
+works without a mailbox. The same window opens from the Mailbox doodad's own bar action
+(`DoodadFuncNaviOpenMailbox` maps to skill 11400; `hud/doodad/local.rs`). Native393b1040 emits
+numeric doodad ID plus boolean true; there is no invented interaction acknowledgement. Opened from
+the doodad, the mailbox is interaction state 4: it ends like the other doodad interactions, on
+walk-away or when another interaction opens (`INTERACTION_END`; see `docs/aa-client-doodads.md`).
+Ctrl-E's open has no such end yet.
 
 The NPC talk/use reach is the common interaction reach of `FUN_393bf270` / `FUN_39093860`: a 3D
 surface gap strictly under `DAT_39ac79fc` 9.0 (3.0 m), or `DAT_39ac7a00` 12.25 (3.5 m) for a **dead
