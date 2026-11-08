@@ -150,11 +150,22 @@ impl Family {
             Family::Robe | Family::Cloak => 75f32,
             Family::Skirt | Family::Other => 60.0,
             // per segment: three or four of them add up, and a braid must not curl over the head in a sharp turn
-            Family::Hair => 35.0,
+            // at 35 degrees a tip saturated the cone on every start and stop and snapped to the opposite edge
+            Family::Hair => 20.0,
             Family::Calf | Family::Arm => 45.0,
             Family::Breast => 15.0,
         }
         .to_radians()
+    }
+
+    /// Fastest a vertex may move relative to its animated position (m/s). Movement starts and stops at once (0 to 7 m/s in one
+    /// frame), and a soft hair tip (the braid's spring is 40 / s² at the tip) answered that with a whip of 20 cm between two
+    /// frames; capped, the same stop is a swing of a few centimetres. The other families keep their full dynamics.
+    fn max_relative_speed(self) -> f32 {
+        match self {
+            Family::Hair => 1.0,
+            _ => f32::INFINITY,
+        }
     }
 }
 
@@ -530,6 +541,7 @@ fn step_chain(
     // absolute damping only: AA's locomotion clips already animate the rope bones trailing (the run clips drive the robe,
     // skirt and cloak chains, the idles do not), so drag against still air (`air_resistance`) would count it twice
     let drag = (h * p.damping).min(1.0);
+    let max_rel = c.family.max_relative_speed();
     // integrate (Verlet, positions per step)
     for j in 1..=n {
         let i = o + j;
@@ -540,6 +552,7 @@ fn step_chain(
         let vt = target(i, f1) - target(i, f0);
         v -= v * drag;
         v += (vt - v) * follow;
+        v = vt + (v - vt).clamp_length_max(max_rel * h);
         let desired = x[i - 1] + (target(i, f1) - target(i - 1, f1));
         let acc = gravity + (desired - x[i]) * k;
         prev[i] = x[i];
@@ -855,7 +868,7 @@ mod tests {
                 let tip = *c.bones.last().unwrap();
                 let droop = rest[tip].1.distance(bind[tip].1);
                 let len: f32 = c.bones.windows(2).map(|w| bind[w[0]].1.distance(bind[w[1]].1)).sum();
-                eprintln!("{:40} {:18} len {len:.2} rest droop {droop:.3} max swing {:.3} caps {}", path.rsplit('/').next().unwrap(), c.name, worst[k], c.caps.len());
+                eprintln!("{:40} {:18} len {len:.2} rest droop {droop:.3} max swing {:.3} caps {} {:?}", path.rsplit('/').next().unwrap(), c.name, worst[k], c.caps.len(), c.params);
                 assert!(worst[k] <= len * 2.0 + 1e-3);
             }
         }
@@ -899,5 +912,48 @@ mod tests {
         let back = tip(&pose);
         eprintln!("robe tip: bind {tip_bind}, rest {rest}, trailed {moved:.3} m, back {back}");
         assert!(back.is_finite() && back.distance(rest) < 0.02, "settles back: {back} vs {rest}");
+    }
+
+    /// Hair under hard turns at a 15 Hz update (the animation LOD): the tips may swing, but never jump between two updates
+    /// (the braid used to flip from behind the head to in front of the shoulder in one frame).
+    #[test]
+    fn hair_turns_without_jumping() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let path = "objects/characters/nuian/female/nude/nu_f_base.chr";
+        let rig = crate::pose::shared_rig(path).unwrap();
+        let rope = Arc::new(RopeRig::new(&rig, true));
+        let mut sim = RopeSim::new(rope.clone());
+        let base = Affine3A::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        let dt = 1.0 / 15.0;
+        let mut last: Option<Vec<Vec3>> = None;
+        let mut worst = vec![0.0f32; rope.chains.len()];
+        let mut t = 0.0f32;
+        for f in 0..(15 * 8) {
+            // 7 m/s around a 3.5 m circle (the rope example), standing still every other 3 s
+            if (f / 45) % 2 == 0 {
+                t += 2.0 * dt;
+            }
+            sim.world = Affine3A::from_translation(Vec3::new(t.cos(), 0.0, -t.sin()) * 3.5) * Affine3A::from_rotation_y(t) * base;
+            let mut pose = rig.bind.clone();
+            sim.apply(&rig, &mut pose, dt);
+            let m = pose.model_space(&rig);
+            let tips: Vec<Vec3> = rope.chains.iter().map(|c| m[*c.bones.last().unwrap()].1).collect();
+            if let Some(prev) = &last {
+                for (k, c) in rope.chains.iter().enumerate() {
+                    if c.family == Family::Hair {
+                        worst[k] = worst[k].max(prev[k].distance(tips[k]) * 100.0);
+                    }
+                }
+            }
+            last = Some(tips);
+        }
+        for (k, c) in rope.chains.iter().enumerate().filter(|(_, c)| c.family == Family::Hair) {
+            eprintln!("{:16} largest move of the tip between two updates {:.1} cm", c.name, worst[k]);
+        }
+        let max = worst.iter().cloned().fold(0.0, f32::max);
+        // before the cap: up to 23 cm (3.4 m/s); now under 7
+        assert!(max < 8.0, "a hair tip jumped {max:.1} cm in one update");
     }
 }
