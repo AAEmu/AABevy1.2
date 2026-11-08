@@ -97,8 +97,8 @@ impl Data {
         self.npcs.get(&template)
     }
 
-    /// `quest_contexts.detail_id` 5: the hidden quests, whose start has no jingle (`FUN_3937b5b0`
-    /// returns before `FUN_39378580`).
+    /// `quest_contexts.detail_id` 5: the hidden quests, whose start and drop have no jingle
+    /// (`FUN_3937b5b0` and `FUN_3937bdf0`'s hidden branches skip `FUN_393f45d0`).
     pub fn quest_hidden(&self, quest: u32) -> bool {
         self.quests.get(&quest) == Some(&5)
     }

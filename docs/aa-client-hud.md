@@ -674,7 +674,8 @@ The server does not send these windows: the client raises the events from the qu
   native raises it);
 * an Updated packet that leaves a task quest ready raises `QUEST_TASK_READY`; a hidden quest raises
   only `QUEST_HIDDEN_READY` when ready, and skips the normal "updated", objective and "dropped"
-  events (`FUN_3937bdf0` jumps past them);
+  events and the dropped jingle (`FUN_3937bdf0` jumps past them; the failed jingle comes before
+  that test and still plays);
 * a Completed packet for a hidden quest raises `QUEST_HIDDEN_COMPLETE` (`FUN_3937bb60`);
 * at world entry, and after every completion, the first active hidden quest that is ready raises
   `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).
