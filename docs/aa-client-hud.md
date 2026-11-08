@@ -429,11 +429,16 @@ Holding a key or clicking fast must not flood the server, so a press is first he
   set it nor wait for it.
 
 A held-back press still shows the native refusal (`Env::held_back_refusal` -> `UseFailed`, still nothing sent). The native
-unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151604-151622) tests any ongoing cast first and writes
-`ON_CASTING` 7 ("Already performing an action."), then `COOLDOWN_TIME` 8 with `FUN_3989a400` (1931224-1931240): the skill's
-own/tag cooldown is detail 1 and only when that is done, for a skill that does not ignore the GCD (`+0xdc == 0`), the running
-global cooldown is detail 2. `FUN_39390900` (742279) prints the text through `FUN_39897990`'s result names and hides result 8
-detail 2, so a GCD-only press is silent natively; detail 1 prints `skill_cooldown_time` ("Can't be used right now."). Nothing
+unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, disassembled at 390B7B00-390B7DC9) asks, in this order:
+the prison (0x1a), the player's life (`SOURCE_ALIVE` 3 / `SOURCE_DIED` 2), 0x29 and 0x28, the buff restrictions (stun
+`CANNOT_CAST_IN_STUN` 0x13, blank-minded 0x16, silence 0x17, crippled 0x18), none of them gated by the caller's check flags;
+then any ongoing cast, `ON_CASTING` 7 ("Already performing an action."); then `COOLDOWN_TIME` 8 with `FUN_3989a400`
+(1931224-1931240): the skill's own/tag cooldown is detail 1 and only when that is done, for a skill that does not ignore the
+GCD (`+0xdc == 0`), the running global cooldown is detail 2; then mana (`LACK_MANA` 0xb). `held_back_refusal` follows it: the
+life and buff rules (`why_not`'s, the dead player skipping the buff rules), then the cast, then the cooldowns; the prison, 0x29
+and 0x28 have no client data. A player stunned inside the GCD therefore hears the stun, not the cooldown. `FUN_39390900`
+(742279) prints the text through `FUN_39897990`'s result names and hides only result 8 detail 2, so a GCD-only press is silent
+natively; detail 1 prints `skill_cooldown_time` ("Can't be used right now."). Nothing
 on the bar press path (`FUN_393989e0` 748802-748918 -> `FUN_39390900`) writes `NOT_NOW` 0x2c: the 0x2c writers are the
 pet/mate-bar checks. The 2026-11-03 capture pressed Charge five times in one GCD: one `CSStartSkill`, no queue, and "Can't be
 used right now." at 185.5-190 s because Charge was on its own 12 s cooldown (detail 1); B4's press 0.44 s into the Insidious

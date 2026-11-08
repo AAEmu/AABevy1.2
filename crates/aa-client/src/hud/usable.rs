@@ -22,8 +22,9 @@
 //!
 //! Before any of that a press can be held back ([`Env::held_back`]): the skill is being cast, the global cooldown has not run
 //! out, or the previous press is still on its way to the server ([`InFlight`]). A held-back press still says why when the
-//! client has a native result for it ([`Env::held_back_refusal`]: `ON_CASTING` for any ongoing cast, `COOLDOWN_TIME` for
-//! the skill's own cooldown); a GCD-only press, the auto attack latch and an unanswered press stay silent.
+//! client has a native result for it ([`Env::held_back_refusal`]: the life and buff rules first, then `ON_CASTING` for any
+//! ongoing cast, `COOLDOWN_TIME` for the skill's own cooldown); a GCD-only press, the auto attack latch and an unanswered
+//! press stay silent.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -623,20 +624,26 @@ impl Env<'_> {
         (r.labor > self.me.labor).then_some(fail(code::NEED_LABOR_POWER))
     }
 
+    /// The player's life against what the skill wants: dead for a skill of the living (`SOURCE_DIED`), alive for a skill
+    /// meant for the dead (`SOURCE_ALIVE`).
+    fn life_rule(&self, r: &SkillRules) -> Option<Fail> {
+        let dead = self.dead();
+        if dead && r.source_alive && !r.source_dead {
+            return Some(fail(code::SOURCE_DIED));
+        }
+        (!dead && r.source_dead && !r.source_alive).then_some(fail(code::SOURCE_ALIVE))
+    }
+
     /// Why the skill cannot be used now, `slack` metres of range given (0 for the slot's look, [`SEND_SLACK`] before sending).
     fn why_not(&self, skill: u32, slack: f32) -> Option<Fail> {
         if self.game.is_some_and(|g| g.book.requires_learning(skill)) && self.skills.is_some_and(|s| !s.knows(skill)) {
             return Some(fail(code::URK_TRAINED_SKILL));
         }
         let r = self.rules()?.skills.get(&skill)?;
-        let dead = self.dead();
-        if dead && r.source_alive && !r.source_dead {
-            return Some(fail(code::SOURCE_DIED));
+        if let Some(f) = self.life_rule(r) {
+            return Some(f);
         }
-        if !dead && r.source_dead && !r.source_alive {
-            return Some(fail(code::SOURCE_ALIVE));
-        }
-        if dead {
+        if self.dead() {
             return None;
         }
         self.requirements(r)
@@ -720,27 +727,33 @@ impl Env<'_> {
     /// The native refusal a held-back press shows, `None` for the holds that stay silent (the auto attack latch, an
     /// unanswered press, and a GCD press with nothing else to say).
     ///
-    /// The native unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, 151525-151649) checks any ongoing
-    /// cast first (`ON_CASTING` 7 for the player's four cast fields `+0x3ac4`, `+0x3ac8`, `+0x3acc`, `+0x3ad0`), then
-    /// `COOLDOWN_TIME` 8 with `FUN_3989a400` (1931224-1931240): the skill's own/tag cooldown detail 1 first; only when
-    /// that is done, and the skill does not ignore the GCD (`+0xdc == 0`), the running global cooldown detail 2.
-    /// `FUN_39390900` prints the result text through `FUN_39897990` and hides detail 2 (742279), so a GCD-only press is
-    /// silent natively; detail 1 prints `skill_cooldown_time`, "Can't be used right now." (the capture's B2 text was
-    /// Charge on its own 12 s cooldown). Nothing on the press path writes `NOT_NOW` 0x2c: its writers are pet/mate-bar
-    /// checks. `Hold::Gcd` therefore repeats the any-cast check (`busy`) before the own cooldown, so B4's press during
-    /// another skill's cast inside the GCD says `ON_CASTING`.
+    /// The native unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`) asks, in this order: the prison
+    /// (0x1a), the player's life (`SOURCE_ALIVE` 3 / `SOURCE_DIED` 2), 0x29 and 0x28, then the buff restrictions: stun
+    /// (`CANNOT_CAST_IN_STUN` 0x13), blank-minded (0x16), silence (0x17), crippled (0x18). None of these is gated by the
+    /// caller's check flags. Only then comes any ongoing cast (`ON_CASTING` 7 for the player's cast handle `+0x3ac4`/`+0x3ac8`
+    /// and channel handle `+0x3acc`/`+0x3ad0`), then `COOLDOWN_TIME` 8 with `FUN_3989a400` (1931224-1931240): the skill's
+    /// own/tag cooldown detail 1 first; only when that is done, and the skill does not ignore the GCD (`+0xdc == 0`), the
+    /// running global cooldown detail 2; then mana (`LACK_MANA` 0xb). `FUN_39390900` prints the result text through
+    /// `FUN_39897990` and hides only detail 2 (742279), so a GCD-only press is silent natively; detail 1 prints
+    /// `skill_cooldown_time`, "Can't be used right now." (the capture's B2 text was Charge on its own 12 s cooldown).
+    /// Nothing on the press path writes `NOT_NOW` 0x2c: its writers are pet/mate-bar checks. A held-back press therefore
+    /// asks the life and buff rules first (the dead player skips the buff rules, as in [`Env::why_not`]); the prison,
+    /// 0x29 and 0x28 have no client data. `Hold::Gcd` then repeats the any-cast check (`busy`) before the own cooldown, so
+    /// B4's press during another skill's cast inside the GCD says `ON_CASTING`.
     pub fn held_back_refusal(&self, skill: u32, flight: &InFlight) -> Option<Fail> {
         let hold = self.hold(skill, flight)?;
+        if matches!(hold, Hold::AutoAttack | Hold::Flight) {
+            return None;
+        }
         let skill = self.effective_skill(skill);
+        let r = self.rules().and_then(|rules| rules.skills.get(&skill));
+        let before_cast = r.and_then(|r| self.life_rule(r).or_else(|| if self.dead() { None } else { self.buff_restriction(r) }));
+        if before_cast.is_some() {
+            return before_cast;
+        }
         match hold {
             Hold::Cast => Some(fail(code::ON_CASTING)),
-            Hold::Gcd => {
-                let busy = self
-                    .rules()
-                    .and_then(|rules| rules.skills.get(&skill))
-                    .and_then(|r| self.busy(skill, r));
-                busy.or_else(|| self.cooldown(skill))
-            }
+            Hold::Gcd => r.and_then(|r| self.busy(skill, r)).or_else(|| self.cooldown(skill)),
             Hold::AutoAttack | Hold::Flight => None,
         }
     }
@@ -1541,6 +1554,7 @@ mod tests {
         struct Fixture {
             game: GameData,
             me: Snapshot,
+            buffs: Vec<BuffEntry>,
         }
         fn press(
             fixture: Res<Fixture>,
@@ -1550,16 +1564,17 @@ mod tests {
             mut net: MessageWriter<SkillPressed>,
             mut failed: MessageWriter<UseFailed>,
         ) {
-            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: None, target_pos: None, skills: Some(&skills), buffs: &[], inventory: None };
+            let env = Env { game: Some(&fixture.game), me: &fixture.me, pos: Vec3::ZERO, target: None, target_pos: None, skills: Some(&skills), buffs: &fixture.buffs, inventory: None };
             use_slot(1, &env, &InFlight::default(), &bar, &Inventory::default(), &target, &mut net, &mut failed);
         }
         let mut game = gcd_game();
         game.skills.get_mut(&1).unwrap().cooldown_ms = 12_000;
+        game.rules.buffs.insert(11, BuffFlags { stun: true, ..Default::default() });
         let mut bar = ActionBar { slots: vec![ActionSlot::default(); ACTION_SLOTS], ..Default::default() };
         bar.slots[1] = ActionSlot { kind: ActionKind::Spell, id: 1 };
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(Fixture { game, me: me() })
+            .insert_resource(Fixture { game, me: me(), buffs: Vec::new() })
             .insert_resource(bar)
             .insert_resource(Target::default())
             .insert_resource(Skills { obj_id: 5, ..Skills::default() })
@@ -1589,6 +1604,16 @@ mod tests {
         app.update();
         assert!(sent(&mut app).is_empty());
         assert!(failed(&mut app).is_empty(), "a GCD-only press is silent natively (result 8 detail 2)");
+        // stunned inside the GCD, the own cooldown running too: the stun comes first natively, still nothing sent
+        app.world_mut().resource_mut::<Skills>().last_used.insert(1, Instant::now());
+        app.world_mut().resource_mut::<Fixture>().buffs.push(entry(11));
+        app.update();
+        assert!(sent(&mut app).is_empty());
+        let f = failed(&mut app);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].result, code::CANNOT_CAST_IN_STUN);
+        app.world_mut().resource_mut::<Fixture>().buffs.clear();
+        app.world_mut().resource_mut::<Skills>().last_used.clear();
         // another skill's cast inside the GCD: ON_CASTING, still nothing sent
         app.world_mut().resource_mut::<Skills>().casting.insert(5, casting(2, 5000, Instant::now(), None, 0));
         app.update();
