@@ -616,7 +616,8 @@ HUD state is released so the original handlers can query it and close their wind
 * `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
   assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
   the not-done Progress components (the native increments before comparing); the counted act types
-  are inferred from `FUN_397d3370`'s switch (`FUN_397d5b90`'s native set is not recovered). A supply item is
+  are the set `FUN_397d6640` builds for `FUN_397d5b90` (the `FUN_397d3370` types plus `ObjAggro`,
+  which `FUN_397d3370` never meets, so an aggro step is never done). A supply item is
   assigned by `FUN_394a2930`'s first test: the item's use skill's `skill_products` (the native
   skill list at `+0x1f8`) name one of the objective's act item ids; objective 1 takes the ones
   unrelated to any other objective. Its second test (effect list `+0x1e8`, effect `+0x1c` type 0x18
@@ -631,8 +632,7 @@ HUD state is released so the original handlers can query it and close their wind
 * `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
   `ObjItemUse` target of an active quest, with the same use-skill filter.
 * `X2Quest:NowIsAggroComponent` (`FUN_394a53c0`) takes the first act in `FUN_397d5b90`'s counted
-  set, not the first act; the native set `DAT_3a5e11f4` is not recovered, so the counted act types
-  (`counts_as_objective`) stand in.
+  set, not the first act: the set `FUN_397d6640` builds (the `FUN_397d3370` types plus `ObjAggro`).
 * `X2Bag:FindFirstBagSlotItemByItemType` / `UseItemByType` (`FUN_3944dee0` / `FUN_3944d590`) and
   `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
   `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
