@@ -864,7 +864,7 @@ impl QuestTables {
     /// The items a quest supplies (`SupplyItem` acts of its kind-3 components): what
     /// `X2Quest.GetUseTypeQuestItems` reads. `action_bar_only` keeps the acts the native shows on the
     /// tracker (`show_action_bar`); the restart check reads them all. `FUN_394a55a0` drops an item
-    /// without a usable use skill (`FUN_39695dc0` + `FUN_396f6390`).
+    /// without a use skill (`FUN_39695dc0`, `+0x98`; [`GameData::item_usable`]).
     pub fn supply_item_targets(&self, game: &GameData, quest: u32, action_bar_only: bool) -> Vec<u32> {
         self.parts_of(quest, kind::SUPPLY)
             .flat_map(|c| &c.acts)
@@ -885,7 +885,7 @@ impl QuestTables {
 
     /// The items a quest asks the player to use: the `ObjItemUse` targets of its Progress steps
     /// (`X2Quest.GetUseTypeQuestItems` and `IsUseItemInActiveQuest`, `FUN_394a55a0` / `FUN_3949e280`),
-    /// with the same usable-skill filter.
+    /// with the same use-skill filter.
     pub fn use_item_targets(&self, game: &GameData, quest: u32) -> Vec<u32> {
         self.parts_of(quest, kind::PROGRESS)
             .flat_map(|c| &c.acts)
@@ -1400,12 +1400,16 @@ mod tests {
         // (`FUN_394a2930`'s relation), so both are on objective 1 (supply first).
         let list = t.items_by_objective(&game, 6370, None, 1);
         assert_eq!(list, vec![34067, 34282]);
-        // The filter drops an item without a usable use skill.
+        // The filter drops an item without a use skill.
         let act = |ty: &str, target| ActDef { ty: ty.into(), target, count: 1, ..ActDef::default() };
         let mut s = QuestTables::default();
         s.defs.insert(9, QuestDef { components: vec![30, 31], ..QuestDef::default() });
         // Item 100 exists but has no use skill; 0 does not exist.
         assert!(!game.item_usable(100) && !game.item_usable(0));
+        // The getters do not resolve the use skill: an item whose skill has no `skills` row counts.
+        let mut unresolved = GameData::default();
+        unresolved.items.insert(4, super::super::data::ItemInfo { use_skill: 9, ..Default::default() });
+        assert!(unresolved.item_usable(4));
         s.parts.insert(30, ComponentDef { id: 30, quest: 9, kind: kind::SUPPLY, acts: vec![act("SupplyItem", 100), act("SupplyItem", 0)], ..ComponentDef::default() });
         s.parts.insert(31, ComponentDef { id: 31, quest: 9, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 100), act("ObjItemUse", 0)], ..ComponentDef::default() });
         assert!(s.supply_item_targets(&game, 9, true).is_empty());

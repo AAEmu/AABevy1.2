@@ -623,11 +623,13 @@ HUD state is released so the original handlers can query it and close their wind
   sub-type 0x1b, the contains checks) is not recovered. `ObjItemGather` / `EtcItemObtain` only feed
   that relation and are never returned (and are not use-skill filtered). An unknown template
   answers an empty table.
-* Every item must pass `FUN_394a55a0`'s filter: the item exists and its `use_skill_id` resolves to a
-  skill (`FUN_39695dc0` + `FUN_396f6390`).
+* Every item must pass `FUN_394a55a0`'s filter (also `FUN_3949e280` / `FUN_394a58d0`): the item exists
+  (`FUN_39695dc0`) and has a `use_skill_id` (`+0x98`); the skill itself is not resolved, so quest
+  1010's item 13919 and quest 1394's item 14177 count although their use skills have no `skills` row.
+  Only the supply relation (`FUN_394a2930`) resolves the skill.
 * `X2Quest:IsQuestStartItem(itemType)` (`FUN_3949c880`): the item's `items.impl_id` is 10.
 * `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
-  `ObjItemUse` target of an active quest, with the same usable-skill filter.
+  `ObjItemUse` target of an active quest, with the same use-skill filter.
 * `X2Quest:NowIsAggroComponent` (`FUN_394a53c0`) takes the first act in `FUN_397d5b90`'s counted
   set, not the first act; the native set `DAT_3a5e11f4` is not recovered, so the counted act types
   (`counts_as_objective`) stand in.
