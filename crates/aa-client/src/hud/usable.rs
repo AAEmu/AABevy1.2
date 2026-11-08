@@ -1751,7 +1751,7 @@ mod tests {
         let mut poor = gcd_game();
         poor.skills.get_mut(&2).unwrap().cooldown_ms = 12_000;
         poor.rules.skills.get_mut(&2).unwrap().mana = 50.0;
-        let broke = Snapshot { mp: 10, ..me() };
+        let broke = Snapshot { mp: 10, ..me.clone() };
         assert_eq!(Env { skills: Some(&after_gcd), ..env(&poor, &broke, None, 0.0) }.precheck(2), Some(fail(code::COOLDOWN_TIME)));
         assert_eq!(Env { skills: Some(&cast_ago(Duration::from_secs(2))), ..env(&poor, &broke, None, 0.0) }.precheck(2), Some(fail(code::LACK_MANA)));
     }
