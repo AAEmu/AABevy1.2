@@ -1069,3 +1069,38 @@ fn a_bench_after_a_doodad_bank_ends_the_bank() {
     let bridge = app.world().get_non_send::<HudBridge>().unwrap();
     assert!(bridge.0.borrow().store.npc.is_none());
 }
+
+/// `FUN_393b3d50` runs before the local funcs (`FUN_393b3ec0`): a mounted player's use of the store
+/// doodad (12087, `source_mount` and `source_mount_mate` off) is refused with 222 and opens nothing.
+/// Runs without the pak.
+#[test]
+fn a_mounted_store_use_is_refused_before_the_local_window() {
+    let mut tables = fixture_tables();
+    tables.mount_flags.insert(12_087, (false, false));
+    let game = GameData {
+        doodad: tables,
+        ..Default::default()
+    };
+    let mut app = dispatch_app(game, 1, 100, 12_087, 42, Inventory::default(), None);
+    app.insert_resource(crate::ingame::LocalMount(Some(crate::ingame::LocalSeat {
+        mount: 9,
+        point: 1,
+        drives: true,
+        cart: false,
+        ship: false,
+        turret: false,
+        speed: Default::default(),
+        lift: 0.0,
+    })));
+    app.update();
+    let errors: Vec<_> = app
+        .world_mut()
+        .resource_mut::<Messages<crate::hud::ShowError>>()
+        .drain()
+        .map(|error| error.0)
+        .collect();
+    assert_eq!(errors, [222]);
+    assert!(sent(&mut app).is_empty());
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    assert!(bridge.0.borrow().store.npc.is_none());
+}
