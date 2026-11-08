@@ -321,11 +321,10 @@ impl LocalFuncs {
                SELECT g2.doodad_almighty_id FROM doodad_funcs f2 JOIN doodad_func_groups g2 ON g2.id = f2.doodad_func_group_id
                WHERE f2.actual_func_type = 'DoodadFuncCoffer'
                  AND (SELECT c.capacity FROM doodad_func_coffers c WHERE c.id = f2.actual_func_id) > 0)",
-        ) {
-            if let Ok(rows) = q.query_map([], |r| crate::hud::data::any_int(r, 0)) {
-                for id in rows.flatten() {
-                    out.coffer_perms.insert(id as u32);
-                }
+        ) && let Ok(rows) = q.query_map([], |r| crate::hud::data::any_int(r, 0))
+        {
+            for id in rows.flatten() {
+                out.coffer_perms.insert(id as u32);
             }
         }
         out
@@ -483,9 +482,7 @@ pub(super) fn run(
     local: LocalAction,
     now: f32,
 ) -> Option<Command> {
-    let Some(rt) = rt else {
-        return None;
-    };
+    let rt = rt?;
     // `FUN_393b7b10` -> `FUN_393b7aa0` inside the funcs that switch interactions. The bubble,
     // parent-info and evidence funcs do not call it.
     match local {

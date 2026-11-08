@@ -338,7 +338,7 @@ fn install_time(lua: &Lua) -> mlua::Result<()> {
         lua.create_function(|lua, (_this, ts): (Value, Value)| {
             let ts = match ts {
                 Value::String(s) => s.to_str().ok().and_then(|s| s.trim().parse::<i64>().ok()).unwrap_or(0),
-                Value::Integer(n) => i64::from(n),
+                Value::Integer(n) => n,
                 Value::Number(n) => n as i64,
                 _ => 0,
             };
