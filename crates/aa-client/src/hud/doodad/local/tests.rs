@@ -1715,7 +1715,7 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
 }
 
 /// `FUN_393bc4e0`: a missing item template refuses with 0x57 and sends nothing; a money total
-/// below the price refuses with `NOT_ENOUGH_MONEY` (0x1a).
+/// below the price shows `NOT_ENOUGH_MONEY` (0x1a, `FUN_394f0eb0`) and still sends `CSBuyItems`.
 #[test]
 fn the_money_purchase_checks_the_item_and_the_price() {
     if !aa_cry::pak_available() {
@@ -1769,7 +1769,10 @@ fn the_money_purchase_checks_the_item_and_the_price() {
         .map(|error| error.0)
         .collect();
     assert_eq!(refused, [NOT_ENOUGH_MONEY]);
-    assert!(sent(&mut poor).is_empty());
+    assert!(matches!(
+        sent(&mut poor).as_slice(),
+        [Command::Shop(ShopCommand::Buy { doodad_obj_id: 2075, func_id: 10_117, .. })]
+    ));
 }
 
 /// A purchase dialog closes when the next local interaction starts (`FUN_393b7b10` ->
@@ -2342,4 +2345,60 @@ fn a_doodad_auction_sends_the_doodad_as_the_auctioneer() {
     );
     let bridge = app.world().get_non_send::<HudBridge>().unwrap();
     assert_eq!(bridge.0.borrow().doodad.local_state, None);
+}
+
+/// `FUN_393bc4e0` / `FUN_394f0eb0`: a money total below price * count still sends `CSBuyItems`
+/// (the caller shows `NOT_ENOUGH_MONEY`). `FUN_393bac20` counts the coins first: enough coins send
+/// `CSBuyCoinItem` even without the coin template, which only the shortage message needs (27
+/// without it). Runs without the pak.
+#[test]
+fn the_purchase_checks_follow_the_native_order() {
+    let mut game = GameData::default();
+    game.items.insert(
+        23_614,
+        crate::hud::data::ItemInfo {
+            price: 50,
+            ..Default::default()
+        },
+    );
+    let buy = PurchaseOrder::Buy {
+        obj_id: 2075,
+        func_id: 10_117,
+        item: 23_614,
+        count: 2,
+        currency: 0,
+    };
+    let inventory = Inventory::default();
+    assert!(matches!(
+        purchase_command(buy, &inventory, Some(&game), 99),
+        Ok((Command::Shop(ShopCommand::Buy { doodad_obj_id: 2075, func_id: 10_117, .. }), true))
+    ));
+    assert!(matches!(purchase_command(buy, &inventory, Some(&game), 100), Ok((_, false))));
+    assert_eq!(
+        purchase_command(buy, &inventory, None, 100).err(),
+        Some(PurchaseRefusal::InvalidItem)
+    );
+
+    let coin = PurchaseOrder::Coin {
+        obj_id: 2075,
+        func_id: 10_262,
+        coin_item: 23_633,
+        coin_count: 15,
+    };
+    assert!(matches!(
+        purchase_command(coin, &bag_count(23_633, 15), None, 0),
+        Ok((Command::Shop(ShopCommand::BuyCoin { obj_id: 2075, func_id: 10_262 }), false))
+    ));
+    assert_eq!(
+        purchase_command(coin, &bag_count(23_633, 14), None, 0).err(),
+        Some(PurchaseRefusal::UnknownCoin)
+    );
+    game.items.insert(23_633, crate::hud::data::ItemInfo::default());
+    assert_eq!(
+        purchase_command(coin, &bag_count(23_633, 14), Some(&game), 0).err(),
+        Some(PurchaseRefusal::NotEnoughCoin {
+            coin_item: 23_633,
+            count: 15
+        })
+    );
 }

@@ -737,10 +737,12 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   position (`GetDoodadScreenPosition`) is still not answered, so a doodad's `CHAT_MSG_DOODAD` bubble is
   not drawn (same limit as other doodad speech).
 * **Purchase**: task 10 sends `CSBuyItemsPacket` with the `DoodadFuncPurchase` func id in the field
-  `FUN_397ac3f0` fills (`+0x14`; the server reads and ignores it) and checks the item template (error 87)
-  and the money total (`NOT_ENOUGH_MONEY`) before sending. Task 11 sends `CSBuyCoinItemPacket` after the
-  bag **plus** equipment coin count check; when short it shows the `not_enough_coin` message (0x1e3)
-  with the coin name and count, not `NOT_ENOUGH_ITEM`. The Rust server's `buy_coin_item`
+  `FUN_397ac3f0` fills (`+0x14`; the server reads and ignores it) after the item template check (error 87).
+  The money check (`FUN_394f0eb0`, currency 0 on all 468 rows) only shows `NOT_ENOUGH_MONEY` when the money is
+  short and returns 0, so the packet still goes out and the server refuses the buy. Task 11 sends
+  `CSBuyCoinItemPacket` when the bag **plus** equipment hold enough coins (`FUN_397cce20`); when short it shows
+  the `not_enough_coin` message (0x1e3) with the coin name and count, not `NOT_ENOUGH_ITEM`, and only that
+  message needs the coin template (error 27 without it). The Rust server's `buy_coin_item`
   (`systems/npcs/bridges.rs:1214`) resolves the func and runs `use_func`, so the packet has a
   handler on main.
 * **Parent info** opens the house only when its unit is in view (`Houses` + `Units`); the native looks the

@@ -820,7 +820,8 @@ fn open_purchase(rt: &UiRuntime, bridge: &Shared, obj_id: u32, func_id: u32, ord
 
 /// The `ErrorMessageType` of the refusal (`error_names.txt`: 27 `NOT_ENOUGH_ITEM`).
 pub(super) const NOT_ENOUGH_ITEM: i16 = 27;
-/// `ErrorMessageType` 26 `NOT_ENOUGH_MONEY` (`FUN_394f0eb0`'s money branch).
+/// `ErrorMessageType` 26 `NOT_ENOUGH_MONEY` (`FUN_394f0eb0`'s money branch shows it and still
+/// lets `FUN_393bc4e0` send).
 pub(super) const NOT_ENOUGH_MONEY: i16 = 26;
 /// `ErrorMessageType` 87 `STORE_INVALID_ITEM` (`FUN_393bc4e0` when the item template is missing).
 pub(super) const STORE_INVALID_ITEM: i16 = 87;
@@ -833,23 +834,24 @@ pub(super) const NO_PERM: i16 = 2;
 pub(super) enum PurchaseRefusal {
     /// The item template is missing (`FUN_393bc4e0`: error 0x57).
     InvalidItem,
-    /// The money is below price * count (`FUN_394f0eb0`).
-    NotEnoughMoney,
-    /// The coin template is missing (`FUN_393bac20`: error 0x1b).
+    /// Too few coins and the coin template is missing (`FUN_393bac20`: error 0x1b).
     UnknownCoin,
     /// The bag and equipment together hold fewer coins (`FUN_397cce20` + message 0x1e3).
     NotEnoughCoin { coin_item: u32, count: i32 },
 }
 
-/// The packet a pending purchase confirmation sends (`FUN_393bc4e0` / `FUN_393bac20`). The money
-/// path needs the item's price and the player's money; the coin path checks the item template and
-/// then the bag plus equipment count (`FUN_397cce20`), like the native.
+/// The packet a pending purchase confirmation sends (`FUN_393bc4e0` / `FUN_393bac20`), and whether
+/// the money path is short of money. For the money currency (every shipped row) `FUN_394f0eb0`
+/// shows `NOT_ENOUGH_MONEY` when the money is below price * count and returns 0 either way, so
+/// `FUN_393bc4e0` still sends `CSBuyItems` and the server answers. The coin path counts the bag
+/// plus the equipment (`FUN_397cce20`) first and needs the coin template only for the shortage
+/// message, like the native.
 pub(super) fn purchase_command(
     order: PurchaseOrder,
     inventory: &Inventory,
     game: Option<&crate::hud::data::GameData>,
     money: i64,
-) -> Result<Command, PurchaseRefusal> {
+) -> Result<(Command, bool), PurchaseRefusal> {
     match order {
         PurchaseOrder::Buy {
             obj_id,
@@ -861,15 +863,9 @@ pub(super) fn purchase_command(
             let Some(info) = game.and_then(|g| g.items.get(&item)) else {
                 return Err(PurchaseRefusal::InvalidItem);
             };
-            if count <= 0 {
-                return Err(PurchaseRefusal::InvalidItem);
-            }
-            if currency == aa_net::shop::currency::MONEY
-                && money < info.price.saturating_mul(i64::from(count))
-            {
-                return Err(PurchaseRefusal::NotEnoughMoney);
-            }
-            Ok(Command::Shop(ShopCommand::Buy {
+            let short_of_money = currency == aa_net::shop::currency::MONEY
+                && money < info.price.saturating_mul(i64::from(count));
+            let command = Command::Shop(ShopCommand::Buy {
                 npc_obj_id: 0,
                 doodad_obj_id: obj_id,
                 func_id,
@@ -881,7 +877,8 @@ pub(super) fn purchase_command(
                 }],
                 buy_back: Vec::new(),
                 use_aa_point: false,
-            }))
+            });
+            Ok((command, short_of_money))
         }
         PurchaseOrder::Coin {
             obj_id,
@@ -889,9 +886,6 @@ pub(super) fn purchase_command(
             coin_item,
             coin_count,
         } => {
-            if game.is_none_or(|g| !g.items.contains_key(&coin_item)) {
-                return Err(PurchaseRefusal::UnknownCoin);
-            }
             let bag: i32 = inventory
                 .bag
                 .iter()
@@ -907,13 +901,17 @@ pub(super) fn purchase_command(
                 .filter(|i| i.template_id == coin_item)
                 .map(|i| i.count.max(0))
                 .sum();
-            if bag + equipped < coin_count {
-                return Err(PurchaseRefusal::NotEnoughCoin {
-                    coin_item,
-                    count: coin_count,
-                });
+            if bag + equipped >= coin_count {
+                return Ok((Command::Shop(ShopCommand::BuyCoin { obj_id, func_id }), false));
             }
-            Ok(Command::Shop(ShopCommand::BuyCoin { obj_id, func_id }))
+            // only the shortage message needs the coin template (`FUN_39695dc0`)
+            if game.is_none_or(|g| !g.items.contains_key(&coin_item)) {
+                return Err(PurchaseRefusal::UnknownCoin);
+            }
+            Err(PurchaseRefusal::NotEnoughCoin {
+                coin_item,
+                count: coin_count,
+            })
         }
     }
 }

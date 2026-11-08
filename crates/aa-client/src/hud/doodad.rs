@@ -2278,17 +2278,17 @@ pub(super) fn execute(
     }
     for order in std::mem::take(&mut d.doodad.purchases) {
         match local::purchase_command(order, &inventory, d.game.get(), d.snapshot.money) {
-            Ok(command) => {
+            Ok((command, short_of_money)) => {
+                // `FUN_394f0eb0` shows the shortage and `FUN_393bc4e0` still sends; the server
+                // refuses the buy.
+                if short_of_money && let Some(errors) = errors.as_mut() {
+                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_MONEY));
+                }
                 out.write(NetCommand(command));
             }
             Err(local::PurchaseRefusal::InvalidItem) => {
                 if let Some(errors) = errors.as_mut() {
                     errors.write(crate::hud::ShowError(local::STORE_INVALID_ITEM));
-                }
-            }
-            Err(local::PurchaseRefusal::NotEnoughMoney) => {
-                if let Some(errors) = errors.as_mut() {
-                    errors.write(crate::hud::ShowError(local::NOT_ENOUGH_MONEY));
                 }
             }
             Err(local::PurchaseRefusal::UnknownCoin) => {
