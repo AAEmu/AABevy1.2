@@ -741,7 +741,8 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
         let texts = Texts { game, player: d.snapshot.name.as_str(), race: d.snapshot.race };
         let name = |id: u32| game.quests.def(id).map(|q| texts.expand(&q.name)).unwrap_or_default();
         let mut condition = None;
-        let mut completed_any = false;
+        // `FUN_3937bb60` raises the "completed" condition after `FUN_39376a70`'s hidden-ready check
+        let mut completed_conditions = 0usize;
         if !fresh {
             for q in &quests.active {
                 let hidden = game.quests.def(q.template_id).is_some_and(|d| d.is_hidden());
@@ -756,12 +757,13 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                             }
                         } else {
                             condition = Some(format!("Quest accepted: [{}]", name(q.template_id)));
+                            // `FUN_3937b5b0`: "started" (0xee), then every started task quest's
+                            // 0xf9 (no script registers it), then the condition (0xf3).
                             fire.push(Fire::Updated(q.template_id, "started"));
-                            fire.push(Fire::Condition("started"));
-                            // every started task quest (0xf9, no script registers it)
                             if task {
                                 fire.push(Fire::Event("QUEST_TASK_STARTED", q.template_id));
                             }
+                            fire.push(Fire::Condition("started"));
                         }
                     }
                     Some(o) if o != q => {
@@ -772,6 +774,11 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                                 fire.push(Fire::Event("QUEST_HIDDEN_READY", q.template_id));
                             }
                             continue;
+                        }
+                        // `FUN_3937bdf0`: the task window opens on the ready status (0xfa), before
+                        // the component loop and the "updated" event.
+                        if q.status == status::READY && task {
+                            fire.push(Fire::Event("QUEST_TASK_READY", q.template_id));
                         }
                         fire.push(Fire::Updated(q.template_id, "updated"));
                         // the objectives that moved, with their new counters
@@ -786,10 +793,6 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                                 fire.push(Fire::Objective(a.text.clone()));
                             }
                         }
-                        // `FUN_3937bdf0`: the task window opens on the ready status.
-                        if q.status == status::READY && task {
-                            fire.push(Fire::Event("QUEST_TASK_READY", q.template_id));
-                        }
                     }
                     _ => {}
                 }
@@ -799,11 +802,11 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
                     continue;
                 }
                 if quests.is_completed(o.template_id) {
-                    completed_any = true;
+                    completed_conditions += 1;
                     condition = Some(format!("Completed Quest: [{}]", name(o.template_id)));
                     fire.push(Fire::Updated(o.template_id, "completed"));
-                    fire.push(Fire::Condition("completed"));
-                    // `FUN_3937bb60`: a hidden quest's completion closes its report window.
+                    // `FUN_3937bb60`: a hidden quest's completion closes its report window (0xf8),
+                    // right after "completed".
                     if game.quests.def(o.template_id).is_some_and(|d| d.is_hidden()) {
                         fire.push(Fire::Event("QUEST_HIDDEN_COMPLETE", o.template_id));
                     }
@@ -815,10 +818,14 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
         }
         // `FUN_39376a70`, called at world entry and after every completion: the first hidden quest
         // that is ready to report now raises `QUEST_HIDDEN_READY`.
-        if (fresh || completed_any)
+        if (fresh || completed_conditions > 0)
             && let Some(id) = first_hidden_ready(&quests.active, &game.quests)
         {
             fire.push(Fire::Event("QUEST_HIDDEN_READY", id));
+        }
+        // then each completion's condition (0xf3 "completed")
+        for _ in 0..completed_conditions {
+            fire.push(Fire::Condition("completed"));
         }
         if let Some(c) = condition {
             d.dialog.condition = c;
@@ -3324,6 +3331,81 @@ mod tests {
                 r#"
                 assert(#OBSERVED == 1, #OBSERVED)
                 assert(OBSERVED[1].event == 'QUEST_HIDDEN_READY' and OBSERVED[1].args[1] == 1057)
+                "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn task_and_hidden_events_fire_in_the_native_order() {
+        let shared: Shared = Rc::new(RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let rt = quest_all_event_runtime();
+        shared.borrow_mut().dialog.seen = true;
+        let mut app = quest_sync_app(shared.clone(), rt);
+        // FUN_3937b5b0: "started", then the task's 0xf9, then the condition.
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1959, status: status::PROGRESS, component_id: 9790, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED == 3, #OBSERVED)
+                assert(OBSERVED[1].event == 'QUEST_CONTEXT_UPDATED' and OBSERVED[1].args[2] == 'started')
+                assert(OBSERVED[2].event == 'QUEST_TASK_STARTED' and OBSERVED[2].args[1] == 1959)
+                assert(OBSERVED[3].event == 'QUEST_CONTEXT_CONDITION_EVENT' and OBSERVED[3].args[2] == 'started')
+                OBSERVED = {}
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // FUN_3937bdf0: the task's 0xfa comes before "updated" and the objective events.
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 1959, status: status::READY, component_id: 9790, ..Quest::default() }],
+            ..Quests::default()
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(OBSERVED[1].event == 'QUEST_TASK_READY' and OBSERVED[1].args[1] == 1959)
+                assert(OBSERVED[2].event == 'QUEST_CONTEXT_UPDATED' and OBSERVED[2].args[2] == 'updated')
+                OBSERVED = {}
+                "#,
+            )
+            .exec()
+            .unwrap();
+        // FUN_3937bb60: "completed", the hidden 0xf8, FUN_39376a70's 0xfb for the next ready hidden
+        // quest (182), then the condition.
+        {
+            let mut d = shared.borrow_mut();
+            d.dialog.quests = vec![
+                Quest { template_id: 1057, status: status::READY, component_id: 5560, ..Quest::default() },
+                Quest { template_id: 182, status: status::READY, component_id: 2385, ..Quest::default() },
+            ];
+        }
+        let block = aa_net::quest::CompletedBlock { id: 1057 / 64, bits: 1 << (1057 % 64) };
+        app.insert_resource(Quests {
+            active: vec![Quest { template_id: 182, status: status::READY, component_id: 2385, ..Quest::default() }],
+            completed: vec![block],
+        });
+        app.update();
+        let rt = app.world().non_send::<UiRuntime>();
+        rt.lua
+            .load(
+                r#"
+                assert(#OBSERVED == 4, #OBSERVED)
+                assert(OBSERVED[1].event == 'QUEST_CONTEXT_UPDATED' and OBSERVED[1].args[1] == 1057 and OBSERVED[1].args[2] == 'completed')
+                assert(OBSERVED[2].event == 'QUEST_HIDDEN_COMPLETE' and OBSERVED[2].args[1] == 1057)
+                assert(OBSERVED[3].event == 'QUEST_HIDDEN_READY' and OBSERVED[3].args[1] == 182)
+                assert(OBSERVED[4].event == 'QUEST_CONTEXT_CONDITION_EVENT' and OBSERVED[4].args[2] == 'completed')
                 "#,
             )
             .exec()

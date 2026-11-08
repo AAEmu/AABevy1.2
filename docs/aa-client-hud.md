@@ -679,6 +679,11 @@ The server does not send these windows: the client raises the events from the qu
 * at world entry, and after every completion, the first active hidden quest that is ready raises
   `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).
 
+They fire in the native order: a start raises "started", `QUEST_TASK_STARTED`, then the
+"started" condition; an update raises `QUEST_TASK_READY` before "updated" and the objective events;
+a completion raises "completed", `QUEST_HIDDEN_COMPLETE`, the follow-up `QUEST_HIDDEN_READY`, then
+the "completed" condition.
+
 All four carry the quest id as the only argument. The original scripts then drive the windows:
 `quest_context_hidden_report.alb` calls `ShowHiddenQuestReport(qtype)` on the ready event and
 `HideHiddenQuestReport()` on the complete event, and `quest_context_task.alb` opens its report from
