@@ -73,8 +73,10 @@ struct Shown {
     labels: Vec<(Entity, Vec3)>,
 }
 
+/// Read once: `aa_dev::args` collects the command line (on the web it parses the page URL).
 fn area_geometry_enabled() -> bool {
-    aa_dev::args().iter().any(|a| a == "--quest-area-geometry")
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| aa_dev::args().iter().any(|a| a == "--quest-area-geometry"))
 }
 
 /// The native per-frame draw (`FUN_393822f0`): a red sphere and the `stype` label per area.
@@ -86,12 +88,9 @@ fn draw_areas(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     font: Res<super::plates::PlateFont>,
-    cameras: Query<(&Camera, &Transform), With<Camera3d>>,
+    cameras: Query<(&Camera, &Transform), (With<Camera3d>, Without<crate::hud::ModelViewCamera>)>,
 ) {
-    let (version, areas, known) = {
-        let d = bridge.0.borrow();
-        (d.quest_area_version, d.quest_areas.clone(), d.game.get().map(|g| g.spheres.clone()).unwrap_or_default())
-    };
+    let version = bridge.0.borrow().quest_area_version;
     if !shown.seen || shown.version != version {
         shown.seen = true;
         shown.version = version;
@@ -99,7 +98,13 @@ fn draw_areas(
             commands.entity(root).despawn();
         }
         shown.labels.clear();
-        if areas.is_empty() {
+        // only on a change: the markers are built inside the borrow, nothing is cloned per frame
+        let list = {
+            let d = bridge.0.borrow();
+            let none = HashSet::new();
+            markers(&d.quest_areas, d.game.get().map_or(&none, |g| &g.spheres))
+        };
+        if list.is_empty() {
             return;
         }
         let sphere = shown.sphere.get_or_insert_with(|| meshes.add(Sphere::new(1.0).mesh().uv(24, 16))).clone();
@@ -116,7 +121,7 @@ fn draw_areas(
             .clone();
         let root = commands.spawn((Name::new("quest areas"), Transform::default(), Visibility::default())).id();
         shown.root = Some(root);
-        for m in markers(&areas, &known) {
+        for m in list {
             commands.spawn((
                 Mesh3d(sphere.clone()),
                 MeshMaterial3d(material.clone()),
