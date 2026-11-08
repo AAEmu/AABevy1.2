@@ -30,7 +30,8 @@
 //! * `DoodadFuncStampMaker` (0x3d) -> `FUN_393b82a0` (774630) sets state 7 and raises
 //!   `OPEN_EMBLEM_UPLOAD_UI(objId)` with the object id as a string; `ucc.alb` opens.
 //! * `DoodadFuncCofferPerm` (0x51) -> `FUN_393bc260` case 0x51: `FUN_3983b3b0` requires any
-//!   `DoodadFuncCoffer` with `actual_func_id > 0` on the template; then state 0xd and
+//!   `DoodadFuncCoffer` on the template whose `doodad_func_coffers.capacity` (the detail row's
+//!   first field, `**(func+12)`) is positive; then state 0xd and
 //!   `COFFER_INTERACTION_START` (579); otherwise returns 0 (the skill is sent).
 //! * `DoodadFuncParentInfo` (0x43) -> `FUN_393b8400` (774707) opens the parent house's info
 //!   through `FUN_393befd0` (`HOUSE_INTERACTION_START`, 109).
@@ -232,7 +233,8 @@ pub(super) struct LocalFuncs {
     purchases: HashMap<u32, Purchase>,
     /// func id -> `doodad_func_renew_items.skill_id`.
     renews: HashMap<u32, u32>,
-    /// `doodad_func_coffer_perms` func ids whose template has a positive `DoodadFuncCoffer`
+    /// `doodad_func_coffer_perms` func ids whose template has a `DoodadFuncCoffer` with a positive
+    /// `doodad_func_coffers.capacity`
     /// (`FUN_3983b3b0` checks the whole template, not the current phase).
     coffer_perms: HashSet<u32>,
     /// func id -> `doodad_func_evidence_item_loots` (the action id is its `skill_id`, `FUN_393b7eb0`
@@ -315,7 +317,8 @@ impl LocalFuncs {
             "SELECT f.id FROM doodad_funcs f JOIN doodad_func_groups g ON g.id = f.doodad_func_group_id
              WHERE f.actual_func_type = 'DoodadFuncCofferPerm' AND g.doodad_almighty_id IN (
                SELECT g2.doodad_almighty_id FROM doodad_funcs f2 JOIN doodad_func_groups g2 ON g2.id = f2.doodad_func_group_id
-               WHERE f2.actual_func_type = 'DoodadFuncCoffer' AND f2.actual_func_id > 0)",
+               WHERE f2.actual_func_type = 'DoodadFuncCoffer'
+                 AND (SELECT c.capacity FROM doodad_func_coffers c WHERE c.id = f2.actual_func_id) > 0)",
         ) {
             if let Ok(rows) = q.query_map([], |r| crate::hud::data::any_int(r, 0)) {
                 for id in rows.flatten() {

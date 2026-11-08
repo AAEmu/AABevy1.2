@@ -1384,7 +1384,8 @@ fn a_closed_auction_does_not_end_an_npc_store() {
 }
 
 /// `DoodadFuncCofferPerm` (`FUN_393bc260` case 0x51): `FUN_3983b3b0` finds the template's
-/// positive `DoodadFuncCoffer`, then `COFFER_INTERACTION_START`. Without one the skill is sent.
+/// `DoodadFuncCoffer` with a positive capacity, then `COFFER_INTERACTION_START`. Without one the
+/// skill is sent.
 #[test]
 fn the_coffer_permission_needs_a_coffer_on_the_template() {
     if !aa_cry::pak_available() {
