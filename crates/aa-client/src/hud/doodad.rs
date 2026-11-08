@@ -537,6 +537,9 @@ pub(super) struct View {
     pub(super) local_state: Option<LocalState>,
     /// Purchase dialogs confirmed since the last `execute`; each sends its native packet.
     pub(super) purchases: Vec<local::PurchaseOrder>,
+    /// The later lines of a doodad's bubble conversation (`DoodadFuncBubble`), said by `execute`
+    /// when their time comes.
+    pub(super) bubble_lines: Vec<local::BubbleLine>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
     /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
     bounds: HashMap<u32, (Vec3, Vec3)>,
@@ -2532,6 +2535,9 @@ pub(super) fn execute(
         finish_interaction(rt.as_deref(), &bridge.0, ended_state, ended_windows);
     }
     if let Some(rt) = rt.as_deref() {
+        for line in local::due_bubble_lines(&bridge.0, now) {
+            local::say_line(rt, &line);
+        }
         for (coin, count) in coin_notices {
             let text = super::alerts::localized_args(
                 rt,
@@ -2611,6 +2617,7 @@ pub(super) fn execute(
                     obj_id,
                     *skill_id,
                     local.action,
+                    now,
                 );
                 if let Some(command) = phase {
                     out.write(NetCommand(command));

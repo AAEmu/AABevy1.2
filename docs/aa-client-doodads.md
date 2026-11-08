@@ -654,7 +654,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncQuest` 0x08 | `FUN_393bc260` case 8 | sets interaction state 9, then returns 0 (the skill, if any, is sent) | dialog/quest worker |
 | `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the zone name, the target name and localized text category 0x5c, and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | **done** (`local.rs`, `REPORT_CRIME`; the action id is the row's `skill_id`, `FUN_393b7eb0` case 0x34; the report button sends `CSReportCrime` 0x76 through `X2Trial.ReportCrime`; the text is approximate, see gaps) |
 | `DoodadFuncStampMaker` 0x3d | `FUN_393b82a0` 774630 | state 7, `OPEN_EMBLEM_UPLOAD_UI` (0x1a4/420) with the doodad id as a string; returns 1 | **done** (event + minimal `X2Ucc`; the window opens with empty lists, uploads are stubs) |
-| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's bubble (`doodad_func_bubbles.bubble_id`); when `next_phase > 0` it sends `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, next_phase, funcId)`, not a message box; returns 1 | **done** (`local.rs`, `CHAT_MSG_QUEST` + `Command::ChangeDoodadPhase`; doodad bubbles are not drawn yet) |
+| `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's `bubbles` conversation (`doodad_func_bubbles.bubble_id` is a `bubbles.id`, the index `FUN_398321e0` builds; `FUN_39375140` starts at the `bubble_chats` row with `START` and follows `next`, `FUN_393745c0` queueing each line after the previous one's show and fade); when `next_phase > 0` it sends `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, next_phase, funcId)`, not a message box; returns 1 | **done** (`local.rs` + `speech::Tables::bubble_chain`: a doodad's line as `CHAT_MSG_DOODAD` (event 14, `FUN_39374960`), an NPC's or the player's as `CHAT_MSG_QUEST`, + `Command::ChangeDoodadPhase`; doodad bubbles are not drawn yet) |
 | `DoodadFuncPurchase` 0x40 | `FUN_393b80d0` 774524 | state 8, a purchase task dialog (10 `DLG_TASK_PURCHASE` / 11 `DLG_TASK_PURCHASE_COIN`) built from `doodad_func_purchases`; returns 1 | **done** (`local.rs`, `X2DialogManager:RequestTaskDialog`; OK sends `CSBuyItems` 0x0ae / `CSBuyCoinItem` 0x0af) |
 | `DoodadFuncParentInfo` 0x43 | `FUN_393b8400` 774707 | opens the parent house's info through `FUN_393befd0` (`HOUSE_INTERACTION_START` 0x6d/109); returns 1 | **done** (`local.rs` -> `housing::open_interaction`; a house in view is required, like the native house lookup) |
 | `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; when `next_phase > 0` it sends the same `CSChangeDoodadPhasePacket` 0x0e9 (774812); returns 0 (the skill is sent) when the func has neither a page nor a book (774760) | **done** (`local.rs`; `X2Book.GetBookInfo` reads `books`/`book_elems`; a page opens a blank web page, see gaps) |
@@ -728,9 +728,12 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   `skill_id` (11672 on all shipped rows, `FUN_393b7eb0` case 0x34). The report button's
   `X2Trial.ReportCrime(text)` sends `CSReportCrimePacket` 0x76 with the context `FUN_393bb090` stored
   (object, skill, next phase, func row).
-* **Doodad bubbles**: the speech is raised as `CHAT_MSG_QUEST`, but the doodad screen position
-  (`GetDoodadScreenPosition`) is still not answered, so no bubble is drawn (same limit as other doodad
-  speech).
+* **Doodad bubbles**: the `bubbles` / `bubble_chats` conversation is raised line by line (the speaker
+  per `FUN_39371fc0`: the `doodad_id` doodad in view, else the player for a line with no NPC, else the
+  nearest unit of `npc_id`; a line whose NPC is not in view is skipped). `change_speaker_name` is not
+  applied, and the 950 ms extra show of the kind-2 chain is from `FUN_39372050`. The doodad screen
+  position (`GetDoodadScreenPosition`) is still not answered, so a doodad's `CHAT_MSG_DOODAD` bubble is
+  not drawn (same limit as other doodad speech).
 * **Purchase**: task 10 sends `CSBuyItemsPacket` with the `DoodadFuncPurchase` func id in the field
   `FUN_397ac3f0` fills (`+0x14`; the server reads and ignores it) and checks the item template (error 87)
   and the money total (`NOT_ENOUGH_MONEY`) before sending. Task 11 sends `CSBuyCoinItemPacket` after the

@@ -902,7 +902,7 @@ fn event_probe(app: &App) {
         app,
         "EVENTS={}; local w=UIParent:CreateWidget('emptywidget','doodadFuncProbe','UIParent');\
          w:SetHandler('OnEvent',function(self,event,...) EVENTS[#EVENTS+1]={event,...} end);\
-         for _,e in ipairs({'OPEN_PAPER','CHAT_MSG_QUEST','RENEW_ITEM_WND_SHOW','OPEN_EMBLEM_UPLOAD_UI',\
+         for _,e in ipairs({'OPEN_PAPER','CHAT_MSG_QUEST','CHAT_MSG_DOODAD','RENEW_ITEM_WND_SHOW','OPEN_EMBLEM_UPLOAD_UI',\
          'COFFER_INTERACTION_START','REPORT_CRIME','NPC_INTERACTION_START','SYSMSG'}) do w:RegisterEvent(e) end",
     )
     .unwrap();
@@ -928,7 +928,29 @@ fn bag_count(template: u32, count: i32) -> Inventory {
     inventory
 }
 
-/// `DoodadFuncBubble` (`FUN_393b8240`): the bubble's speech and the native phase change.
+/// `bubble_chats` (not `bubble_effects`) holds a doodad bubble's lines: bubble 2 starts with the
+/// bound skull's (doodad 2999) "S-save me..." and goes on to NPC 4212's warning along `next`.
+#[test]
+fn the_bubble_conversation_follows_its_start_line() {
+    let Some(game) = game() else { return };
+    let chain = game.speech.bubble_chain(2);
+    let lines: Vec<_> = chain.iter().map(|c| (c.id, c.doodad, c.npc)).collect();
+    assert_eq!(lines, [(3, 2999, 0), (4, 0, 4212)]);
+    assert!(chain[0].text.starts_with("S-save me"), "{}", chain[0].text);
+    // bubble 5: the speakerless START line (the player's) "Should I get this?", then the doll
+    assert_eq!(
+        game.speech
+            .bubble_chain(5)
+            .first()
+            .map(|c| (c.id, c.text.as_str())),
+        Some((12, "Should I get this?"))
+    );
+    assert!(game.speech.bubble_chain(0).is_empty());
+}
+
+/// `DoodadFuncBubble` (`FUN_393b8240`): the `bubbles` conversation (bubble 27: the doll's own
+/// "Where've you been?", `CHAT_MSG_DOODAD` over the doodad, `FUN_39374960`) and the native phase
+/// change. `bubble_effects` 27 is an unrelated skill bubble and is not said.
 #[test]
 fn the_bubble_plays_its_speech_and_changes_the_phase() {
     if !aa_cry::pak_available() {
@@ -941,14 +963,20 @@ fn the_bubble_plays_its_speech_and_changes_the_phase() {
     app.update();
     tick(&app);
     assert_eq!(
-        event_arg(&app, "CHAT_MSG_QUEST", 2)
+        event_arg(&app, "CHAT_MSG_DOODAD", 2)
             .and_then(|v| v
                 .as_string()
                 .and_then(|s| s.to_str().ok())
                 .map(|s| s.to_string()))
             .as_deref(),
-        Some("What's this? How strange! You are so lucky and blessed!")
+        Some("Where've you been?")
     );
+    assert_eq!(
+        event_arg(&app, "CHAT_MSG_DOODAD", 4).and_then(|v| v.as_f64()),
+        Some(2075.0),
+        "the doodad says it"
+    );
+    assert!(event_arg(&app, "CHAT_MSG_QUEST", 2).is_none());
     assert!(matches!(
         sent(&mut app).as_slice(),
         [Command::ChangeDoodadPhase {

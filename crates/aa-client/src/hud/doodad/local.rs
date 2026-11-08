@@ -14,8 +14,9 @@
 //!   `NPC_INTERACTION_START("bank")`.
 //! * `DoodadFuncAuctionUi` (0x55) -> `FUN_393b8b80` (775103) sets state 0xe and raises
 //!   `NPC_INTERACTION_START("auction")`; `npc_interaction.alb` opens the original auction window.
-//! * `DoodadFuncBubble` (0x3f) -> `FUN_393b8240` (774609): plays
-//!   `doodad_func_bubbles.bubble_id` through `FUN_393703b0` and, when `next_phase > 0`, sends
+//! * `DoodadFuncBubble` (0x3f) -> `FUN_393b8240` (774609): plays the `bubbles` / `bubble_chats`
+//!   conversation `doodad_func_bubbles.bubble_id` through `FUN_393703b0` (the `bubbles` index,
+//!   `FUN_39375140` from the `START` line along `next`) and, when `next_phase > 0`, sends
 //!   `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, nextPhase, funcId)`.
 //! * `DoodadFuncOpenPaper` (0x46) -> `FUN_393b8450` (774731) sets state 1, raises
 //!   `OPEN_PAPER("page", book_page_id)` or `("book", book_id)` and sends the same phase packet
@@ -128,7 +129,7 @@ pub(in crate::hud) enum LocalAction {
     Bank,
     /// `NPC_INTERACTION_START("auction")` (`FUN_393b8b80`).
     Auction,
-    /// The bubble `bubble_id` and the native phase change (`next_phase > 0`).
+    /// The `bubbles` conversation `bubble_id` and the native phase change (`next_phase > 0`).
     Bubble {
         bubble: u32,
         next_phase: i32,
@@ -159,6 +160,35 @@ pub(in crate::hud) enum LocalAction {
         next_phase: i32,
         func_id: u32,
     },
+}
+
+/// Who says a line of a `bubbles` conversation (`FUN_39371fc0`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Speaker {
+    /// A doodad in view: `CHAT_MSG_DOODAD` with its object id.
+    Doodad(u32),
+    /// An NPC in view or the player: `CHAT_MSG_QUEST` over the unit.
+    Unit(u32),
+}
+
+/// A line of a doodad's bubble conversation, said at `at` (`Time::elapsed_secs`): `FUN_393745c0`
+/// queues the whole chain at once, each line after the previous one's show and fade times.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct BubbleLine {
+    pub at: f32,
+    pub speaker: Speaker,
+    pub author: String,
+    pub text: String,
+    pub kind: u8,
+}
+
+/// Raises a conversation line (`speech::say_bubble_line`).
+pub(super) fn say_line(rt: &UiRuntime, line: &BubbleLine) {
+    let (doodad, obj_id) = match line.speaker {
+        Speaker::Doodad(obj_id) => (true, obj_id),
+        Speaker::Unit(obj_id) => (false, obj_id),
+    };
+    super::super::speech::say_bubble_line(rt, doodad, obj_id, &line.author, &line.text, line.kind);
 }
 
 /// The confirmation of a purchase dialog (`FUN_393bc4e0` / `FUN_393bac20`).
@@ -458,6 +488,7 @@ pub(super) fn run(
     obj_id: u32,
     skill_id: u32,
     local: LocalAction,
+    now: f32,
 ) -> Option<Command> {
     let Some(rt) = rt else {
         return None;
@@ -517,7 +548,7 @@ pub(super) fn run(
             next_phase,
             func_id,
         } => {
-            play_bubble(rt, bridge, doodads, obj_id, bubble);
+            play_bubble(rt, bridge, doodads, units, obj_id, bubble, now);
             return phase_change(obj_id, skill_id, next_phase, func_id);
         }
         LocalAction::OpenPaper {
@@ -598,28 +629,117 @@ fn phase_change(obj_id: u32, skill_id: u32, next_phase: i32, func_id: u32) -> Op
     })
 }
 
-/// `FUN_393703b0(doodadObjId, bubbleId)`: the doodad's speech bubble. The native draws it over
-/// the doodad; this client raises the same `CHAT_MSG_QUEST` a unit bubble uses, and the doodad
-/// screen position is still missing (`speech.rs`), so no bubble is drawn yet.
-fn play_bubble(rt: &UiRuntime, bridge: &Shared, doodads: &Doodads, obj_id: u32, bubble: u32) {
+/// `FUN_393703b0(doodadObjId, bubbleId)`: the `bubbles` conversation (`bubble_chats`, not
+/// `bubble_effects`): `FUN_39375140` plays it from its `START` line along `next`. The first line
+/// is said now, the rest wait in `View::bubble_lines` for `execute`. A bubble without lines says
+/// nothing. The doodad screen position is still missing (`speech.rs`), so a doodad's line is
+/// raised but not drawn yet.
+fn play_bubble(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+    bubble: u32,
+    now: f32,
+) {
     if bubble == 0 {
         return;
     }
-    let (author, text) = {
+    let lines = {
         let d = bridge.borrow();
         let Some(game) = d.game.get() else { return };
-        let Some(text) = game.speech.text(bubble) else {
-            return;
-        };
-        let author = doodads
-            .by_id
-            .get(&obj_id)
-            .and_then(|o| game.doodad.name(o.template_id))
-            .unwrap_or("?")
-            .to_owned();
-        (author, text.to_owned())
+        let player = d
+            .snapshot
+            .unit_id
+            .parse::<u32>()
+            .ok()
+            .map(|id| (id, d.snapshot.name.clone()));
+        let mut at = now;
+        let mut lines = Vec::new();
+        for chat in game.speech.bubble_chain(bubble) {
+            if let Some((speaker, author)) =
+                speaker_of(chat, game, doodads, units, obj_id, player.as_ref())
+            {
+                lines.push(BubbleLine {
+                    at,
+                    speaker,
+                    author,
+                    text: chat.text.clone(),
+                    kind: chat.kind,
+                });
+            }
+            at += super::super::speech::bubble_line_secs(&chat.text);
+        }
+        lines
     };
-    super::super::speech::say(rt, obj_id, &author, &text, 1);
+    let mut later = Vec::new();
+    for line in lines {
+        if line.at <= now {
+            say_line(rt, &line);
+        } else {
+            later.push(line);
+        }
+    }
+    bridge.borrow_mut().doodad.bubble_lines.extend(later);
+}
+
+/// `FUN_39371fc0`: the line's doodad (`doodad_id`: the used doodad when it is of that template,
+/// else the nearest one in view); without one, the player when the line names no NPC, else the
+/// nearest unit of the `npc_id` template. `None` when that NPC is not in view.
+fn speaker_of(
+    chat: &super::super::speech::BubbleChat,
+    game: &crate::hud::data::GameData,
+    doodads: &Doodads,
+    units: &Units,
+    obj_id: u32,
+    player: Option<&(u32, String)>,
+) -> Option<(Speaker, String)> {
+    let used = doodads.by_id.get(&obj_id);
+    let near = |x: f32, y: f32, z: f32| {
+        used.map_or(0.0, |o| {
+            let (dx, dy, dz) = (x - o.pos.x, y - o.pos.y, z - o.pos.z);
+            dx * dx + dy * dy + dz * dz
+        })
+    };
+    if chat.doodad != 0 {
+        let doodad = used
+            .filter(|o| o.template_id == chat.doodad)
+            .or_else(|| {
+                doodads
+                    .by_id
+                    .values()
+                    .filter(|o| o.template_id == chat.doodad)
+                    .min_by(|a, b| {
+                        near(a.pos.x, a.pos.y, a.pos.z).total_cmp(&near(b.pos.x, b.pos.y, b.pos.z))
+                    })
+            });
+        if let Some(o) = doodad {
+            let name = game.doodad.name(o.template_id).unwrap_or_default().to_owned();
+            return Some((Speaker::Doodad(o.obj_id), name));
+        }
+    }
+    if chat.npc == 0 {
+        return player.map(|(id, name)| (Speaker::Unit(*id), name.clone()));
+    }
+    units
+        .by_id
+        .values()
+        .filter(|u| {
+            matches!(u.kind, aa_net::model::UnitKind::Npc { template_id, .. } if template_id == chat.npc)
+        })
+        .min_by(|a, b| near(a.pos.x, a.pos.y, a.pos.z).total_cmp(&near(b.pos.x, b.pos.y, b.pos.z)))
+        .map(|u| (Speaker::Unit(u.obj_id), u.name.clone()))
+}
+
+/// The conversation lines whose turn has come (`FUN_393745c0`'s queue).
+pub(super) fn due_bubble_lines(bridge: &Shared, now: f32) -> Vec<BubbleLine> {
+    let mut d = bridge.borrow_mut();
+    let (due, later): (Vec<BubbleLine>, Vec<BubbleLine>) = std::mem::take(&mut d.doodad.bubble_lines)
+        .into_iter()
+        .partition(|line| line.at <= now);
+    d.doodad.bubble_lines = later;
+    due
 }
 
 /// The original purchase dialog (`FUN_393b80d0`): task 10 when the row has no coin item or no
