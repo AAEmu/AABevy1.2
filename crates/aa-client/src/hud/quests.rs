@@ -886,8 +886,8 @@ impl QuestTables {
     }
 
     /// `X2Quest.GetFirstObjectiveCount` (`FUN_394a4c30`): the amount of the first Progress
-    /// component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). The act types
-    /// `FUN_397d3440` does not handle count 0.
+    /// component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`, see
+    /// `native_act_count`). The act types `FUN_397d3440` does not handle count 0.
     pub fn first_objective_count(&self, quest: u32) -> i32 {
         let Some(c) = self.parts_of(quest, kind::PROGRESS).next() else { return 0 };
         self.counted_act(c).map_or(0, Self::native_act_count)
@@ -1174,12 +1174,13 @@ impl QuestTables {
         c.acts.iter().find(|a| Self::native_counted(&a.ty))
     }
 
-    /// `FUN_397d3440`: the act's amount. Only the act types in its switch have one; the rest answer
-    /// 0, and `ObjZoneKill` (0x31) already stores `count_pk + count_npc`.
+    /// `FUN_397d3440`: the act's amount. Only the act types in its switch have one (0 MonsterHunt,
+    /// 1 MonsterGroupHunt, 2 ItemGather, 4 ItemUse, 5 Interaction, 0x31 ZoneKill = `count_pk +
+    /// count_npc`, already summed by the loader, and 0x32 Craft); the rest answer 0.
     fn native_act_count(a: &ActDef) -> i32 {
         match a.ty.as_str() {
             "ObjMonsterHunt" | "ObjMonsterGroupHunt" | "ObjItemGather" | "ObjItemUse" | "ObjInteraction"
-            | "ObjZoneKill" | "ObjZoneMonsterHunt" => a.count.max(0),
+            | "ObjZoneKill" | "ObjCraft" => a.count.max(0),
             _ => 0,
         }
     }

@@ -3545,6 +3545,10 @@ mod tests {
                 assert(X2Quest:GetScoreQuestObjective(2438) == '')
                 assert(X2Quest:GetObjectiveComponentCount(330) == 0)
                 assert(X2Quest:GetFirstObjectiveCount(330) == 0)
+                -- 4436's only Progress act is a craft (0x32) of 5: FUN_397d3440 answers its amount.
+                assert(X2Quest:GetFirstObjectiveCount(4436) == 5)
+                local c = X2Quest:GetLinkedQuestObjectives(4436)
+                assert(#c == 1 and c[1].count == 5)
                 assert(X2Quest:GetLinkedQuestSummary(330) ~= nil)
                 assert(not X2Quest:IsScoreQuest(999999))
                 assert(X2Quest:GetScoreQuestDoneScore(999999) == 0)

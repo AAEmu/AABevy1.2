@@ -692,8 +692,9 @@ on `QUEST_HIDDEN_COMPLETE`; the task report is created hidden, a PROGRESS->READY
 The getters these windows read that were still stubs now follow the natives:
 
 * `X2Quest:GetFirstObjectiveCount(qtype)` (`FUN_394a4c30`): the amount of the first Progress
-  component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). The act types `FUN_397d3440`
-  does not handle count 0, and a missing quest/Progress component/counted act answers 0.
+  component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). `FUN_397d3440` has an amount
+  only for act types 0, 1, 2, 4, 5, 0x31 (`ObjZoneKill`, `count_pk + count_npc`) and 0x32
+  (`ObjCraft`); the others count 0, and a missing quest/Progress component/counted act answers 0.
 * `X2Quest:GetObjectiveComponentCount(qtype)` (`FUN_394a4ae0`): the template's Progress components
   (not the objectives of the step the quest is at).
 
