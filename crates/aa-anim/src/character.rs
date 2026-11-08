@@ -1126,11 +1126,36 @@ pub(crate) fn face_base(named: &str, exists: impl Fn(&str) -> bool) -> Option<St
 /// tint (the ferre's fur-skin `fe_*_face_brop01_df`, or a `face01` fallback), fitted to that texture.
 pub fn part_skin_tune(kind: PartKind, race: Race, gender: Gender, face_base: &str) -> Vec3 {
     let t = skin_tune(race, gender);
-    if kind == PartKind::Face && !face_base.to_ascii_lowercase().contains("_face00_df") {
-        t
-    } else {
-        Vec3::splat(t.dot(Vec3::new(0.2126, 0.7152, 0.0722))) * body_skin_tune(race, gender)
+    let face00 = face_base.to_ascii_lowercase().contains("_face00_df");
+    if kind == PartKind::Face && !face00 {
+        return t;
     }
+    let luma = Vec3::new(0.2126, 0.7152, 0.0722);
+    let face = face00_tune(race, gender);
+    let body = Vec3::splat(t.dot(luma)) * body_skin_tune(race, gender);
+    // face and body share the skin's hue (1.2 gives them the same parameters); the brightness stays per part
+    if kind == PartKind::Face { body * face } else { body * face / face.dot(luma) }
+}
+
+/// Colour of a face on its `face00` texture relative to the body's tune ([`part_skin_tune`]). The body's tune alone left
+/// the faces of the creation screen a saturated pink to red (Nuian female and Elf male worst) where the `step2_*`
+/// captures have tan faces, while the bodies (the elf female's chest cutout) matched; the face's lighting differs from
+/// the body's (`HumanSkin` face rig, decals), so the face gets its own colour. Fitted per model to the median linear
+/// colour of a nose / cheek patch in `reference/character_create/step2_*` (`examples/compare`); the ferre keep their
+/// fur faces' tune.
+pub fn face00_tune(race: Race, gender: Gender) -> Vec3 {
+    // BEGIN FACE00 TUNE
+    let t = match (race, gender) {
+        (Race::Nuian, Gender::Male) => [0.883, 1.244, 1.158],
+        (Race::Nuian, Gender::Female) => [0.573, 0.931, 0.834],
+        (Race::Elf, Gender::Male) => [0.766, 1.235, 1.015],
+        (Race::Elf, Gender::Female) => [1.313, 1.415, 1.372],
+        (Race::Hariharan, Gender::Male) => [1.166, 1.855, 1.534],
+        (Race::Hariharan, Gender::Female) => [1.233, 1.404, 1.410],
+        (Race::Ferre, _) => [1.0, 1.0, 1.0],
+    };
+    // END FACE00 TUNE
+    Vec3::from(t)
 }
 
 /// Extra multiplier of [`skin_tune`] for the skin of the body (and of the costumes' skin parts).
@@ -1245,7 +1270,9 @@ mod tests {
         let face00 = "game/objects/characters/hariharan/male/face/face00/ha_m_face00_df.dds";
         for (race, gender) in [(Race::Hariharan, Gender::Male), (Race::Nuian, Gender::Male), (Race::Elf, Gender::Female)] {
             let body = part_skin_tune(PartKind::Body, race, gender, "");
-            assert_eq!(part_skin_tune(PartKind::Face, race, gender, face00), body, "{race:?} {gender:?}");
+            let face = part_skin_tune(PartKind::Face, race, gender, face00);
+            let hue = |v: Vec3| v / v.dot(Vec3::new(0.2126, 0.7152, 0.0722));
+            assert!((hue(face) - hue(body)).length() < 1e-5, "face and body share the hue: {race:?} {gender:?}");
             assert_eq!(part_skin_tune(PartKind::Costume, race, gender, ""), body);
         }
         // a face on another texture keeps the face tune fitted to it (ferre fur-skin)

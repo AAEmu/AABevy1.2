@@ -498,7 +498,12 @@ client draws Tumon's face, chest and arms in one tone. So a face on its `face00`
 (`character::part_skin_tune`); `skin_tune` with its tint stays only for a face on another texture (ferre fur-skin, a
 `face01` fallback). The `skin_tune` rows and `body_skin_tune` above were fitted while faces were painted on the premade
 `face01_df` (darker: ×0.37 Nuian male to ×0.99 hariharan female, yellower), so the creation screen's face tone moved
-with this change and is judged again by eye. Face decals do not change the skin outside their shapes (compared with
+with this change. Judged again (2026-11-08): with only the body's grey tune the faces came out a saturated pink to red
+(nose / cheek patch red/green 2.9 to 3.3 against 1.7 to 2.3 in the captures, Nuian female and Elf male worst), so a face on
+`face00` now also gets `face00_tune` (per model, fitted to the median linear colour of that patch in
+`reference/character_create/step2_*` with `examples/compare`, two passes, every channel within 5 %), and the body gets
+the same hue at its own brightness (`face00_tune / luma`): with the face alone corrected the necks stood out pink.
+The elf female's chest cutout still matches its capture. The ferre keep their fur faces' tune. Face decals do not change the skin outside their shapes (compared with
 and without in `faces`, same pixels).
 
 Body skin (elf female chest cutout). The starter costume `el_f_login001` has a heart-shaped cutout
