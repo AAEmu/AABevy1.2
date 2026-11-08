@@ -73,7 +73,7 @@ pub(super) const TASK_PURCHASE_COIN: u8 = 11;
 
 /// A `DoodadFuncPurchase` row (`doodad_func_purchases`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct Purchase {
+pub(in crate::hud) struct Purchase {
     pub item: u32,
     pub count: i32,
     pub coin_item: u32,
@@ -161,7 +161,7 @@ pub(in crate::hud) enum LocalAction {
 
 /// Who says a line of a `bubbles` conversation (`FUN_39371fc0`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Speaker {
+pub(in crate::hud) enum Speaker {
     /// A doodad in view: `CHAT_MSG_DOODAD` with its object id.
     Doodad(u32),
     /// An NPC in view or the player: `CHAT_MSG_QUEST` over the unit.
@@ -171,7 +171,7 @@ pub(super) enum Speaker {
 /// A line of a doodad's bubble conversation, said at `at` (`Time::elapsed_secs`): `FUN_393745c0`
 /// queues the whole chain at once, each line after the previous one's show and fade times.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct BubbleLine {
+pub(in crate::hud) struct BubbleLine {
     pub at: f32,
     pub speaker: Speaker,
     pub author: String,
@@ -190,7 +190,7 @@ pub(super) fn say_line(rt: &UiRuntime, line: &BubbleLine) {
 
 /// The confirmation of a purchase dialog (`FUN_393bc4e0` / `FUN_393bac20`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum PurchaseOrder {
+pub(in crate::hud) enum PurchaseOrder {
     /// `CSBuyItemsPacket` (0x0ae): doodad, item and currency. The native's `unk` field is its
     /// func id (`FUN_397ac3f0` fills it); the server reads that field and ignores it, and this
     /// client sends the func id there too.

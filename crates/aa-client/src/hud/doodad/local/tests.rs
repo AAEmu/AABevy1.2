@@ -972,8 +972,8 @@ fn the_bubble_plays_its_speech_and_changes_the_phase() {
         Some("Where've you been?")
     );
     assert_eq!(
-        event_arg(&app, "CHAT_MSG_DOODAD", 4).and_then(|v| v.as_f64()),
-        Some(2075.0),
+        event_arg(&app, "CHAT_MSG_DOODAD", 4).and_then(|v| v.as_integer()),
+        Some(2075),
         "the doodad says it"
     );
     assert!(event_arg(&app, "CHAT_MSG_QUEST", 2).is_none());
