@@ -81,9 +81,9 @@ LocalizeUiText parameter 4; field 11 is tostring'd by the script). The 1.2 CrySc
 numbers with `lua_tostring`, so the history labels fill without a script error. The native types are
 not changed.
 
-Seven focused bounty checks pass, including the nonempty rows, the selected-row reward request,
-`SET_BOUNTY_DONE` money refresh, hide/reopen re-patching and `SET_BOUNTY` opening the setup window.
-The trial filter runs 18 passed/1 ignored. The new rows capture is `shots/hud/bounty/rows.png`,
+Eight focused bounty checks pass, including the nonempty rows, the selected-row reward request,
+`SET_BOUNTY_DONE` money refresh, hide/reopen re-patching, `SET_BOUNTY` opening the setup window and
+a refused request keeping it closed. The trial filter runs 19 passed/1 ignored. The new rows capture is `shots/hud/bounty/rows.png`,
 inspected at **484.2-511.3 FPS**: it shows the authored Wanted poster, both received rows
 (7 / Wanted One / 52 / blank / 12345 and 12 / Wanted Two / 55 / blank / 987654), the original detail
 card and "Offer a Reward". The trial example with `--bounty-rows` self-closes without WARN/ERROR or
