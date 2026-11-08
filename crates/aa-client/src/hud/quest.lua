@@ -114,7 +114,8 @@ X2Quest.GetQuestContextGrade = function(self, qtype) return "normal" end
 X2Quest.GetQuestContextLeftTime = function(self, qtype) return HUD.quest_left_time(qtype) end
 -- The item types the quest lets the player use on its tracker (`FUN_394a55a0`): the supplied items
 -- whose `show_action_bar` is set, then the `ObjItemUse` items. With `checkState` the native answers
--- nothing for a failed, ready or dropped quest, or one already completed.
+-- nothing for a failed, ready or dropped quest, or one already completed. An empty list is nil too:
+-- the native builds the table only for a non-empty list.
 local function pushUnique(out, seen, list)
   for _, id in ipairs(list or {}) do
     local t = tonumber(id)
@@ -133,6 +134,7 @@ X2Quest.GetUseTypeQuestItems = function(self, qtype, checkState)
   local out, seen = {}, {}
   pushUnique(out, seen, q.actionBarItems)
   pushUnique(out, seen, q.useItems)
+  if #out == 0 then return nil end
   return out
 end
 -- The items of one objective (`FUN_394a58d0`): the supplied items assigned to it plus its

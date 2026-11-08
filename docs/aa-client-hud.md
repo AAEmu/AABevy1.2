@@ -611,7 +611,8 @@ HUD state is released so the original handlers can query it and close their wind
 * `X2Quest:GetUseTypeQuestItems(qtype, checkState)` (`FUN_394a55a0`): the kind-3 `SupplyItem`
   targets with `show_action_bar`, then the Progress `ObjItemUse` targets. With `checkState` it
   answers nil for a quest in status 2/3/4, or for a completed non-repeatable quest (the completed
-  bit is ignored when `quest_contexts.repeatable` is set).
+  bit is ignored when `quest_contexts.repeatable` is set). An empty list is nil too
+  (`FUN_394a55a0` builds the table only for a non-empty list).
 * `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
   assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
   the not-done Progress components (the native increments before comparing); the counted act types

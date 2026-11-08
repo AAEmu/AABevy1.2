@@ -3812,6 +3812,7 @@ mod tests {
                 assert(type(X2Quest:GetQuestContextRewardAppellation(11)) == 'table')
                 assert(X2Quest:GetUseTypeQuestItems(13, true)[1] == 8, 'completed repeatable keeps its items')
                 assert(X2Quest:GetUseTypeQuestItems(11, true)[1] == 7)
+                assert(X2Quest:GetUseTypeQuestItems(12, true) == nil, 'an empty list is nil (FUN_394a55a0)')
                 assert(X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) ~= nil)
                 assert(#X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) == 0, 'unknown template is an empty table')
                 "#,
