@@ -383,8 +383,8 @@ impl LocalFuncs {
             "DoodadFuncParentInfo" => Some(LocalAction::ParentInfo),
             "DoodadFuncEvidenceItemLoot" => {
                 self.evidence
-                    .get(&func_id)
-                    .map(|_| LocalAction::Evidence {
+                    .contains_key(&func_id)
+                    .then_some(LocalAction::Evidence {
                         next_phase,
                         func_id: row_id,
                     })
