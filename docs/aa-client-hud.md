@@ -646,6 +646,14 @@ kind-3 `SupplyItem` counts it hands out again (error 5; a missing/non-main templ
 through `QUEST_ERROR_INFO`). The server answers with a normal Started / Updated, so the journal and
 tracker follow through `sync_quests`.
 
+`FUN_3937b200` also sets the restart flag `byte_3a173744` for any active, not completed quest, before
+the throttle and the error 5 / 0xc checks, so the flag is set even when the send is refused
+(`DialogView::restart_pending`). The next Started (`FUN_3937b5b0`) raises `QUEST_CHAT_RESTART` (246)
+and clears the flag instead of running the start component's follow-up (`FUN_39378580`: its
+`DOODAD_PHASE_MSG` lines, voice and queued directing task, not modelled in Bevy). A Started of a
+hidden quest (detail 5, `FUN_397d3540`) takes the other branch and leaves the flag alone. No original
+script registers 246, so nothing visible changes yet.
+
 ### Server-shown quest areas
 
 `SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /
