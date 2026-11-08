@@ -644,8 +644,9 @@ pub enum ServerMsg {
     QuestUnitReqFailed(quest::QuestUnitReqFailed),
     /// `SCQuestMailSent`: a quest mail was sent (`QUEST_MAIL_SENT` system text).
     QuestMailSent(quest::QuestMailSent),
-    /// `SCShowQuestArea`: the server places a quest's area at a world position; the native draws
-    /// its quest-mark decal (no Lua event).
+    /// `SCShowQuestArea`: `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) appends it to the
+    /// native area list, drawn as a debug sphere and `stype` label (`FUN_393822f0`,
+    /// `hud/quest_areas.rs`); no Lua event.
     QuestArea(quest::QuestArea),
     // -- skills and combat
     SkillStarted(SkillStarted),

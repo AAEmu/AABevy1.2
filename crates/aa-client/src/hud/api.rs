@@ -153,9 +153,10 @@ pub struct HudData {
     pub loot: super::loot::LootView,
     /// The NPC talked to, the quest dialog and the quest rows the scripts read (`dialog.rs`).
     pub dialog: super::dialog::DialogView,
-    /// The areas `SCShowQuestArea` placed (`map_quests.rs`), newest last.
+    /// The areas `SCShowQuestArea` placed (drawn by `quest_areas.rs`), oldest first, append only
+    /// (capped at 256).
     pub quest_areas: Vec<aa_net::quest::QuestArea>,
-    /// Bumped when an area is added or replaced, so the maps rebuild their markers.
+    /// Bumped when an area is added, so `quest_areas.rs` rebuilds its geometry.
     pub quest_area_version: u64,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
