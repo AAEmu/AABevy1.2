@@ -90,13 +90,44 @@ the whole mix, `soundmoods.xml`):
 | `combat` | `PlayerStats.in_combat` and 8 s after, with the "use combat sound" option |
 | `underwater` | the listener is below the surface of a water body |
 | `low_health` | alive with health strictly above zero and below a fifth; native `3907b221..3907b266`, f32 constant at `3999dd34` |
-| `falling` | `LocalJump.freefall` |
+| `falling` | `LocalJump.freefall` while no glider (nor its end clip) is shown |
+| `gliding` | the local flight before its slide (the own gliding buff is on), see below |
 | `driving` | `LocalMount::driving()` |
 | `indoor` | the reverb preset under the listener is `x2_hall_1` / `x2_room_1` / `x2_cave_1` at weight 1 |
 | `default` | always in game |
 
-Not raised (no known trigger or no data): `gliding`, `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
+Not raised (no known trigger or no data): `flyng`, `moving`, `dancing`, `menu`, `quest_camera`, `siege_period`,
 `machinima_default`.
+
+`gliding` (priority 8; its sound `sounds/x2vehicles:glider:run_soundmood`, sound 2016, is the `gliding` item of every
+`soundmood_*` pack) follows the gliding buff: `ClientBuffMan::ApplyAttrs` (`39389440`) calls `AddSoundMood(6)` when a buff with
+the gliding flag (desc `+0x84`) lands on the local player (or the unit it controls), and the buff's end (`39389D60`) folds the
+glider and calls `RemoveSoundMood(6)`. `falling` is the actor's move mode (`+0x1C1`): `CActor::UpdateInAir` (`3911C780`) sets
+the freefall's 1 and `39113D40` adds mood 10 in mode 1 and removes it in any other, so the glider (mode 4, `3911FC80`) and its
+slide (mode 5) end the fall's mood. The mood table (`39AC3318`, 72-byte entries) is filled at run time and its names were not
+read: 6 = `gliding` and 10 = `falling` follow from these triggers. `moods::flight_moods` raises `gliding` for the flight in
+its `Open` / `Gliding` phases (the slide starts once the buff has been gone for `BUFF_GRACE`, 0.2 s after the original) and
+keeps `falling` down while the glider or its 0.5 s end clip is shown, since `LocalJump.freefall` is not updated while the
+glider moves the character. Still approximate: a gliding buff that stays listed without a flight (after a death, a mount or
+a teleport) keeps the original's mood but not this one, and after a fold in the air `falling` comes back with the end clip's
+end rather than when the fall is fast again.
+
+The glider `.cal`s name a `$SoundEventDatabase` whose `fist_ac_gliding_start.caf` / `_end.caf` (the `.cal`'s `start` and `end`)
+fire `x2vehicles:glider:start` (at 0.02 of the clip) and `:end` (at 0.33); the character's sound databases (nuian, ferre, dwarf,
+warborn) have no gliding events. What plays those glider clips is the character's *animation* event database
+(`animations/<race>/<gender>/event_database.animevents`, every race with gliding clips): `fist_ac_gliding_start` has
+`!item_backpack start` (and `!glider start`) at 0, `fist_ac_gliding_end` has `!item_backpack end` at 0, `endloop;0.1;34;` at 0.1 and
+`!glider end` at 0.5, and the flight clips `loop` / `front` / `back` / `left` / `right` / `sliding` with `;0.5;2;`. x2game's anim
+event handler (x2game12.c:254214) sends an `item_*` event to `FUN_39361820`, which plays the parameter `clip;blend;flags;` on that
+slot's attachment (default blend 0.1, flags 0x80; 2 loops, 0x20 starts after the current clip). So every opening plays the
+glider's `start` and every fold its `end`, then the one-frame `endloop` (`glider_bx` frame 142, `end`'s last frame).
+`Pose::glider_clip` plays `start` / `end` (falling back to `loop` / `endloop` for a model that lacks them; every glider item has
+both loose), and `show_glider` / `draw_remote_gliders` give the glider model a `sounds::SoundEvents` with its `.cal`, so
+`anim_sounds` (which otherwise needs a unit's `Locomotion`) plays the events. Live (2026-11-07, `liveglide`,
+`data/local/transport/live/glider-fix/f1.log`): `sound: foley Sounds/x2vehicles:glider:start` 0.13 s after
+`glide: buff 1029 opens the glider` (the model is spawned the frame after the buff), and `:end` 0.2 s after the fold, on the
+ground and on the water. Approximate: `end` is held instead of switching to `endloop` (the same frame), and the 0.15 s blend
+replaces the events' 0.1 / 0.5 s ones.
 
 A mood with an item in the zone's pack (`combat`, `death`, `low_health`, `falling`, `gliding`, `quest_camera`, `siege_period`;
 the other moods have none in any of the 72 packs) has a sound. The original (`SoundMoodManager::AddSoundMood`,
@@ -122,9 +153,19 @@ the model moves (either velocity vector above 0.0003). The `engine` event's `spe
 `update_vehicle_engine_sounds` rewrites them only when the ratio changes. The tractor's pack has only `run` (so it is
 silent when parked), the speedcar's only `engine` (its `speed_car/run` event is the one with those parameters). Native
 stops the `run`/`yaw`/`pitch` handles in damage state 5 (dying) or 6 (dead) and does not update the `engine` handle
-there (it is not explicitly stopped). The Bevy client has no dying state yet (PR #69), so it gates on `Dead` (state 6)
-and removes both sounds there; a resurrection restores the engine. A muted run has no `SoundBook`/`Packs`, so nothing
-is resolved.
+there (it is not explicitly stopped). `update_vehicle_engine_sounds` reads `VehicleDamage.state` for that: in 5 or 6
+`run` (and a ship's `steering`) are removed and the engine sound stays frozen on its last parameters; a unit that
+appears dying never starts its engine; back in 1..4 the engine starts or updates again and `run` follows the motion.
+
+Ships (`ShipUnitModel::UpdateSound`, `sub_390C7BF0`, `x2game12.c:170960`): `run` plays only while the speed is above
+1.0 m/s (land vehicles keep 0.0003 on speed or yaw rate), and the pack's `steering` item (pack 144 galleon -> sound 33
+`x2vehicles:ship:turn`, 381 fishboat and 146 speedboat -> 2147; 145 smallboat and 335 duckboat have none) is a second
+loop that plays while `this+213` is non-zero. `UpdateSteeringWheel` (`sub_390D2990`, `x2game12.c:179170`) sets it each
+frame: 1 or 2 while the helm wheel turns toward its target (the steering angle scaled, 7 by default, and quantised to
+45°), 0 once the wheel rests there; the smallboat, soloship and coupleduckship prefabs return early and keep 0. So the
+original plays the turn while the steering changes and is silent through a steady turn. Approximate (capture-pending):
+the Bevy motion has no helm wheel, so `steering` plays while `|yaw_rate|` is above 0.02 rad/s, through the whole
+turn. A muted run has no `SoundBook`/`Packs`, so nothing is resolved.
 
 ## Checks (muted engine unless `--sound`)
 

@@ -32,8 +32,14 @@ immediately, even when no movement follows. Ship steering requests carry no posi
   when it stands. Players strafe: `remote::local_dir(heading, yaw)` is the direction of travel in the unit's own frame, which
   picks the forward, backward and strafe clips of `drive_locomotion`; NPCs always run forward.
 * **Ground.** The server's z is replaced by `TerrainQuery::height_at` when it is within 1 m of it and the unit is not airborne.
-  A jumping or falling player keeps the server's z.
+  A jumping or falling player keeps the server's z, and so does a swimmer: a report whose stance is `SWIM` or `CO_SWIM`
+  (`remote::Report::swimming`, carried to the played-back `Pose`) floats over the bed, so a unit swimming in shallow water
+  is no longer pulled onto it.
 * `Motion { speed, local_dir, airborne }` is written for `anim::drive_locomotion`, which owns the walk, run, jump and fall clips.
+  While the stance swims, `move_units` also puts `anim::Swimming { level }` on the unit (and takes it off with the next
+  stance): a mate's `level` is the graph's `waterLevel`, its packet z plus its swim level (`MountSpeed::swim_level` x its
+  unit scale) minus the water surface (`WaterQuery`); a character's is 0, since its swim clips belong to the on-foot
+  swimming (a remote character still runs on the water, as before).
   The transform is touched only when the pose changed (a standing unit costs nothing).
 
 ## Clips
@@ -54,6 +60,65 @@ character `.cal` (`ba_relaxed_idle`, `mo_normal_*`, jump and fall clips for play
 A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
 
 * the mount is another unit, drawn like any creature (model, gait clips by its own speed);
+* **the mount's jump** (`jump::JumpKind::Creature`, played by `anim::drive_locomotion`): every rideable mate's
+  `actor_models.animation_graph` is `horse_full_body.xml`, and every rideable species' `.cal` includes `global_horse.cal`,
+  which names `fist_mo_jump_[f|b]_{start,loop,end,land}` (:220-239; l and r are commented out) and no humanoid
+  `fist_mo_relaxed_jump_*`. `ClipSet::load` takes `fist_mo_jump_f_loop` as such a model's air clip and marks the set a
+  creature jump. The graph's chain (:808-1060): take-off `fist_mo_jump_[dir]_start` (`JumpMain`, Action `jumpMP01`, 0.1 s
+  blend, held to 0.98 of its length), air `_loop` (`JumpLoop`, 0.1), landing with a direction `_land` (`JumpEnd`, 0.2,
+  then `Jump to Move`) or with none `fist_mo_jump_f_end` / `_b_end` (then `Jump to Idle`; their blend is empty, taken as
+  0.2), freefall `fist_mo_jump_freefall` = `fist_mo_jump_f_loop` (0.2). l, r, fl and fr play the f clips and bl, br the b
+  clips (the pelvis turn is not drawn); the graph has no `s` state, so a phase with no direction takes the side the jump
+  went to. Unlike the player's, its landings do not leave for a changed request (`leave_request_changed` empty). The
+  horse's take-off is 0.83 s, longer than its 0.59 s in the air, so on flat ground the landing follows the take-off
+  without the air clip. The walking variants (`_start_walk`, `_f_loop_walk`: Action `jumpMP02`, which `sub_39153FF0`
+  x2game12.c:271855 sends when the actor's walk flag 0x1000 is set) play the same clips with other blends and are not
+  told apart. The horse, wildboar and pangolin sets are checked against the pak (`anim` test); all 11 rideable species
+  folders carry the clips.
+  * The mate the player drives takes its take-off, direction and freefall from the player's `LocalJump`;
+    `mount::drive_mount` writes its `Motion.airborne` from the mover (in the air and not swimming) and keeps its speed.
+  * A remote mate (spawned with `anim::AirStart`): `units::move_units` shows it in the air as it does a character, keeps
+    its speed there so its riders keep their gait (it went idle mid-air before), and sets `AirStart` for an air time
+    whose packets since the ground had the take-off bit (`actor_flags::JUMP_START` 0x08; the driver sends 0x0c, then 0
+    in the air and 0x14 at the landing, as `player::control_player` does from the on-foot capture). The bit is kept on
+    `RemoteUnit` until the played-back pose leaves the ground (the track's `Report` is unchanged). Such an air time plays
+    the take-off, a fall the air clip. The server relays a mate's `CSMoveUnit` flags as they are, but the 1.2 path from a
+    remote unit's packet to its +680 jump call is not traced: using the take-off bit is **inferred**. A remote mate's
+    direction is always forward (a non-character's `Motion.local_dir`), so its backward jump plays the f clips
+    (**approximate**).
+  * A new direction in the air that keeps the air clip (f to l, r, fl, fr or none; b to bl, br or none) plays it on
+    instead of from its start: only `JumpMain` sets `AllowAnimRestart` (`jumpmain.xml`), `JumpLoop` does not.
+  * `examples/mount_jump.rs` scripts a remote mate's jump on the Lilyut horse (model 139) and takes a shot mid-air;
+* **the mount's swim** (`swim::MountSwimClips`, played by `anim::drive_locomotion` while the unit is `anim::Swimming`): the
+  horse graph's swim states select on `Stance` swim (`ag_horse.txt` :211-327, `horse_full_body.xml` :753-761 and
+  :1061-1255), and `global_horse.cal` names `fist_ba_idle_swim` (:100) and `fist_mo_swim_{f,b,l,r}` with their `_deep`
+  clips (:265-277). `ClipSet::load` binds them for a model without the humanoid jump (the monster graph's swim is
+  `fist_mo_swim_idle`, a character's is `swim::drive_swim`'s). The pak has them in the horse, donkey, pangolin, pegasus,
+  yata, elephant, polar bear and snow lion folders; the wildboar and the riding lions have only some (a missing side
+  swims forward). What plays:
+  * no move request (`SwimControlX/Y/Z` within 0.3): `fist_ba_idle_swim` (`SwimIdle`), at any depth; the `up` / `down`
+    states (Z beyond 0.96) are the same file in the `.cal`;
+  * a request: the side's clip (`SwimMovement`). The swim mode (`sub_3912CE00`, x2game12.c:246966-246973) lifts any
+    forward or backward share of the request to 1.1, so fl and fr swim `fist_mo_swim_f`, bl and br `fist_mo_swim_b` (the
+    graph turns their pelvis by 45 / 40 degrees, which is not drawn: **approximate**), and only a pure strafe swims l or
+    r. The clip plays on while the graph stays in its state; a new state starts its clip again even when it is the same
+    one (f to fl or fr, b to bl or br: `SwimMovement` sets `AllowAnimRestart`, `swimmovement.xml`, unlike `JumpLoop`
+    above). The diagonals take `SwimControlX` beyond 0.4 (`swim::mount_swim_lean`; the 0.3..0.4 gap, where the graph
+    keeps its state, counts as straight, and the scale of `SwimControlX` against the request is not traced);
+  * `_deep` under `waterLevel` -1.01 (the shallow states want -1..1000). `waterLevel` is `CActor::UpdateSwimStats`'
+    `relativeWaterLevel` (`sub_39120300`, x2game12.c:239760-239772, the graph input at `this + 2222`), 0 for a body
+    floating at its swim level, so a mount at the surface never plays them;
+  * both templates blend in over 0.5 s (`swimidle.xml`, `swimmovement.xml`: `TransitionTime` 0.5; the states' own
+    `transition_time` is unused) and loop at the clip's own pace: the horse's swim clips are in place with the pelvis at
+    1.71 m, as in its standing idle (`data/extract/mounts/cafroot.py`), so the body's depth is the origin's. Leaving the
+    water picks the land clip again.
+
+  The move states also want `PseudoSpeed` 0.2..2; the code takes the land threshold (0.3 m/s) instead, since the swim
+  PseudoSpeed scale is not known (**approximate**). The mate the player drives swims with its mover (`mount::drive_mount`:
+  `Swimming` at its own `waterLevel`, the pressed direction as its `local_dir`, zero while it coasts with no key held);
+  a remote mate swims forward (a non-character's `local_dir`). The swim death (`swim_death_animation`, `dead_swim_start`)
+  is not played. `examples/mount_swim.rs` scripts a swimming horse under a water plane (`shots/aa-client/mount_swim.png`:
+  idle, forward, a strafe to the right, forward; 290-360 fps in the debug build);
 * the rider sits on the seat of its attach point in `model_attach_point_strings` (a creature's actor bone or a vehicle
   body's prefab helper, see "Vehicle and creature seats" below), faces the mount's facing, and
   plays the original player's mounted states (`player_full_body.xml`; the graph `Vehicle`/`VehicleSeat` comes from
@@ -68,9 +133,10 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     The get-on is only for a **fresh** attach: the local player when a reason is pending, a remote unit when the attach
     arrives after this client saw it on foot. A remote rider that streams in already riding, one that leaves the drawing
     range mounted and returns on the same seat, and a local player entity built again while riding start in the riding
-    loops; waiting for the rider's animator or the mount's data keeps a real on-foot-to-attach transition fresh, while a
-    unit first seen attached never becomes fresh (a conservative rule; the real client's per-entity attach event is not
-    in the 1.2 notes);
+    loops; waiting for the rider's rig (a model still loading) or the mount's data keeps a real on-foot-to-attach
+    transition fresh, while a unit first seen attached never becomes fresh (a conservative rule; the real client's
+    per-entity attach event is not in the 1.2 notes). A rider that gets on out of view (its animator parked, see below) is
+    seated at once from the parked animator's rig, without the get-on: it is over by the time anyone sees the rider;
   * **riding:** `Horse_DriverIdle` (:1464), `Horse_DriverWalk` (:1490) and `Horse_DriverRun` (:1479) by the graph's
     PseudoSpeed bands 0..0.1, 0.15..0.6 and 0.7..2, with the `_FIST_MO_RIDER_HORSE_IDLETORUN` (:1474) and
     `horse_mo_relaxed_runtoidle_f` (:1488) one-shots between idle and run. Their `transition_time` 0.2 s is the blend; the
@@ -78,7 +144,24 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     at their end, so a speed change during one is taken up then (the graph also links the idle-to-run state to the
     run-to-idle one, :14555; whether the real client leaves early is unverified). PseudoSpeed is not m/s: 1.2 sets it to 1.0
     at an actor's full run (the Dash controller, `docs/research/re-skills.md`), so `gait()` divides the mount's speed by its
-    `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified;
+    `MountSpeed::run`; the 0.1..0.15 and 0.6..0.7 gaps keep the lower state. The scale is unverified. On a swimming mount
+    the rider sits in its idle: `X2::ActorUnitModel::Update` (`sub_390DCC80`, x2game12.c:186796-186815) copies the mount
+    graph's PseudoSpeed to the rider's and puts 0 instead while the mount's `Stance` is `swim`, so `MountMotion::of`
+    hands the rider speed 0 while its mount is `Swimming` (riding into the water at a run plays the run-to-idle);
+  * **jump:** 1.2 hands a unit's jump to its riders (`sub_390CCAB0`, x2game12.c:175297-175317: the unit's +680 calls +680
+    on every attached actor, then sends `jumpMP01` to its own graph). `Horse_Driver_Jump_Start` (:1502; Action `jumpMP01`,
+    `VehicleSeat` 0..10, so passengers too; `JumpLoop`) plays `horse_mo_jump_f_start` once and holds its last frame;
+    `Horse_Driver_Jump_Land` (:1498; `JumpEnd`, 0.2 s, `leave_actual_changed` / `leave_request_changed`) plays
+    `horse_mo_jump_f_land`, then the idles, the walk or the run (:14579-14581) with no gait one-shot. `Horse Move to Jump`
+    is linked only from the walk, the run, their one-shots and the landing (:14546-14578), so an idle or rearing rider
+    stays as it is. Pangolin (:1721 / :1729) and elephant (:1410 / `elephant_Driver_Jump_Land` :5272) use the horse
+    pair; lion (:1634 / :1641), bear (:1324 / :1332) and wildboar (:1877 / :1885) the lion pair (`global_player.cal`
+    names only these two; the s/l/r/b variants and the loops are commented out). `Rider::step` takes the mount's
+    `MountMotion { speed, airborne }` from its `Motion`: the frame the mount leaves the ground is the take-off, so a
+    ledge fall while running plays it too (**approximate**: 1.2 calls +680 only for a jump; a remote unit's take-off is
+    not known to the rider). The landing holds to 0.8 of its length (`stayInStateUntil`) unless the gait changes first;
+    a posed vehicle seat ignores the jump. The take-off's blend is empty in the graph and taken as the other states'
+    0.2. The rider graph has no `jumpMP02` state, so a walking-mode jump may keep the rider in its gait (unverified);
   * **get-off:** `SCUnitDetached` plays `fist_ac_horse_l_getoff_start` / `_loop` / `_end` (:11733-11747; every kind's
     `jump_*` states use the horse's left clips, links :17356-17359), then restores the on-foot locomotion. The clips' own
     lengths pace it (the research notes 0.67 / 0.83 s are unverified);
@@ -86,7 +169,11 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     (:1684-1745) and elephant (:1383-1427). Bear and elephant share the horse idle/walk, wildboar the lion's; the get-on
     clips are `fist_ac_lion_*` (lion, wildboar), `fist_ac_bear_*` (bear) and `fist_ac_horse_*` (horse, pangolin, elephant).
     Pose 0 (donkeys, elks, yatas) keeps the horse set; the boat/car poses 5..8 have no `Enter`/`Exit` states in the graph
-    and keep the old loop-only rider;
+    and keep the old loop-only rider. Pose 5, the submarine and porpoise mates (`ocom_submarine_*`, `porpoise_*`: models
+    1428, 1433-1435, 1441, 1457, 1458, 1500, 1501), has one clip state under `InSubmarine` (:1566),
+    `submarine_DriverIdle` (:13869): its rider sits in `lion_ba_relaxed_idle` at any speed, with no walk, run or jump
+    clip (the state's `SelectWhen` also names Action `ac_cooking`, apparently a slip in the graph; the seat offset is
+    unchecked);
   * the `_FIST_MO_RIDER_*_RUN` / `_IDLETORUN` graph names are `.cal` locomotion groups; `bind_rider_clip` takes the
     group's `_f` example nearest the forward direction (0,1), not the first one (the horse run group lists the idle-to-run
     clip first), e.g. `horse_mo_normal_run_f`. The elephant's `Elephant_*` group (:1383-1427) has no idle-to-run / run-to-idle
@@ -96,13 +183,29 @@ A unit with `Unit::attached_to` set (`SCUnitAttached`) becomes a `Rider`:
     and has no run-to-idle), so the elephant crossfades directly instead of playing the horse's clips;
 * the seat is the bone's place on the mount's last drawn pose carried to where the mount stands in this frame, so a rider does
   not trail a moving mount;
+* a rider nobody sees stays on its mount: `units::cull_units` parks the animator (`units::Asleep`) of a unit outside the
+  view or over 60 m away and judges that from the unit's own transform, and the server sends no movement of an attached
+  unit, so a rider that was not placed while asleep stayed where it got on or where it left the view, was never judged in
+  view again and its mount was drawn alone (live check D1, 2026-11-07: a rider seated in view, the camera turned away while
+  it rode 18 m on; a rider that got on behind the camera and rode into view; a horse swimming into view from the beach).
+  `pose_riders` puts a sleeping rider (and one whose mount sleeps: the parked bones keep their pose under the moving root)
+  on its seat every frame without stepping its clips, so it wakes with its mount; on waking it starts again in the gait of
+  the mount's motion now (`RiderAnim::wake`: no idle-to-run, landing or get-on for what happened unseen), and a rider that
+  gets off while asleep walks at once (`step_dismounts`) instead of holding its get-off until it is seen. Its drawn
+  position (`RemoteUnit::pos`) follows the seat too; the network `Unit::pos` stays where it got on (the script runner's
+  `units` distance reads that one). A rider asleep in the 60-110 m band is drawn on the seat in the last pose its parked
+  animator had (a far unit is frozen like every other one);
 * the rider's state machine waits while its `Animator` is frame-held (`combat::framehold`, ice/stone): the get-on, gait and
   get-off timers and clip records stop with the animator's clock, so a hold cannot finish the get-on behind the freeze or
   take a getting-off rider off before the get-off clips played (they resume where they stopped);
 * the rider's on-foot `Locomotion` is stashed and given back after the get-off clips.
 
 `AA_FAKE_MOUNT=1` checks the remote riders without a server: a horse (model 139) and a rider that looks like the local player
-appear next to the player and run a circle at 5 m/s.
+appear next to the player and run a circle at 5 m/s. `AA_FAKE_MOUNT=jump` adds a jump every 3 s, sent as a driver's client
+sends it (actor flags: take-off 0x0c, air 0, landing 0x14; the horse's 1.3 m arc at gravity 30). `AA_FAKE_MOUNT=swim` swims the
+circle as a driver's client sends a swimming mount: stance `SWIM` (2), no ground flag, the horse's 1.8 m/s, its origin 2.14 m
+under the water surface where `WaterQuery` finds water (the circle, 8 m round a point 3 m east of the player, lies in 5-10 m of
+sea at `--pos 15675,15360`).
 The offset between the seat bone and the rider's origin is a first guess, not checked against the real client.
 
 ### Owned mounts (the local player)
@@ -131,9 +234,33 @@ The offset between the seat bone and the rider's origin is a first guess, not ch
   sends the movement as `Command::MoveUnit` with the mate's object id (`CSMoveUnit`; the server ignores a riding character's
   own movement). The speed is the mount's relaxed stance run speed (`game_stances.ai_move_speed_run`, stance 2: 9 m/s for the
   Lilyut horse, 7.2 for a donkey; `Db::mount_speed`) times the `MoveSpeedMul` of the mate's buffs (`Sprint::mount_speed_mul`),
-  with the actor model's walk and backward factors; no jumping and no swimming while mounted. The mate's unit is marked
+  with the actor model's walk and backward factors; Space with a direction held jumps the mount with its own jump height and
+  gravity (`docs/aa-client-movement.md`, "Speeds and jumping"), and the mate and its rider play their jump clips
+  ("the mount's jump" and "jump" above). In water deeper than its swim level (`MountSpeed::swim_level`: `swim_height` plus
+  its spine, times the mate's unit scale: 2.14 m for the Lilyut horse) the mount swims at the surface at its swim stance's
+  speed (`game_stances.max_speed` of stance 3: 1.8 m/s for the horse) and its packets carry stance `SWIM` (`docs/aa-client-movement.md`, "Swimming"); the
+  mate plays its swim clips ("the mount's swim" above) and the rider sits in its idle (PseudoSpeed 0, "riding" above). A get-off there leaves the rider swimming at the surface
+  (`player::afloat`; the get-off pose in water is capture-pending). The mate's unit is marked
   `Driven`: `move_units` leaves it alone (its echoed movement packets are ignored) and `mount::drive_mount` puts it where the
-  mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands.
+  mover is with the mover's speed for its gait clips; when the player gets off, its track starts over where it stands. A
+  mate left swimming (`anim::Swimming`) starts over in the swim stance (`RemoteUnit::reset_swimming`): the driver's last
+  packets for it carried stance `SWIM`, so it floats where it was with its swim clips until its next movement packet
+  instead of standing in its land idle on the bed (capture-pending: what the mate does after the get-off in water).
+* **Rearing:** Space on a standing mount (no move request) does not lift it: 1.2's ground step (`sub_3912B330`,
+  x2game12.c:245905-245920) then calls the unit's +680 with 0, which sends the graph Signal `em_jump_in_place`
+  (`sub_39153FF0`) unless the graph is already in a `jump_in_place` state, and sets no jump vector. It still sets the
+  mover's two jump bytes as the moving branch does (`*(WORD *)(a1 + 152) = 0x0101`, :245915), so the write-back
+  (`sub_3912AC50`, :245385-245405) raises the unit's `jumped` event and its jumping byte (+353): to the movement code the
+  rear is a jump without a vector. `control_player` writes `mount::MountRear` (no vertical speed, no packet, no
+  `PlayerInput::jumped`, so a cast goes on); that is a choice, not traced (see the open points below). The mate
+  (`anim::rear_driven_mate`) plays `fist_em_jump_in_place` once (`horse_full_body.xml` `em_jump_in_place` :567 ->
+  `em_jump_in_place_anim` :573, `IdleOneShotNoLookIk`, 0.2 s blend; 2.77 s for the horse) when it stands, entered from
+  `Idle Start` only (:1528) and back to `Idle End` (:1658); a model whose `.cal` lacks the clip stays in its idle. The rider
+  (`mount::rear_local_rider`) plays `horse_em_jump_in_place` (horse, bear, pangolin, elephant) or `lion_em_jump_in_place`
+  (lion, wildboar) from its idle gait only (the `*_DriverIdles_NullNode` hubs: horse :14565, lion :14617, bear :14368,
+  wildboar :15287, pangolin :14700, elephant :14475) and chooses its gait again at the clip's end. The submarine's
+  `submarine_em_jump_in_place_anim` (:13884) names an `em_jump_in_place` the 1.2 `.cal` does not list, and the boat poses
+  have no rider states here, so it does not rear. Both one-shots play to their end (`leave_at_moving` is empty).
 * A passenger seat (point 2, someone else's mate) is followed, not steered: the mover goes with the mount.
 * **Mount skills:** the pet bar's first five `ISLOT_PET_ACTION` slots (`hud/pet_action_bar/pet.alb`, capped by
   `MAX_PET_ACTION_SLOT` 5) map to the mate's displayed mount rows (`owned::displayed`; `GetMountSkill` is
@@ -305,7 +432,20 @@ The S3 run (`captures/2026-10-28/s3/native.csv`, Heir's Horse 27264) recorded:
   folder; the code uses that path and therefore crossfades directly. Not captured.
 * Whether pose 0 mounts (donkeys, elks, yatas), the boat/car poses and the other kinds really use these states; the
   graph's own `Enter` states were followed where present. Not captured (only a horse was mounted).
-* The mounted jump clips (`horse_mo_jump_f_start` / `_land`, :1498-1502) are not played yet. Not captured.
+* The mounted jump is built from the graphs and not captured. To check: the packets of a mate's jump as another client
+  sees them (the take-off bit is assumed to pass the server's relay), the mount's landing with no key held (`_f_end` /
+  `_b_end` select on `RequestedMoveDir4LH` f..r / b..br, and the graph has no `s` for them), the empty blends of the
+  `_end` states and of the rider's take-off, whether a ledge fall while running plays the rider's take-off, and a
+  walking-mode (`jumpMP02`) jump. `AA_FAKE_MOUNT=jump` on the lane server shows a remote horse and its rider jumping.
+* The mount's swim is built from the graph and the pak and not captured. To check: a remote horse swimming
+  (`AA_FAKE_MOUNT=swim` on the lane server with `--pos 15675,15360`, `--shot shots/aa-client/mount_swim_remote.png
+  --shot-after 8`, and the fps line), the own horse swimming (the depth it starts at, its wire stance), the rider's idle on a swimming mount, the
+  `PseudoSpeed` 0.2 threshold of the move states, the diagonals' pelvis turn, and whether another client's swimming mount
+  is ever deep (its driver floats it at its level).
+* The rear (`em_jump_in_place`) is local display only: whether a standing Space sends a packet (1.2 marks the unit
+  jumped and jumping, "Rearing" above, so a JUMPING packet is plausible), how other clients see the rear, whether
+  movement input cuts it short and whether it cancels a cast (the code says no, although 1.2 raises the same `jumped`
+  event as for a jump) need a capture of a standing Space on a mount.
 * The `SCUnitAttached` reason byte from the original server, and for slave bonds (`bond_kind` reasons 5/6/7/10);
   AAEmu echoes the request reason or the bond kind, the original server is unverified.
 * Getting off a vehicle seat (a `$` helper: the wagon's bench, a carriage's back seat): the remake skips the 1.5 m
@@ -398,9 +538,10 @@ resolves each unit once and marks it with `VehicleSound` (the pack and `vehicle_
 are cached in `SoundBook`), spawns the `engine` loop under the root with the initial parameters, and keeps the `run` child
 for the movement toggle. `sounds::update_vehicle_engine_sounds` writes the parameters only when the ratio changes, so a
 parked tractor is silent and a parked speedcar loops its idle engine. Native stops the `run`/`yaw`/`pitch` handles in
-state 5/6 and freezes the `engine` handle; the Bevy client gates on the damage state 5 (dying) or `Dead`
-(state 6) and removes both sounds there. A resurrection puts the engine back and
-`vehicle::resume_vehicle_idle` starts the idle again.
+state 5/6 and freezes the `engine` handle; `update_vehicle_engine_sounds` reads `VehicleDamage.state` the same way:
+in 5 or 6 it removes `run` (and a ship's `steering`, see [sound](aa-client-sound.md)) and leaves the engine on its last
+parameters, and a unit that appears dying or dead starts no engine until it is back in 1..4. A resurrection updates
+the engine again and `vehicle::resume_vehicle_idle` starts the idle again.
 
 `VehicleIdle` also carries the body's `dead_01`/`dead_02` bind (the `Transfers_trailer_a_body.cal` has `dead_01`).
 `combat::ensure_corpses` only looks for an `Animator` on the root that carries `Dead`; a prefab body keeps its
@@ -563,15 +704,36 @@ poller never returns 5: dying is entered by the death path below.
   (`FUN_39109120`, x2game.dll.c:206810) when the state worsens (`old < new`, also 1 -> 6), and on every
   entry to dying: `FUN_390e7910(5,1)` passes 1, so the 6 -> 5 route of an HP-0 update followed by the
   death packet plays the dying prefab's effects too. The dead prefab's one-shots are not replayed on the
-  following 5 -> 6 when the poller already showed 6 for this death. `_despawn_effect` has no traced caller
-  and is left out. The spawn-time filter is exactly
-  `FUN_390eaf40`'s lists: type-5 particles named `exhaust` (the +0x2c0 list), `splash_l` / `splash_r`
-  (the +0x2f0 bubble list), scaled by `FUN_390c78d0` from the ship's speed and angular velocity, which
-  this slice does not draw. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
+  following 5 -> 6 when the poller already showed 6 for this death. The speed-driven emitters are
+  type-5 particles named exactly `exhaust` (`FUN_390eaf40`'s list at +0x2c0) and `splash_l` / `splash_r`
+  (the pair list at +0x2f0, with a side flag); `ShipUnitModel::UpdateExhaustEffect` (`FUN_390c78d0`) scales
+  them every frame. The active ones are spawned silent as `SpeedEmitter`s and `drive_speed_emitters` sets
+  `Effect::count_scale` on `ShipModel` roots (from `Db`, so a muted run without the sound database draws them
+  too): exhaust `clamp(|velocity| / (ship_models.velocity * 0.5), 0, 1)`, splash
+  `clamp(yaw_rate * side * 6.0, 0, 1)`, so they show nothing at rest. The side is the pair's flag:
+  `FUN_390eaf40` stores 0 for `splash_l` and 1 for `splash_r` (`0x390eb0e6` / `0x390eb121`), and the update
+  turns flag 0 into -1.0 and flag 1 into +1.0 (`0x390c7ad3`, constants `0x3999cc1c` / `0x3999c488`). A left
+  turn (positive yaw rate, game `angular_velocity.z`) therefore raises `splash_r` (`caravel_water_rihgt`, the
+  outer side) and a right turn `splash_l`. An inactive speed emitter is left out like any inactive emitter:
+  `ParticleEffectPrefabObject::Load` creates the emitter only when `bActive` is set (x2game12.c:221889), and
+  `sub_390FED20` scales only an existing one (`[this+0x40]`, `0x390fed23`). Every prefab `splash_l` /
+  `splash_r` is authored inactive and no traced caller starts them, so 1.2 shows no turn splash and neither do
+  we; only the active `exhaust` emitters (on the galleon: bow wave, side wash and wake) follow the speed. The native struct (`sub_390FED20`) takes the value in three channels whose
+  meaning (count, size, alpha) is not decoded: the count is **approximate**, a live capture of a galleon under
+  way would settle it. A sweep of the 89 `normal` vehicle / ship prefabs found 116 `ParticleEffect`
   objects: 78 active `exhaust`, 7 inactive `portal_exhaust`, 7 inactive `splash_l` + 7 `splash_r`, 10
   inactive `_spawn_effect`, 3 inactive `_despawn_effect`, and 2 active `_spawn` + 2 active named
-  particles (`caravel_cruise_pool`, `airship_smoke`); only the exact speed-driven names are filtered, the
-  other active authored emitters stay. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
+  particles (`caravel_cruise_pool`, `airship_smoke`); the other active authored emitters stay as they are.
+  **`SCSlaveDespawn`** (`OnSlaveDespawn` `FUN_393497C0`, x2game12.c:693183) for a slave whose model kind is 2,
+  3 or 4 reads the slave row: with a despawn portal group (`slaves.portal_despawn_fx_id`) it plays that group
+  (`FUN_390CA280`, not drawn: capture-pending); without one it plays the prefab's `_despawn_effect*`
+  particles (`FUN_391091A0`, x2game12.c:221330, prefix match, active flag ignored; it also clears the local
+  owned-slave entry, which the slave HUD state handles). `play_despawn_effects` does the prefab case once per packet and spawns the effects in
+  the world at the prefab anchors, not under the root, so the `SCUnitsRemoved` that follows does not cut
+  them. Test prefab: the rowboat (slave 15, model 129, `smallboat_a`); the coupleduckship and soloship
+  bodies carry one too. The sentinel for "no group" (`dword_3A168AA0`) is taken to be a null / 0 row
+  (**inferred**). Every slave row whose prefabs carry a `_despawn_effect` (15, 55, 91 rowboats, 102, 103) has a
+  null `portal_despawn_fx_id`, so with the shipped data the portal check never suppresses one. The game adds `aa_fx::FxPlugin` (`main.rs:63`), which loads
   `X2_EFFECTS` and simulates these `Effect` entities. `examples/vehicle_damage` adds it too and checks the
   Red Farm Hauler's dying fire (`X2_EFFECTS.housing_test.housing_fire_b`) and dead smoke/explosion
   (`X2_EFFECTS.fire_smoke.burning_smoke_01`, `X2_EFFECTS.housing_test.small_ship_exp`) are spawned. A
@@ -631,10 +793,82 @@ death") is the evidence for the ship half of S15; the prefabs are the game's own
   end pose and carries the 25 % prefab's fire (**inferred**; the client has no death timestamp for it).
   `examples/vehicle_ship_death` checks the burning wreck, the missing explosion, the water effect and the sink.
 
-Left out: the speed-driven exhaust/splash scale (`FUN_390c78d0`), `_despawn_effect`, the ship deck floor
+Left out: the despawn portal group of `SCSlaveDespawn`, the ship deck floor
 of a dead hull (the deck still uses `ship_models.normal`), and the engine sound (`FUN_390c6780`, needed
 only once the idle branch lands). Combat effects anchored to a body bone (`super::attachments`) go away
 with the old parts on a swap; re-anchoring them by bone name is not implemented.
+
+### Ship helm: rudder, wheel and throttle clips (`ship/helm.rs`)
+
+`X2::ShipUnitModel::Update` (`sub_390EBC50`, x2game12.c:198239) runs `UpdateRudder`, `UpdateSteeringWheel` and
+`UpdateThrottleAnim` every frame from two model fields that only the ship's movement controller writes.
+
+* **Input (decoded).** `sub_390B0040` (x2game12.c:151435) copies the interpolated sample's steering and throttle into
+  the model through `sub_390BE0B0` (model+0x35c) and `sub_390BE0D0` (model+0x358); these are their only callers.
+  `sub_390B2F30` (:153277) builds the sample from the type-3 `ship.steering` / `ship.throttle` bytes as `byte * (1/127)`
+  (`0.0078740157`), and `sub_390A16B0` lerps both between the two samples around the playback time (sample floats 11
+  and 12). Once the controller has reset (5 s without a sample, `sub_390AFF70` clears the arrival time) the
+  no-sample branch of `sub_390B2420` writes 0 and 0. So every ship, including the one this client steers, shows the
+  server's echo, not the local request. `VehicleTrack::display` carries both (the timeout now zeroes them) and
+  `RemoteUnit::helm` hands them to `ShipHelm`, which `helm::attach_ship_helms` puts on every `ShipModel` root. A
+  unit whose vehicle track was dropped (death and resurrection reset it) has no samples and gets 0 and 0, as that
+  no-sample branch writes.
+* **Rudder (`UpdateRudder`, `sub_390C7410`, :170604).** `sub_390C7330` takes the first model element named
+  `rudder` (`sub_39104630`, any element type, exact name) and keeps its authored local matrix; every frame the
+  rudder's matrix is that matrix times `RotZ(model+0x35c)`. The steering is used **as radians**: full helm (127)
+  turns the rudder 1 rad (57.3 degrees), and a positive (D, right) helm swings its aft edge to starboard. The
+  port marks the first prefab object named `rudder` (`prefab::named_parts_of`, `vehicle::assemble`) with
+  `helm::Rudder` and `turn_rudders` sets its rotation. The galleons, merchant ship, boarding ship, speedboat and
+  fishing boats have one; the cruise ship names its rudders `cruise_a_rudder_1` and the rowboat, solo ship and
+  duck boat have none (1.2 logs "ship unit model(%u) has no rudder").
+* **Wheel (`UpdateSteeringWheel`, `sub_390D2990`, :179169).** Skipped when the ship model's path contains
+  `smallboat`, `soloship` or `coupleduckship`. Otherwise it needs the element attached with type 35: the doodad
+  bound at attach point 35 `$helms` (`slave_doodad_bindings`: `galleon.galleon_helms` on the galleons, speedboats,
+  merchant ship, cruise ship, middle galleon and fishing boats, `boardship.boardship_bell` on the boarding ship;
+  `smallboat_helms` on the rowboat and solo ship, which skip). `sub_390E8E40` (:196276) keeps its
+  attach transform at model+0x364; without the element nothing below runs. The target is
+  `45 * ((315 + x + 44) / 45) - 315` degrees with C integer division, `x = (int)(steering_deg * option)`,
+  `315 = (int)(option * 45)`: it rounds up to the next 45 degrees, and the truncating division stops full left at
+  -315 while full right is +405. The drawn angle (model+0x360) moves toward it at `option / 2` rad/s and stops on it;
+  the element's matrix is its attach transform times `RotY(angle)`. An 8-spoke wheel at rest therefore always shows
+  the same spokes. `helm::mark_helm_wheels` finds the model of a drawn doodad with `attach_point == 35` under a
+  ship root and `turn_helm_wheels` turns it about the doodad's own Y.
+* **Steering state (model+0x354, `sub_390D2900`, :179125).** 0 when the drawn angle did not change this frame, 1 when
+  it grew, 2 when it shrank. `ShipHelm::state` exposes it (for the ship steering sound gate). A change starts an
+  animation action on the unit at attach point 1, the helmsman: `dword_39AC38BC` (still; also the default pose of
+  point 1 on every ship but the three without a wheel, `sub_390C2150`), `dword_39AC38C0` (growing),
+  `dword_39AC38C4` (shrinking).
+* **Throttle clips (`UpdateThrottleAnim`, `sub_390DB700`, :185523).** Only when a character element has `run_f`,
+  `run_b` or `idle` (`sub_390C20E0`). Each frame whose throttle differs from the last (model+0x3a0, -1 at load) plays
+  `run_f` (> 0), `run_b` (< 0) or `idle` (0), looped, 0.5 s blend, at speed `|throttle|` (1 for idle); a same-sign
+  change adds flag `0x8` to the play flags (`0x5082` -> `0x508A`), and the port reads that as "keep the playing
+  clip", so it only retimes it then (see below). Among the rigged ship
+  parts only the duck boat's `coupleduckship_foot.chr` (all three) and the boarding ship's telescope (`idle`) have
+  them: `helm::ThrottleClips` binds them in `vehicle::add_parts`.
+
+`examples/ship_helm` draws the Eznan Cutter with its helm doodad on the hull's `$helms` helper and a held steering:
+`shots/aa-client/ship_helm.png` (full right, rudder 57.3 degrees) against `ship_helm_still.png` (steering 0), the
+wheel on the stern deck (`ship_helm_wheel.png`, and `ship_helm_wheel_turning.png` mid-turn), and the duck boat's
+feet (`--model 1287 --view duck --throttle 1`: the feet move between frames, at throttle 0 they do not).
+
+Approximate or capture-pending:
+
+* **The same-sign throttle change.** Flag `0x8` is `CA_TRANSITION_TIMEWARPING` in the CryEngine 3 flag set and
+  `CA_ALLOW_ANIM_RESTART` (`0x100`) is never set, so a running `run_f` is not restarted; that the new speed still
+  applies to it is inferred, not captured. The parameter block's layer field is 1, so 1.2 plays the throttle clip on
+  layer 1 over the idle; the port replaces the base clip, which looks the same while the clip covers the same bones.
+* **The own ship** shows the server's echo (the setters' only callers are the network controller); not checked live.
+* **The rudder axis and sign** (cry Z of the part, aft edge to starboard on a positive helm) were checked visually on
+  the galleon only.
+* **The wheel option** (`dword_39AE6C90`, an object filled at run time) was not read; 7.0 is the value 1.2 uses while
+  it is null. A capture of a galleon helm turning (time to full lock, 405 degrees) would confirm it.
+* **The helmsman clips** behind `dword_39AC38BC` / `C0` / `C4` are hashes in the image data whose names were not
+  recovered (zlib/Cry CRC-32, FNV and djb2 of the `anim_actions` and graph names do not match). The likely rows are
+  `anim_actions` 5 `ac_steer_idle`, 6 `ac_steer_l_01` and 7 `ac_steer_r_01`; no driver clip is played from the state.
+* **The fishing boat's paddle wheel** (`fishboat_wheel.cga`, `fishboat_wheel_idle/run_f/run_b.anm`) has throttle
+  clips in 1.2, but this port does not play `.cga` node animations, so it stays still.
+* The helm doodad's place is the server's (parent-local packet position); 1.2 composes the turn with the attach
+  transform it was given, which should be the same `$helms` helper. Not checked against a live galleon.
 
 ### Vehicle and creature seats
 
@@ -1028,6 +1262,37 @@ a still cart does not turn on the spot; the wire `angVel.z` keeps the captured
 quaternions show the yaw is applied about the cart's own up axis (`step` post-multiplies the
 turn when the ground is missing).
 
+#### Per-model dynamics (`cart/model.rs`)
+
+Every driven land slave uses its own `vehicle_models` row, not the Farm Wagon's.
+`X2::VehicleUnitModel::Init` (`FUN_390f0510`, query string at `0x39A06208`) reads `velocity`, `angVel`,
+`lin_inertia`, `lin_deaccel_inertia`, `rot_inertia` and `rot_deaccel_inertia`; `CartParams::load`
+reads the same row read-only (like `swim::ActorParams::load`) when `drive_cart` starts a drive,
+and the wheel contacts come from the body's `wheelN` / `wheel_type2N` mounts (`vehicle::wheel_mounts`,
+the reader the wheel visuals use): the mounts split at the middle of their length into a front and
+a rear axle and the widest pair of each is the contact pair. The wagon body's mounts read back as
+`WHEEL_CONTACTS` plus float noise (0.8350314 for 0.8350); a layout within 1 mm of the constants keeps
+them, so model 38 drives the captured fit bit-exactly in game, not only in the tests (a test, skipped
+without `AA_PAK` / `AA_DB`, checks the drive's own load path). The battle food cart 51 and the 8000001
+wagon have their own front axle / rear track and keep their own layout.
+
+* `top_speed = velocity`, `yaw_rate_per_steer = angVel` (wire `angVel.z` too). Data, exact for
+  model 38 (4.0, 0.4); Hauler 65, 58 and 33 5.0, 30/60 3.5, 45-48/50/52 15.0, 54-56 17.0, 17 13.0, 28/29 10.0.
+* `accel = 1 / lin_inertia`, `decel = 1 / lin_deaccel_inertia` (model 38: 0.4 gives the captured 2.5 m/s²).
+  **Inferred** for every other model: only the wagon was captured. A model with no linear inertia
+  takes the wagon's 1.6 s from rest to top speed: the speed cars (`use_wheeled_vehicle_simulation`), and
+  also the kinematic (non-wheeled-sim) catapult 1, ram 4 and ballista 6 / hook 13. Read as
+  `1 / lin_inertia`, a zero could instead mean no inertia at all (an instant change); capture-pending.
+  Easing toward zero uses `decel`, speeding up or reversing `accel` (S at speed brakes at `accel`, so a
+  model with `lin_deaccel_inertia < lin_inertia` coasts down faster than it brakes; also capture-pending).
+* A body with fewer than two axles of mounts (or no body model) keeps the wagon layout; a missing row keeps
+  `CartParams::WAGON` altogether. `CartController::new` is the wagon, `with_params` takes a model's.
+* The speed cars really run the CryPhysics wheeled simulation (`wheeled_vehicle_*` columns), which is not
+  ported: they drive the same kinematic stand-in at their own speed (**approximate**; `rot_inertia`,
+  `susp_*` and `max_climb_ang` are unused). A server that clamps below `velocity` would show as
+  `RESYNC_DISTANCE` snaps (capture-pending). The `vehicles` example only lays vehicles out, so there is
+  no slope screenshot; the slope fit is a unit test with a non-wagon wheelbase.
+
 #### Terrain following (C8a)
 
 The Farm Wagon is not a wheeled-sim vehicle (`vehicle_models.use_wheeled_vehicle_simulation`
@@ -1064,10 +1329,58 @@ mean <= 0.02 rad / 0.035 m, max <= 0.03 rad / 0.05 m). The evidence is in
 A synthetic deck test keeps the wagon on the deck, and a pak-backed test takes the Lutesong
 bridge deck over its river bed.
 
-Out of scope: collision with rocks and bushes (the `g3` case's 0.3 m bumps) and full wheeled
+Water does not hold a cart up. The wheel probes read only the terrain and static brushes
+(`WorldCollision` does not know about water), so in water the cart drives on the bed. Live check V1
+(2026-11-07, Farm Wagon): in the Solzreed pond at (15562, 15391) the wagon stands at z 126.30 on the
+bed. A player on foot stands at 126.25 there and wades. The river volume's surface is 127.00
+(`/waterdebug info`), so the water stands 0.7 m up the wheels: over the hub of the front wheels
+(radius 0.518 m, their tops 0.3 m out of the water) and just under the hub of the rear wheels
+(0.885 m). Reversed into the sea east of (15620, 15383), the wagon follows the seabed down to z 84.5,
+15.5 m below the surface, and the driver stays seated (the client's terrain at (15692, 15389) is
+83.8). The server's `/height` `Floor` is its geodata (navmesh) height, the same value as its
+`NavMeshHeight` (the terrain heightmap only without geodata, `heightmap.rs` `get_height`), never the
+water surface: 126.38 at the pond stop, but 97.26 over that seabed. The AAEmu server tests water only
+at the summon. **Not traced:** what 1.2 does with a land vehicle in deep water (CryPhysics buoyancy,
+a sinking cart, or forcing the driver off). This is capture-pending.
+
+Out of scope: bumps from rocks and bushes (the `g3` case's 0.3 m bumps; walls, trees and large rocks
+stop the cart, see World collision below) and full wheeled
 physics for the nine car models. Remote carts' tilt now comes from the received type-2
 quaternion (S8 below). Pending live checks: the server's echo/correction of a tilted type-2
 pose, `vel.z` on the wire over the slope, and the cart's tilt while turning on a slope.
+
+#### World collision (`cart.rs`, `step_colliding`)
+
+1.2's land vehicle is a CryPhysics entity, so static brushes stop it. `vehicle_models` carries the physics
+flags, but `use_proxy_collision` is true only for rows 2, 5, 59, 62 and 64: the Farm Wagon (row 38) has it
+false, `max_climb_ang` 45 and `susp_stroke` 0, so its body shape is not a proxy. The exact response is **not traced**
+(no capture; AAEmu has no vehicle-versus-unit code), so this is an inferred stand-in for static geometry only:
+
+* Two capsules, one at each axle centre (the means of the front and rear wheel-contact pairs of the
+  model's own layout), are slid against `WorldCollision::slide` from where the axle was to where the step
+  would put it, with the on-foot `STEP_UP` (surfaces lower than 0.5 m above the body do not push).
+  Radius is half the model's track clamped to 0.4..1.0 m (`body_radius`), height `BODY_HEIGHT` 1.6 m
+  (no model bounds are read: **approximate**, a capsule pair is not the box body). `push_out` starts the
+  capsule at `STEP_UP + radius`, so from a radius of 0.55 m up the "capsule" is one sphere and
+  `BODY_HEIGHT` has no effect: the wagon (radius 1.0) tests one sphere 1.5 m above the body, which
+  reaches from 0.5 to 2.5 m. Its rear wheels (1.53 m out) stick out of it at the sides.
+* The more limiting axle's correction moves the whole body; the heading is kept. The speed is scaled by
+  twice the share of the wanted move that survived (capped at 1; the share is the sine of the angle between
+  the heading and the wall's normal), and that factor is per 1/60 s, raised to `dt * 60` so the result
+  does not depend on the frame rate. Head-on stops the cart; a wall whose normal is 30 degrees or more off
+  the heading leaves the speed alone and the cart slides along it (tangent kept, 2.8 m/s at 45 degrees);
+  in between the cart crawls (about 0.05, 0.1 and 0.3 m/s at 20, 25 and 28 degrees) and the crawl climbs
+  steeply to 2 m/s toward 30 degrees. The rule is chosen, not captured. Reversing is the same with the
+  rear axle. While the walls change the step, the wire velocity is the body's real motion along the wall
+  (kept within the speed), not the heading times the speed.
+* `drive_cart` only slides once `ready_around(pos, 24 m)` says the cells are built; before that the cart drives
+  through as before. Units, players and other vehicles are not collided (no evidence).
+* The sent pose is the slid pose, so the server's echo agrees; a server that disagrees falls into the existing
+  2 m / 0.35 rad resync. The heading is not rotated out of a wall, so turning hard against one can still
+  clip it (pending a capture of the real response).
+* Tests: synthetic walls (head-on, behind, 45 degrees with the wire velocity along it, the steep-wall crawl at
+  10 to 144 FPS, open ground through the pass-through slide) and a pak-backed drive at a real near-vertical
+  face by Lutesong Harbor (skips without `AA_PAK`).
 
 #### Wheels and spindle (S6/S7 step 3)
 
@@ -1188,9 +1501,10 @@ kept by the offset of `FUN_390986a0`/`FUN_39098780`, and `FUN_390b2420` -> `FUN_
 * **A local controller ignores its own echo.** `FUN_390c63c0` is a no-op while the unit has a
   local vehicle controller; `receive_moves` therefore does not feed type-2/3 movements of a
   `Driven` unit (the cart this client drives) into the track.
-* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`) as the
-  seams for the S6/S9 rudder, wheel and propeller visuals; the track interpolates
-  steering/throttle for its pose but this port has no ship rudder or wheel-speed consumer yet.
+* **Steering/throttle/wheel data are kept** on `Movement` (`VehicleMove` / `ShipMove`); the track
+  interpolates steering/throttle for its pose (`VehicleTrack::display`, 0/0 after the 5 s reset) and
+  the ship's rudder, helm wheel and throttle clips read them (see "Ship helm" under Vehicles). A
+  land vehicle's steering and wheel speeds have no consumer yet.
 
 `DELAY` is the one value the decompile cannot give: it comes from a runtime getter
 (`DAT_39ae4e90`, integer ms capped at 10000 in `NetActorMovementController::PrePhysicsUpdate`).
@@ -1397,8 +1711,8 @@ its type-3 echo (the hull has no `Driven` marker). Leaving queues the final 0/0 
   `$lamp_rear` helper nodes plus the static `smallboat_helms.cgf` brush. It has **no** rudder part and
   no steering-wheel/helm bone: `FUN_390c7410` needs a child model named `rudder`, and
   `FUN_390d2990` returns early for `smallboat` / `soloship` / `coupleduckship`. No visual change is
-  therefore possible or native for this hull; sailboat/clipper rendering is still blocked by the
-  server-hull placement issue (deck standing is S10).
+  therefore possible or native for this hull. The larger ships' rudder and wheel follow the type-3
+  echo (see "Ship helm" under Vehicles).
 
 Pending live checks: the uncaptured game-option factor (folded into the rowboat's fitted
 `steer_vel`), the ramp on a sailboat or clipper (galleon row 1.0), and a second
@@ -1409,8 +1723,32 @@ character's view of the type-3 hull (interpolation and velocity scale).
 `ingame/ship/deck.rs` puts the local player on the hull floor of any
 `UnitKind::Slave` whose `models.sub_type` is `ShipModel`. The floor is the
 salvaged older own-ship work (`test/ships` deck floor): `ship/floor.rs` takes
-the upward-facing triangles of the hull brush (`*_body.cgf`) of the model's
-`ship_models.normal` prefab, in the ship frame (cry: x right, y forward, z up).
+the upward-facing triangles of every hull and deck brush of the model's
+`ship_models.normal` prefab, merged, in the ship frame (cry: x right, y forward, z up).
+The brushes are picked by name (`is_deck_part`): `*_body*.cgf` (smallboat, middleship,
+the galleons' and boardships' `*_body` / `*_body_test`, `galleon_test_body`), the hulls
+named like the prefab file (`boxship`, `boxship_old`, `cruise_a` with its `_add04`-`_add08`
+pieces, `soloship_a`, `speedboat_a`, `fishboat`, `coupleduckship`) and `*_helms.cgf` raised
+helms. Animated `.chr` / `.cga` parts (the fishboat's stern `fishboat.chr`, the duck
+boat's `coupleduckship_foot.chr`), decoration (barrels, sandbags, shields, chairs, chain
+boxes, cannonballs), rope, sails, flags, cannons, anchors, rudders, ladders, damage
+variants, the `box.cgf` buoyancy boxes and the `*item*` pieces are left out, so a barrel
+top or mast is never a floor. The `*item*` pieces are the galleon's bow piece
+(`galleon_item01`) and the pirate galleon's bow and stern pieces
+(`galleon_pirate_item01` / `_item03`): a 1 m height sweep finds only scattered surfaces
+on them, not a deck. 1.2 itself walks on the CryPhysics of
+the whole prefab and its collision set is not decoded: the name rule is inferred from
+the prefab sweep (capture-pending). Still approximate: the cruise ship's `_add*` pieces
+are breakable superstructure (they have `_damage` variants) whose tops stand 2.5-10 m
+over the hull deck, and `_add06` hangs outboard (x +-11-13 m) down to z -1.9 m of the ship
+frame; no minimum height above the waterline is applied, so its underside, like
+every hull's outer skin, can be a floor. A pak- and DB-gated test checks every
+`ship_models.normal` prefab: each one outside the uncovered list below has a floor, a
+`$driver` helper, and every `$driver` / `$passenger*` helper (only the rowboat and the
+duck boat have a `$passenger0`) has that floor within 1.5 m below it. Not covered: the
+caravel and ray (`caravel_body.cgf`, `caravel_helms.cgf` and `ray.cgf` are not in the
+1.2 pak), `galleon02` (no `galleon02.xml`), `boxship_old` `_6f` / `_2f` (no such prefab
+in `boxship_old.xml`) and the `woodpiece01` debris (`galleon_item03.cgf`, no hull).
 Boarding is automatic while the player stands within `DECK_STEP` (1.5 m) of
 that floor; a dead (the `Dead` component or, as on foot, the stats' death
 flag that arrives first), skill-moved, seated or mounted player is left to

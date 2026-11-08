@@ -64,6 +64,8 @@ pub const LEAVE_MARGIN: f32 = 0.2;
 pub const JUMP_RANGE: f32 = 0.2;
 /// The body is "deep" (the `_deep` clips) when its origin is this far under the swimming height (m).
 pub const DEEP: f32 = 0.5;
+/// The bone whose bind-pose height [`swim_level`] adds to `swim_height`.
+pub const SWIM_LEVEL_BONE: &str = "Bip01 Spine";
 /// `cl_shallowWaterDepthLo` / `Hi` / `SpeedMulPlayer`.
 pub const WADE_LO: f32 = 0.3;
 pub const WADE_HI: f32 = 1.0;
@@ -138,6 +140,31 @@ impl ActorParams {
     }
 }
 
+/// How far over its feet an actor's swim level is (m): the depth of water it starts to swim in and how far under the
+/// surface its origin floats. `CActor::UpdateSwimStats` (`sub_39120300`, x2game12.c:239714-239774) takes
+/// `relativeWaterLevel = pos.z + vfunc108 - surface`; `vfunc108` is `sub_39113EE0` (slot 27 of the actor vtables in
+/// `x2game_unpacked.dll` `.rdata`), `this+116 x scale` (this is the unscaled level: a mount's scale is applied by
+/// [`super::data::MountSpeed::at_scale`]), which `sub_39113150` (x2game12.c:229875-229923) sets to `swimHeight`
+/// plus the bind-pose height of the first of six predefined bones the skeleton has, else 0.8 of its box's top plus 0.2 of
+/// its bottom. `IsSwimming` (`sub_39114060`, x2game12.c:230678-230690) then wants water at least that deep. Which six bones is CryAnimation's (not in
+/// the dumps): the Nuian male's [`SWIM_LEVEL_BONE`] (1.116 m) plus its 0.2 is 1.32 m, the 1.3 m a player floats at, so the
+/// spine stands in for them. `model_file` is the actor's `.cdf` or `.chr`; `None` when its skeleton cannot be loaded.
+pub fn swim_level(model_file: &str, swim_height: f32) -> Option<f32> {
+    let skeleton = if model_file.to_ascii_lowercase().ends_with(".cdf") {
+        aa_anim::Cdf::load(model_file).ok()?.model
+    } else {
+        model_file.to_string()
+    };
+    let rig = aa_anim::pose::shared_rig(&skeleton).ok()?;
+    let joints = rig.bind.model_space(&rig);
+    let bone = rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case(SWIM_LEVEL_BONE)).map(|i| joints[i].1.z);
+    let height = bone.unwrap_or_else(|| {
+        let (low, high) = joints.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), j| (lo.min(j.1.z), hi.max(j.1.z)));
+        0.8 * high + 0.2 * low
+    });
+    height.is_finite().then_some(swim_height + height)
+}
+
 /// A player in the water: the surface and what it does there. `Mover::swim` is `Some` while it swims.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Swim {
@@ -189,15 +216,19 @@ pub fn should_swim(swimming: bool, feet: f32, wet: Option<Wet>, enter: f32) -> b
 /// `param_2 + 0x2d0` (x2game.dll.c:230934-230966) and takes its z as the vertical, so forward/back follow the camera:
 /// looking down and pressing forward dives, looking up and pressing forward surfaces. The pressed direction is normalised
 /// and then scaled by the swim speed, so the total speed stays at the clips' 3.0 m/s (2.4 backwards, `swim_back_speed_mul`);
-/// strafing stays horizontal.
-pub fn aimed_velocity(dir: Vec2, pitch: f32) -> Vec3 {
+/// strafing stays horizontal. `speed_mul` is the own buffs' `SwimSpeedMul` ([`super::sprint::Sprint::swim_speed_mul`]).
+pub fn aimed_velocity(dir: Vec2, pitch: f32, speed_mul: f32) -> Vec3 {
     let d = dir.normalize_or_zero();
     if d == Vec2::ZERO {
         return Vec3::ZERO;
     }
-    let speed = if d.y < -0.1 { BASE_SPEED * BACK_MUL } else { BASE_SPEED };
     let (sin, cos) = pitch.sin_cos();
-    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * speed
+    Vec3::new(d.x, d.y * cos, d.y * sin).normalize_or_zero() * back_factor(d) * BASE_SPEED * speed_mul
+}
+
+/// `swim_back_speed_mul` for a pressed direction (x right, y forward): backwards and diagonally backwards swim slower.
+pub fn back_factor(dir: Vec2) -> f32 {
+    if dir.y < -0.1 { BACK_MUL } else { 1.0 }
 }
 
 /// The fraction of 1.2's surface hold at a desired vertical speed `desired_vz` and height `z` for a body whose floating
@@ -305,6 +336,80 @@ impl SwimClips {
     }
 }
 
+/// The horse graph's `waterLevel` under which a mount swims with its `_deep` clips: `horse_full_body.xml` selects the
+/// `_deep` states on `waterLevel` -1000..-1.01 and the others on -1..1000 (`data/extract/mounts/ag_horse.txt` :274-325).
+/// `waterLevel` is `CActor::UpdateSwimStats`' `relativeWaterLevel` (`sub_39120300`, x2game12.c:239760-239772, written to
+/// the graph input `this + 2222`): the origin plus the swim level ([`swim_level`]) minus the surface, 0 for a body
+/// floating at its level.
+pub const MOUNT_DEEP_LEVEL: f32 = -1.01;
+/// The blend into a mount's swim clip (s): `TransitionTime` 0.5 of the `SwimIdle` and `SwimMovement` templates
+/// (`libs/animationgraphtemplates/swimidle.xml`, `swimmovement.xml`; the latter ignores the states' own `transition_time`).
+pub const MOUNT_SWIM_BLEND: f32 = 0.5;
+
+/// The horse graph's swim set (`horse_full_body.xml` :753-761, :1061-1255; every rideable `.cal` includes
+/// `global_horse.cal`, which names the clips at :100 and :265-277): `fist_ba_idle_swim`, and `fist_mo_swim_{f,b,l,r}` with
+/// their `_deep` variants. The graph's diagonals play the f or b clip turned at the pelvis (`pelvis_rotation` 45 / 40), and
+/// `fist_mo_swim_up` / `_down` are `fist_ba_idle_swim.caf` in the `.cal`. The horse's clips are in place (no `Bip01` travel)
+/// with the pelvis at 1.71 m, as in its standing idle, so they are played at their own pace.
+#[derive(Clone)]
+pub struct MountSwimClips {
+    idle: BoundClip,
+    /// By [`mount_swim_side`]: f, b, l, r.
+    swim: [Option<BoundClip>; 4],
+    deep: [Option<BoundClip>; 4],
+}
+
+/// The sides of the horse graph's swim clips, the order of [`MountSwimClips`].
+const MOUNT_SIDES: [&str; 4] = ["f", "b", "l", "r"];
+
+impl MountSwimClips {
+    /// Binds the swim clips of a mount's `.cal`; `None` when the model has no swim idle or no forward swim.
+    pub fn load(rig: &Rig, cal: &Cal, clips: &ClipLibrary) -> Option<MountSwimClips> {
+        let bind = |name: &str| bind_clip(rig, cal, clips, name);
+        let idle = bind("fist_ba_idle_swim")?;
+        let sides = |suffix: &str| -> [Option<BoundClip>; 4] { std::array::from_fn(|i| bind(&format!("fist_mo_swim_{}{suffix}", MOUNT_SIDES[i]))) };
+        let (swim, deep) = (sides(""), sides("_deep"));
+        swim[0].as_ref()?;
+        Some(MountSwimClips { idle, swim, deep })
+    }
+
+    /// The clip for a mount swimming to `side` ([`mount_swim_side`]; `None`: no move request, the swim idle) at the graph's
+    /// `waterLevel` `level`: the `_deep` clip under [`MOUNT_DEEP_LEVEL`], else the surface one. A side the model lacks
+    /// swims forward (the wildboar and the riding lions have only some of them).
+    pub fn pick(&self, side: Option<usize>, level: f32) -> &BoundClip {
+        let Some(i) = side else { return &self.idle };
+        let deep = if level < MOUNT_DEEP_LEVEL { self.deep[i].as_ref().or(self.deep[0].as_ref()) } else { None };
+        deep.or(self.swim[i].as_ref()).or(self.swim[0].as_ref()).unwrap_or(&self.idle)
+    }
+}
+
+/// The side of the horse graph's swim clip for a move request (x right, y forward): f, b, l or r as in [`MountSwimClips`].
+/// The graph boxes `SwimControlX` / `Y` at 0.3 / 0.4 (:1061-1245), and the swim mode (`sub_3912CE00`, x2game12.c:246966)
+/// lifts any forward or backward share to 1.1, so only a pure strafe is l or r; fl and fr swim f, bl and br swim b.
+pub fn mount_swim_side(local_dir: Vec2) -> usize {
+    if local_dir.y.abs() > 0.001 {
+        if local_dir.y > 0.0 { 0 } else { 1 }
+    } else if local_dir.x < 0.0 {
+        2
+    } else {
+        3
+    }
+}
+
+/// Which of the horse graph's f / b states a request to `side` is in: -1 the left diagonal (fl, bl: `SwimControlX`
+/// -10..-0.4), 1 the right one (fr, br: 0.4..10), 0 the straight state (-0.3..0.3; the 0.3..0.4 gap, where the graph keeps
+/// its state, counts as straight); always 0 for l and r. The diagonals play the straight state's clip, but they are other
+/// states: `SwimMovement` sets `AllowAnimRestart` (`swimmovement.xml`), so going from f to fl starts `fist_mo_swim_f` again.
+pub fn mount_swim_lean(local_dir: Vec2, side: usize) -> i8 {
+    if side > 1 || local_dir.x.abs() < 0.4 {
+        0
+    } else if local_dir.x < 0.0 {
+        -1
+    } else {
+        1
+    }
+}
+
 /// Metres per second the root bone travels in a forward clip.
 fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
     let root = rig.skeleton.bones.get(rig.root).map(|b| b.controller_id);
@@ -315,9 +420,11 @@ fn ground_speed(rig: &Rig, clip: &BoundClip) -> f32 {
 }
 
 /// Plays the swim clips on the local player while it swims, after `anim::drive_locomotion` (which sees a standing player: the
-/// player's `Motion` is empty in the water) and hands the animator back when it stops (`Locomotion::invalidate`).
+/// player's `Motion` is empty in the water) and hands the animator back when it stops (`Locomotion::invalidate`). A rider on a
+/// swimming mount keeps its seat's clips (the horse graph's Driver states have no swim state).
+#[allow(clippy::type_complexity)]
 pub fn drive_swim(
-    mut player: Query<(&Mover, &mut Animator, &mut Locomotion, &SwimClips, Option<&Acting>, Has<Dead>), With<LocalPlayer>>,
+    mut player: Query<(&Mover, &mut Animator, &mut Locomotion, &SwimClips, Option<&Acting>, Has<Dead>), (With<LocalPlayer>, Without<super::mount::Rider>)>,
     mut was_swimming: Local<bool>,
 ) {
     let Ok((mover, mut animator, mut loco, clips, acting, dead)) = player.single_mut() else { return };
@@ -377,9 +484,26 @@ mod tests {
         assert!(!should_swim(true, 101.0, wet(6.0), enter));
     }
 
+    /// The horse graph's swim sides: any forward or backward share swims f or b (the diagonals' clips), only a pure strafe
+    /// swims l or r.
+    #[test]
+    fn a_mount_swims_diagonally_with_its_forward_or_back_clip() {
+        let side = |x: f32, y: f32| MOUNT_SIDES[mount_swim_side(Vec2::new(x, y).normalize())];
+        assert_eq!([side(0.0, 1.0), side(-1.0, 1.0), side(1.0, 1.0), side(0.99, 0.1)], ["f"; 4]);
+        assert_eq!([side(0.0, -1.0), side(-1.0, -1.0), side(1.0, -1.0)], ["b"; 3]);
+        assert_eq!([side(-1.0, 0.0), side(1.0, 0.0)], ["l", "r"]);
+        // fl / fr and bl / br are states of their own (their clip starts again), a pure strafe has no lean
+        let lean = |x: f32, y: f32| {
+            let dir = Vec2::new(x, y).normalize();
+            mount_swim_lean(dir, mount_swim_side(dir))
+        };
+        assert_eq!([lean(0.0, 1.0), lean(-1.0, 1.0), lean(1.0, 1.0), lean(0.2, 1.0)], [0, -1, 1, 0]);
+        assert_eq!([lean(-1.0, -1.0), lean(1.0, -1.0), lean(-1.0, 0.0), lean(1.0, 0.0)], [-1, 1, 0, 0]);
+    }
+
     #[test]
     fn swim_speed_depends_on_the_direction() {
-        let flat = |dir| aimed_velocity(dir, 0.0).truncate();
+        let flat = |dir| aimed_velocity(dir, 0.0, 1.0).truncate();
         assert_eq!(flat(Vec2::ZERO), Vec2::ZERO);
         assert!((flat(Vec2::Y).length() - 3.0).abs() < 1e-5);
         assert!((flat(Vec2::X).length() - 3.0).abs() < 1e-5);
@@ -389,20 +513,20 @@ mod tests {
 
     #[test]
     fn swimming_follows_the_camera_pitch() {
-        let aimed = aimed_velocity(Vec2::Y, 0.0);
+        let aimed = aimed_velocity(Vec2::Y, 0.0, 1.0);
         assert!((aimed - Vec3::new(0.0, 3.0, 0.0)).length() < 1e-5);
-        let down = aimed_velocity(Vec2::Y, -45f32.to_radians());
+        let down = aimed_velocity(Vec2::Y, -45f32.to_radians(), 1.0);
         assert!((down.length() - 3.0).abs() < 1e-5, "{down:?}");
         assert!((down.y - 2.1213).abs() < 1e-3 && (down.z + 2.1213).abs() < 1e-3, "{down:?}");
-        let up = aimed_velocity(Vec2::Y, 45f32.to_radians());
+        let up = aimed_velocity(Vec2::Y, 45f32.to_radians(), 1.0);
         assert!(up.z > 2.12 && (up.y - 2.1213).abs() < 1e-3, "{up:?}");
         // backwards follows the camera the other way, at the back speed
-        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians());
+        let back = aimed_velocity(-Vec2::Y, -45f32.to_radians(), 1.0);
         assert!((back.length() - 2.4).abs() < 1e-5 && back.z > 1.69, "{back:?}");
         // strafing stays horizontal at the full speed whatever the pitch
-        let side = aimed_velocity(Vec2::X, -60f32.to_radians());
+        let side = aimed_velocity(Vec2::X, -60f32.to_radians(), 1.0);
         assert!((side - Vec3::X * 3.0).length() < 1e-5, "{side:?}");
-        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0), Vec3::ZERO);
+        assert_eq!(aimed_velocity(Vec2::ZERO, -1.0, 1.0), Vec3::ZERO);
     }
 
     const DT: f32 = 1.0 / 60.0;
@@ -421,7 +545,7 @@ mod tests {
     #[test]
     fn a_gentle_course_stays_at_the_surface_and_a_steep_one_dives() {
         let (rest, up10, down10, down45) = (98.7f32, 10f32.to_radians(), -10f32.to_radians(), -45f32.to_radians());
-        let course = |pitch: f32| aimed_velocity(Vec2::Y, pitch).z;
+        let course = |pitch: f32| aimed_velocity(Vec2::Y, pitch, 1.0).z;
         // +10 degrees at the floating height must not push the body out of the water
         assert_eq!(wanted_vz(0.0, Some(course(up10)), rest, rest, DT, &mut 1.0), 0.0);
         assert!(wanted_vz(0.0, Some(course(up10)), rest + 0.1, rest, DT, &mut 1.0) <= 0.0, "the course lifted the body above rest");
@@ -539,6 +663,33 @@ mod tests {
                 let find = |n: &str| rig.skeleton.bones.iter().position(|b| b.name.eq_ignore_ascii_case(n)).map(|i| m[i].1);
                 let f = |v: Option<Vec3>| v.map_or("-".to_string(), |v| format!("({:.2}, {:.2}, {:.2})", v.x, v.y, v.z));
                 println!("{name:22} t={t:.2}/{:.2}s pelvis {} head {} lfoot {} rfoot {} root {}", clip.clip.duration, f(find("Bip01 Pelvis")), f(find("Bip01 Head")), f(find("Bip01 L Foot")), f(find("Bip01 R Foot")), f(m.get(rig.root).map(|r| r.1)));
+            }
+        }
+    }
+
+    /// The bind-pose height of the spine, neck and head bones of the player and the mounts (`--ignored --nocapture`): what
+    /// `sub_39113150` adds to `swim_height` for the swim level.
+    #[test]
+    #[ignore]
+    fn swim_level_bones() {
+        for skeleton in [
+            "objects/characters/nuian/male/nude/nu_m_base.chr",
+            "objects/characters/animals/horse/horse.chr",
+            "objects/characters/animals/donkey/donkey.chr",
+            "objects/characters/monster/snowlion/snowlion2_yellomane/snowlion2_yellomane.chr",
+            "game/objects/characters/monster/polarbear/polarbear_rider.chr",
+        ] {
+            let Ok(rig) = aa_anim::pose::shared_rig(skeleton) else {
+                println!("{skeleton}: missing");
+                continue;
+            };
+            let m = rig.bind.model_space(&rig);
+            println!("{skeleton}");
+            for (i, bone) in rig.skeleton.bones.iter().enumerate() {
+                let n = bone.name.to_ascii_lowercase();
+                if ["pelvis", "spine", "neck", "head", "bip01"].iter().any(|k| n.contains(k)) && !n.contains("nub") {
+                    println!("  {:28} z {:.3}", bone.name, m[i].1.z);
+                }
             }
         }
     }

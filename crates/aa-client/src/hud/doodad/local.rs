@@ -36,8 +36,13 @@
 //! * `DoodadFuncEvidenceItemLoot` (0x34) -> `FUN_393bb090` (777166) builds the report text and
 //!   raises `REPORT_CRIME` (514) with the doodad name and the text; returns 1.
 //! * `DoodadFuncNaviOpenMailbox` (0x2c): `FUN_393bd290` (779073) lists it as skill 11400 through
-//!   the func-type map of `FUN_397aa970` (1699182), and using it reaches `FUN_393b1040` (767979),
-//!   which sets state 4 and raises `TOGGLE_MAIL(doodadObjId, true)`.
+//!   the func-type map of `FUN_397aa970` (1699182). 11400 is dispatched by the action-handler map
+//!   before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` ->
+//!   `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040` 767979), so no `CSStartSkill` is sent.
+//!   `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL(doodadObjId, true)` and calls
+//!   `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not
+//!   all loaded. `mail::open_at`'s `MailCommand::List` stands in for it, queued whenever the
+//!   window is hidden. It runs here with the other local windows.
 //!
 //! `DoodadFuncInsertCounter` (0x54) is the pre-check of its case: when both the bag count
 //! (`FUN_397ccda0`) and the 28 equipment slots (`FUN_393b8f00`) hold fewer than
@@ -437,6 +442,9 @@ fn read_quads(conn: &Connection, sql: &str, mut f: impl FnMut(u32, i64, i64, i64
 /// Runs a local func. Native `FUN_393bc260` always handles these: the skill is never sent, even
 /// when the window cannot open here (no UI runtime, no position, an empty pack), except for the
 /// open-paper func with neither a page nor a book, which `local()` already filters out.
+/// `FUN_393b7b10` first ends the interaction that is active (`FUN_393b7aa0`), which
+/// `end_interaction` mirrors; the new window then becomes the active interaction
+/// (`View::local_state`). The store and bank are tracked by the store view.
 /// Returns the phase change the native sends after a bubble or an open paper.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
@@ -467,6 +475,8 @@ pub(super) fn run(
     let state = match local {
         LocalAction::OpenPaper { .. } => 1,
         LocalAction::RenewItem { .. } => 2,
+        // `FUN_393b1040` sets interaction state 4 before `TOGGLE_MAIL`.
+        LocalAction::Mailbox => 4,
         LocalAction::StampMaker => 7,
         LocalAction::Purchase { .. } => 8,
         LocalAction::CofferPerm => 0xd,
@@ -485,8 +495,11 @@ pub(super) fn run(
                 .by_id
                 .get(&obj_id)
                 .and_then(|o| crate::ingame::units::doodad_world(o, units))
+                && super::super::farm::show_doodad(rt, farm as i32, pos)
             {
-                super::super::farm::show_doodad(rt, farm as i32, pos);
+                // `FUN_393b8700` sets interaction state 10.
+                bridge.borrow_mut().doodad.local_state =
+                    Some(super::LocalState { state: 10, obj_id });
             }
         }
         // An empty or unknown merchant pack still opens the native store window (it has no

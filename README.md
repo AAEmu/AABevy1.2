@@ -22,7 +22,7 @@ The aim is a client that looks and behaves like the real one and runs fast.
 - **World:** streamed terrain, buildings, vegetation with wind, roads and decals; water, the sea and swimming; sky,
   sun, moons, fog and time of day; sun shafts and eye adaptation; collision; portals and recall.
 - **Characters:** all races with faces, hair, presets and dyes; equipment, costumes and weapons; cloth and hair
-  physics; animation blending, mounts, other players and NPCs.
+  physics; animation blending, mounts that jump, rear and swim, riders that attack from the saddle, other players and NPCs.
 - **Combat:** all 231 player skills animated, the game's own particle effects, area targeting, movement skills,
   stealth, hit reactions and damage numbers.
 - **HUD (original windows on real data):** action bars, cooldowns, buffs, unit frames and nameplates; bag, bank,
@@ -34,7 +34,10 @@ The aim is a client that looks and behaves like the real one and runs fast.
 
 ## What's missing
 
-- Ships, vehicles and gliders; mount skills and mounted jumping/swimming.
+- Mounts, ships, carts and gliders are built but not yet checked against a live server or the original client: mounted
+  jumping, rearing and swimming, mount skills, and ship helm and wheel are marked capture-pending in the docs.
+  Missing: the helmsman's steering clips, the fishboat's paddle wheel, the dive of a swimming mount, vehicle and unit
+  collision, and ships whose hull model is not in the pak (caravel, ray).
 - Housing construction, decorating and farms end to end; the in-game shop; territory, siege and nation.
 - Rendering: FFT ocean waves, glow, some lighting parity for characters and vegetation sprites.
 - Windows only.

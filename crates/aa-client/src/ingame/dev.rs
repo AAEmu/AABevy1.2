@@ -30,6 +30,9 @@ pub struct DevOptions {
     pub cam_pitch: Option<f32>,
     pub cam_dist: Option<f32>,
     pub cam_fov: Option<f32>,
+    /// `--view X,Y,Z,DX,DY,DZ`: the world camera stands at this game position and looks along this direction (game axes), whatever
+    /// the player does: a still of the 1.2 client's view (`System.GetViewCameraPos` / `GetViewCameraDir`) seen by aa-client.
+    pub view: Option<(Vec3, Vec3)>,
     pub hide_part: Option<usize>,
     pub hair_color: Option<u32>,
     pub leave_after: Option<f32>,
@@ -87,6 +90,10 @@ impl DevOptions {
             cam_pitch: num("--cam-pitch").map(f32::to_radians),
             cam_dist: num("--cam-dist"),
             cam_fov: num("--cam-fov"),
+            view: one("--view").and_then(|v| {
+                let n: Vec<f32> = v.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+                (n.len() == 6).then(|| (Vec3::new(n[0], n[1], n[2]), Vec3::new(n[3], n[4], n[5])))
+            }),
             hide_part: num("--hide-part").map(|n| n as usize),
             hair_color: one("--hair-color").and_then(|v| v.parse().ok()),
             leave_after: num("--leave-after"),

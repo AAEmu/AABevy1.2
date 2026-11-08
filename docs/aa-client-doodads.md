@@ -659,7 +659,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncParentInfo` 0x43 | `FUN_393b8400` 774707 | opens the parent house's info through `FUN_393befd0` (`HOUSE_INTERACTION_START` 0x6d/109); returns 1 | **done** (`local.rs` -> `housing::open_interaction`; a house in view is required, like the native house lookup) |
 | `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; when `next_phase > 0` it sends the same `CSChangeDoodadPhasePacket` 0x0e9 (774812); returns 0 (the skill is sent) when the func has neither a page nor a book (774760) | **done** (`local.rs`; `X2Book.GetBookInfo` reads `books`/`book_elems`; a page opens a blank web page, see gaps) |
 | `DoodadFuncRenewItem` 0x47 | `FUN_393b8610` 774823 | state 2, `RENEW_ITEM_WND_SHOW` (0x8a/138) with `(doodad_func_renew_items.skill_id, obj id)`; returns 1 | **done** (event raised; no script registers `RENEW_ITEM_WND_SHOW`, so no window, see gaps) |
-| `DoodadFuncOpenFarmInfo` 0x48 | `FUN_393b8700` 774877 | state 10, `OPEN_COMMON_FARM_INFO` (0x102/258) with `farm_id`; returns 1 | **done** (`local.rs`, `farm::show_doodad`; skips the skill) |
+| `DoodadFuncOpenFarmInfo` 0x48 | `FUN_393b8700` 774877 | state 10, `OPEN_COMMON_FARM_INFO` (0x102/258) with `farm_id`; returns 1 | **done** (`local.rs`, `farm::show_doodad`; skips the skill; ends as an interaction, below) |
 | `DoodadFuncEnterSysInstance` 0x4a | `FUN_393bc260` case 0x4a | state 0x12, returns 0 (the skill is sent) | no client action |
 | `DoodadFuncBuyFish` 0x4f | `FUN_393b8870` | task-12 confirmation; returns 1 | **done** (`doodad/fish.rs`) |
 | `DoodadFuncConvertFish` 0x50 | `FUN_393b8a30` | task-13 confirmation; returns 1 | **done** (`doodad/fish.rs`) |
@@ -669,7 +669,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the doodad is gone or out of reach (`FUN_394ce540`, walk-away `FUN_393b7e40`); closing the window alone leaves it until the next interaction; the server still requires an auctioneer NPC, see gaps) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
-| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | state 4, `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)`; the handler also calls `FUN_393ccdd0` (not ported). Mailbox group 107 has `next_phase` 10279; the handler is reached through the pointer table `0x399d2c58` and its direct caller is not recovered, so "no packet" is **unverified** | **done** (`local.rs`, `mail::open_at`) |
+| `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | 11400 is dispatched by the action-handler map before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` -> `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040`), so no `CSStartSkill` is sent. `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)` and calls `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not all loaded | **done** (`local.rs`, `mail::open_at`; its `MailCommand::List` stands in for `FUN_393ccdd0` and is queued whenever the window is hidden) |
 
 The non-skill action ids of `FUN_393bd290` (779073): the func-type map gives Butcher, Cutdown, Dig, Feed,
 Harvest, Mow, Shear, Use, Binding, CraftStart, CraftInfo, CraftCancel, CraftGetItem, the collect types,
@@ -677,15 +677,27 @@ MachinePartsCollect, RemoveItem, NaviNaming/MarkPosToMap/Donation/Remove/OpenPor
 OpenBounty, LootPack, Enter/RemoveInstance, LogicDisplay, CleanupLogicLink, CraftPack and Coffer their
 interaction ids; `FUN_393b7eb0` gives Climb, LootItem, Quest, CraftAct, FakeUse, RecoverItem, ConditionalUse
 and EvidenceItemLoot theirs. Of those, the client-side paths aa-client has are the mailbox (above), the
-workbench (`CraftStart`/`CraftPack`, #94), fishing (#98), the coffer (`CSCofferInteraction`), fake use
-(`gather.rs` detail skill), climb (`ingame/ladder`), loot (`hud/loot`) and the generic skill sends. The
-Navi naming/mark/donation/remove/open-bounty entries, RecoverItem and ConditionalUse still fall through to a
-plain skill send; the server owns their effect.
+workbench (`CraftStart`/`CraftPack`, #94), fishing (#98), the coffer (`CSCofferInteraction`), `CSNaviTeleport`
+and `CSNaviOpenPortal`, fake use (`gather.rs` detail skill), climb (`ingame/ladder`), loot (`hud/loot`) and the
+generic skill sends. `DoodadFuncNaviOpenBounty` is a client-side handler too (`FUN_393b1140`, slot 4 of table
+`0x399d2c58`): it sends `CSNaviOpenBountyPacket` 0x0ea with the doodad id and no skill. It is **not implemented**
+here: the port falls through to the skill send. The Navi naming/mark/donation/remove entries, RecoverItem and
+ConditionalUse fall through to a plain skill send; the server owns their effect.
+
+The windows are interactions (`FUN_393b7b10` stores the state): the open paper (1), renew (2), mailbox (4), stamp (7),
+purchase (8), farm board (10), coffer permission (0xd) and auction (0xe) are kept as `View::local_state`, the store/bank
+(0xf/0x11) as the store view. `FUN_393b7e40` (polled every 1000 ms) ends the active one
+through `FUN_393b7aa0` when the doodad is gone or out of the interaction reach (`left_interaction`), and any later
+interaction (a local window, a bench, the coffer) ends it first. The end raises `NPC_INTERACTION_END` for the store/bank, then
+`INTERACTION_END`, which `mailbox.lua` and `commonfarm/info.lua` answer by hiding their window; a second mailbox use therefore
+closes and reopens the window (`TOGGLE_MAIL`) instead of toggling it shut. An NPC store replaced by a doodad store or a bench
+raises its owed `NPC_INTERACTION_END` at once (`dialog::fire_npc_end`), before the new window's start event.
 
 Tests: `hud::doodad::local::tests` drives the original scripts for the mailbox, farm board, store, bank,
-book, UCC, auction, coffer-permission and crime-report windows, the bubble/open-paper phase packet, the
-purchase dialogs (task 10/11 and their OK packets), the parent-house and renew-item events and the
-insert-counter refusal (AA_PAK/AA_DB, skipped without them). `aa-net/game.rs` checks
+book, UCC, auction, coffer-permission and crime-report windows, their ends (walk-away, replacement, the bench
+after a bank), the bubble/open-paper phase packet, the purchase dialogs (task 10/11 and their OK packets), the
+parent-house and renew-item events, the insert-counter refusal and the mount gate before the local funcs
+(AA_PAK/AA_DB, skipped without them; the dispatch tests run without either). `aa-net/game.rs` checks
 `CSChangeDoodadPhasePacket` (0x0e9: `bc objId`, `u32 skill`, `u32 nextPhase`, `u32 funcId`) byte for byte
 against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0x0af).
 
@@ -735,6 +747,13 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   the labor, tool and cast of a natural node are the server's and the existing skill path's (see "Natural gathering").
 * The Mailbox's action is now on the bar: `DoodadFuncNaviOpenMailbox` maps to skill 11400 (the native func-type
   mapping), and its use opens the mail window locally (`local.rs`); Ctrl-E still opens the nearest mailbox (`mail.rs`).
+* **Fallback-gap interactions end late** (deliberate): an interaction opened on a fallback gap (no drawn bounds yet, or a
+  parented doodad) closes only at the 4 m centre distance (`DOODAD_REACH`, `left_interaction`), not at the native 2.1 m
+  surface reach of `FUN_39093800`, because the fallback is not the native collider shape and the strict rule would close
+  it as soon as it opened. This covers the bench, the fish stand, the doodad store/bank, the mailbox and the farm board.
+  A bench craft at such a gap is not refused locally with `TOO_FAR_AWAY` (0x9a); the server checks. The close is also
+  checked every frame, where native `FUN_393b7e40` polls every 1000 ms, so a measured-gap end can come up to 1 s earlier
+  than in 1.2.
 * The bar stays up during the cast (the capture sampled the cast bar only, not the dynamic bar).
 * Confirmed by the 2026-10-30 1.2 capture (`tools/evidence/gather/capture-results.txt`): the herb 2274 Use path (13990, key F,
   "Gather", 4000 ms, 1 LP, phase 4513 -> 4514), the fake-use lamp 13166 fallback, the local no-labor refusal, the reach samples

@@ -9,6 +9,7 @@
 //! * [`sound`]: `aa-audio` wired to the screens (music, UI sounds, zone music, volumes)
 //! * [`graphics`]: the Options window's screen and quality pages applied to the window and the renderer
 //! * [`script`]: `--script file.txt`, a line-based script that drives the client (with `--headless`: no window)
+//! * [`skilltrace`]: `AA_SKILL_TRACE=<file.jsonl>`, a structured trace of what the client does during skills
 //! * [`priority`]: the process runs above normal priority (`AA_PRIORITY=normal` keeps the default)
 
 mod graphics;
@@ -19,6 +20,7 @@ mod login;
 mod priority;
 mod script;
 mod settings;
+mod skilltrace;
 mod sound;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -60,7 +62,7 @@ pub fn run() -> AppExit {
         // logged, not a crash
         .set_error_handler(bevy::ecs::error::warn)
         .add_plugins((aa_dev::default_plugins_with_log("AAEMU 1.2", logging::layer), aa_dev::DevPlugin))
-        .add_plugins(aa_fx::FxPlugin)
+        .add_plugins((aa_fx::FxPlugin, skilltrace::SkillTracePlugin))
         // Audited constant local Wind bursts affect other FX roots; vegetation has
         // a separate native cache boundary and is not connected here.
         .insert_resource(aa_fx::wind::FxWindSettings { enabled: true, max_fields: 64 })

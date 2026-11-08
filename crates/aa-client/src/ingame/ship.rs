@@ -27,17 +27,18 @@
 //! teleport's loading screen skips [`drive_ship`], so [`reset_on_teleport`]
 //! clears the ramp and pump meanwhile.
 //!
-//! Visuals: the smallboat (rowboat) prefab has only the `$helms`, `$driver`,
-//! `$passenger0`, `$ladder_*`, `$aimpoint`, `$heal_point0` and `$lamp_rear`
-//! helper nodes and the static `smallboat_helms.cgf` brush; it has no rudder
-//! part or steering-wheel bone. `FUN_390d2990` (UpdateSteeringWheel) returns
-//! early for models whose path contains `smallboat`, `soloship` or
-//! `coupleduckship`, so the rowboat has no wheel animation in the original
-//! either. `FUN_390c7410` (UpdateRudder) needs a child model named `rudder`,
-//! which this prefab does not have.
+//! Visuals: [`helm`] turns the rudder and the `$helms` wheel and plays the
+//! throttle clips from the steering and throttle of the type-3 echo, for every
+//! ship including this one. The smallboat (rowboat) prefab has only the
+//! `$helms`, `$driver`, `$passenger0`, `$ladder_*`, `$aimpoint`, `$heal_point0`
+//! and `$lamp_rear` helper nodes and the static `smallboat_helms.cgf` brush; it
+//! has no rudder part. `FUN_390d2990` (UpdateSteeringWheel) returns early for
+//! models whose path contains `smallboat`, `soloship` or `coupleduckship`, so
+//! the rowboat's helm doodad does not turn in the original either.
 
 pub(crate) mod deck;
 pub(crate) mod floor;
+pub(crate) mod helm;
 
 pub use deck::{DeckRide, board_deck, deck_control};
 

@@ -109,6 +109,8 @@ pub enum Cmd {
     /// The script starts once the character is in the world; this line only documents it.
     Enter,
     Echo(String),
+    /// A label in the skill trace (`AA_SKILL_TRACE`), nothing else.
+    Trace(String),
     Mark,
     /// Walk to a position (game coordinates).
     WalkTo(f32, f32),
@@ -126,6 +128,10 @@ pub enum Cmd {
     Zoom(f32),
     /// The camera's pitch in degrees (positive looks up), held to its limits, as a drag would leave it.
     Pitch(f32),
+    /// A fixed world camera at a game position looking along a direction (`--view`), or back to the follow camera (`view off`).
+    View(Option<([f32; 3], [f32; 3])>),
+    /// `hour H` pins the time of day (like `--hour`), `hour off` follows the server's clock again.
+    Hour(Option<f32>),
     Tp(f32, f32, f32),
     Gm(String),
     Chat(String),
@@ -271,6 +277,7 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "wait" | "pump" | "sleep" => Cmd::Wait(num(a.first(), "seconds")?),
         "enter" | "login" => Cmd::Enter,
         "echo" => Cmd::Echo(rest(text, 1)),
+        "trace" => Cmd::Trace(rest(text, 1)),
         "mark" => Cmd::Mark,
         "walk" | "move" | "goto" => match first.as_deref() {
             None => return Err("walk needs a distance, 'X Y' or 'to <unit>'".into()),
@@ -286,6 +293,13 @@ pub fn parse_line(line: &str) -> Result<Option<Cmd>, String> {
         "orbit" => Cmd::Orbit(num(a.first(), "degrees")?),
         "zoom" => Cmd::Zoom(num(a.first(), "notches")?),
         "pitch" => Cmd::Pitch(num(a.first(), "degrees")?),
+        "view" if a.first() == Some(&"off") => Cmd::View(None),
+        "view" => Cmd::View(Some((
+            [num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?],
+            [num(a.get(3), "dx")?, num(a.get(4), "dy")?, num(a.get(5), "dz")?],
+        ))),
+        "hour" if a.first() == Some(&"off") => Cmd::Hour(None),
+        "hour" => Cmd::Hour(Some(num(a.first(), "hour")?)),
         "tp" => Cmd::Tp(num(a.first(), "x")?, num(a.get(1), "y")?, num(a.get(2), "z")?),
         "gm" | "gmq" => Cmd::Gm(rest(text, 1)),
         "chat" | "say" => Cmd::Chat(rest(text, 1)),
@@ -433,6 +447,16 @@ pitch -30
     }
 
     #[test]
+    fn parses_the_still_commands() {
+        let lines = parse("view 15530 15321 133.04 0 1 0\nview off\nhour 18.004\nhour off\n", "t").unwrap();
+        assert_eq!(lines[0].cmd, Cmd::View(Some(([15530.0, 15321.0, 133.04], [0.0, 1.0, 0.0]))));
+        assert_eq!(lines[1].cmd, Cmd::View(None));
+        assert_eq!(lines[2].cmd, Cmd::Hour(Some(18.004)));
+        assert_eq!(lines[3].cmd, Cmd::Hour(None));
+        assert!(parse("view 1 2 3", "s").is_err() && parse("hour noon", "s").is_err());
+    }
+
+    #[test]
     fn unknown_commands_fail_with_the_line() {
         let e = parse("wait 1\nfrobnicate 3\n", "s.txt").unwrap_err();
         assert!(e.starts_with("s.txt:2: unknown command 'frobnicate'"), "{e}");
@@ -455,5 +479,6 @@ echo a  b#c
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].cmd, Cmd::Lua("print(#t ..  'a  b')".into()));
         assert_eq!(lines[1].cmd, Cmd::Echo("a  b#c".into()));
+        assert_eq!(parse_line("trace  skill:14376:start # why").unwrap(), Some(Cmd::Trace("skill:14376:start".into())));
     }
 }

@@ -51,6 +51,7 @@ mod cinema_flow;
 pub(crate) mod chat;
 mod combat;
 mod cooldown;
+pub(crate) mod skill_trace;
 mod crafting;
 mod crime;
 pub(crate) mod data;
@@ -885,8 +886,12 @@ fn schedule_death_tracking(app: &mut App) {
 /// Folds aa-net's state into the snapshot and tells the scripts what changed.
 fn sync_hud(world: &mut World) {
     let bridge = world.non_send::<api::HudBridge>().0.clone();
-    api::refresh_snapshot(world, &bridge);
+    {
+        let _t = aa_cry::prof::scope("hud.snapshot");
+        api::refresh_snapshot(world, &bridge);
+    }
     if let Some(rt) = world.get_non_send::<UiRuntime>() {
+        let _t = aa_cry::prof::scope("hud.push");
         api::push_changes(rt, &bridge);
     }
 }

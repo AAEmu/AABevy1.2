@@ -12,7 +12,7 @@ x2game). Code: `crates/aa-client/src/ingame/weapons.rs`, `data.rs` (`Db::weapon`
 | 6 `.cdf` weapons invisible | `weapons::model_files(path)`: a `.cdf` is unwrapped. A `real_torch.chr` carrier (`NoDraw` material) is skipped and its `CA_BONE` object attachment (`sword` / `item` / `weapon`, with the `_enchant` material for the 1H / 2H blades) is the blade; a `.cdf` whose `Model` is a real mesh (`shield_gorgon_002`, `sword_1h_59_1`, `bow_59_1`) is drawn as that model with its `Material`. Several pieces hang under one parent entity. `prepare.rs` prewarms the same files. A dangling `.cdf` (`sword_2h_46_8.cdf` is not in the pak) falls back to the `.cgf` of the same name. The effect attachments (enchant glow, `wpnfx_hasla_*`) are not drawn (no persistent weapon effect hook yet); `real_torch.cdf` (the torch item: light and fire are entity bindings) draws nothing |
 | 7 rotation order | `attachment_rotation`: `Quat::from_euler(EulerRot::ZYX, rz, ry, rx)` = `Rz * Ry * Rx`, X first, as x2game's `3935A800` / `3935EA10` do (Ghidra, `re-equipment.md` (b)). `AA_DEV_EULER_XYZ=1` brings back the old order for comparison |
 | mirror | `item_assets.allow_mirror` (14 assets, 1H swords / maces / axes): the off hand copy flips `pos_x`, `rot_y`, `rot_z` (x2game `3935EA10`, slot 16) |
-| 10 slots never drawn | Backpack (wire slot 26): `Db::backpack` reads `item_backpacks` (`asset_id`, or `asset2_id` = the stowed look of a glider, `glider_b_back.cgf`) with the `item_assets` offset; hung on `item_back_c` as `Grip::Pack`, never in a hand. The 5 gliders with no stowed look (`glider_bx.chr`, only the 6 m flying canopy) draw nothing. Tail (ferre `fe_m_tail01`, `fe_f_tail`) and beard (`fe_m_beard01`): `appearance::resolve` adds them as extra skin parts (`item_body_parts`, model must match); without the tail slot a ferre body has a hole at the tail root. Glasses: no row in `item_body_parts` / `item_armors` has a glasses visual, nothing to draw |
+| 10 slots never drawn | Backpack (wire slot 26): `Db::backpack` reads `item_backpacks` (`asset_id`, or `asset2_id` = the stowed look of a glider, `glider_b_back.cgf`) with the `item_assets` offset; hung on `item_back_c` as `Grip::Pack`, never in a hand. The 2 gliders with a skill and no stowed look (items 16385 and 16392, `glider_bx.chr`, only the 6 m flying canopy) draw nothing; what 1.2 shows on the back for `asset2_id` 0 is capture-pending. Tail (ferre `fe_m_tail01`, `fe_f_tail`) and beard (`fe_m_beard01`): `appearance::resolve` adds them as extra skin parts (`item_body_parts`, model must match); without the tail slot a ferre body has a hole at the tail root. Glasses: no row in `item_body_parts` / `item_armors` has a glasses visual, nothing to draw |
 
 Backpack under a costume: the options script `x2ui/option/interface_option.lua` has `ShowMyCosplay` default 1 and
 `ShowMyBackPackWithCosplay` default **0** (`X2Player:ShowCosplay` / `ShowBackPackWithCosplay`), so `weapons::carried` hides the
@@ -80,3 +80,37 @@ Frames in `shots/aa-client/weapons-fix/` (git-ignored): `a_back` 2H sword / staf
 shield (30060), the 2H blade, the dragon staff (28905) and mace (35524) and mirrored off hand swords in the hands;
 `g_ingame_2h` the game screen with the 2H sword (`AA_DEV_MAINHAND=5660`) on the back. Before: the sweep sheets
 `shots/aa-anim/equip/twohand_nu_m_a_idle_back.jpg` and `sword_main_nu_m_a_idle_side.jpg`.
+
+## Glider sweep (every `item_backpacks` type-2 item)
+
+`cargo test -p aa-client --bin aa-client glide -- --nocapture` runs `every_glider_item_resolves_and_binds_its_clips` over
+`Db::glider_items()` (type-2 rows whose item casts a skill, 36 now): `Db::glider` resolves, `glide::glider_cal` finds the `.cal`
+(a `.cdf` goes through its `model`; `glider_blue2.cdf` resolves too), the rig loads and every clip a flying glider plays binds
+(`Pose::glider_clip`: `loop`, which the opening plays too, `front`, `back`, `left`, `right`, `sliding`). Result: every item passes.
+`endloop` (the clip the closing glider plays, `FUN_3911d6c0(0)`, `3911D6C0`) does not bind for 17 items (kite, butterfly, kraken,
+sloth, blue2/3/5, silver, silver_black, dragon, reddragon, red C and Korea): their `.cal` names `fist_ac_gliding_endloop.caf` and no
+loose file of that name is under `animations/env/<dir>/`, but the `.cal`'s `$TracksDBH` track database
+(`animations/env/<dir>/<dir>.dbh`, controller chunks v0x902 / 0x903) holds it: every one of the 10 glider `.dbh` lists
+`fist_ac_gliding_endloop.caf`, so the original has the closing clip for all 36 items (the engine finds a `$TracksDBH` clip by
+its `.caf` name; not seen in a capture). aa-anim reads loose `.caf` only (no `.dbh` decoder;
+`docs/aa-anim.md`'s "the loose `.caf` carry the same data" does not hold here), so for those 17 the closing glider keeps its last
+clip: a known gap, not 1.2 behaviour. The test asserts the clip is in the `.dbh` and prints the items; `show_glider` and
+`draw_remote_gliders` log a clip that does not bind (`glide: the glider model has no "endloop" clip`) once per pose change instead of
+only remembering it.
+
+Wing plane: `every_glider_model_opens_level_on_the_item_glider_bone` opens each of the 27 distinct models on a Nuian male's
+`item_glider` bone in the gliding idle clip (`show_glider`'s path) and measures the skinned vertices' spread. The span lies level
+across the facing on all 27 (0.7-1.5 deg roll), nothing stands on edge. The plane's pitch is 1-9 deg on 23 models and 15-18.5 deg
+on four: glider_c (15.3) and the dragon / reddragon / kraken model (18.5). Whether that is their shape (a raised neck, a long tail)
+or a nose-up flight pose is capture-pending. The three-vertex check of `the_glider_wing_stays_level_on_the_item_glider_bone`
+(Experimental Glider, 2 deg) only fits a canopy: on the dragon wings its tips and top give no plane.
+`AA_GLIDER_SHEET=1 cargo run -p aa-client --example glider_look -- --mute --offscreen-shot shots/aa-client/glider_sheet.png --shot-after 4`
+draws eight of the 26 distinct non-`glider_bx` models (kraken, b_lv_c, c, sp_pink, kite, dragon, green, c_korea) in two rows
+from above, bare (`creature::spawn`, not on a character's `item_glider` bone): all eight spawn (30 fps). Seen from above they
+show their front outline, so the sheet shows the models' shapes, not their flight attitude (that is the test above).
+
+`every_gliding_buff_flies_ten_seconds_of_every_key_without_nan` starts `Flight` from all 55 gliding buffs and steps
+10 s of every W/S/A/D combination: no NaN, the opening ends, and a buff with `gliding_rotate_speed` 0 never turns (`turn_rate` 0, no
+stuck state). 21 of the 55 buffs have no glider item (quest wings, prison-break glider, 'Glide' skills): their flight runs the same
+`Flight`, and `show_glider` draws whatever glider the back slot holds (nothing when it is empty); what 1.2 draws for those buffs
+with a glider equipped is not checked.

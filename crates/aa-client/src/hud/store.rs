@@ -483,13 +483,19 @@ pub(super) fn end_interaction(rt: &UiRuntime, bridge: &Shared) -> bool {
         return false;
     }
     let scope = data.store.scope.take();
+    let mut owed = false;
     if let Some(scope) = scope {
-        // `close_npc` owes the end through `flush_ends`; firing it here too would duplicate it.
-        super::dialog::close_npc(&mut data, scope);
+        // `close_npc` owes the end to `flush_ends`. Raise it now instead: the window that replaces
+        // the store (a doodad store, a bench) opens in this frame, and an end flushed on the next
+        // `drive_npc` pass would land after its start and hide it (`store.lua` NPC_INTERACTION_END).
+        // The `NpcEnd` packet stays in `flow.ends` for `flush_ends` to send.
+        owed = super::dialog::close_npc_now(&mut data, scope);
     }
     data.store.close();
     drop(data);
-    if scope.is_none() {
+    if owed {
+        super::dialog::fire_npc_end(&rt.lua, bridge);
+    } else if scope.is_none() {
         // A doodad store/bank has no NPC flow to flush its end.
         rt.fire_event("NPC_INTERACTION_END", ());
     }
@@ -710,18 +716,22 @@ mod tests {
     use super::*;
     use aa_net::interaction::InteractEvent;
 
-    /// Replacing an NPC store with a local window must not add a second
-    /// `NPC_INTERACTION_END`: `close_npc` already owes the talk's end through `flush_ends`.
-    #[test]
-    fn replacing_an_npc_store_fires_one_npc_end() -> Result<(), Box<dyn std::error::Error>> {
+    /// An NPC store opened through the real talk flow (skill list 12087), with `NPC_ENDS` counting
+    /// `NPC_INTERACTION_END` and `ENDS_AT_START` holding that count when the next
+    /// `NPC_INTERACTION_START` fires. `None` without the game files or the database.
+    fn npc_store_app() -> Result<Option<(App, Shared)>, Box<dyn std::error::Error>> {
         if !aa_cry::pak_available() {
-            return Ok(());
+            return Ok(None);
         }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(game) = crate::hud::data::GameData::load(&path) else {
+            return Ok(None);
+        };
         let (rt, shared, _path, inventory) =
             crate::hud::expansion::fixture::runtime(1280.0, 720.0)?;
         rt.lua
             .load(
-                "NPC_ENDS=0; local w=UIParent:CreateWidget('emptywidget','npcStoreEndProbe','UIParent');                  w:RegisterEvent('NPC_INTERACTION_END');                  w:SetHandler('OnEvent',function() NPC_ENDS=NPC_ENDS+1 end)",
+                "NPC_ENDS=0; ENDS_AT_START=-1; local w=UIParent:CreateWidget('emptywidget','npcStoreEndProbe','UIParent');                  w:RegisterEvent('NPC_INTERACTION_END'); w:RegisterEvent('NPC_INTERACTION_START');                  w:SetHandler('OnEvent',function(self, event) if event == 'NPC_INTERACTION_END' then NPC_ENDS=NPC_ENDS+1 else ENDS_AT_START=NPC_ENDS end end)",
             )
             .exec()?;
         let spawn = crate::hud::fixture_spawn();
@@ -772,9 +782,7 @@ mod tests {
         app.update();
         {
             let mut data = shared.borrow_mut();
-            if let Ok(game) = crate::hud::data::GameData::load(aa_anim::db::DEFAULT_DB) {
-                assert!(data.game.0.set(game).is_ok());
-            }
+            assert!(data.game.0.set(game).is_ok());
             data.pos = Vec3::ZERO;
             data.panels.target = Some(crate::hud::panels::TargetSnap {
                 obj_id: npc.obj_id,
@@ -804,8 +812,17 @@ mod tests {
         assert!(shared.borrow().store.npc.is_some());
         // Count only the end the replacement causes; the talk's own target-change end already
         // fired when the store opened.
-        lua.load("NPC_ENDS=0").exec()?;
+        lua.load("NPC_ENDS=0; ENDS_AT_START=-1").exec()?;
+        Ok(Some((app, shared)))
+    }
 
+    /// Replacing an NPC store with a local window must not add a second
+    /// `NPC_INTERACTION_END`: `close_npc` already owes the talk's end through `flush_ends`.
+    #[test]
+    fn replacing_an_npc_store_fires_one_npc_end() -> Result<(), Box<dyn std::error::Error>> {
+        let Some((mut app, shared)) = npc_store_app()? else {
+            return Ok(());
+        };
         {
             let rt = app.world().non_send::<UiRuntime>();
             let bridge = app.world().non_send::<HudBridge>();
@@ -815,6 +832,29 @@ mod tests {
         let lua = &app.world().non_send::<UiRuntime>().lua;
         assert_eq!(lua.load("return NPC_ENDS").eval::<i64>()?, 1);
         assert!(shared.borrow().store.npc.is_none());
+        Ok(())
+    }
+
+    /// A doodad store replacing an NPC store stays open: the NPC talk's end fires before the
+    /// doodad store's `NPC_INTERACTION_START`, not on the next `drive_npc` pass after it (where
+    /// `store.lua` would hide the window it just opened).
+    #[test]
+    fn a_doodad_store_replacing_an_npc_store_stays_open() -> Result<(), Box<dyn std::error::Error>> {
+        let Some((mut app, shared)) = npc_store_app()? else {
+            return Ok(());
+        };
+        {
+            let rt = app.world().non_send::<UiRuntime>();
+            let bridge = app.world().non_send::<HudBridge>();
+            assert!(open_doodad(rt, &bridge.0, 0x0abc, 0, false));
+        }
+        app.update();
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert!(lua.load("return IsActivatedStore()").eval::<bool>()?);
+        assert!(shared.borrow().store.doodad);
+        assert_eq!(lua.load("return NPC_ENDS").eval::<i64>()?, 1);
+        assert_eq!(lua.load("return ENDS_AT_START").eval::<i64>()?, 1);
         Ok(())
     }
 

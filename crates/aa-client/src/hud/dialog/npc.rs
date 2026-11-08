@@ -812,7 +812,7 @@ pub(in crate::hud) fn npc_menu_current(data: &HudData, scope: Scope) -> bool {
         && flow.ready((scope.character, scope.actor), scope.npc)
 }
 
-fn fire_end(lua: &mlua::Lua, shared: &Shared) {
+pub(in crate::hud) fn fire_end(lua: &mlua::Lua, shared: &Shared) {
     {
         let mut data = shared.borrow_mut();
         data.dialog.npc_flow.ending = true;
@@ -847,6 +847,14 @@ pub(in crate::hud) fn close_npc(data: &mut HudData, scope: Scope) {
         data.dialog.complete.clear();
         data.dialog.talk.clear();
     }
+}
+
+/// [`close_npc`] for a caller that raises the owed `NPC_INTERACTION_END` itself ([`fire_end`],
+/// after its borrow) because the window replacing the talk opens in the same frame. `true` when
+/// an end is owed; the `NpcEnd` packet stays queued for `flush_ends`.
+pub(in crate::hud) fn close_npc_now(data: &mut HudData, scope: Scope) -> bool {
+    close_npc(data, scope);
+    std::mem::take(&mut data.dialog.npc_flow.close_owed)
 }
 
 /// The native public binding guards on the retained active actor, not dispatch.
