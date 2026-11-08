@@ -97,6 +97,12 @@ impl Data {
         self.npcs.get(&template)
     }
 
+    /// `quest_contexts.detail_id` 5: the hidden quests, whose start and drop have no jingle
+    /// (`FUN_3937b5b0` and `FUN_3937bdf0`'s hidden branches skip `FUN_393f45d0`).
+    pub fn quest_hidden(&self, quest: u32) -> bool {
+        self.quests.get(&quest) == Some(&5)
+    }
+
     /// The suffix of the `global` pack's `event_quest_<started|completed|failed|dropped>_<kind>` items for a quest.
     pub fn quest_kind(&self, quest: u32) -> &'static str {
         match self.quests.get(&quest).copied().unwrap_or(0) {
@@ -151,5 +157,7 @@ mod tests {
             [1, 2, 3, 4, 5, 6, 7, 99].map(|q| d.quest_kind(q)),
             ["main", "daily", "livelihood", "normal", "group", "hidden", "task", "normal"]
         );
+        assert!(d.quest_hidden(6));
+        assert!(!d.quest_hidden(1) && !d.quest_hidden(99));
     }
 }

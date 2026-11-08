@@ -345,6 +345,12 @@ pub struct CinemaPlayer {
 }
 
 impl CinemaPlayer {
+    /// The sequence in flight, for the replay tests.
+    #[cfg(test)]
+    pub(crate) fn playing_name(&self) -> Option<&str> {
+        self.playing.as_ref().map(|pending| pending.name.as_str())
+    }
+
     fn has(&self, quest_id: u32, component_id: u32) -> bool {
         self.played.contains(&(quest_id, component_id))
             || self.queued.iter().any(|q| q.quest_id == quest_id && q.component_id == component_id)
@@ -462,9 +468,35 @@ pub(super) fn start_quest_cinema(player: &mut CinemaPlayer, net: &mut MessageWri
     true
 }
 
+/// `X2Player:PlayCinema(name)` (`FUN_39495550` -> `FUN_391e2a70`): plays a completed main quest's
+/// movie from the journal's Past tab. The native compares the name with `""`, starts
+/// `worlds/main_world/cinemas/<name>.xml` and sends `CSStartedCinema` (0xcf); unlike a quest step,
+/// the same movie may be replayed again. When a movie is already running the native returns
+/// without starting another one.
+pub(super) fn play_cinema(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>, name: &str) {
+    if name.is_empty() || player.playing.is_some() {
+        return;
+    }
+    let Some(sequence) = Sequence::load(name) else {
+        warn!("hud: replay cinema {name} is missing or invalid");
+        return;
+    };
+    let Some(start) = cinema_flow::start(0, 0, name, sequence.duration, None) else {
+        warn!("hud: replay cinema {name} has no duration");
+        return;
+    };
+    for packet in start.packets {
+        net.write(NetCommand(Command::Interact(packet)));
+    }
+    info!("hud: replay cinema {name} ({:.1} s) started", sequence.duration);
+    player.playing = Some(start.pending);
+    player.sequence = Some(sequence);
+    player.hide_dialog = false;
+}
+
 fn start_queued(player: &mut CinemaPlayer, net: &mut MessageWriter<NetCommand>) {
     while let Some(queued) = player.queued.pop_front() {
-        let cinema = CinemaDef { name: queued.cinema, before_bubble: false };
+        let cinema = CinemaDef { name: queued.cinema, before_bubble: false, replay: false };
         let started = start_quest_cinema(
             player,
             net,
@@ -763,11 +795,11 @@ mod tests {
     }
 
     fn try_start(mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>, mut result: ResMut<StartResult>) {
-        let missing = CinemaDef { name: "missing_cinema_xyz".into(), before_bubble: false };
+        let missing = CinemaDef { name: "missing_cinema_xyz".into(), before_bubble: false, replay: false };
         result.missing = start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1, component_id: 2, cinema: &missing, then: None, hide_dialog: false });
         *player = CinemaPlayer::default();
-        let first = CinemaDef { name: "fly_east".into(), before_bubble: false };
-        let second = CinemaDef { name: "zq_09_helmire".into(), before_bubble: false };
+        let first = CinemaDef { name: "fly_east".into(), before_bubble: false, replay: false };
+        let second = CinemaDef { name: "zq_09_helmire".into(), before_bubble: false, replay: false };
         result.first = start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1065, component_id: 5336, cinema: &first, then: None, hide_dialog: false });
         result.second = start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1352, component_id: 6758, cinema: &second, then: None, hide_dialog: false });
     }
@@ -1192,8 +1224,8 @@ mod tests {
     }
 
     fn queue_then(mut player: ResMut<CinemaPlayer>, mut net: MessageWriter<NetCommand>, mut out: ResMut<QueuedThen>) {
-        let first = CinemaDef { name: "fly_east".into(), before_bubble: false };
-        let second = CinemaDef { name: "zq_09_helmire".into(), before_bubble: true };
+        let first = CinemaDef { name: "fly_east".into(), before_bubble: false, replay: false };
+        let second = CinemaDef { name: "zq_09_helmire".into(), before_bubble: true, replay: false };
         start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1065, component_id: 5336, cinema: &first, then: None, hide_dialog: false });
         start_quest_cinema(&mut player, &mut net, StartCinema { quest_id: 1352, component_id: 6758, cinema: &second, then: None, hide_dialog: false });
         let then = Interact::QuestStart { quest_id: 1352, npc_obj_id: 0, doodad_obj_id: 0, sphere_id: 0 };

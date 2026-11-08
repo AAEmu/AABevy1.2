@@ -119,11 +119,19 @@ pub(super) fn game_sounds(
                 }
                 heard.level = *level;
             }
-            Event::QuestStarted(q) => out.quest(packs, data, "started", q.template_id),
-            // finished objectives (status READY) are an update, not a sound: the jingle is the hand in
+            // `FUN_3937b5b0`'s hidden branch skips the `FUN_393f45d0("started", detail)` jingle, so
+            // a hidden quest's start has no jingle (its ready event has its own script sound).
+            Event::QuestStarted(q) => {
+                if !data.quest_hidden(q.template_id) {
+                    out.quest(packs, data, "started", q.template_id);
+                }
+            }
+            // finished objectives (status READY) are an update, not a sound: the jingle is the hand in.
+            // `FUN_3937bdf0`'s hidden branch jumps past the dropped jingle; the failed one comes
+            // before the hidden test, so it still plays.
             Event::QuestUpdated(q) => match q.status {
                 status::FAILED => out.quest(packs, data, "failed", q.template_id),
-                status::DROPPED => out.quest(packs, data, "dropped", q.template_id),
+                status::DROPPED if !data.quest_hidden(q.template_id) => out.quest(packs, data, "dropped", q.template_id),
                 _ => {}
             },
             Event::QuestCompleted { quest_id, .. } => out.quest(packs, data, "completed", *quest_id),

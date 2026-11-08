@@ -686,6 +686,104 @@ and clears the flag instead of running the start component's follow-up (`FUN_393
 hidden quest (detail 5, `FUN_397d3540`) takes the other branch and leaves the flag alone. No original
 script registers 246, so nothing visible changes yet.
 
+### Hidden-report and task quests
+
+The server does not send these windows: the client raises the events from the quest packet handlers.
+`sync_quests` now matches them:
+
+* a Started packet whose quest is hidden (`quest_contexts.detail_id` 5) raises only
+  `QUEST_HIDDEN_READY` when it is already ready (status 3), with no `QUEST_CONTEXT_UPDATED`
+  "started", no condition event and no started jingle; every started task quest (6) raises
+  `QUEST_TASK_STARTED` (`FUN_3937b5b0`; no 1.2 script registers the task-started event, but the
+  native raises it);
+* an Updated packet that leaves a task quest ready raises `QUEST_TASK_READY`; a hidden quest raises
+  only `QUEST_HIDDEN_READY` when ready, and skips the normal "updated", objective and "dropped"
+  events and the dropped jingle (`FUN_3937bdf0` jumps past them; the failed jingle comes before
+  that test and still plays);
+* a Completed packet for a hidden quest raises `QUEST_HIDDEN_COMPLETE` (`FUN_3937bb60`);
+* at world entry, and after every completion, the first active hidden quest that is ready raises
+  `QUEST_HIDDEN_READY` (`FUN_39376a70`, called from `FUN_3937bb60` and the world start).
+
+They fire in the native order: a start raises "started", `QUEST_TASK_STARTED`, then the
+"started" condition; an update raises `QUEST_TASK_READY` before "updated" and the objective events;
+a completion raises "completed", `QUEST_HIDDEN_COMPLETE`, the follow-up `QUEST_HIDDEN_READY`, then
+the "completed" condition.
+
+All four carry the quest id as the only argument. The original scripts then drive the windows:
+`quest_context_hidden_report.alb` calls `ShowHiddenQuestReport(qtype)` on the ready event and
+`HideHiddenQuestReport()` on the complete event, and `quest_context_task.alb` opens its report from
+`QUEST_TASK_READY` (its report registers that handler on the first open; the task marker's OnClick
+opens the journal or the report). The module tests load the World stage: the real
+`hiddenQuestReport` widget is hidden before `QUEST_HIDDEN_READY`, shown after it, and hidden again
+on `QUEST_HIDDEN_COMPLETE`; the task report is created hidden, a PROGRESS->READY transition through
+`sync_quests` raises `QUEST_TASK_READY` and shows it, and the marker's OnClick opens
+`taskQuest.journal`.
+
+The getters these windows read that were still stubs now follow the natives:
+
+* `X2Quest:GetFirstObjectiveCount(qtype)` (`FUN_394a4c30`): the amount of the first Progress
+  component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`). `FUN_397d3440` has an amount
+  only for act types 0, 1, 2, 4, 5, 0x31 (`ObjZoneKill`, `count_pk + count_npc`) and 0x32
+  (`ObjCraft`); the others count 0, and a missing quest/Progress component/counted act answers 0.
+* `X2Quest:GetObjectiveComponentCount(qtype)` (`FUN_394a4ae0`): the template's Progress components
+  (not the objectives of the step the quest is at).
+
+### Score and linked quests
+
+* `X2Quest:IsScoreQuest(qtype)` (`FUN_397d3600`) is `quest_contexts.score > 0`.
+* `GetScoreQuestDoneScore` (`FUN_3949cc10`) is that `score` (0 without one).
+* `GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`) multiplies each Progress
+  component's counter by its first counted act's amount for act types 0, 1, 2, 4, 5 and 0x2b; an
+  inactive or unknown quest answers 0. The native does not test `score`, so a quest with those acts
+  can answer above 0 without being a score quest (the scripts only ask after `IsScoreQuest`).
+* `GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`) is the `quest_names` row with
+  `quest_name_kind_id` 2, else the empty string. `quest_contexts.name` is not used.
+* `GetLinkedQuestSummary` (`FUN_394a4dc0`) is the first Progress component's
+  `quest_component_texts` kind-4 text, else the first Ready component's, or nil. The native copies
+  the text (`FUN_3901aa10`) and expands its macros (`FUN_39435050`) before pushing the result, so
+  the getter returns the expanded text (for example `@NPC_NAME(614)` becomes the NPC's name).
+* `GetLinkedQuestObjectives` (`FUN_394a4fc0`) is an array of `{ obj, count }`, one row per Progress
+  component with a counted act; `count` is `FUN_397d3440`'s amount. A quest with no Progress
+  components lists each Ready component with the first of the locale's `report_alias` /
+  `talk_report_npc` / `find_report_doodad` texts (category 6) whose `[~qst_...~]` macro resolves,
+  and count 0. The macros (`FUN_392dd880` / `FUN_392dd910` / `FUN_392dd970`) read the first
+  `ConReportNpc` act of the quest's Ready components: its alias when `use_alias` is set (else the
+  first `ConReportDoodad` act's), its NPC's name, and the first `ConReportDoodad` act's doodad
+  name; Rust resolves them and Lua substitutes them, so quest 330 lists "Report to Woodcutter
+  Gallagher". When none resolves there is no row, as in the native. The substitution is plain
+  text: the Korean `|1과;와;` particle choice after the name is not applied (approximate). An
+  unknown quest answers nil. The objective text is the act alias, else the component's
+  kind-4 text, else the act description: the native formats the act through `FUN_392d9640` and
+  `objective_ptn`, whose alias substitution is not recovered, so the text is approximate.
+
+### Main-quest cutscene replay
+
+`X2Quest:GetMainQuestCutSceneReplayList()` (`FUN_39378e10` -> `FUN_393781a0`) returns nil when there
+is nothing to replay, else an array of `{ name, cinema }`. The native keeps a vector of
+(quest, cinema) pairs: `FUN_3937b540` appends a completed main quest's component cinemas whose
+`cinemas.replay` is set, once per component. `FUN_3937c940` clears and rebuilds it from the
+completed blocks on `SCCompletedQuests`, then sorts by `quest_contexts.chapter_idx` and `quest_idx`
+(`FUN_39377f30` compares the quest context's `+0x08` then `+0x24`; the stable order keeps a quest's
+components in component order). The native appends in template-table order, so Bevy walks the
+quests by ascending id and equal keys keep that order (quests 213, 2315 and 2350 at chapter 1,
+quest 8). That is exact for 32 entries or fewer, where MSVC's `std::sort` (`FUN_3937b130`) is an
+insertion sort; above that its introsort is not reproduced. A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
+`FUN_3937b2d0` push_back) is appended unsorted until the next rebuild. The Bevy getter reads the
+same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. When a
+component has no `quest_components.cinema_id`, `FUN_393780a0` falls back to the component's skill:
+the first `CinemaEffect` in `skill_effects` -> `effects.actual_id` -> `cinema_effects.cinema_id` ->
+`cinemas`, with the same `cinemas.replay` filter (quest 3556's component 17120 and skill 17610
+resolve to `sl_ha_024`).
+
+The Past tab (`quest_list/tab_past.alb`) lists `%d. <name>` and its replay button calls
+`X2Player:PlayCinema(<cinema>)`. `FUN_39495550` ignores the empty name, then `FUN_391e2a70` loads
+`worlds/main_world/cinemas/<name>.xml` and sends `CSStartedCinema` (0x0cf). Bevy's `play_cinema`
+uses the same `CinemaPlayer` as a quest movie (camera tracks, input block) and does not mark it
+played, so the same movie may be replayed; while a movie is already running it does nothing, like
+the native's early return. That shared player also sends `CSCompletedCinema` (0x0ce) at the end, as
+a quest movie does; the native replay path shows only the 0x0cf send, so the completion report for
+a replay is an inference, not captured.
+
 ### Server-shown quest areas
 
 `SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /

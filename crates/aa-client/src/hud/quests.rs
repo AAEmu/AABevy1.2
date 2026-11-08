@@ -76,6 +76,9 @@ pub struct QuestDef {
     /// `QuestDetail`: 1 normal, 2 main, 5 hidden, 6 task, 7 daily, 8 livelihood, 9 group ...
     pub detail: u32,
     pub chapter: u32,
+    /// `quest_contexts.quest_idx`: the quest's position within its chapter, the second replay
+    /// list sort key (`FUN_39377f30` compares `+0x24` after `+0x08`).
+    pub quest_idx: u32,
     pub zone_id: u32,
     pub selective: bool,
     pub let_it_done: bool,
@@ -169,6 +172,8 @@ pub struct CinemaDef {
     pub name: String,
     /// `play_cinema_before_bubble`: the movie comes before the step's lines instead of after them.
     pub before_bubble: bool,
+    /// `cinemas.replay`: a completed main quest's movie can be replayed from the journal's Past tab.
+    pub replay: bool,
 }
 
 /// A component (`quest_components`).
@@ -182,6 +187,9 @@ pub struct ComponentDef {
     pub acts: Vec<ActDef>,
     /// The bubble the step's talk starts with (`is_start`), 0 for none.
     pub first_bubble: u32,
+    /// `quest_components.skill_id`, 0 for none. A component without a direct cinema uses its
+    /// skill's `CinemaEffect` for the replay list (`FUN_393780a0`).
+    pub skill: u32,
     /// The cinema played for this step, if any.
     pub cinema: Option<CinemaDef>,
 }
@@ -265,8 +273,39 @@ pub struct QuestTables {
     pub aliases: HashMap<u32, String>,
     pub monster_groups: HashMap<u32, String>,
     pub doodads: HashMap<u32, String>,
+    /// Skill id -> the first `CinemaEffect` of its effects (`FUN_393780a0`), for a replay
+    /// component with no `quest_components.cinema_id`.
+    pub skill_cinemas: HashMap<u32, CinemaDef>,
+    /// `quest_names` with `quest_name_kind_id` 2: a score quest's objective line
+    /// (`X2Quest.GetScoreQuestObjective`, `FUN_397d4660`).
+    pub score_objectives: HashMap<u32, String>,
     /// `zones.id` (a quest's zone) -> `zone_groups.id`.
     pub zone_group: HashMap<u32, u32>,
+}
+
+/// The linked-quest objective rows of `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`).
+pub struct LinkedObjectives {
+    /// `(obj, count)` for every Progress component with a counted act.
+    pub entries: Vec<(String, i32)>,
+    /// The Ready components to list when the quest has no Progress components; the text is the
+    /// locale's `report_alias` / `talk_report_npc` / `find_report_doodad`.
+    pub ready_components: u32,
+    /// What those locale texts' `[~qst_...~]` macros resolve to (empty with Progress components).
+    pub report: ReadyReport,
+}
+
+/// The report target the `[~qst_report_alias~]` / `[~qst_report_npc_name~]` /
+/// `[~qst_report_doodad_name~]` macros resolve to (`FUN_392dd880`, `FUN_392dd910`, `FUN_392dd970`);
+/// an empty string is a macro that does not resolve.
+#[derive(Default)]
+pub struct ReadyReport {
+    /// The alias of the first `ConReportNpc` act when it uses one, else of the first
+    /// `ConReportDoodad` act (`FUN_397d44f0`, `FUN_397d45c0`).
+    pub alias: String,
+    /// The name of the first `ConReportNpc` act's NPC (`FUN_397d4490`).
+    pub npc: String,
+    /// The name of the first `ConReportDoodad` act's doodad (`FUN_397d4560`).
+    pub doodad: String,
 }
 
 /// What the requirements read of the player.
@@ -378,7 +417,7 @@ impl QuestTables {
         {
             let mut q = conn.prepare(
                 "SELECT tbl_name, tbl_column_name, idx, en_us FROM localized_texts WHERE en_us IS NOT NULL AND en_us <> '' AND (\
-                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties','quest_mails') AND tbl_column_name = 'name') OR \
+                 (tbl_name IN ('quest_contexts','quest_categories','quest_act_obj_aliases','quest_monster_groups','doodad_almighties','quest_mails','quest_names') AND tbl_column_name = 'name') OR \
                  (tbl_name = 'quest_component_texts' AND tbl_column_name = 'text') OR \
                  (tbl_name = 'quest_chat_bubbles' AND tbl_column_name IN ('speech','change_speaker_name')))",
             )?;
@@ -408,7 +447,7 @@ impl QuestTables {
         }
         {
             let mut q = conn.prepare(
-                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, zone_id, use_quest_camera, score FROM quest_contexts",
+                "SELECT id, name, category_id, LEVEL, REPEATABLE, selective, let_it_done, detail_id, chapter_idx, quest_idx, zone_id, use_quest_camera, score FROM quest_contexts",
             )?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
@@ -427,38 +466,68 @@ impl QuestTables {
                         let_it_done: any_flag(r, 6)?,
                         detail: any_int(r, 7)? as u32,
                         chapter: any_int(r, 8)? as u32,
-                        zone_id: any_int(r, 9)? as u32,
-                        use_quest_camera: any_flag(r, 10)?,
-                        score: any_int(r, 11)?.max(0) as u32,
+                        quest_idx: any_int(r, 9)? as u32,
+                        zone_id: any_int(r, 10)? as u32,
+                        use_quest_camera: any_flag(r, 11)?,
+                        score: any_int(r, 12)?.max(0) as u32,
                         repeatable: t.repeatable.contains(&id),
                         components: Vec::new(),
                     },
                 );
             }
         }
+        // `quest_names` kind 2 is the score quest's objective line (`FUN_397d4660`).
+        if let Ok(mut q) = conn.prepare("SELECT id, quest_context_id, quest_name_kind_id, name FROM quest_names ORDER BY id") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if any_int(r, 2)? != 2 {
+                    continue;
+                }
+                let id = any_int(r, 0)? as u32;
+                let fallback: Option<String> = r.get(3)?;
+                t.score_objectives.insert(any_int(r, 1)? as u32, en("quest_names", id).or(fallback).unwrap_or_default());
+            }
+        }
         {
-            let mut q = conn.prepare("SELECT id, quest_context_id, component_kind_id, or_unit_reqs, hide_quest_marker FROM quest_components ORDER BY quest_context_id, component_kind_id, id")?;
+            let mut q = conn.prepare("SELECT id, quest_context_id, component_kind_id, or_unit_reqs, hide_quest_marker, skill_id FROM quest_components ORDER BY quest_context_id, component_kind_id, id")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let (id, quest, kind) = (any_int(r, 0)? as u32, any_int(r, 1)? as u32, any_int(r, 2)? as u8);
                 if kind == kind::START {
                     t.components.insert(id, StartComponent { quest, any_req: any_flag(r, 3)?, hidden: any_flag(r, 4)?, reqs: Vec::new() });
                 }
-                t.parts.insert(id, ComponentDef { id, quest, kind, ..ComponentDef::default() });
+                t.parts.insert(id, ComponentDef { id, quest, kind, skill: any_int(r, 5)? as u32, ..ComponentDef::default() });
                 if let Some(d) = t.defs.get_mut(&quest) {
                     d.components.push(id);
                 }
             }
         }
         if let Ok(mut q) = conn.prepare(
-            "SELECT qc.id, c.name, qc.play_cinema_before_bubble FROM quest_components qc JOIN cinemas c ON c.id = qc.cinema_id",
+            "SELECT qc.id, c.name, qc.play_cinema_before_bubble, c.replay FROM quest_components qc JOIN cinemas c ON c.id = qc.cinema_id",
         ) {
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 let id = any_int(r, 0)? as u32;
                 if let Some(c) = t.parts.get_mut(&id) {
-                    c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)? });
+                    c.cinema = Some(CinemaDef { name: r.get(1)?, before_bubble: any_flag(r, 2)?, replay: any_flag(r, 3)? });
                 }
+            }
+        }
+        // `FUN_393780a0`: a replay component without `cinema_id` uses the first CinemaEffect of its
+        // skill (skill_effects -> effects.actual_id -> cinema_effects.cinema_id -> cinemas).
+        if let Ok(mut q) = conn.prepare(
+            "SELECT se.skill_id, c.name, c.replay FROM skill_effects se \
+             JOIN effects e ON e.id = se.effect_id \
+             JOIN cinema_effects ce ON ce.id = e.actual_id \
+             JOIN cinemas c ON c.id = ce.cinema_id \
+             WHERE e.actual_type = 'CinemaEffect' ORDER BY se.skill_id, se.id",
+        ) {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                let skill = any_int(r, 0)? as u32;
+                t.skill_cinemas
+                    .entry(skill)
+                    .or_insert(CinemaDef { name: r.get(1)?, before_bubble: false, replay: any_flag(r, 2)? });
             }
         }
         // the detail rows of every act type
@@ -765,6 +834,154 @@ impl QuestTables {
             })
     }
 
+    /// `X2Quest.IsScoreQuest` (`FUN_397d3600`): `quest_contexts.score` is above 0.
+    pub fn is_score(&self, quest: u32) -> bool {
+        self.defs.get(&quest).is_some_and(|def| def.score > 0)
+    }
+
+    /// `X2Quest.GetScoreQuestCurrentScore` (`FUN_3949cb00` -> `FUN_397d5c10`): the counters of the
+    /// active quest multiplied by each Progress component's first counted act's amount. The native
+    /// does not test the score, so a quest with those act types can answer above 0 without being a
+    /// score quest; an inactive or unknown quest has no counter and the caller answers 0.
+    pub fn score_current(&self, q: &Quest) -> i64 {
+        self.score(q)
+    }
+
+    /// `X2Quest.GetScoreQuestDoneScore` (`FUN_3949cc10`): `quest_contexts.score`, 0 for an unknown
+    /// quest or one without a score.
+    pub fn score_required(&self, quest: u32) -> i64 {
+        self.defs.get(&quest).map_or(0, |def| i64::from(def.score))
+    }
+
+    /// `X2Quest.GetScoreQuestObjective` (`FUN_3949ca70` -> `FUN_397d4660`): the `quest_names` row with
+    /// `quest_name_kind_id` 2, or the empty string. The native only searches a quest whose score is
+    /// above 0.
+    pub fn score_objective(&self, quest: u32) -> String {
+        if !self.is_score(quest) {
+            return String::new();
+        }
+        self.score_objectives.get(&quest).cloned().unwrap_or_default()
+    }
+
+    /// `X2Quest.GetLinkedQuestSummary` (`FUN_394a4dc0`): the first Progress component's kind-4 text,
+    /// else the first Ready component's, with its macros expanded: the native copies the text
+    /// (`FUN_3901aa10`) and runs the macro expander (`FUN_39435050`) before pushing the result.
+    pub fn linked_summary(&self, quest: u32, texts: &Texts) -> Option<String> {
+        if !self.defs.contains_key(&quest) {
+            return None;
+        }
+        self.parts_of(quest, kind::PROGRESS)
+            .find_map(|c| c.texts.first().map(|t| texts.expand(t)))
+            .or_else(|| self.parts_of(quest, kind::READY).find_map(|c| c.texts.first().map(|t| texts.expand(t))))
+    }
+
+    /// `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`): one `{obj, count}` row per Progress
+    /// component with a counted act. A quest without Progress components lists its Ready components
+    /// instead (the caller supplies the locale's report text from `report`, count 0).
+    pub fn linked_objectives(&self, quest: u32, texts: &Texts) -> Option<LinkedObjectives> {
+        if !self.defs.contains_key(&quest) {
+            return None;
+        }
+        let mut progress = self.parts_of(quest, kind::PROGRESS).peekable();
+        if progress.peek().is_none() {
+            return Some(LinkedObjectives {
+                entries: Vec::new(),
+                ready_components: self.parts_of(quest, kind::READY).count() as u32,
+                report: self.ready_report(quest, texts),
+            });
+        }
+        let mut entries = Vec::new();
+        for c in progress {
+            let Some(a) = self.counted_act(c) else { continue };
+            let base = self
+                .aliases
+                .get(&a.alias)
+                .filter(|_| a.alias != 0)
+                .map(|s| texts.expand(s))
+                .or_else(|| c.main_text().map(|t| texts.expand(t)))
+                .unwrap_or_else(|| texts.describe(a));
+            entries.push((base, Self::native_act_count(a)));
+        }
+        Some(LinkedObjectives { entries, ready_components: 0, report: ReadyReport::default() })
+    }
+
+    /// The first act of type `ty` among the quest's Ready components (`FUN_397d4490` and its
+    /// siblings walk the kind-6 components in order).
+    fn first_ready_act(&self, quest: u32, ty: &str) -> Option<&ActDef> {
+        self.parts_of(quest, kind::READY).flat_map(|c| &c.acts).find(|a| a.ty == ty)
+    }
+
+    /// The quest's report target for the `[~qst_report_...~]` macros (see [`ReadyReport`]).
+    fn ready_report(&self, quest: u32, texts: &Texts) -> ReadyReport {
+        let npc_act = self.first_ready_act(quest, "ConReportNpc");
+        let doodad_act = self.first_ready_act(quest, "ConReportDoodad");
+        // `alias` is already 0 when the detail's `use_alias` is not set
+        let alias_of = |a: Option<&ActDef>| a.filter(|a| a.alias != 0).and_then(|a| self.aliases.get(&a.alias)).map(|s| texts.expand(s));
+        ReadyReport {
+            alias: alias_of(npc_act).or_else(|| alias_of(doodad_act)).unwrap_or_default(),
+            npc: npc_act.and_then(|a| texts.game.npcs.get(&a.target)).map(|n| n.name.clone()).unwrap_or_default(),
+            doodad: doodad_act.and_then(|a| self.doodads.get(&a.target)).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// `X2Quest.GetFirstObjectiveCount` (`FUN_394a4c30`): the amount of the first Progress
+    /// component's first counted act (`FUN_397d5b90` -> `FUN_397d3440`, see
+    /// `native_act_count`). The act types `FUN_397d3440` does not handle count 0.
+    pub fn first_objective_count(&self, quest: u32) -> i32 {
+        let Some(c) = self.parts_of(quest, kind::PROGRESS).next() else { return 0 };
+        self.counted_act(c).map_or(0, Self::native_act_count)
+    }
+
+    /// `X2Quest.GetObjectiveComponentCount` (`FUN_394a4ae0`): the Progress components of the quest.
+    pub fn objective_component_count(&self, quest: u32) -> u32 {
+        self.parts_of(quest, kind::PROGRESS).count() as u32
+    }
+
+    /// The cinema of a component for the replay list: its own `cinema_id`, else (when it has none)
+    /// the first `CinemaEffect` of its skill (`FUN_393780a0`).
+    fn replay_cinema<'a>(&'a self, c: &'a ComponentDef) -> Option<&'a CinemaDef> {
+        c.cinema.as_ref().or_else(|| self.skill_cinemas.get(&c.skill))
+    }
+
+    /// The replay cinemas of `quest`, in component order: `FUN_3937b540` walks a completed main
+    /// quest's components and appends each `cinemas.replay` movie.
+    pub fn replay_cinemas(&self, quest: u32) -> Vec<String> {
+        let Some(def) = self.defs.get(&quest) else { return Vec::new() };
+        if !def.is_main() {
+            return Vec::new();
+        }
+        def.components
+            .iter()
+            .filter_map(|id| self.parts.get(id))
+            .filter_map(|c| self.replay_cinema(c))
+            .filter(|c| c.replay)
+            .map(|c| c.name.clone())
+            .collect()
+    }
+
+    /// `X2Quest.GetMainQuestCutSceneReplayList` (`FUN_39378e10`): every completed main quest whose
+    /// component has a `cinemas.replay` movie, as `(quest id, cinema name)`. `FUN_3937c940`
+    /// rebuilds the vector from the completed blocks and `FUN_39377f30` sorts it by
+    /// `(chapter_idx, quest_idx)`; the stable sort keeps a quest's components in order. The native
+    /// appends in template-table order (ascending quest id here), so ties keep that order: exact for
+    /// 32 entries or fewer, where its `std::sort` is an insertion sort; above that the native's
+    /// introsort is not reproduced.
+    pub fn replay_list(&self, completed: &[aa_net::quest::CompletedBlock]) -> Vec<(u32, String)> {
+        let mut out = Vec::new();
+        let mut ids: Vec<u32> = self.defs.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            if !completed.iter().any(|b| b.has(id)) {
+                continue;
+            }
+            for cinema in self.replay_cinemas(id) {
+                out.push((id, cinema));
+            }
+        }
+        out.sort_by_key(|(id, _)| self.defs.get(id).map_or((0, 0), |d| (d.chapter, d.quest_idx)));
+        out
+    }
+
     /// `FUN_397d42d0` of a quest's Ready component: whether it has a `QuestActConReportNpc` (0x14) or
     /// `QuestActConReportDoodad` (0x15) act. This is the flag of a `COMPLETE_QUEST_CONTEXT_DOODAD`
     /// event.
@@ -999,6 +1216,17 @@ impl QuestTables {
     /// The first act in `FUN_397d5b90`'s counted set (the set `FUN_397d6640` builds).
     fn counted_act<'a>(&self, c: &'a ComponentDef) -> Option<&'a ActDef> {
         c.acts.iter().find(|a| Self::native_counted(&a.ty))
+    }
+
+    /// `FUN_397d3440`: the act's amount. Only the act types in its switch have one (0 MonsterHunt,
+    /// 1 MonsterGroupHunt, 2 ItemGather, 4 ItemUse, 5 Interaction, 0x31 ZoneKill = `count_pk +
+    /// count_npc`, already summed by the loader, and 0x32 Craft); the rest answer 0.
+    fn native_act_count(a: &ActDef) -> i32 {
+        match a.ty.as_str() {
+            "ObjMonsterHunt" | "ObjMonsterGroupHunt" | "ObjItemGather" | "ObjItemUse" | "ObjInteraction"
+            | "ObjZoneKill" | "ObjCraft" => a.count.max(0),
+            _ => 0,
+        }
     }
 
     /// The component's slot among the template's kind-4 components (`FUN_397d4360`); only the first
@@ -1295,13 +1523,25 @@ mod tests {
         // 1065 "Evacuation Protocol": the Ready component 5336 reports through cinema 17 (fly_east)
         if let Some(c) = t.parts.get(&5336) {
             assert_eq!(c.quest, 1065);
-            assert_eq!(c.cinema, Some(CinemaDef { name: "fly_east".to_string(), before_bubble: false }));
+            assert_eq!(c.cinema, Some(CinemaDef { name: "fly_east".to_string(), before_bubble: false, replay: false }));
         }
         // 2246: the Start component 10186 plays zq_20_karl
         if let Some(c) = t.parts.get(&10186) {
             assert_eq!(c.quest, 2246);
-            assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false }));
+            assert_eq!(c.cinema, Some(CinemaDef { name: "zq_20_karl".to_string(), before_bubble: false, replay: false }));
         }
+    }
+
+    #[test]
+    fn a_replay_component_without_a_cinema_uses_its_skills_cinema_effect() {
+        let Some(t) = tables() else { return };
+        // Quest 3556's Ready component 17120 has no cinema_id but skill 17610, whose CinemaEffect
+        // leads to cinema 121 "sl_ha_024" (replay).
+        let c = t.parts.get(&17120).expect("quest 3556 has component 17120");
+        assert_eq!((c.quest, c.kind, c.skill, c.cinema.clone()), (3556, kind::READY, 17610, None));
+        assert_eq!(t.replay_cinemas(3556), vec!["sl_ha_024".to_string()]);
+        let block = CompletedBlock { id: (3556 / 64) as u16, bits: 1 << (3556 % 64) };
+        assert_eq!(t.replay_list(std::slice::from_ref(&block)), vec![(3556, "sl_ha_024".to_string())]);
     }
 
     #[test]
