@@ -1616,7 +1616,7 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
         "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;\
          X2DialogManager.RequestTaskDialog=function(self,task,info,owner)\
            local wnd=original(self,task,info,owner);\
-           PURCHASE={task=task,itemCount=info.itemCount,money=info.moneyString,wnd=wnd}; return wnd end",
+           PURCHASE={task=task,itemCount=info.itemCount,money=info.moneyString,item=info.itemInfo,wnd=wnd}; return wnd end",
     )
     .unwrap();
     tick(&money);
@@ -1637,6 +1637,18 @@ fn the_purchase_dialog_confirms_with_the_native_packets() {
             .unwrap()
             .as_boolean()
             .unwrap_or(false)
+    );
+    // `FUN_393b9080`: the full item info (`tips::item_tip`), not a name-only stub
+    assert_eq!(
+        lua(&money, "return PURCHASE.item.itemType").unwrap().as_integer(),
+        Some(23_614)
+    );
+    assert_eq!(
+        lua(&money, "return PURCHASE.item.isPetOnly ~= nil")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the item info is the stub"
     );
     lua(&money, "PURCHASE.wnd.OkProc()").unwrap();
     money.update();

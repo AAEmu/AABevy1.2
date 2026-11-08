@@ -755,13 +755,37 @@ fn open_purchase(rt: &UiRuntime, bridge: &Shared, obj_id: u32, func_id: u32, ord
         Ok(t) => t,
         Err(_) => return,
     };
-    let item = lua.create_table().ok();
-    let Some(item) = item else { return };
-    let _ = item.set("name", item_name);
-    let _ = item.set("itemType", order.item);
-    let _ = item.set("lookType", order.item);
-    let _ = item.set("itemGrade", 0);
-    let _ = item.set("gradeColor", "FFFFFFFF");
+    // `FUN_393b9080` / `FUN_393b92a0` fill `itemInfo` with the full item info (`FUN_39421e20` over
+    // `FUN_3941a130(item, grade)`), what `dialog_handler.alb` hands to the icon and its tooltip.
+    let tip = {
+        let d = bridge.borrow();
+        d.game.get().and_then(|game| {
+            super::super::tips::item_tip(
+                lua,
+                game,
+                &d.tips,
+                order.item,
+                None,
+                Some(i64::from(order.count)),
+                super::super::tips::Instance::default(),
+            )
+            .ok()
+            .flatten()
+        })
+    };
+    let item = match tip {
+        Some(item) => item,
+        None => {
+            // no game data or no template: the name and ids only
+            let Ok(item) = lua.create_table() else { return };
+            let _ = item.set("name", item_name);
+            let _ = item.set("itemType", order.item);
+            let _ = item.set("lookType", order.item);
+            let _ = item.set("itemGrade", 0);
+            let _ = item.set("gradeColor", "FFFFFFFF");
+            item
+        }
+    };
     let _ = info.set("itemInfo", item);
     let _ = info.set("itemCount", order.count);
     if task == TASK_PURCHASE {
