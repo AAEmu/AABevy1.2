@@ -17,7 +17,8 @@
 //! 6. the range, from the skill or from the weapon in the hand (`TOO_FAR_RANGE` / `TOO_CLOSE_RANGE`);
 //! 7. mana, labor points.
 //!
-//! The own cooldown comes last ([`Env::cooldown`]): the sweep already shows it, so it does not darken the icon. Unknown skills and
+//! The own cooldown comes last ([`Env::cooldown`]): the sweep already shows it, so it does not darken the icon. Before a send it
+//! is asked ahead of the mana, as `FUN_390b7b00` does ([`Env::precheck`]). Unknown skills and
 //! rules without data pass: the server has the last word and its refusal is shown too (`refusal.rs`).
 //!
 //! Before any of that a press can be held back ([`Env::held_back`]): the skill is being cast, the global cooldown has not run
@@ -768,7 +769,8 @@ impl Env<'_> {
 
     /// What the client refuses before it asks the server: everything that darkens the slot ([`Env::slot_blocked`]), except
     /// that a target a little over the reach is left to the server (it knows the size of the bodies), and the skill's own
-    /// cooldown (the sweep shows it, the slot stays lit). A linked skill is checked as the converted skill it will cast; a
+    /// cooldown (the sweep shows it, the slot stays lit), which comes before the mana (`LACK_MANA` only once the cooldown is
+    /// over, the native order). A linked skill is checked as the converted skill it will cast; a
     /// missing linked item stays the shared route's 326 (not a `SkillResult`), while `slot_blocked` darkens the slot. A
     /// linked item whose use skill is 0 is refused here (the slot's `URK_EQUIP_ITEM`), so no skill 0 is sent.
     pub fn precheck(&self, skill: u32) -> Option<Fail> {
@@ -781,7 +783,12 @@ impl Env<'_> {
             _ => {}
         }
         let skill = self.effective_skill(skill);
-        self.why_not(skill, SEND_SLACK).or_else(|| self.cooldown(skill))
+        // `FUN_390b7b00` asks the own cooldown (390B7D51) before the mana (390B7D7E); the other rules keep their place
+        match self.why_not(skill, SEND_SLACK) {
+            Some(f) if f.result == code::LACK_MANA => self.cooldown(skill).or(Some(f)),
+            None => self.cooldown(skill),
+            other => other,
+        }
     }
 
     /// What refuses a basic attack before it is sent. The 1.2 skill 2 path (`FUN_393989e0`) checks a valid auto attack
@@ -1739,6 +1746,14 @@ mod tests {
             Some(fail(code::COOLDOWN_TIME)),
             "after the GCD the skill's own cooldown is COOLDOWN_TIME (detail 1)"
         );
+        // too little mana with the own cooldown running: the cooldown comes first (`FUN_390b7b00` 390B7D51 before
+        // the cost check at 390B7D7E), the mana only once the cooldown is over
+        let mut poor = gcd_game();
+        poor.skills.get_mut(&2).unwrap().cooldown_ms = 12_000;
+        poor.rules.skills.get_mut(&2).unwrap().mana = 50.0;
+        let broke = Snapshot { mp: 10, ..me() };
+        assert_eq!(Env { skills: Some(&after_gcd), ..env(&poor, &broke, None, 0.0) }.precheck(2), Some(fail(code::COOLDOWN_TIME)));
+        assert_eq!(Env { skills: Some(&cast_ago(Duration::from_secs(2))), ..env(&poor, &broke, None, 0.0) }.precheck(2), Some(fail(code::LACK_MANA)));
     }
 
     #[test]

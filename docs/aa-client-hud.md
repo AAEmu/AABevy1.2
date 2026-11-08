@@ -403,7 +403,9 @@ An item slot is dark when its stack is empty or its use skill is (a potion goes 
 global cooldown are not reasons: their sweeps show them.
 
 Before it sends `UseSkill` / `UseItem`, `use_slot` / `use_bag_slot` ask the same rules (`Env::precheck`): a use that cannot work is
-not sent and says why. The shared `ground_target::route` then applies the 1.2 linked-item rule (`FUN_393925c0`,
+not sent and says why; the skill's own cooldown (`COOLDOWN_TIME`) is asked there too, ahead of the mana as `FUN_390b7b00` does
+(the cooldown at 390B7D51, the cost at 390B7D7E), so a skill on its cooldown with too little mana says "Can't be used right now."
+whether or not the GCD runs. The shared `ground_target::route` then applies the 1.2 linked-item rule (`FUN_393925c0`,
 `ingame::linked_skill`): a skill with `skills.link_equip_slot_id` (14901 "Use Glider") is cast as the equipped item's use skill
 with the item as caster, and an empty slot, an unknown item template (743838-743839) or a wrong-type slot raises the local 326
 `MUST_EQUIP_PROPER_ITEM` with no packet. This
