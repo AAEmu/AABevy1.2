@@ -199,6 +199,10 @@ pub struct DialogView {
     pointer_talk: Option<PointerTalk>,
     /// The last `QuestContextRestart` attempt, for the native 3 s throttle (`DAT_39ac7598`).
     pub restart_at: Option<Instant>,
+    /// `byte_3a173744`: `FUN_3937b200` sets it for an active, not completed quest before the
+    /// throttle and the error 5 / 0xc checks; the next Started raises `QUEST_CHAT_RESTART` and
+    /// clears it (`FUN_3937b5b0`).
+    pub restart_pending: bool,
     /// The walk to a right-clicked NPC beyond the interaction reach ([`Approach`]).
     pub(super) approach: Option<Approach>,
     npc_flow: npc::Flow,
@@ -1557,7 +1561,20 @@ pub fn route_quest_notices(
     let Some(rt) = rt else { return };
     for NetEvent(e) in events.read() {
         match e {
-            Event::QuestStarted(q) => start_quest_clock(&bridge.0, q, q.time_left_ms, Instant::now()),
+            Event::QuestStarted(q) => {
+                start_quest_clock(&bridge.0, q, q.time_left_ms, Instant::now());
+                // FUN_3937b5b0: after a restart attempt the Started raises QUEST_CHAT_RESTART (246)
+                // in place of the start component's follow-up (FUN_39378580, not modelled). A hidden
+                // quest (detail 5, FUN_397d3540) takes the other branch and leaves the flag set.
+                let restart = {
+                    let mut d = bridge.0.borrow_mut();
+                    let hidden = d.game.get().and_then(|g| g.quests.def(q.template_id)).is_some_and(|def| def.is_hidden());
+                    !hidden && std::mem::take(&mut d.dialog.restart_pending)
+                };
+                if restart {
+                    rt.fire_event("QUEST_CHAT_RESTART", ());
+                }
+            }
             Event::QuestUpdated(q) => {
                 // 723452: a status other than in progress calls FUN_3937b240(qtype, -1), which the
                 // next tick removes and publishes as (qtype, 0).
@@ -1887,6 +1904,8 @@ pub fn handle_dialog(
                 if world.quests.active_quest(quest_id).is_none_or(|q| q.status == status::COMPLETED) {
                     continue;
                 }
+                // `byte_3a173744`, set even when the throttle or an error refuses the send.
+                d.dialog.restart_pending = true;
                 let now = Instant::now();
                 if d.dialog.restart_at.is_some_and(|at| now.duration_since(at) < Duration::from_secs(3)) {
                     continue;
@@ -3921,6 +3940,30 @@ mod tests {
     }
 
     #[test]
+    fn the_started_after_a_restart_raises_quest_chat_restart_once() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        app.world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load("RESTARTS=0;local w=UIParent:CreateWidget('emptywidget','questRestartProbe','UIParent');w:Show(true);w:SetHandler('OnEvent',function() RESTARTS=RESTARTS+1 end);w:RegisterEvent('QUEST_CHAT_RESTART')")
+            .exec()
+            .unwrap();
+        let count = |app: &mut App| app.world_mut().non_send::<aa_ui::UiRuntime>().lua.load("return RESTARTS").eval::<i64>().unwrap();
+        let q = Quest { id: 77, ..timed(60_000) };
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        assert_eq!(count(&mut app), 0, "a plain Started is a fresh accept");
+        shared.borrow_mut().dialog.restart_pending = true;
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        assert_eq!(count(&mut app), 1, "FUN_3937b5b0 raises 246 for the restart");
+        assert!(!shared.borrow().dialog.restart_pending, "and clears byte_3a173744");
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q)));
+        app.update();
+        assert_eq!(count(&mut app), 1);
+    }
+
+    #[test]
     fn an_updated_status_change_hides_the_clock_on_the_next_tick() {
         let Some((mut app, shared)) = quest_notice_app() else { return };
         let q = Quest { id: 77, ..timed(60_000) };
@@ -4295,6 +4338,8 @@ mod tests {
             sent_requests(&mut app),
             [Interact::RestartMainQuest { quest_id: main }]
         );
+        assert!(shared.borrow().dialog.restart_pending, "FUN_3937b200 sets byte_3a173744");
+        shared.borrow_mut().dialog.restart_pending = false;
         // The native throttle (`DAT_39ac7598`) holds the next try for 3 s.
         app.world_mut()
             .non_send::<aa_ui::UiRuntime>()
@@ -4304,6 +4349,7 @@ mod tests {
             .unwrap();
         app.update();
         assert!(sent_requests(&mut app).is_empty());
+        assert!(shared.borrow().dialog.restart_pending, "the flag is set before the throttle refuses");
     }
 
     #[test]
@@ -4434,6 +4480,7 @@ mod tests {
                 assert(type(X2Quest:GetQuestContextRewardAppellation(11)) == 'table')
                 assert(X2Quest:GetUseTypeQuestItems(13, true)[1] == 8, 'completed repeatable keeps its items')
                 assert(X2Quest:GetUseTypeQuestItems(11, true)[1] == 7)
+                assert(X2Quest:GetUseTypeQuestItems(12, true) == nil, 'an empty list is nil (FUN_394a55a0)')
                 assert(X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) ~= nil)
                 assert(#X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) == 0, 'unknown template is an empty table')
                 "#,

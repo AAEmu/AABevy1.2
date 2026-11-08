@@ -9,6 +9,9 @@
 //! * `--record <dir>`     write one PNG per frame (`f_000001.png`, ...) at a fixed timestep, then exit: see [`record`]
 //!   (`--record-fps 30`, `--record-from S` game seconds before the first frame, `--record-secs N` length,
 //!   `--record-gate` count `--record-from` from [`RecordGate::open`] instead of from the start)
+//! * `--video <out.mp4>`  wall-clock video of the primary window through `ffmpeg`, frames taken from inside the app:
+//!   `--video-fps 30`, `--ffmpeg <path>` (else `FFMPEG`, else PATH), `--video-gate` start at [`RecordGate::open`] /
+//!   [`open_video_gate`]; writes `out.mp4`, `out.mp4.json` and `video.json`; see [`video`]. Not with `--record` or `--headless`
 //! * `--headless`         no OS window and no GPU: the primary `Window` is only a component (the UI needs its size),
 //!   the schedule loop runs at `--headless-fps N` (default 30) and the game logic, `aa-net`, the Lua UI and the HUD run
 //!   as usual. `--shot` is not possible then; see `--offscreen-shot`
@@ -37,9 +40,11 @@ pub mod capture;
 pub mod clock;
 mod headless;
 mod record;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod video;
 pub use clock::{ClockAudit, ClockMode};
 pub use headless::{OffscreenTarget, SCRIPTED, take_offscreen_shot};
-pub use record::RecordGate;
+pub use record::{GATE_MARK, RecordGate, open_video_gate};
 
 /// Parsed command line options.
 #[derive(Resource, Clone, Debug)]
@@ -62,6 +67,14 @@ pub struct DevArgs {
     pub offscreen_shot: Option<String>,
     /// `--require-wall-clock`: exit non-zero when game time does not run at wall rate (see [`clock`]).
     pub require_wall_clock: bool,
+    /// `--video <out.mp4>`: wall-clock video capture through ffmpeg (not in the browser), see `video`.
+    pub video: Option<String>,
+    /// `--video-fps N`: the video's frame rate (default 30).
+    pub video_fps: u32,
+    /// `--ffmpeg <path>`: the ffmpeg to run (default: the `FFMPEG` variable, else `ffmpeg`).
+    pub ffmpeg: String,
+    /// `--video-gate`: the video starts when the gate opens ([`RecordGate::open`], [`open_video_gate`]), not at the first frame.
+    pub video_gate: bool,
 }
 
 /// The command line flags: `std::env::args` natively; in the browser built from the page URL's query string, so
@@ -139,6 +152,10 @@ impl DevArgs {
             headless_fps: value("--headless-fps").and_then(|s| s.parse().ok()).unwrap_or(30.0),
             offscreen_shot: value("--offscreen-shot"),
             require_wall_clock: args.iter().any(|a| a == "--require-wall-clock"),
+            video: value("--video"),
+            video_fps: value("--video-fps").and_then(|s| s.parse().ok()).unwrap_or(30).clamp(1, 240),
+            ffmpeg: value("--ffmpeg").or_else(|| std::env::var("FFMPEG").ok()).filter(|s| !s.is_empty()).unwrap_or_else(|| "ffmpeg".into()),
+            video_gate: args.iter().any(|a| a == "--video-gate"),
         };
         // No file system, no second window and no GPU-less mode in the browser.
         #[cfg(target_arch = "wasm32")]
@@ -147,6 +164,7 @@ impl DevArgs {
             args.record = None;
             args.headless = false;
             args.offscreen_shot = None;
+            args.video = None;
         }
         args
     }
@@ -166,6 +184,8 @@ pub fn default_plugins_with_log(
     custom_layer: fn(&mut App) -> Option<bevy::log::BoxedLayer>,
 ) -> impl PluginGroup {
     let args = DevArgs::from_env();
+    #[cfg(not(target_arch = "wasm32"))]
+    video::check(&args);
     let window = Window {
         title: title.to_string(),
         // One window pixel per image pixel whatever the desktop scaling, so screenshots are
@@ -215,6 +235,7 @@ impl Plugin for DevPlugin {
             && (args.shot.is_some()
                 || args.exit_after.is_some()
                 || args.record.is_some()
+                || args.video.is_some()
                 || args.require_wall_clock)
         {
             // Unattended runs usually have no focus; don't let Bevy cap them at 60 Hz, or the
@@ -228,6 +249,8 @@ impl Plugin for DevPlugin {
         clock::plugin(app, require_wall_clock);
         record::plugin(app);
         headless::plugin(app);
+        #[cfg(not(target_arch = "wasm32"))]
+        video::plugin(app);
     }
 }
 

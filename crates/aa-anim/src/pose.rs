@@ -239,6 +239,9 @@ impl Pose {
 pub struct BoundClip {
     /// Normalized pak path when bound by [`crate::ClipLibrary`]. Raw in-memory clips have none.
     pub source: Option<Arc<str>>,
+    /// The `.cal` animation name (lower case) the caller bound the clip by. Set only while [`crate::trace`] is on, for the
+    /// skill trace; `None` otherwise.
+    pub name: Option<Arc<str>>,
     pub clip: Arc<Clip>,
     pub binding: Arc<ClipBinding>,
     pub options: SampleOptions,
@@ -247,7 +250,7 @@ pub struct BoundClip {
 impl BoundClip {
     pub fn new(rig: &Rig, clip: Arc<Clip>, options: SampleOptions) -> BoundClip {
         let binding = Arc::new(rig.bind_clip(&clip));
-        BoundClip { source: None, clip, binding, options }
+        BoundClip { source: None, name: None, clip, binding, options }
     }
 }
 

@@ -77,7 +77,8 @@ pub struct WorldConfig {
     pub shadows: bool,
     /// Shadow distance (m).
     pub shadow_distance: f32,
-    /// Lux per unit of `Sun color * multiplier` luminance (noon is about 6).
+    /// Lux per unit of `Sun color * multiplier` luminance (noon is about 6). With the ambient light of `AtmosphereTuning` it gives
+    /// the engine's shadow depth: shade is 0.2 to 0.3 of the sunlit ground (1.2 client at spec 4, zone 179).
     pub sun_lux_scale: f32,
     /// Ambient brightness per unit of sky / ground colour luminance.
     pub ambient_scale: f32,
@@ -124,7 +125,7 @@ impl WorldConfig {
             sky_radius: 9000.0,
             shadows: true,
             shadow_distance: 300.0,
-            sun_lux_scale: 1000.0,
+            sun_lux_scale: 2000.0,
             ambient_scale: 1700.0,
             fog_visibility: 2500.0,
             terrain_tint: Vec3::new(1.75, 1.75, 1.65),

@@ -22,6 +22,7 @@ use bevy::prelude::*;
 use crate::caf::Clip;
 use crate::pose::{BoneMask, BoundClip, ClipBinding, Pose, Rig, SampleOptions};
 use crate::rope::RopeSim;
+use crate::trace::{self, ClipStart};
 
 /// One clip being played.
 #[derive(Clone, Debug)]
@@ -65,20 +66,83 @@ impl Playing {
 }
 
 /// Plays `variants` now and then while the idle loops: after `every_loops` loops of the idle
-/// (jittered), one random variant runs once, then the idle resumes.
+/// (jittered), one random variant runs once, then the idle resumes. [`RandomIdle::every_secs`] counts seconds instead.
 #[derive(Clone, Debug)]
 pub struct RandomIdle {
     pub variants: Vec<BoundClip>,
     pub every_loops: u32,
     seed: u32,
     countdown: u32,
+    /// Seconds of the idle between variants (not jittered), instead of loops.
+    every_secs: Option<f32>,
+    /// Seconds the idle has looped since the last variant (seconds mode).
+    idle_time: f32,
+    /// The cross-fades into a variant and back to the idle.
+    blend_in: f32,
+    blend_out: f32,
+    /// The variant played last (seconds mode picks another one).
+    last: Option<usize>,
 }
 
 impl RandomIdle {
     pub fn new(variants: Vec<BoundClip>, every_loops: u32, seed: u32) -> RandomIdle {
-        let mut r = RandomIdle { variants, every_loops: every_loops.max(1), seed: seed.wrapping_mul(2654435761).wrapping_add(1), countdown: 0 };
+        let mut r = RandomIdle {
+            variants,
+            every_loops: every_loops.max(1),
+            seed: seed.wrapping_mul(2654435761).wrapping_add(1),
+            countdown: 0,
+            every_secs: None,
+            idle_time: 0.0,
+            blend_in: 0.25,
+            blend_out: 0.2,
+            last: None,
+        };
         r.countdown = r.next_countdown();
         r
+    }
+
+    /// A variant every `secs` seconds of the idle, never the one before again, faded in over `blend_in` and back to the idle over
+    /// `blend_out`: the 1.2 client's combat idle, a `*_ba_combat_idle_rand_1..5` 3.0 s after the idle (re)starts, 0.2 both ways.
+    pub fn every_secs(variants: Vec<BoundClip>, secs: f32, blend_in: f32, blend_out: f32, seed: u32) -> RandomIdle {
+        RandomIdle { every_secs: Some(secs.max(0.1)), blend_in, blend_out, ..RandomIdle::new(variants, 1, seed) }
+    }
+
+    /// The first variant comes `first` seconds into the idle instead of the interval (the 1.2 client's combat idle after an
+    /// action: 3.10-3.15 s, where it is 2.99-3.01 s after a variant).
+    pub fn first_after(mut self, first: f32) -> RandomIdle {
+        if let Some(secs) = self.every_secs {
+            self.idle_time = secs - first;
+        }
+        self
+    }
+
+    /// The variant to start now, if one is due: after `loops` loops of the idle, or `dt` more seconds of it.
+    fn due(&mut self, loops: u32, dt: f32) -> Option<usize> {
+        if self.variants.is_empty() {
+            return None;
+        }
+        match self.every_secs {
+            Some(secs) => {
+                self.idle_time += dt;
+                if self.idle_time < secs {
+                    return None;
+                }
+                self.idle_time = 0.0;
+                let n = self.variants.len();
+                let mut i = self.rand() as usize % n;
+                if n > 1 && Some(i) == self.last {
+                    i = (i + 1 + self.rand() as usize % (n - 1)) % n;
+                }
+                self.last = Some(i);
+                Some(i)
+            }
+            None if loops >= self.countdown => {
+                let i = self.rand() as usize % self.variants.len();
+                self.countdown = self.next_countdown();
+                Some(i)
+            }
+            None => None,
+        }
     }
 
     fn rand(&mut self) -> u32 {
@@ -142,6 +206,8 @@ pub struct Animator {
     pub current: Option<Playing>,
     /// Clip to start when `current` finishes (non-looping), usually the idle.
     pub then: Option<Playing>,
+    /// The cross-fade into `then` (0.2; a random idle's own way back).
+    then_fade: f32,
     pub random_idle: Option<RandomIdle>,
     /// Base clip playback speed multiplier. Cross-fades and the partial-body layer use real seconds.
     pub speed: f32,
@@ -162,6 +228,8 @@ pub struct Animator {
     base_idle: Option<Playing>,
     pose: Pose,
     scratch: Pose,
+    /// Clip starts not yet drained (only while [`crate::trace`] is on).
+    started: Vec<ClipStart>,
 }
 
 #[derive(Clone, Debug)]
@@ -187,6 +255,7 @@ impl Animator {
             bones,
             current: None,
             then: None,
+            then_fade: 0.2,
             random_idle: None,
             speed: 1.0,
             paused: false,
@@ -199,7 +268,18 @@ impl Animator {
             base_idle: None,
             pose,
             scratch,
+            started: Vec::new(),
         }
+    }
+
+    /// Whether [`Animator::take_starts`] has anything (a read, so the animator is not marked changed).
+    pub fn has_starts(&self) -> bool {
+        !self.started.is_empty()
+    }
+
+    /// The clips started since the last call, oldest first. Always empty unless [`crate::trace::enable`] was called.
+    pub fn take_starts(&mut self) -> Vec<ClipStart> {
+        std::mem::take(&mut self.started)
     }
 
     /// Sets the gameplay framehold: stops clip/transition clocks and rejects new starts.
@@ -226,12 +306,16 @@ impl Animator {
         } else {
             self.fade = None;
         }
+        if trace::enabled() {
+            self.started.push(ClipStart::of(&clip, trace::BASE, looping, fade));
+        }
         let p = Playing::new(clip, looping);
         if looping {
             self.base_idle = Some(p.clone());
         }
         self.current = Some(p);
         self.then = None;
+        self.then_fade = 0.2;
     }
 
     /// Plays `clip` once, then `after` (looping). Does nothing during gameplay framehold,
@@ -252,6 +336,9 @@ impl Animator {
     pub fn play_layer(&mut self, mask: BoneMask, clip: BoundClip, looping: bool, fade: f32) {
         if !self.starts_enabled() {
             return;
+        }
+        if trace::enabled() {
+            self.started.push(ClipStart::of(&clip, trace::UPPER, looping, fade));
         }
         let weight = self.layer.as_ref().map_or(0.0, |l| l.weight);
         self.layer = Some(Layer { mask, playing: Playing::new(clip, looping), fade, age: weight * fade, stopping: None, weight });
@@ -288,22 +375,27 @@ impl Animator {
             let mut start_variant = None;
             if cur.finished() {
                 if let Some(next) = self.then.take() {
-                    self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.2 });
+                    let fade = std::mem::replace(&mut self.then_fade, 0.2);
+                    if trace::enabled() {
+                        self.started.push(ClipStart::of(&next.clip, trace::BASE, next.looping, fade));
+                    }
+                    self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: fade });
                     *cur = next;
                 }
-            } else if cur.looping {
-                if let Some(ri) = &mut self.random_idle {
-                    if cur.loops >= ri.countdown && !ri.variants.is_empty() {
-                        let i = ri.rand() as usize % ri.variants.len();
-                        start_variant = Some(ri.variants[i].clone());
-                        ri.countdown = ri.next_countdown();
-                    }
-                }
+            } else if cur.looping
+                && let Some(ri) = &mut self.random_idle
+                && let Some(i) = ri.due(cur.loops, dt.abs())
+            {
+                start_variant = Some((ri.variants[i].clone(), ri.blend_in, ri.blend_out));
             }
-            if let (Some(v), Some(idle)) = (start_variant, self.base_idle.clone()) {
-                self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: 0.25 });
+            if let (Some((v, blend_in, blend_out)), Some(idle)) = (start_variant, self.base_idle.clone()) {
+                if trace::enabled() {
+                    self.started.push(ClipStart::of(&v, trace::BASE, false, blend_in));
+                }
+                self.fade = Some(Fade { from: self.pose.clone(), elapsed: 0.0, duration: blend_in });
                 *cur = Playing::new(v, false);
                 self.then = Some(Playing::new(idle.clip, true));
+                self.then_fade = blend_out;
             }
         }
         self.pose.clone_from(&self.rig.bind);
@@ -450,7 +542,7 @@ impl ClipLibrary {
                 b
             }
         };
-        Ok(BoundClip { source: Some(key.1.into()), clip, binding, options })
+        Ok(BoundClip { source: Some(key.1.into()), name: None, clip, binding, options })
     }
 }
 
@@ -461,6 +553,10 @@ mod clock_tests;
 #[cfg(test)]
 #[path = "animator/framehold_tests.rs"]
 mod framehold_tests;
+
+#[cfg(test)]
+#[path = "animator/trace_tests.rs"]
+mod trace_tests;
 
 #[cfg(test)]
 mod tests {

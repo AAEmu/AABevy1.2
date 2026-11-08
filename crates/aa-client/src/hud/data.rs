@@ -557,10 +557,11 @@ fn load_vehicle_looks(
 pub const DEFAULT_GCD_MS: u32 = 1000;
 
 impl GameData {
-    /// `FUN_394a55a0`'s item filter: the item exists, has a `use_skill_id`, and that skill exists
-    /// (`FUN_39695dc0` item + `FUN_396f6390` skill both resolve).
+    /// `FUN_394a55a0`'s item filter (also `FUN_3949e280` / `FUN_394a58d0`): the item exists
+    /// (`FUN_39695dc0`) and has a `use_skill_id` (`+0x98`, not the invalid sentinel); the skill
+    /// itself is not resolved.
     pub fn item_usable(&self, id: u32) -> bool {
-        self.items.get(&id).is_some_and(|i| i.use_skill != 0 && self.skills.contains_key(&i.use_skill))
+        self.items.get(&id).is_some_and(|i| i.use_skill != 0)
     }
 
     /// `FUN_394a2930`'s first test: the item's use skill produces (`skill_products`, the native

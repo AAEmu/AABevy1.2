@@ -184,9 +184,9 @@ local baseUseSlot = AAUI.UseSlot
 AAUI.UseSlot = function(slotType, slotIdx, button)
   if slotType == ISLOT_ABILITY_VIEW then
     if button == "LeftButton" then askLearn(slotIdx) end
-    return
+    return false
   end
-  baseUseSlot(slotType, slotIdx, button)
+  return baseUseSlot(slotType, slotIdx, button)
 end
 
 -- What the dialogs ask the game.

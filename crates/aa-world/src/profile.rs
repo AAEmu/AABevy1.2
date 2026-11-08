@@ -59,8 +59,8 @@ struct Sums {
     frames: u32,
     /// Process CPU cycles over all threads, in millions.
     cycles: f64,
-    /// The longest frame of the window and its main thread slices.
-    worst: (f64, [f64; MAIN - 1]),
+    /// The longest frame of the window, its main thread slices and the gap after them (to the next frame's `First`).
+    worst: (f64, [f64; MAIN - 1], f64),
     render: [f64; RENDER - 1],
     render_frames: u32,
 }
@@ -72,6 +72,8 @@ struct Stamps {
     t: [Option<Instant>; MAIN],
     last_end: Option<Instant>,
     last_first: Option<Instant>,
+    /// The main thread slices of the previous frame: the one a frame time (`First` to `First`) measures.
+    last_slices: [f64; MAIN - 1],
     last_cycles: u64,
     sums: Arc<Mutex<Sums>>,
 }
@@ -113,7 +115,7 @@ impl Plugin for ProfilePlugin {
             app.add_systems(Update, offscreen);
         }
         app.init_resource::<Timers>()
-            .insert_resource(Stamps { thread_cycles: BTreeMap::new(), t: [None; MAIN], last_end: None, last_first: None, last_cycles: aa_cry::prof::process_cycles(), sums: sums.clone() })
+            .insert_resource(Stamps { thread_cycles: BTreeMap::new(), t: [None; MAIN], last_end: None, last_first: None, last_slices: [0.0; MAIN - 1], last_cycles: aa_cry::prof::process_cycles(), sums: sums.clone() })
             .add_systems(First, stamp::<0>)
             .add_systems(SpawnScene, stamp::<1>)
             .add_systems(
@@ -187,12 +189,11 @@ fn report(
     let first = stamps.t[0].unwrap_or_else(Instant::now);
     let end = stamps.t[MAIN - 1].unwrap_or(first);
     let cycles = aa_cry::prof::process_cycles();
+    let mut slices = [0.0; MAIN - 1];
     {
         let mut s = stamps.sums.lock().unwrap();
-        if let Some(prev_end) = stamps.last_end {
-            s.gap += first.saturating_duration_since(prev_end).as_secs_f64() * 1000.0;
-        }
-        let mut slices = [0.0; MAIN - 1];
+        let gap = stamps.last_end.map_or(0.0, |prev_end| first.saturating_duration_since(prev_end).as_secs_f64() * 1000.0);
+        s.gap += gap;
         for i in 0..MAIN - 1 {
             if let (Some(a), Some(b)) = (stamps.t[i], stamps.t[i + 1]) {
                 slices[i] = b.saturating_duration_since(a).as_secs_f64() * 1000.0;
@@ -202,8 +203,9 @@ fn report(
         if let Some(prev_first) = stamps.last_first {
             let frame = first.saturating_duration_since(prev_first).as_secs_f64() * 1000.0;
             s.frame += frame;
+            // `First` to `First` is the previous frame: its slices, then the gap up to this one
             if frame > s.worst.0 {
-                s.worst = (frame, slices);
+                s.worst = (frame, stamps.last_slices, gap);
             }
         }
         s.frames += 1;
@@ -212,6 +214,7 @@ fn report(
     stamps.last_cycles = cycles;
     stamps.last_end = Some(end);
     stamps.last_first = Some(first);
+    stamps.last_slices = slices;
 
     *since += time.delta_secs();
     if *since < 3.0 {
@@ -231,6 +234,7 @@ fn report(
     for (i, name) in MAIN_NAMES.iter().enumerate() {
         line += &format!(" {name} {:.1}", sums.worst.1[i]);
     }
+    line += &format!(" gap {:.1}", sums.worst.2);
     info!("{line}");
     let mut line = String::from("aa-profile: render thread:");
     for (i, name) in RENDER_NAMES.iter().enumerate() {

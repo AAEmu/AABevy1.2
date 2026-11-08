@@ -68,6 +68,8 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `orbit DEG` | turn the camera alone around the player, DEG from the character's heading (90 or -90: a side view), for a shot |
 | `zoom N` | N wheel notches of the camera's zoom, by 1.2's step: positive zooms in, negative out (`zoom -1` one notch out) |
 | `pitch DEG` | the camera's pitch in degrees (positive looks up), held to its limits, as a drag leaves it |
+| `view X Y Z DX DY DZ` / `view off` | a fixed world camera at a game position looking along a direction (game axes), whatever the player does, as `--view X,Y,Z,DX,DY,DZ` sets it at start: a still of the 1.2 client's view (`tools/worldlook`); `view off` gives the follow camera back |
+| `hour H` / `hour off` | pins the time of day at hour `H` (0..24) as `--hour H` does at start, for a still taken at another hour; `hour off` follows the server's clock again |
 | `target SPEC` | `CSChangeTarget`, waits for the server's `TargetChanged` |
 | `click SPEC` | the left click: the scripted pick goes through `hud::targeting::click_target` |
 | `cast SKILL [SPEC]` | `CSStartSkill` on the spec (default: current target, else self); waits for `SkillStarted` (a skill with a cast time), `SkillFired` (an instant one) or the first own `PlotEvent` (a plot-only one: Triple Slash, Charge), fails when refused; an `OUTOF_ANGLE` refusal waits once more while the combat code turns the player and asks again; `cast slot N` presses action bar slot N |
@@ -90,6 +92,7 @@ Distance is from the player; `hostile` / `friendly` use the nameplate relation.
 | `mark` | the start point of `moved` |
 | `use TEMPLATE` | request the bag item's ordinary skill (`Request::UseBag`); fails when the bag has none. Equipment and modal powder targeting require the bag's `X2Bag:HandleUse(slot)` path instead |
 | `units [TEMPLATE...]`, `me`, `bag`, `quests`, `echo TEXT` | print state |
+| `trace TEXT` | write a `mark` row (`label` = TEXT, `skill_id` too for a `skill:<id>:...` label) into the skill trace (`AA_SKILL_TRACE=<file.jsonl>`, `docs/aa-client-combat.md`, "Skill trace") and do nothing else. `echo TEXT` writes the same row as it prints. With the trace off both are as before. The label `video-start` (either command) also starts a `--video-gate` capture (`docs/aa-dev.md`). `cast slot N` / `key slotN` become `press` rows when the HUD takes the key |
 | `quit` / `quit now` | log out and wait for the server to close the connection (45 s) / drop the connection; ends the run |
 
 Conditions: `in_world`, `target`, `target_name TEXT`, `target_template N`, `target_alive`, `target_dead`, `target_hurt`

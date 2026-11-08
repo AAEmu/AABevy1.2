@@ -779,6 +779,14 @@ music-route scratch was not touched.
 screenshot run costs nothing and is silent. The audio device opens at the first sound that is played (not at startup);
 a device error is kept in `Stats::device_error` and the engine goes on silent.
 
+### Start record (`trace.rs`, opt-in)
+
+For aa-client's `AA_SKILL_TRACE` (`docs/aa-client-combat.md`, "Skill trace"). `aa_audio::trace::enable()` makes
+`Engine::play_with` (so `play_at`, `play_2d` and the `Sound` component's start) leave a `Started { wall_us, path, at }` for every
+event it is asked to play, whether or not the engine is audible; `trace::take()` hands them over (once a frame). `at` is the Bevy
+world position of a 3D sound. `play_pcm` (player music) is not recorded. Off (the default) the hook is one relaxed atomic load.
+At most 16384 starts wait for `take`.
+
 ## Engine choice
 
 [kira](https://crates.io/crates/kira) 0.12 (pure Rust, cpal backend; features: `cpal` only, no symphonia / mp3 / ogg decoders, we

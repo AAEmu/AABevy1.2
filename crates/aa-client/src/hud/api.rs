@@ -153,9 +153,10 @@ pub struct HudData {
     pub loot: super::loot::LootView,
     /// The NPC talked to, the quest dialog and the quest rows the scripts read (`dialog.rs`).
     pub dialog: super::dialog::DialogView,
-    /// The areas `SCShowQuestArea` placed (`map_quests.rs`), newest last.
+    /// The areas `SCShowQuestArea` placed (drawn by `quest_areas.rs`), oldest first, append only
+    /// (capped at 256).
     pub quest_areas: Vec<aa_net::quest::QuestArea>,
-    /// Bumped when an area is added or replaced, so the maps rebuild their markers.
+    /// Bumped when an area is added, so `quest_areas.rs` rebuilds its geometry.
     pub quest_area_version: u64,
     /// The player is away from the keyboard ("-Away-" under the name plate, `plates::track_idle`).
     pub afk: bool,
@@ -1330,11 +1331,25 @@ pub fn mark_pushed(bridge: &Shared) {
 
 /// Push what changed into the Lua state and raise the events the scripts listen for.
 pub fn push_changes(rt: &UiRuntime, bridge: &Shared) {
-    super::mode_actions::push_slots(rt, bridge);
-    super::pets::push(rt, bridge);
-    push_state(rt, bridge);
+    use aa_cry::prof::scope;
+    {
+        let _t = scope("hud.push.mode_slots");
+        super::mode_actions::push_slots(rt, bridge);
+    }
+    {
+        let _t = scope("hud.push.pets");
+        super::pets::push(rt, bridge);
+    }
+    {
+        let _t = scope("hud.push.state");
+        push_state(rt, bridge);
+    }
     // after the state: the character window's handler reads HUD.state (level, ...)
-    push_character_stats(rt, bridge);
+    {
+        let _t = scope("hud.push.stats");
+        push_character_stats(rt, bridge);
+    }
+    let _t = scope("hud.push.panels");
     push_panels(rt, bridge);
 }
 
@@ -1380,6 +1395,7 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
     }
     let lua = &rt.lua;
     let Ok(hud) = lua.globals().raw_get::<Table>("HUD") else { return };
+    let push_timer = aa_cry::prof::scope("hud.panels.push");
     let changed = match panels::push(lua, &hud, &new, Some(&old)) {
         Ok(c) => c,
         Err(e) => {
@@ -1387,11 +1403,15 @@ fn push_panels(rt: &UiRuntime, bridge: &Shared) {
             return;
         }
     };
+    drop(push_timer);
+    let slots_timer = aa_cry::prof::scope("hud.panels.refresh_slots");
     if changed.slots
         && let Err(e) = rt.refresh_slots()
     {
         warn!("hud: refresh slots: {e}");
     }
+    drop(slots_timer);
+    let _target_timer = aa_cry::prof::scope("hud.panels.target_events");
     if changed.bank {
         rt.fire_event("BANK_UPDATE", (-1i64, -1i64));
     }
@@ -1423,10 +1443,13 @@ fn push_state(rt: &UiRuntime, bridge: &Shared) {
     let Some(old) = old else { return };
     let lua = &rt.lua;
     let Ok(hud) = lua.globals().raw_get::<Table>("HUD") else { return };
+    let snapshot_timer = aa_cry::prof::scope("hud.state.snapshot");
     if let Err(e) = push_snapshot(lua, &hud, &new) {
         warn!("hud: state: {e}");
         return;
     }
+    drop(snapshot_timer);
+    let _events_timer = aa_cry::prof::scope("hud.state.events");
     let script_id = super::unit_id::from_private(&new.unit_id).unwrap_or_default();
     let id = script_id.as_str();
     if (old.hp, old.max_hp) != (new.hp, new.max_hp) {
@@ -1672,6 +1695,21 @@ mod tests {
             bridge.borrow().requests,
             vec![Request::UsePetAction { slot: 2 }]
         );
+    }
+
+    #[test]
+    fn bag_use_by_type_sees_the_queued_use_through_every_use_slot_wrapper() {
+        // `X2Bag:UseItemByType` reads `AAUI.UseSlot`'s answer: the skillbook and look-conversion wrappers pass it through.
+        let mut rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        let bridge = Rc::new(RefCell::new(HudData::default()));
+        install(&mut rt, &bridge).unwrap();
+        rt.lua.load(r#"
+            HUD.bag_slots = 4
+            HUD.bag = { [1] = { id = 777, count = 1 } }
+            assert(X2Bag:UseItemByType(777) == true)
+            assert(X2Bag:UseItemByType(9) == false)
+        "#).exec().unwrap();
+        assert_eq!(bridge.borrow().requests, vec![Request::UseBag { slot: 1 }]);
     }
 
     #[test]

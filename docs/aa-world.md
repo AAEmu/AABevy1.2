@@ -5826,9 +5826,11 @@ last packet, in `Screen::Loading` and `Screen::InGame`; nothing until the server
   Hidden cinematic actors/targets remain aa-client's screen-flow responsibility. Also missing: original cloud reference brightness calibration,
   volumetric cloud animation, the glow buffer (see Post), SSAO by default (hair material
   conflict, see Post), procedural grass blades, vegetation sprites (far trees use their lowest LOD mesh).
-* Ambient light: the shade now matches the capture within about 15 % (see Environment); the dirt paths are brighter and warmer than the capture's, and
-  the water shows some reflection speckle where the screen space march hits foliage. One `ambient_gain` serves both calibration zones (the
-  spawn zone 179 and the palace zone 186 would like about 1.1 and 1.5).
+* Ambient light: sun and ambient are balanced to the engine's shadow depth (see "Sun against ambient"); the palace courtyard's shade is 0.3 to
+  0.6 stops darker than its capture, the sunlit meadow of zone 179 0.3 stops brighter, and the water shows some reflection speckle where the
+  screen space march hits foliage. The sunlit ground keeps about 1.6 times the capture's blue: the 1.2 client's `r_ColorGrading` takes about
+  a fifth of the blue out of the ground with its time of day grading values neutral (photo filter density 0, no selective colour), not
+  reproduced.
 * Royal Palace lighting differences left (the sun direction itself is the engine's, see Sun path): the west-facing walls far from the camera in the
   first view are lit warm in the capture (luma 60 to 80) although the sun is behind them: this is probably the engine's screen space bounce
   (`SSDO`, `Global illumination multiplier` of the time of day) from the sunlit surfaces, which is not done here (ours: 35 to 48, shade only);
@@ -7656,3 +7658,41 @@ at grazing angles and the lit ground and objects carried a fine grain that crawl
 held a third to a half more fine detail than 1.2's picture of the same place). `terrain_layers.rs` gives the normal arrays
 (the sampler of every normal lookup of the terrain shader) no anisotropy; aa-cry's loader gives a `_ddn` texture
 `texture::bump_sampler`.
+
+## Sun against ambient (2026-11-04)
+
+The 1.2 client's own numbers (`tools/worldlook/orig.py state`, its system Lua `System.GetSunColor` / `GetSkyColor` /
+`GetOutdoorAmbientColor`) at 11.24 h in zone 179 are sun (7.63, 7.34, 7.08) and sky = outdoor ambient (1.51, 2.00, 1.87):
+the raw curve values times their multipliers times `2^HDR dynamic power factor`, exactly `EnvSample::native_sun_sky`'s
+halves, with no IEC decode. On flat ground under a sun 48 degrees up that makes the ambient light about a quarter of the
+light. The engine's own picture agrees: with `e_shadows 0` against `e_shadows 1` (same frame, spec 4) the shadowed ground keeps
+0.2 to 0.33 of its light (histogram peak 0.18 to 0.24, display linear).
+
+aa-world had the ambient at about 64 % of the light on flat ground (the environment map's sky texel `ambient_scale x 1.3 x`
+the sky's luminance against `sun_lux_scale 1000 x` the sun's, over pi): its shadow kept 0.5 to 0.6 of the lit ground, one stop,
+which is the washed out look of every sunlit scene. `sun_lux_scale` is now 2000 and `ambient_gain` 0.75: aa-client's
+shadow keeps 0.2 to 0.3 (median 0.29; `AA_TUNE=adapt=0`, the sun on against `sun_gain=0`, same pose; `sun_gain` is the new tuning
+multiplier on the sun). The ambient takes the hue the engine gives `Sky color` (`ambient_native 1`: the raw value's hue at the
+decoded brightness; decoded, the data's pale cyan is a saturated green) instead of the sky dome's blue grey (`ambient_dome` 0,
+`ambient_sat` 1); the clouds keep the dome hue they were calibrated with (`cloud_dome`, `cloud_sat`). `fog_native` (the
+raw fog colour's hue) is a knob only: it takes some blue out of zone 179's distance but turns Mirage Isle's sky bluer.
+
+Validation, `tools/worldlook` (six still poses at the dolls, 15530 15325, hour 18.0 and the client's exact camera, against the
+original at a real spec 4 load) and `lighting_fit.py` (the older references):
+
+| | default before | now |
+|---|---|---|
+| stills: ground luminance, original / ours | 0.73 | 0.80 |
+| stills: ground hue (R, G, B per luminance; original 1.21, 1.02, 0.15) | 1.00, 1.06, 0.31 | 1.16, 1.02, 0.24 |
+| shade / lit ground (original 0.2 to 0.33) | 0.5 to 0.6 | 0.2 to 0.3 |
+| `lighting_fit.py` mean abs sRGB difference, 27 regions | 25.95 | 24.23 |
+
+`lighting_fit.py`'s palace and Mirage Isle views draw other buildings than their captures in front of the sky and some walls
+(wooden balconies, a door), so those regions measure geometry, not light; spawn and the floors are valid.
+
+The capture of the original: the user's saved graphics options load at the low preset whatever `sys_spec_full` says, and
+`System.SetCVar('sys_spec_full', 4)` at run time does not reload the vegetation: a cell loaded at `e_obj_quality` 1 has
+none of its records of min spec 2 and 3 (`rndFlags` bits 24..26, nearly all of zone 179's grass and bushes). A GM `/move`
+5 km away and back reloads the cells at spec 4. Stills taken without that show an open meadow where aa-world (rightly)
+draws ferns and tall grass.
+

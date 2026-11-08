@@ -88,6 +88,34 @@ pub struct SlotData {
     /// Actual slot-frame selector flags +311/+312, present only for the explicit native adapter.
     pub native_cooldown: Option<NativeCooldownState>,
     completion: Option<completion::Completion>,
+    /// What the last bind told the slot's `OnContentUpdated` handler.
+    sent: Option<Sent>,
+}
+
+/// The content a bind showed (type, id, icon, grade) and the `OnContentUpdated` values it sent. A refresh of the same content
+/// sends only the values that changed: every refresh of the action bars (any skill's cooldown, the target, the casting dark)
+/// rebound all 193 slot widgets and ran their ~545 handlers, 32 ms of the frame each time (skill parity profile, 2026-11-03);
+/// the 1.2 client updates a slot when its content changes.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Sent {
+    content: (Option<String>, Option<i64>, Option<String>, Option<i64>),
+    values: Vec<(&'static str, SentValue)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SentValue {
+    Bool(bool),
+    Int(i64),
+}
+
+impl SentValue {
+    fn of(v: &Value) -> Option<SentValue> {
+        match v {
+            Value::Boolean(b) => Some(SentValue::Bool(*b)),
+            Value::Integer(n) => Some(SentValue::Int(i64::from(*n))),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -659,6 +687,7 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         s.source = Some(source);
         s.binded = binded.clone();
     }
+    let icon_path_shown = icon_path.clone();
     if let Some(d) = icon
         && let Some(dr) = u.tree.drawable_mut(d)
     {
@@ -675,23 +704,40 @@ fn bind(lua: &Lua, id: Id, source: Source) -> mlua::Result<()> {
         )
     };
     let bound = binded.is_some();
-    u.pending.push(ev("action_binded", Value::Boolean(bound)));
+    let mut values: Vec<(&'static str, Value)> = vec![("action_binded", Value::Boolean(bound))];
     if bound {
-        u.pending.push(ev("can_use", Value::Boolean(can_use)));
+        values.push(("can_use", Value::Boolean(can_use)));
         let (learned, extras) = skill_view_state(content.as_ref());
-        u.pending.push(ev("learned", Value::Boolean(learned)));
-        for (what, v) in extras {
-            u.pending.push(ev(what, v));
-        }
-        u.pending
-            .push(ev("hotkey_activated", Value::Boolean(hotkey)));
+        values.push(("learned", Value::Boolean(learned)));
+        values.extend(extras);
+        values.push(("hotkey_activated", Value::Boolean(hotkey)));
         if let Some(n) = stack {
-            u.pending.push(ev("stack_count_changed", crate::lua_int(n)));
+            values.push(("stack_count_changed", crate::lua_int(n)));
         }
-        if let Some((_, total)) = cooldown {
-            u.pending
-                .push(ev("skill_cooldown_start", Value::Number(total as f64)));
+    }
+    let content_id: Option<i64> = match &content {
+        Some(c) => c.raw_get::<Option<i64>>("id").ok().flatten(),
+        None => None,
+    };
+    let shown = (binded.clone(), content_id, icon_path_shown, grade);
+    let previous = u.tree.widget(id).and_then(|w| w.slot.as_ref()).and_then(|s| s.sent.clone()).filter(|p| p.content == shown);
+    let mut sent = Sent { content: shown, values: Vec::new() };
+    for (what, v) in values {
+        let simple = SentValue::of(&v);
+        if let Some(simple) = simple {
+            sent.values.push((what, simple));
+            if previous.as_ref().is_some_and(|p| p.values.contains(&(what, simple))) {
+                continue;
+            }
         }
+        u.pending.push(ev(what, v));
+    }
+    // a cooldown starts again with the same total: always sent
+    if bound && let Some((_, total)) = cooldown {
+        u.pending.push(ev("skill_cooldown_start", Value::Number(total as f64)));
+    }
+    if let Some(s) = u.tree.widget_mut(id).and_then(|w| w.slot.as_mut()) {
+        s.sent = Some(sent);
     }
     Ok(())
 }
@@ -763,6 +809,10 @@ fn grade_frame(grade: i64) -> Option<String> {
 
 /// Ask the hooks again for every bound slot (the app's bars or bags changed).
 pub fn refresh_slots(lua: &Lua) -> mlua::Result<()> {
+    static PROFILE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *PROFILE.get_or_init(|| std::env::var_os("AA_UI_SLOT_PROFILE").is_some()) {
+        return refresh_slots_profiled(lua);
+    }
     let slots: Vec<(Id, Source)> = {
         let u = ui(lua);
         u.tree
@@ -780,6 +830,47 @@ pub fn refresh_slots(lua: &Lua) -> mlua::Result<()> {
         bind(lua, id, s)?;
     }
     super::flush(lua);
+    Ok(())
+}
+
+/// [`refresh_slots`] with its parts timed (`AA_UI_SLOT_PROFILE`): the widget scan, the binds by source kind, the text refit
+/// and the handlers the binds queued.
+fn refresh_slots_profiled(lua: &Lua) -> mlua::Result<()> {
+    let t0 = web_time::Instant::now();
+    let objects = ui(lua).tree.objects.len();
+    let slots: Vec<(Id, Source)> = {
+        let u = ui(lua);
+        u.tree
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.alive)
+            .filter_map(|(i, o)| {
+                let s = o.widget()?.slot.as_ref()?.source.clone()?;
+                Some((i as Id, s))
+            })
+            .collect()
+    };
+    let t1 = web_time::Instant::now();
+    let mut kinds = [(0usize, 0f64); 3];
+    for (id, s) in slots {
+        let k = match s { Source::Slot(..) => 0, Source::Skill(_) => 1, Source::Item(..) => 2 };
+        let b = web_time::Instant::now();
+        bind(lua, id, s)?;
+        kinds[k].0 += 1;
+        kinds[k].1 += b.elapsed().as_secs_f64() * 1000.0;
+    }
+    let t2 = web_time::Instant::now();
+    let pending = ui(lua).pending.len();
+    super::widget::textbox::refit_scales(lua);
+    let t3 = web_time::Instant::now();
+    super::flush(lua);
+    let t4 = web_time::Instant::now();
+    let ms = |a: web_time::Instant, b: web_time::Instant| (b - a).as_secs_f64() * 1000.0;
+    bevy::log::info!(
+        "ui: refresh_slots {:.1} ms: scan {:.1} ms of {objects} objects; bind slot {} in {:.1} ms, skill {} in {:.1} ms, item {} in {:.1} ms; refit {:.1} ms; {pending} handlers {:.1} ms",
+        ms(t0, t4), ms(t0, t1), kinds[0].0, kinds[0].1, kinds[1].0, kinds[1].1, kinds[2].0, kinds[2].1, ms(t2, t3), ms(t3, t4)
+    );
     Ok(())
 }
 

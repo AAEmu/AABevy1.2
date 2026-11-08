@@ -61,6 +61,20 @@ first 103 ms packet and 8.85 by 0.5 s, and a release coasts 12.65 -> 8.3 -> 0.7 
 `v = 0` stop packet. The position step is the frame's mean speed while the packet carries the new carried one, as the capture's first coast row
 does (position 10.65, velocity 8.39); the velocity direction lags a turn instead of snapping.
 
+Space on the driver's seat jumps the mount. 1.2's input code (`sub_39404D50`, x2game12.c:859926) sets the jump request on the
+controlled unit, the mate, and every actor copies its own `jumpHeight` (`sub_390CB440`, :174729-174739), so the take-off is
+`sqrt(2 g h)` from the mount's row (`MountSpeed::jump_height` / `gravity`, `Db::mount_speed`): the Lilyut horse (actor 42) has
+1.3 m and gravity 30, 8.83 m/s and 0.59 s in the air; most other mounts (actors 205, 210, 493, 699, 704) have gravity 20,
+7.21 m/s; the elk (674) 30. A fall off a ledge uses the same gravity; the get-off hop keeps the player's. The ground step
+(`sub_3912B330`, :245828-245920) builds the jump vector only with a move request (`|x|` or `|y|` over 0.1); standing, it signals
+`em_jump_in_place` and leaves the vector at 0, so a standing Space rears the mount instead of lifting it (`docs/aa-client-units.md`,
+"Owned mounts"). The packets are the on-foot ones as the mate's `CSMoveUnit`: the take-off JUMPING with actor 0x0c and the launch
+speed, MOVING or 0 in the air, the landing actor 0x14 (the 0x80 fall block from 20 m/s). The take-off sets `PlayerInput::jumped`,
+so it cancels a cast as on foot. In the air the mount steers on with its carried velocity (`mount_velocity`). Capture-pending:
+the mate's take-off and landing flags (taken from the on-foot capture; no mounted jump was captured), whether the mount keeps its
+steering inertia in the air (not traced). The mate plays the horse graph's jump clips and its rider the take-off and landing
+(`docs/aa-client-units.md`, "Mounts").
+
 The own buffs' `MoveSpeedMul` rows scale the run and walk speed (`sprint::speed_multiplier`: Dash at level 1 is x 1.384, 7.47 m/s); the run clip
 plays faster with it. A buff with `sprint_motion` (Dash) runs with the second tier of the run group instead: 1.2's `fist_mo_normal_run.lmg`
 lists the run and then `fist_mo_sprint_run_f`, `_fl`, `_fr`, `_l`, `_r` (and the run's own back clips), read from the model's own group
@@ -102,6 +116,45 @@ as the player instead of waiting for cells around a different saved spawn.
   clips are authored with the body 1.3 m over the origin, `fist_mo_swim_f` lies horizontally with the pelvis at 1.34 m, `fist_ba_idle_swim` treads water
   upright with the head at 1.83 m). Stops below 1.1 m (`LEAVE_MARGIN` hysteresis). The depth threshold is the part not traced in the binary
   (`CActor::UpdateSwimStats` keeps the same `relativeWaterLevel`): change `ActorParams::swim_depth` when a capture of the real client says otherwise.
+* The swim level, decompiled (2026-11-06): `UpdateSwimStats` (`sub_39120300`, x2game12.c:239714-239774) takes `relativeWaterLevel =
+  pos.z + vfunc108 - surface`. `vfunc108` is `sub_39113EE0` (slot 27 of the four actor vtables in `x2game_unpacked.dll` `.rdata`, the
+  same slot table as `UpdateSwimStats` at 107): `this+116 x` the entity scale, and `sub_39113150` (:229875-229923) sets `this+116` to
+  `swimHeight` (`actor_models.swim_height`, loaded at :235676-235679) **plus** the bind-pose height of the first of six predefined bones
+  the skeleton has (else 0.8 of its box's top plus 0.2 of its bottom). `IsSwimming` (`sub_39114060`, :230678-230690) wants the bottom
+  depth (`this+108`, surface minus the "actor bottom level ray" hit, `sub_39111DA0`) at least that level, and 1.3 times it within a
+  second of leaving the water; the swim mode holds `relativeWaterLevel` at 0, so the same level is the floating depth. The six bones are
+  joint ids of CryAnimation's (`x2game_unpacked.dll` `.rdata`: `unk_399ABCD0` lists 19 ids, 0-7, 9, 8, 14, 52, 25, 12, 17, 51, 24, 45,
+  46, and `dword_399ABCB8` tries its entries 18, 17, 5, 4, 3, 2, so ids 46, 45, 5, 4, 3, 2 in that order); their names are resolved
+  inside CryAnimation, not in the dumps. `swim::swim_level` takes `Bip01 Spine`, since the Nuian male's spine (1.116 m) plus his 0.2 is
+  1.32 m, the 1.3 m above; if the ids run up the spine the first one found is a higher bone (his `Bip01 Spine3` would give 1.57 m), so
+  the bone is unverified. The player keeps `height - swim_height` (2 cm off for the Nuian male; other races not checked); a mount uses
+  the decompiled form (below), times its unit's scale (`MountSpeed::at_scale`, set by `mount::track_local_mount`). The 1.3 x re-entry
+  rule is not applied.
+* Mounts swim too: the mate is a `CActor` and `UpdateSwimStats` is generic. A driven mount (`LocalMount::driving`) swims in water deeper
+  than its `MountSpeed::swim_level` (`Db::mount_speed`: `swim_height` + the bind-pose height of its `Bip01 Spine`, `swim::swim_level`; a
+  Lilyut horse 0.3 + 1.843 = 2.14 m, a donkey 1.39, a snow lion 2.15, the polar bear 1.55, each times the mate's unit scale: a snow lion
+  summoned at `npcs.scale` 0.9 swims at 1.94 m) and floats with its origin that far under the surface (the horse's back about 0.3 m
+  under, its head out). It moves at the swim stance's `game_stances.max_speed` (stance 3: horse 1.8 m/s, white horse 1.9, snow lion 2.2,
+  donkey 4.0; the player's row is the 3.0 of `BASE_SPEED`), x 0.8 backwards, with its land inertia (`mount_velocity`; assumed, the swim
+  mode `sub_3912CE00` smooths its own velocity and was not traced for a mount), and walks again `LEAVE_MARGIN` shallower. Its packets
+  are the swimming ones as the mate's `CSMoveUnit` (stance `SWIM`, no ground flag, the swim cadence). X, Space and the camera pitch do not move it up or down, and no jump leaves the water
+  (unverified: whether a ridden mount can dive was not traced). No wading slowdown on land (`cl_shallowWaterSpeedMulPlayer` is players
+  only). The rider keeps its seat clips (`drive_swim` skips a `Rider`; the horse graph's Driver states have no swim state) and sits
+  in its idle, since 1.2 gives the rider of a swimming mount PseudoSpeed 0; the mate plays the horse graph's swim clips
+  (`ag_horse.txt:211-327`, `Stance=swim`; `docs/aa-client-units.md`, "the mount's swim"). Capture-pending: the depth a ridden horse
+  starts to swim at and its wire stance.
+* Getting off a swimming mount: the get-off placement (`mount::DismountMove`) falls to the rider's floating height over water at least
+  `ActorParams::swim_depth` deep (`player::afloat`), not to the bed, and at its end the rider swims on (`Mover::swim` is set where
+  `swim::should_swim` says so) instead of standing up on the bed and floating up from it. 1.2's get-off (`sub_3909B4A0`,
+  x2game12.c:139279) resets the actor's swim and fall fields (+353, +120, +92), so its swim stats are taken again; the get-off pose in
+  the water is capture-pending.
+* Swim speed buffs: the own buffs' `SwimSpeedMul` rows (`unit_modifiers` attribute 66, 47 buffs) scale the swim velocity
+  (`sprint::swim_multiplier`, `Sprint::swim_speed_mul`), and the ridden mount's buffs its swim speed (`Sprint::mount_swim_speed_mul`).
+  Their flat rows are percent, summed on 100, not per mille: 1.2's tooltip shows `swim_speed_mul` as `value %` and `move_speed_mul` as
+  `value x 0.1 %` (`tooltip.lua` `GetCalculatedAddModifierValue`). The flippers (buff 2416, +30) swim at 3.9 m/s, buff 5752 (+100) at
+  6.0, 1373 (a percent row of 200) at 9.0. That the client scales the swim speed by it (as it does the run speed by `MoveSpeedMul`) is
+  inferred, not traced; the items' rows (24715-24717, +4/+8/+12) and attribute 139 (underwater swim speed, no buff rows) are not
+  applied. A dive's vertical speed stays capped at 3.0 m/s.
 * Direction: the swim movement mode (`FUN_3912ce00`) rotates the request by the view quaternion at `param_2 + 0x2d0`
   (`x2game.dll.c:230934-230966`) and takes its z as the vertical, so the vertical is part of the direction rather than buoyancy: **W / S
   follow the camera pitch** - look down and swim forward to dive, look up to rise, and a level camera keeps the depth while moving. X
@@ -119,6 +172,18 @@ as the player instead of waiting for cells around a different saved spawn.
   terrain hole in a loaded cell (no support, but `is_hole_at`) the floor stays at the body's current height minus the 5 cm swim clearance, so
   the clamp holds it in place instead of lifting it out of the water every frame.
 * A body that falls in is stopped by the water (35 m/s^2); gravity is x 0.3 in water and a splash is no landing (no fall packet).
+  These are the player's rules (the splash from `cl_shallowWaterDepthLo` 0.3 m; none of them is traced in 1.2). A driven mount
+  takes them only in water deep enough for it to swim in (`player::fall_water`, its own `swim_level`): shallower water is a
+  wading depth for it, where it jumps and lands as on dry ground, as it walks there without the player's wading slowdown. Live
+  check D2 (2026-11-07, `data/local/transport/live/mount/b-rider.clean.log`): in the pond lane's 0.75 m the horse's jump rose
+  1.87 m (water gravity from the bed to the surface), fell capped at 4 m/s and touched down with a plain ground packet; it
+  now has the dry 1.3 m arc and sends the landing (flags 6, actor 0x14). How 1.2 handles a mount's jump in shallow water is
+  not traced (**approximate**). Walking out of the water is no landing (`SendState::waded_out`): the swim ends `LEAVE_MARGIN`
+  shallower than the swim level, which for a mount is a wading depth with the dry rules, and its step down onto the bed
+  had sent a landing (flags 6, actor 0x14) as the horse came out of the sea (review re-check, 2026-11-07,
+  `data/local/transport/live/mount/review/w-rider.moves.txt`; with the fix `w2-rider.moves.txt` has the fall packet and a
+  plain ground one, as before the wading change). The short air time of that step still plays the local mount's
+  jump-loop and landing clips (an older gap, not changed here).
 * Clips: `fist_ba_idle_swim`, `fist_mo_swim_<dir>` (8 ways), `_deep` when diving (more than 0.5 m under the floating height), `fist_mo_swim_up / down`
   while only Space / X is pressed. `drive_swim` runs after `anim::drive_locomotion` (the player's `Motion` is empty in the water, so locomotion
   leaves the animator alone) and calls `Locomotion::invalidate` when the swim ends. `anim.rs` is not touched: a combat action on the whole body
@@ -160,11 +225,24 @@ ported as `GlideParams` / `Flight`; the tests pin buff 1029 against the database
   flags 0x14** (later grounded packets return to flags 4 / actor 0x04). Water is **stance 2, flags 0, actor flags 0** and
   then the same remove (row 5288 / 13:39:15), not a fold stop. Velocity at 1/1024 m/s. Deploy is `CSStartSkill` 12373 cast
   as the equipped item 14677 (item id 16777259). **S14-C1 settled for flight; S14-C3 settled; S14-C2 key flags partly open.**
+* End after a water entry: the buff's removal runs the same stop probe, which measures to the bed under the water, so over
+  deep water the flight ends without a slide, through `gliding_end` like every flight (the graph's only way out of the
+  gliding states: `glider_null_node` -> `gliding_end` -> `Vehicle End`), and the swim takes over when the controller lets
+  go. The log says `glide: buff N gone on the water, folding into the swim (D m of water)`, not "folding in the air" (live
+  check 2026-11-07, `data/local/transport/live/glider-fix/f1.log`). **Capture-pending:** 1.2's probe ray
+  (`FUN_3911fc80`, entity types `0x301` = static, terrain and `ent_water`, from 0.1 m over the feet) can hit the water
+  surface itself, so whether the original slides on the surface after the water entry depends on where its actor is when
+  the removal arrives; this client keeps the bed distance (a slide only in water shallower than `land_height + 0.2`).
 * Look: the stowed glider is the item's `asset2_id` on `item_back_c` (drawn by `weapons.rs`); the opened model is the
   item's `asset_id` (`glider_bx.chr` for 14677), attached to the character's **`item_glider`** bone with an identity
   attachment (`FUN_394e4e80`; the bone is a child of `Bip01 Spine2`, `item_assets` offsets 0) and the graph's
   `fist_ac_gliding_{start,idle,front,back,left,right,fl,fr,bl,br,sliding,end}` clips and the glider `.cal`'s
-  `start/loop/front/back/left/right/sliding/endloop`. The model is spawned in the bone's CryEngine frame
+  `start/loop/front/back/left/right/sliding/end`. The character's clips choose the glider's: each race's
+  `event_database.animevents` has an `item_backpack` event at 0 of the gliding clips (`start`, `loop;0.5;2;`, `front;0.5;2;`,
+  ..., `end` then `endloop;0.1;34;`), which x2game plays on the back-slot attachment (`FUN_39361820`), so the opening is
+  the glider's `start` (it unfolds, 0.83 s for `glider_bx`) and the fold its `end` (held: `endloop` is its last frame);
+  `Pose::glider_fallback` plays `loop` / `endloop` for a model without them. Their sound events are the glider's start / end
+  sounds (`docs/aa-client-sound.md`). The model is spawned in the bone's CryEngine frame
   (`creature::spawn_cry_space`, no second `CRY_TO_BEVY`): with the world conversion added again the wing stood on
   edge (owner report 2026-11-01). **S14-C5 settled.**
 * Deploy by the action bar's item use is the ordinary item skill. Option 57 (`OPTION_ITEM_USE_GLIDE_WITH_DOUBLE_JUMP`,

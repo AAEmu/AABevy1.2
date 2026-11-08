@@ -21,7 +21,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use aa_net::items::{container, ActionKind, ActionSlot};
+use aa_net::items::{container, ActionKind, ActionSlot, ItemMove};
 use aa_net::CofferCommand;
 use aa_net::model::slot as worn;
 use aa_net::state::{ActionBar, Inventory};
@@ -178,6 +178,7 @@ fn start_equip_table() {
     }
     crate::task::spawn("hud-equip-slots", || {
             let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+            let _ = BACKPACKS.set(load_backpack_kinds(&path).unwrap_or_default());
             match load_equip_table(&path) {
                 Ok(t) => {
                     debug!("hud: {} items can be worn", t.len());
@@ -189,6 +190,56 @@ fn start_equip_table() {
                 }
             }
         });
+}
+
+/// `item_backpacks.backpack_type_id` per backpack template (2 is a glider), read with the equipment slots.
+static BACKPACKS: OnceLock<HashMap<u32, u32>> = OnceLock::new();
+
+/// The backpack kind of a template (`None`: not a backpack, or the table is not loaded yet).
+fn backpack_kind(template: u32) -> Option<u32> {
+    #[cfg(test)]
+    if let Some(kind) = TEST_KINDS.with(|k| k.borrow().get(&template).copied()) {
+        return Some(kind);
+    }
+    BACKPACKS.get()?.get(&template).copied()
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_KINDS: std::cell::RefCell<HashMap<u32, u32>> = Default::default();
+}
+
+const BACKPACK_TYPE_GLIDER: u32 = 2;
+/// `ErrorMessageType::CannotChangeBackpackInGliding`.
+const CANNOT_CHANGE_BACKPACK_IN_GLIDING: i16 = 543;
+
+/// `FUN_394e41f0`: wearing a glider in the back slot while the worn backpack is a glider too raises 543 during a flight.
+/// (A worn backpack of another kind raises `BACKPACK_OCCUPIED` 315 first, flying or not; that one is not checked here.)
+fn glider_swap_refused(inventory: &Inventory, mv: &ItemMove, kind: impl Fn(u32) -> Option<u32>) -> bool {
+    let back = (container::EQUIPMENT, worn::BACKPACK);
+    let from = (mv.from_container, usize::from(mv.from_slot));
+    let to = (mv.to_container, usize::from(mv.to_slot));
+    let other = if from == back {
+        to
+    } else if to == back {
+        from
+    } else {
+        return false;
+    };
+    let glider = |place: (u8, usize)| inventory.item_at(place.0, place.1).and_then(|i| kind(i.template_id)) == Some(BACKPACK_TYPE_GLIDER);
+    glider(back) && glider(other)
+}
+
+fn load_backpack_kinds(path: &str) -> rusqlite::Result<HashMap<u32, u32>> {
+    let conn = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    let mut q = conn.prepare("SELECT item_id, backpack_type_id FROM item_backpacks")?;
+    let mut rows = q.query([])?;
+    let mut out = HashMap::new();
+    while let Some(r) = rows.next()? {
+        let (item, kind): (i64, i64) = (r.get(0)?, r.get(1)?);
+        out.insert(item as u32, kind as u32);
+    }
+    Ok(out)
 }
 
 fn load_equip_table(path: &str) -> rusqlite::Result<HashMap<u32, u32>> {
@@ -272,6 +323,8 @@ pub(super) fn apply_requests(
     bridge: NonSend<super::api::HudBridge>,
     inventory: Res<Inventory>,
     bar: Res<ActionBar>,
+    gliding: Option<Res<crate::ingame::glide::Gliding>>,
+    mut errors: Option<MessageWriter<super::ShowError>>,
     mut net: MessageWriter<NetCommand>,
 ) {
     let Some(rt) = rt else { return };
@@ -281,6 +334,17 @@ pub(super) fn apply_requests(
     // handle_requests.  Use the scripts' page so a page change and a drop in the same frame
     // cannot send the drop to the previous page's slot.
     let page = bridge.0.borrow().action_page;
+    let flying = gliding.as_deref().is_some_and(|g| g.flying());
+    let mut glider_swap = |mv: &ItemMove| {
+        let refused = flying && glider_swap_refused(&inventory, mv, backpack_kind);
+        if refused {
+            debug!("hud: drag: a glider cannot be swapped while gliding");
+            if let Some(errors) = errors.as_mut() {
+                errors.write(super::ShowError(CANNOT_CHANGE_BACKPACK_IN_GLIDING));
+            }
+        }
+        refused
+    };
     for req in requests {
         match req {
             Req::Move { from, to, count } => {
@@ -296,12 +360,15 @@ pub(super) fn apply_requests(
                 } else if count > 0 && count < stack {
                     info!("hud: drag: split {count} of item {} from {from:?} to {to:?}", mv.from_item_id);
                     net.write(NetCommand(Command::SplitItem { mv, count }));
+                } else if glider_swap(&mv) {
+                    continue;
                 } else {
                     info!("hud: drag: move item {} from {from:?} to {to:?} (target item {})", mv.from_item_id, mv.to_item_id);
                     net.write(NetCommand(Command::SwapItems(mv)));
                 }
             }
             Req::Equip { bag, equip } => match inventory.plan_equip(bag, equip) {
+                Some(mv) if glider_swap(&mv) => {}
                 Some(mv) => {
                     info!("hud: drag: wear item {} (bag slot {bag}) in worn slot {equip} (worn item {})", mv.to_item_id, mv.from_item_id);
                     net.write(NetCommand(Command::SwapItems(mv)));
@@ -438,6 +505,94 @@ mod tests {
         assert!(allowed_slots(99).is_empty());
     }
 
+    fn backpack(template_id: u32, id: u64) -> Option<aa_net::model::Item> {
+        Some(aa_net::model::Item { template_id, id, count: 1, ..Default::default() })
+    }
+
+    /// Worn glider 1001 and, in the bag, glider 1002 (slot 3) and a plain backpack 1003 (slot 4).
+    fn glider_inventory() -> Inventory {
+        let mut inventory = Inventory::default();
+        inventory.equipment.slots[worn::BACKPACK] = backpack(1001, 100);
+        inventory.bag = vec![None, None, None, backpack(1002, 101), backpack(1003, 102), None];
+        inventory
+    }
+
+    /// Backpack kinds of the fixture: 1001 and 1002 are gliders (type 2), 1003 a plain backpack (type 3).
+    fn kind(template: u32) -> Option<u32> {
+        match template {
+            1001 | 1002 => Some(2),
+            1003 => Some(3),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_glider_swap_is_refused_only_between_two_gliders() {
+        let inventory = glider_inventory();
+        let swap = |bag| inventory.plan_equip(bag, worn::BACKPACK).unwrap();
+        assert!(glider_swap_refused(&inventory, &swap(3), kind), "glider for glider");
+        assert!(!glider_swap_refused(&inventory, &swap(4), kind), "a plain backpack is not this check");
+        let unrelated = inventory.plan_move((container::INVENTORY, 3), (container::INVENTORY, 5)).unwrap();
+        assert!(!glider_swap_refused(&inventory, &unrelated, kind));
+    }
+
+    #[allow(clippy::field_reassign_with_default)] // the other fields are private
+    fn flying() -> crate::ingame::glide::Gliding {
+        use crate::ingame::glide::{Active, Flight, GlideParams, Gliding, Pose};
+        let mut gliding = Gliding::default();
+        gliding.active = Some(Active {
+            flight: Flight::start(GlideParams::EXPERIMENTAL),
+            buff_id: 1029,
+            buff_index: 0,
+            pose: Pose::Start,
+            touched: false,
+            touched_for: 0.0,
+            missing: 0.0,
+            water: false,
+            deck: None,
+        });
+        gliding
+    }
+
+    fn equip_app(in_flight: bool) -> App {
+        TEST_KINDS.with(|k| *k.borrow_mut() = HashMap::from([(1001, 2), (1002, 2), (1003, 3)]));
+        let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        let hud = rt.lua.create_table().unwrap();
+        register_functions(&rt.lua, &hud).unwrap();
+        rt.lua.globals().set("HUD", hud).unwrap();
+        rt.lua.load(format!("HUD.drag_equip(4, {})", worn::BACKPACK + 1)).exec().unwrap();
+        let bridge = crate::hud::api::HudBridge(Rc::new(std::cell::RefCell::new(crate::hud::api::HudData::default())));
+        let mut app = App::new();
+        app.insert_non_send(rt)
+            .insert_non_send(bridge)
+            .insert_resource(ActionBar::default())
+            .insert_resource(glider_inventory())
+            .add_message::<NetCommand>()
+            .add_message::<super::super::ShowError>()
+            .add_systems(Update, apply_requests);
+        if in_flight {
+            app.insert_resource(flying());
+        }
+        app
+    }
+
+    #[test]
+    fn the_glider_swap_while_flying_raises_543_and_sends_nothing() {
+        let mut app = equip_app(true);
+        app.update();
+        assert!(app.world_mut().resource_mut::<Messages<NetCommand>>().drain().next().is_none());
+        let shown: Vec<_> = app.world_mut().resource_mut::<Messages<super::super::ShowError>>().drain().map(|e| e.0).collect();
+        assert_eq!(shown, [543]);
+    }
+
+    #[test]
+    fn the_same_swap_on_the_ground_is_sent() {
+        let mut app = equip_app(false);
+        app.update();
+        assert_eq!(app.world_mut().resource_mut::<Messages<NetCommand>>().drain().count(), 1);
+        assert!(app.world_mut().resource_mut::<Messages<super::super::ShowError>>().drain().next().is_none());
+    }
+
     #[test]
     fn the_quest_tracker_uses_the_first_bag_or_worn_item_of_a_type() {
         let rt = UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
@@ -450,8 +605,10 @@ mod tests {
                 USED = nil
                 USE_OK = true
                 AAUI = { UseSlot = function(kind, slot, button) USED = { kind, slot, button }; return USE_OK end }
+                ITEM_IMPL = 22
                 HUD = { bag_slots = 4, bag = { [2] = { id = 777, count = 1 } }, equipment = { [4] = { id = 777 } },
-                        requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot } end }
+                        item_impl = function(id) return ITEM_IMPL end,
+                        requests = {}, request = function(kind, slot) HUD.requests[#HUD.requests + 1] = { kind, slot }; return true end }
                 "#,
             )
             .exec()
@@ -471,6 +628,9 @@ mod tests {
                 assert(X2Equipment:UseEquippedItemByType(777) == true)
                 assert(HUD.requests[1][1] == "use_equip" and HUD.requests[1][2] == 4)
                 assert(X2Equipment:UseEquippedItemByType(9) == false)
+                ITEM_IMPL = 5
+                assert(X2Equipment:UseEquippedItemByType(777) == false, 'FUN_3946e770 refuses an impl it cannot use worn')
+                assert(#HUD.requests == 1, 'and sends nothing')
                 "#,
             )
             .exec()

@@ -1,5 +1,5 @@
 //! The walkable surface of a ship hull, salvaged from the older own-ship work
-//! (`test/ships` deck floor): the upward-facing triangles of the hull brush in
+//! (`test/ships` deck floor): the upward-facing triangles of the hull and deck brushes in
 //! the ship's frame (cry space: x right, y forward, z up, origin at the hull
 //! root), bucketed by 1 m cells. The rowboat's `smallboat_body.cgf` and the
 //! galleon's `galleon_body.cgf` are the brushes `smallboat.xml` / `galleon.xml`
@@ -75,15 +75,16 @@ impl ShipFloor {
         ShipFloor::new(tris)
     }
 
-    /// The hull floor of a `ShipModel`'s `ship_models.normal` prefab: its
-    /// `body` brush (any `*_body.cgf`), or `None` when the pak has no readable
-    /// hull.
+    /// The walkable floor of a `ShipModel`'s `ship_models.normal` prefab: the up-facing triangles of every
+    /// hull and deck brush ([`is_deck_part`]), merged; `None` when the pak has no readable one.
     pub fn load(normal: &str) -> Option<ShipFloor> {
-        let hull = prefab::load(normal)
-            .into_iter()
-            .find(|part| part.model.ends_with("_body.cgf"))?;
-        let model = aa_cry::mesh::Model::load(&hull.model).ok()?;
-        let floor = ShipFloor::from_model(&model, &hull);
+        let mut tris = Vec::new();
+        for part in prefab::load(normal).iter().filter(|p| is_deck_part(&p.model)) {
+            if let Ok(model) = aa_cry::mesh::Model::load(&part.model) {
+                tris.extend(ShipFloor::from_model(&model, part).tris);
+            }
+        }
+        let floor = ShipFloor::new(tris);
         (!floor.is_empty()).then_some(floor)
     }
 
@@ -125,6 +126,26 @@ impl ShipFloor {
         }
         best
     }
+}
+
+/// Whether a prefab part is a hull or deck brush a player can stand on. 1.2 walks on the CryPhysics of the whole
+/// prefab (the decoded set is unknown), so this is inferred from the prefab sweep: a static `.cgf` that is a hull
+/// (`*_body*`, or named like the prefab file: `boxship`, `cruise_a`, `soloship_a`, `speedboat_a`, `fishboat`,
+/// `ray`) or a raised structure (`*_helms`, `*_add*` of the cruise ship). Animated `.chr` / `.cga` parts,
+/// decoration, rigging, cannons, anchors, rudders, ladders, damage variants and the `box.cgf` helper are left out.
+fn is_deck_part(model: &str) -> bool {
+    let Some(stem) = model.strip_suffix(".cgf").map(|m| m.rsplit('/').next().unwrap_or(m)) else {
+        return false;
+    };
+    const DECOR: [&str; 15] = [
+        "ndeco", "barrel", "chainbox", "rope", "shield", "cannon", "sail", "flag", "anchor", "rudder", "ladder",
+        "damage", "demage", "item", "chair",
+    ];
+    if stem == "box" || DECOR.iter().any(|d| stem.contains(d)) {
+        return false;
+    }
+    const HULLS: [&str; 7] = ["boxship", "cruise_a", "soloship_a", "speedboat_a", "fishboat", "ray", "coupleduckship"];
+    stem.contains("_body") || stem.ends_with("_helms") || HULLS.iter().any(|h| stem.starts_with(h))
 }
 
 #[cfg(test)]
@@ -196,5 +217,99 @@ mod tests {
             floor.height(0.0, 0.0, 10.0).is_some(),
             "a floor at the hull root"
         );
+    }
+
+    #[test]
+    fn deck_parts_are_hulls_and_raised_structures_not_decoration() {
+        for yes in [
+            "objects/ships/smallboat_body.cgf",
+            "objects/ships/fishboat_body_step02.cgf",
+            "objects/ships/boxship.cgf",
+            "objects/ships/cruise_a.cgf",
+            "objects/ships/cruise_a_add05.cgf",
+            "objects/ships/soloship_a.cgf",
+            "objects/ships/speedboat_a.cgf",
+            "objects/ships/caravel_helms.cgf",
+            "objects/ships/galleon_body.cgf",
+        ] {
+            assert!(is_deck_part(yes), "{yes}");
+        }
+        for no in [
+            "objects/ships/caravel_sail1.cgf",
+            "objects/ships/caravel_anchor.chr",
+            "objects/ships/fishboat_wheel.cga",
+            "objects/ships/galleon_cannon.cgf",
+            "objects/ships/galleon_rudder.cgf",
+            "objects/ships/box.cgf",
+            "objects/env/barrel_oak_b.cgf",
+            "objects/ships/boxship_ladder_1.cgf",
+            "objects/ships/soloship_a_damage50.cgf",
+        ] {
+            assert!(!is_deck_part(no), "{no}");
+        }
+    }
+
+    /// The `ship_models.normal` prefabs the 1.2 pak cannot give a deck: the caravel and ray parts
+    /// (`caravel_body.cgf`, `ray.cgf`, `caravel_helms.cgf`) are not in the pak, `galleon02.xml` is missing,
+    /// `boxship_old.xml` has no `_6f` / `_2f` prefab, and the woodpiece is floating debris (`galleon_item03.cgf`,
+    /// no hull).
+    const NO_DECK: [&str; 6] = [
+        "prefab://prefabs/ship.xml/caravel.ship_body",
+        "prefab://prefabs/ship.xml/ray.ship_body",
+        "prefab://prefabs/galleon02.xml/galleon02.galleon_step10_normal",
+        "prefab://prefabs/boxship_old.xml/boxship_old.boxship_old_normal_6f",
+        "prefab://prefabs/boxship_old.xml/boxship_old.boxship_old_normal_2f",
+        "prefab://prefabs/galleon.xml/galleon.woodpiece01",
+    ];
+
+    /// Every `ship_models.normal` prefab of the game database other than [`NO_DECK`] has a floor, and every one
+    /// with a floor has a `$driver` helper with that floor within 1.5 m below it (as every `$passenger*` helper);
+    /// prints the ships without a floor (needs `AA_PAK` and `AA_DB`).
+    #[test]
+    fn every_ship_prefab_has_a_deck_under_its_seats_when_the_data_is_present() {
+        if !aa_cry::pak_available() {
+            return;
+        }
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        let Ok(db) = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+            return;
+        };
+        let mut st = db.prepare("SELECT DISTINCT normal FROM ship_models WHERE normal IS NOT NULL").unwrap();
+        let normals: Vec<String> = st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        let (mut empty, mut seatless, mut driverless) = (Vec::new(), Vec::new(), Vec::new());
+        for normal in normals {
+            let parts = prefab::load(&normal);
+            let Some(floor) = ShipFloor::load(&normal) else {
+                empty.push(normal);
+                continue;
+            };
+            let mut seats = Vec::new();
+            for part in &parts {
+                let Ok(model) = aa_cry::mesh::Model::load(&part.model) else { continue };
+                for (i, node) in model.nodes.iter().enumerate() {
+                    let name = node.name.trim_start_matches('$');
+                    if name == "driver" || name.starts_with("passenger") {
+                        let at = model.world_transform(i).transform_point3(Vec3::ZERO);
+                        seats.push((name.to_string(), part.pos + part.rot * (at * part.scale)));
+                    }
+                }
+            }
+            if !seats.iter().any(|(name, _)| name == "driver") {
+                driverless.push(normal.clone());
+            }
+            for (name, at) in seats {
+                let under = floor.height(at.x, at.y, at.z + 0.5);
+                if under.is_none_or(|h| at.z - h > 1.5) {
+                    seatless.push(format!("{normal} {name} at {at:?} floor {under:?}"));
+                }
+            }
+        }
+        eprintln!("ships without a floor: {empty:#?}
+seats without a floor within 1.5 m: {seatless:#?}");
+        let uncovered: Vec<&String> =
+            empty.iter().filter(|n| !NO_DECK.iter().any(|k| k.eq_ignore_ascii_case(n))).collect();
+        assert!(uncovered.is_empty(), "ships without a floor: {uncovered:#?}");
+        assert!(driverless.is_empty(), "ships with a floor but no $driver helper: {driverless:#?}");
+        assert!(seatless.is_empty(), "{seatless:#?}");
     }
 }

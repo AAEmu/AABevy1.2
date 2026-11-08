@@ -1037,7 +1037,7 @@ impl QuestTables {
     /// The items a quest supplies (`SupplyItem` acts of its kind-3 components): what
     /// `X2Quest.GetUseTypeQuestItems` reads. `action_bar_only` keeps the acts the native shows on the
     /// tracker (`show_action_bar`); the restart check reads them all. `FUN_394a55a0` drops an item
-    /// without a usable use skill (`FUN_39695dc0` + `FUN_396f6390`).
+    /// without a use skill (`FUN_39695dc0`, `+0x98`; [`GameData::item_usable`]).
     pub fn supply_item_targets(&self, game: &GameData, quest: u32, action_bar_only: bool) -> Vec<u32> {
         self.parts_of(quest, kind::SUPPLY)
             .flat_map(|c| &c.acts)
@@ -1058,7 +1058,7 @@ impl QuestTables {
 
     /// The items a quest asks the player to use: the `ObjItemUse` targets of its Progress steps
     /// (`X2Quest.GetUseTypeQuestItems` and `IsUseItemInActiveQuest`, `FUN_394a55a0` / `FUN_3949e280`),
-    /// with the same usable-skill filter.
+    /// with the same use-skill filter.
     pub fn use_item_targets(&self, game: &GameData, quest: u32) -> Vec<u32> {
         self.parts_of(quest, kind::PROGRESS)
             .flat_map(|c| &c.acts)
@@ -1133,8 +1133,9 @@ impl QuestTables {
         out
     }
 
-    /// The act types `FUN_397d3370` handles: the native `FUN_397d5b90` set (`DAT_3a5e11f4`) is not
-    /// recovered, so these inferred types stand in.
+    /// `FUN_397d5b90`'s counted act set, built by `FUN_397d6640` (`DAT_3a5e11f0` / `11f4`): act
+    /// ids 0-7, 36-39, 42-46, 49, 50, 54, 55, 57-59 and 61-63, the types `FUN_397d3370` handles plus
+    /// `ObjAggro` (57).
     fn native_counted(ty: &str) -> bool {
         matches!(
             ty,
@@ -1164,10 +1165,11 @@ impl QuestTables {
                 | "ObjCinema"
                 | "ObjDistance"
                 | "ObjCondition"
+                | "ObjAggro"
         )
     }
 
-    /// The first act in `FUN_397d5b90`'s counted set (inferred from `FUN_397d3370`).
+    /// The first act in `FUN_397d5b90`'s counted set (the set `FUN_397d6640` builds).
     fn counted_act<'a>(&self, c: &'a ComponentDef) -> Option<&'a ActDef> {
         c.acts.iter().find(|a| Self::native_counted(&a.ty))
     }
@@ -1204,7 +1206,8 @@ impl QuestTables {
     }
 
     /// `FUN_397d3370`: whether the first counted act's requirement is met by `counter`. Types with
-    /// a detail count compare it; the rest are met by any progress.
+    /// a detail count compare it; the rest are met by any progress. `ObjAggro` (0x39) has no case,
+    /// so it is never met (the switch's default).
     fn act_met(a: &ActDef, counter: i32) -> bool {
         if !Self::native_counted(&a.ty) {
             return false;
@@ -1214,6 +1217,7 @@ impl QuestTables {
             | "ObjItemGather" | "ObjItemUse" | "ObjZoneQuestComplete" | "ObjEffectFire"
             | "ObjItemGroupGather" | "ObjItemGroupUse" | "ObjExpressFire" | "ObjCraft"
             | "ObjZoneKill" => counter >= a.count,
+            "ObjAggro" => false,
             _ => counter > 0,
         }
     }
@@ -1246,11 +1250,9 @@ impl QuestTables {
     }
 
     /// `X2Quest.NowIsAggroComponent` (`FUN_394a53c0`): `FUN_397d5b90` returns the first act whose
-    /// type is in its counted set, and that act is `ObjAggro` (0x39). The native set
-    /// `DAT_3a5e11f4` is not recovered; the server's objective types stand in here.
+    /// type is in its counted set (the set `FUN_397d6640` builds), and that act is `ObjAggro` (0x39).
     pub fn is_aggro(&self, quest: u32) -> bool {
-        self.parts_of(quest, kind::PROGRESS)
-            .any(|c| c.acts.iter().find(|a| counts_as_objective(&a.ty)).is_some_and(|a| a.ty == "ObjAggro"))
+        self.parts_of(quest, kind::PROGRESS).any(|c| self.counted_act(c).is_some_and(|a| a.ty == "ObjAggro"))
     }
 
     /// The bubbles of a component's talk, from its start bubble along `next_bubble`.
@@ -1595,12 +1597,16 @@ mod tests {
         // (`FUN_394a2930`'s relation), so both are on objective 1 (supply first).
         let list = t.items_by_objective(&game, 6370, None, 1);
         assert_eq!(list, vec![34067, 34282]);
-        // The filter drops an item without a usable use skill.
+        // The filter drops an item without a use skill.
         let act = |ty: &str, target| ActDef { ty: ty.into(), target, count: 1, ..ActDef::default() };
         let mut s = QuestTables::default();
         s.defs.insert(9, QuestDef { components: vec![30, 31], ..QuestDef::default() });
         // Item 100 exists but has no use skill; 0 does not exist.
         assert!(!game.item_usable(100) && !game.item_usable(0));
+        // The getters do not resolve the use skill: an item whose skill has no `skills` row counts.
+        let mut unresolved = GameData::default();
+        unresolved.items.insert(4, super::super::data::ItemInfo { use_skill: 9, ..Default::default() });
+        assert!(unresolved.item_usable(4));
         s.parts.insert(30, ComponentDef { id: 30, quest: 9, kind: kind::SUPPLY, acts: vec![act("SupplyItem", 100), act("SupplyItem", 0)], ..ComponentDef::default() });
         s.parts.insert(31, ComponentDef { id: 31, quest: 9, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 100), act("ObjItemUse", 0)], ..ComponentDef::default() });
         assert!(s.supply_item_targets(&game, 9, true).is_empty());
@@ -1611,6 +1617,9 @@ mod tests {
         a.parts.insert(41, ComponentDef { id: 41, quest: 11, kind: kind::PROGRESS, acts: vec![act("ObjMonsterHunt", 1), act("ObjAggro", 1)], ..ComponentDef::default() });
         assert!(!a.is_aggro(11));
         a.parts.get_mut(&41).unwrap().acts.remove(0);
+        assert!(a.is_aggro(11));
+        // ConFail is not in FUN_397d6640's set, so ObjAggro is still the first counted act.
+        a.parts.get_mut(&41).unwrap().acts.insert(0, act("ConFail", 1));
         assert!(a.is_aggro(11));
         // `SupplyAaPoint` takes the first act, not the sum.
         let point = |value| ActDef { ty: "SupplyAaPoint".into(), value, ..ActDef::default() };
@@ -1712,6 +1721,13 @@ mod tests {
         // The first component keeps index 1, so the use item is on objective 2.
         assert_eq!(t.items_by_objective(&game, 31, None, 2), vec![3]);
         assert!(t.items_by_objective(&game, 31, None, 1).is_empty());
+        // ObjAggro is in FUN_397d6640's set and FUN_397d3370 never meets it: an aggro step is not
+        // done and keeps objective 1.
+        t.defs.insert(32, QuestDef { components: vec![62, 63], ..QuestDef::default() });
+        t.parts.insert(62, ComponentDef { id: 62, quest: 32, kind: kind::PROGRESS, acts: vec![act("ObjAggro", 0, 1)], ..ComponentDef::default() });
+        t.parts.insert(63, ComponentDef { id: 63, quest: 32, kind: kind::PROGRESS, acts: vec![act("ObjItemUse", 3, 1)], ..ComponentDef::default() });
+        assert_eq!(t.items_by_objective(&game, 32, None, 2), vec![3]);
+        assert!(t.items_by_objective(&game, 32, None, 1).is_empty());
     }
 
     #[test]
