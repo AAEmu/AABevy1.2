@@ -721,10 +721,11 @@ mod tests {
         if !aa_cry::pak_available() {
             return Ok(None);
         }
+        // The fixture loads the game data from the same database (`breath::fixture::runtime`).
         let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
-        let Ok(game) = crate::hud::data::GameData::load(&path) else {
+        if !std::path::Path::new(&path).is_file() {
             return Ok(None);
-        };
+        }
         let (rt, shared, _path, inventory) =
             crate::hud::expansion::fixture::runtime(1280.0, 720.0)?;
         rt.lua
@@ -780,7 +781,6 @@ mod tests {
         app.update();
         {
             let mut data = shared.borrow_mut();
-            assert!(data.game.0.set(game).is_ok());
             data.pos = Vec3::ZERO;
             data.panels.target = Some(crate::hud::panels::TargetSnap {
                 obj_id: npc.obj_id,
