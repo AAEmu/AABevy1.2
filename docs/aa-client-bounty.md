@@ -64,6 +64,12 @@ FillLeftFrame body indexes its argument with its own CUR_SELECTED upvalue; the w
 that resolves every key to the selected record, so the detail card and the reward button follow the
 same row.
 
+These flows exist only in this client; the stock 1.2 client never produces them: the board's "Offer
+a Reward" button sending CS11f (`RequestSetBountyMoney`), `SET_BOUNTY` opening the setup window, and
+the setup window's OK sending CS120 (`SendBountyUpdate`). Native `sub_3907DEE0` raises `SET_BOUNTY`
+(UI event 334) even when the request is refused (after error 584); this client suppresses it on a
+refusal (aa-net emits only the 584 error), so the shim's listener does not open the setup window.
+
 The popup-menu entry (`popup_menu_proc` proto `main.18`) stays out of scope: its closure is held in a
 local that no later closure captures, it is stored in no global, and no portrait/menu entry reaches
 it.

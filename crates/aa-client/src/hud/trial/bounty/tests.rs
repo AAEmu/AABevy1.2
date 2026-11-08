@@ -399,3 +399,34 @@ fn set_bounty_reply_opens_the_original_setup_window() -> Result<(), Box<dyn std:
     }
     Ok(())
 }
+
+#[test]
+fn refused_set_bounty_request_keeps_the_setup_window_closed() -> Result<(), Box<dyn std::error::Error>> {
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !aa_world::pak_available() || !std::path::Path::new(&db).exists() {
+        eprintln!("skip: AA_PAK/AA_DB missing");
+        return Ok(());
+    }
+    let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
+    super::super::fixture::selected(Some(&rt), &state);
+    // Native sub_3907DEE0 raises SET_BOUNTY even after error 584; aa-net drops it so the
+    // shim's listener cannot open the setup window on a refusal.
+    send(
+        Some(&rt),
+        &state,
+        BountyEvent::SetPermitted {
+            kind: 50,
+            name: b"Wanted".to_vec(),
+            money: 12345,
+            raw_allowed: 0,
+        },
+    );
+    aa_ui::lua::flush(&rt.lua);
+    rt.lua.load("assert(userTrial.setupBountyWnd==nil)").exec()?;
+    assert!(commands(&state).is_empty());
+    assert!(rt.errors.is_empty(), "{:?}", rt.errors);
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
