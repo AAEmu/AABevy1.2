@@ -706,6 +706,13 @@ the local funcs (AA_PAK/AA_DB, skipped without them; the dispatch tests run with
   the labor, tool and cast of a natural node are the server's and the existing skill path's (see "Natural gathering").
 * The Mailbox's action is now on the bar: `DoodadFuncNaviOpenMailbox` maps to skill 11400 (the native func-type
   mapping), and its use opens the mail window locally (`local.rs`); Ctrl-E still opens the nearest mailbox (`mail.rs`).
+* **Fallback-gap interactions end late** (deliberate): an interaction opened on a fallback gap (no drawn bounds yet, or a
+  parented doodad) closes only at the 4 m centre distance (`DOODAD_REACH`, `left_interaction`), not at the native 2.1 m
+  surface reach of `FUN_39093800`, because the fallback is not the native collider shape and the strict rule would close
+  it as soon as it opened. This covers the bench, the fish stand, the doodad store/bank, the mailbox and the farm board.
+  A bench craft at such a gap is not refused locally with `TOO_FAR_AWAY` (0x9a); the server checks. The close is also
+  checked every frame, where native `FUN_393b7e40` polls every 1000 ms, so a measured-gap end can come up to 1 s earlier
+  than in 1.2.
 * The bar stays up during the cast (the capture sampled the cast bar only, not the dynamic bar).
 * Confirmed by the 2026-10-30 1.2 capture (`tools/evidence/gather/capture-results.txt`): the herb 2274 Use path (13990, key F,
   "Gather", 4000 ms, 1 LP, phase 4513 -> 4514), the fake-use lamp 13166 fallback, the local no-labor refusal, the reach samples
