@@ -2256,3 +2256,55 @@ fn walking_away_from_a_purchase_cancels_the_dialog() {
     assert!(sent(&mut app).is_empty(), "the far purchase still sent");
     assert_eq!(lua(&app, "return INTER_ENDS").unwrap().as_integer(), Some(1));
 }
+
+/// `FUN_394ce5d0`: with no auctioneer NPC, the window's requests carry the state-0xe doodad
+/// (`FUN_394ce540`) as `obj_id2`, and they are sent; out of reach, 388 ends the state instead.
+#[test]
+fn a_doodad_auction_sends_the_doodad_as_the_auctioneer() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 22_065, 7983, 12_083, Inventory::default());
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return IsActivatedAuction()")
+            .unwrap()
+            .as_boolean(),
+        Some(true),
+        "the auction window did not open"
+    );
+    assert!(sent(&mut app).is_empty());
+    lua(&app, "X2Auction:SearchAuctionArticle(3, 10, 20, 4, 10203, false, 'Sword')").unwrap();
+    app.update();
+    let searches: Vec<_> = sent(&mut app)
+        .into_iter()
+        .filter_map(|command| match command {
+            Command::Auction(aa_net::AuctionCommand::Search { auctioneer, .. }) => Some(auctioneer),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        searches,
+        [aa_net::auction::AuctioneerIds {
+            obj_id: 0,
+            obj_id2: 2075
+        }]
+    );
+
+    // Out of reach the request is not sent and the auction state ends.
+    lua(&app, "X2Auction:SearchAuctionArticle(3, 10, 20, 4, 10203, false, 'Sword')").unwrap();
+    set_pos(&app, Vec3::new(1000.0, 1000.0, 100.0));
+    app.update();
+    app.update();
+    assert!(
+        !sent(&mut app)
+            .iter()
+            .any(|command| matches!(command, Command::Auction(_))),
+        "an auction request left for the far doodad"
+    );
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    assert_eq!(bridge.0.borrow().doodad.local_state, None);
+}

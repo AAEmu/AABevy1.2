@@ -666,7 +666,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncCofferPerm` 0x51 | `FUN_393bc260` case 0x51 | `FUN_3983b3b0` needs a `DoodadFuncCoffer` with a positive `actual_func_id`; then state 0xd and `COFFER_INTERACTION_START` (0x243/579); returns 1, else 0 (server refusal) | **done** (template-wide coffer check + event; `X2Coffer.SetHouseCofferPermission` still has no packet) |
 | `DoodadFuncMould` 0x53 | `FUN_393bc260` case 0x53 | returns 1 (no-op) | no rows in 1.2 |
 | `DoodadFuncInsertCounter` 0x54 | `FUN_393bc260` case 0x54 | with fewer than `doodad_func_insert_counters.item_count` of `item_id`, shows `NOT_ENOUGH_ITEM` (0x1b/27) and returns 1; else returns 0 (skill sent) | **done** (`local.rs`, `missing_counter_item`) |
-| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the doodad is gone or out of reach (`FUN_394ce540`, walk-away `FUN_393b7e40`); closing the window alone leaves it until the next interaction or the walk-away; the server still requires an auctioneer NPC, see gaps) |
+| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the doodad is gone or out of reach (`FUN_394ce540`, walk-away `FUN_393b7e40`); closing the window alone leaves it until the next interaction or the walk-away; its requests carry the doodad as `obj_id2`, `FUN_394ce5d0`, see gaps) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
 | `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | 11400 is dispatched by the action-handler map before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` -> `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040`), so no `CSStartSkill` is sent. `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)` and calls `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not all loaded | **done** (`local.rs`, `mail::open_at`; its `MailCommand::List` stands in for `FUN_393ccdd0` and is queued whenever the window is hidden) |
@@ -715,10 +715,12 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   but no script registers that event (`docs/ui-api.md` lists it as never referenced), so 1.2's renew window
   stays missing. The one shipped row (func 7896, group 8776) also has no `func_skill_id`, so the bar never
   offers it (the native action map has no type 0x47 either).
-* **Auction from a doodad**: `NPC_INTERACTION_START("auction")` opens the original window, but the client
-  sends no auctioneer for a doodad and the server (`auction_packets.rs::at_auctioneer`) accepts only an
-  auctioneer NPC in range, so searches from the auction warehouse doodad are refused until the client
-  resolves the nearby auctioneer.
+* **Auction from a doodad**: `NPC_INTERACTION_START("auction")` opens the original window, and its
+  requests carry the doodad as `AuctioneerIds { obj_id: 0, obj_id2: doodad }` like the native
+  `FUN_394ce5d0` -> `FUN_394ce540`. Before each send the doodad must still exist and be in reach
+  (`left_interaction`; the native measures against its own auction reach at `dword_39aefb98+672`), else
+  state 0xe ends with 387/388 and nothing is sent. Whether the server accepts a doodad auctioneer is
+  server-side (`auction_packets.rs::at_auctioneer` accepts only an auctioneer NPC today, AAEmu-1.2-Rust#49).
 * **Crime report text**: `FUN_393bb090` builds `<zone name> >> <target name> >> <localized text,
   category 0x5c>` from the client's own tables. AA_DB carries neither the zone names nor that
   localized text, so `local.rs` approximates it as `<target> >> <doodad name> >> crime <crime_kind_id>`

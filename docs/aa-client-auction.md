@@ -14,7 +14,11 @@ and the original `npc_interaction.lua` calls `ToggleAuctionWindow`. Like the sto
 (`featureSet.hudAuctionButton`) is off: the server only serves the house at an auctioneer in range (it checks the
 packet's NPC ids and the NPC being interacted with).
 
-Requests carry the auctioneer's object id (`AuctioneerIds { obj_id, obj_id2: 0 }`).
+Requests carry the auctioneer's object id (`AuctioneerIds { obj_id, obj_id2: 0 }`). With no auctioneer NPC, a doodad
+auction (`DoodadFuncAuctionUi`, interaction state 0xe) sends its doodad instead (`{ obj_id: 0, obj_id2: doodad }`,
+`FUN_394ce5d0` -> `FUN_394ce540`); when that doodad is gone or out of reach the request is not sent, state 0xe ends and
+`AUC_INVALID_TARGET_AUCTIONEER` (387) / `AUC_AUCTIONEER_TOO_FAR_AWAY` (388) is shown (see
+[aa-client-doodads](aa-client-doodads.md)).
 
 ## `X2Auction`
 

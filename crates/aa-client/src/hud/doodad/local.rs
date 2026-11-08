@@ -510,7 +510,8 @@ pub(super) fn run(
         LocalAction::Bank => {
             super::super::store::open_doodad(rt, bridge, obj_id, 0, true);
         }
-        LocalAction::Auction => rt.fire_event("NPC_INTERACTION_START", "auction"),
+        // `FUN_393b8b80`; the window's requests then carry the doodad as `obj_id2`.
+        LocalAction::Auction => super::super::auction::start_doodad(rt, obj_id),
         LocalAction::Bubble {
             bubble,
             next_phase,
