@@ -962,10 +962,15 @@ impl QuestTables {
     /// `X2Quest.GetMainQuestCutSceneReplayList` (`FUN_39378e10`): every completed main quest whose
     /// component has a `cinemas.replay` movie, as `(quest id, cinema name)`. `FUN_3937c940`
     /// rebuilds the vector from the completed blocks and `FUN_39377f30` sorts it by
-    /// `(chapter_idx, quest_idx)`; the stable sort keeps a quest's components in order.
+    /// `(chapter_idx, quest_idx)`; the stable sort keeps a quest's components in order. The native
+    /// appends in template-table order (ascending quest id here), so ties keep that order: exact for
+    /// 32 entries or fewer, where its `std::sort` is an insertion sort; above that the native's
+    /// introsort is not reproduced.
     pub fn replay_list(&self, completed: &[aa_net::quest::CompletedBlock]) -> Vec<(u32, String)> {
         let mut out = Vec::new();
-        for id in self.defs.keys().copied() {
+        let mut ids: Vec<u32> = self.defs.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
             if !completed.iter().any(|b| b.has(id)) {
                 continue;
             }

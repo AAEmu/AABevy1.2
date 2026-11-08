@@ -3657,6 +3657,21 @@ mod tests {
     }
 
     #[test]
+    fn replay_list_ties_keep_the_template_table_order() {
+        let shared: Shared = Rc::new(RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        // 213, 2315 and 2350 are all main quests at (chapter 1, quest 8) with a replay movie:
+        // FUN_3937c940 appends them in table order and the sort keeps it.
+        let block = |q: u32| aa_net::quest::CompletedBlock { id: (q / 64) as u16, bits: 1 << (q % 64) };
+        let d = shared.borrow();
+        let list = d.game.get().unwrap().quests.replay_list(&[block(2350), block(213), block(2315)]);
+        let cinemas: Vec<&str> = list.iter().map(|(_, c)| c.as_str()).collect();
+        assert_eq!(cinemas, ["sl_el_005", "sl_fe_005", "sl_ha_004"]);
+    }
+
+    #[test]
     fn the_replay_list_sorts_by_chapter_and_quest_index_and_appends_runtime_completions() {
         let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
         if !with_game(&shared) {

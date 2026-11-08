@@ -740,7 +740,10 @@ is nothing to replay, else an array of `{ name, cinema }`. The native keeps a ve
 `cinemas.replay` is set, once per component. `FUN_3937c940` clears and rebuilds it from the
 completed blocks on `SCCompletedQuests`, then sorts by `quest_contexts.chapter_idx` and `quest_idx`
 (`FUN_39377f30` compares the quest context's `+0x08` then `+0x24`; the stable order keeps a quest's
-components in component order). A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
+components in component order). The native appends in template-table order, so Bevy walks the
+quests by ascending id and equal keys keep that order (quests 213, 2315 and 2350 at chapter 1,
+quest 8). That is exact for 32 entries or fewer, where MSVC's `std::sort` (`FUN_3937b130`) is an
+insertion sort; above that its introsort is not reproduced. A completion at runtime (`FUN_3937bb60` -> `FUN_3937b540` ->
 `FUN_3937b2d0` push_back) is appended unsorted until the next rebuild. The Bevy getter reads the
 same vector: `Event::CompletedQuests` rebuilds and sorts it, `Event::QuestCompleted` appends. When a
 component has no `quest_components.cinema_id`, `FUN_393780a0` falls back to the component's skill:
