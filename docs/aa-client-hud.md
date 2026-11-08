@@ -432,7 +432,11 @@ A held-back press still shows the native refusal (`Env::held_back_refusal` -> `U
 unit skill check behind the `CanUseSkill` accessor (`FUN_390b7b00`, disassembled at 390B7B00-390B7DC9) asks, in this order:
 the prison (0x1a), the player's life (`SOURCE_ALIVE` 3 / `SOURCE_DIED` 2), 0x29 and 0x28, the buff restrictions (stun
 `CANNOT_CAST_IN_STUN` 0x13, blank-minded 0x16, silence 0x17, crippled 0x18), none of them gated by the caller's check flags;
-then any ongoing cast, `ON_CASTING` 7 ("Already performing an action."); then `COOLDOWN_TIME` 8 with `FUN_3989a400`
+then any ongoing cast, `ON_CASTING` 7 ("Already performing an action."), written for the cast handle (`+0x3ac4`/`+0x3ac8`, the
+Lua `IsCasting`) and the channel handle (`+0x3acc`/`+0x3ad0`, `IsChanneling`) alike: nothing in the function writes
+`CANNOT_CAST_IN_CHANNELING` 0x19, so a press inside the GCD during another skill's channel says `ON_CASTING` too (a
+`stop_channeling` skill still passes, since the caller's 0x800 cast-check flag, from the VM-obfuscated `CanUseSkill`, is
+unrecovered; `why_not`/`precheck` after the GCD still say 0x19 for a channel, a follow-up); then `COOLDOWN_TIME` 8 with `FUN_3989a400`
 (1931224-1931240): the skill's own/tag cooldown is detail 1 and only when that is done, for a skill that does not ignore the
 GCD (`+0xdc == 0`), the running global cooldown is detail 2; then mana (`LACK_MANA` 0xb). `held_back_refusal` follows it: the
 life and buff rules (`why_not`'s, the dead player skipping the buff rules), then the cast, then the cooldowns; the prison, 0x29

@@ -739,7 +739,11 @@ impl Env<'_> {
     /// Nothing on the press path writes `NOT_NOW` 0x2c: its writers are pet/mate-bar checks. A held-back press therefore
     /// asks the life and buff rules first (the dead player skips the buff rules, as in [`Env::why_not`]); the prison,
     /// 0x29 and 0x28 have no client data. `Hold::Gcd` then repeats the any-cast check (`busy`) before the own cooldown, so
-    /// B4's press during another skill's cast inside the GCD says `ON_CASTING`.
+    /// B4's press during another skill's cast inside the GCD says `ON_CASTING`. The cast check (390B7CEE-390B7D4E, gated by
+    /// bit 0x800 of the caller's check flags) writes 7 for the channel handle too and nothing in the function writes
+    /// `CANNOT_CAST_IN_CHANNELING` 0x19, so `busy`'s channel result becomes `ON_CASTING`. A `stop_channeling` skill still
+    /// passes `busy`: the 0x800 flag comes from `CanUseSkill` (`sub_394B7E70`, VM-obfuscated), which could clear it per
+    /// skill, so that exemption is kept until the caller is recovered.
     pub fn held_back_refusal(&self, skill: u32, flight: &InFlight) -> Option<Fail> {
         let hold = self.hold(skill, flight)?;
         if matches!(hold, Hold::AutoAttack | Hold::Flight) {
@@ -753,7 +757,11 @@ impl Env<'_> {
         }
         match hold {
             Hold::Cast => Some(fail(code::ON_CASTING)),
-            Hold::Gcd => r.and_then(|r| self.busy(skill, r)).or_else(|| self.cooldown(skill)),
+            // both handle pairs write 7: a channel of another skill is `ON_CASTING` here, not `busy`'s 0x19
+            Hold::Gcd => r
+                .and_then(|r| self.busy(skill, r))
+                .map(|f| if f.result == code::CANNOT_CAST_IN_CHANNELING { fail(code::ON_CASTING) } else { f })
+                .or_else(|| self.cooldown(skill)),
             Hold::AutoAttack | Hold::Flight => None,
         }
     }
@@ -1708,10 +1716,11 @@ mod tests {
         let mut casting_inside = cast_ago(Duration::from_millis(300));
         casting_inside.casting.insert(5, casting(3, 5000, now, None, 0));
         assert_eq!(refusal(&casting_inside, 2), Some(fail(code::ON_CASTING)));
-        // a channel of another skill follows the existing busy rule
+        // a channel of another skill: `FUN_390b7b00` writes 7 for the cast and the channel handle pair alike (never 0x19);
+        // the stop_channeling pass-through of `busy` is kept, as the caller's 0x800 cast-check flag is unrecovered
         let mut channeling = cast_ago(Duration::from_millis(300));
         channeling.casting.insert(5, casting(3, 0, now, Some(now), 4000));
-        assert_eq!(refusal(&channeling, 2), Some(fail(code::CANNOT_CAST_IN_CHANNELING)));
+        assert_eq!(refusal(&channeling, 2), Some(fail(code::ON_CASTING)));
         // the last 100 ms are the server's to judge, and an ignore_gcd skill never waits
         assert!(!Env { skills: Some(&cast_ago(Duration::from_millis(950))), ..env(&g, &me, None, 0.0) }.held_back(2, &flight));
         assert_eq!(refusal(&cast_ago(Duration::from_millis(950)), 2), None);
