@@ -288,6 +288,11 @@ fn original_empty_bulletin_and_standalone_setup_controls_queue_only_the_captured
 
 #[test]
 fn shim_fills_nonempty_rows_reward_selection_done_and_repatches_after_reopen() -> Result<(), Box<dyn std::error::Error>> {
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !aa_world::pak_available() || !std::path::Path::new(&db).exists() {
+        eprintln!("skip: AA_PAK/AA_DB missing");
+        return Ok(());
+    }
     let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
     super::super::fixture::selected(Some(&rt), &state);
     rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
@@ -378,8 +383,14 @@ fn shim_fills_nonempty_rows_reward_selection_done_and_repatches_after_reopen() -
 
 #[test]
 fn set_bounty_reply_opens_the_original_setup_window() -> Result<(), Box<dyn std::error::Error>> {
+    let db = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+    if !aa_world::pak_available() || !std::path::Path::new(&db).exists() {
+        eprintln!("skip: AA_PAK/AA_DB missing");
+        return Ok(());
+    }
     let (rt, state, path) = crate::hud::breath::fixture::runtime(1920., 1080.)?;
     super::super::fixture::selected(Some(&rt), &state);
+    rt.lua.load("ADDON:ShowContent(UIC_BAG,false)").exec()?;
     send(
         Some(&rt),
         &state,
@@ -393,6 +404,20 @@ fn set_bounty_reply_opens_the_original_setup_window() -> Result<(), Box<dyn std:
     rt.lua
         .load("local w=userTrial.setupBountyWnd;assert(w and w:IsVisible());assert(w.currentBounty~=nil)")
         .exec()?;
+    // The id and the first-NUL name travel from SET_BOUNTY to SendBountyUpdate.
+    aa_ui::lua::flush(&rt.lua);
+    crate::hud::expansion::fixture::click(&rt, "userTrial.setupBountyWnd.okButton")?;
+    assert_eq!(
+        commands(&state),
+        [(
+            47,
+            BountyCommand::Update {
+                kind: 50,
+                name: b"Wanted".to_vec(),
+                money: 0
+            }
+        )]
+    );
     assert!(rt.errors.is_empty(), "{:?}", rt.errors);
     if path.exists() {
         std::fs::remove_file(path)?;
