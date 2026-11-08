@@ -1619,6 +1619,13 @@ fn the_evidence_loot_opens_the_crime_report() {
             msg,
         }] if msg == "blood on the ground"
     ));
+    // FUN_3907bfd0 keeps the context: a second report sends again.
+    lua(&app, "X2Trial:ReportCrime('a second look')").unwrap();
+    app.update();
+    assert!(matches!(
+        sent(&mut app).as_slice(),
+        [Command::ReportCrime { obj_id: 2075, func_id: 12_578, msg, .. }] if msg == "a second look"
+    ));
 }
 
 /// `DoodadFuncPurchase` (`FUN_393b80d0`): task 10 for a money row, task 11 for a coin row; the

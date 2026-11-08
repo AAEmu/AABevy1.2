@@ -148,7 +148,8 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
         )?;
     }
     // `X2Trial.ReportCrime(msg)` (`FUN_3907bfd0`): the evidence doodad context FUN_393bb090
-    // stored plus the report text, sent as CSReportCrimePacket 0x076.
+    // stored plus the report text, sent as CSReportCrimePacket 0x076. The native reads the
+    // context every call and never clears it; the next evidence use replaces it.
     let s = state.clone();
     api.raw_set(
         "ReportCrime",
@@ -157,7 +158,7 @@ pub(super) fn install(lua: &Lua, state: &Shared) -> mlua::Result<()> {
             if data.disconnected {
                 return Ok(());
             }
-            if let Some(context) = data.doodad.crime_report.take() {
+            if let Some(context) = data.doodad.crime_report {
                 data.doodad.crime_reports.push((context, msg));
             }
             Ok(())
