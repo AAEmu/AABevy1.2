@@ -84,26 +84,27 @@ pub(super) struct LocalFuncs {
 
 impl LocalFuncs {
     pub(super) fn load(conn: &Connection) -> Self {
-        let mut out = Self::default();
-        out.farms = read_map(conn, "SELECT id, farm_id FROM doodad_func_open_farm_infos");
-        out.stores = read_map(
-            conn,
-            "SELECT id, merchant_pack_id FROM doodad_func_store_uis",
-        );
+        let mut out = Self {
+            farms: read_map(conn, "SELECT id, farm_id FROM doodad_func_open_farm_infos"),
+            stores: read_map(
+                conn,
+                "SELECT id, merchant_pack_id FROM doodad_func_store_uis",
+            ),
+            ..Self::default()
+        };
         if let Ok(mut q) =
             conn.prepare("SELECT id, item_id, item_count FROM doodad_func_insert_counters")
-        {
-            if let Ok(rows) = q.query_map([], |r| {
+            && let Ok(rows) = q.query_map([], |r| {
                 Ok((
                     crate::hud::data::any_int(r, 0)? as u32,
                     crate::hud::data::any_int(r, 1)? as u32,
                     crate::hud::data::any_int(r, 2)? as u32,
                 ))
-            }) {
-                for (func, item, count) in rows.flatten() {
-                    if item != 0 && count != 0 {
-                        out.insert_counters.insert(func, (item, count));
-                    }
+            })
+        {
+            for (func, item, count) in rows.flatten() {
+                if item != 0 && count != 0 {
+                    out.insert_counters.insert(func, (item, count));
                 }
             }
         }

@@ -410,12 +410,16 @@ mod tests {
     /// `left_interaction` rule the window uses lets the craft request through (the server checks).
     #[test]
     fn a_fallback_gap_craft_request_is_allowed() {
-        let mut data = HudData::default();
-        data.character_id = 47;
-        data.pos = Vec3::new(0.0, 3.0, 0.0);
-        data.player_radius = 0.0;
-        let mut game = super::super::super::data::GameData::default();
-        game.crafting = super::super::fixture_tables([(568, vec![5557])]);
+        let mut data = HudData {
+            character_id: 47,
+            pos: Vec3::new(0.0, 3.0, 0.0),
+            player_radius: 0.0,
+            ..Default::default()
+        };
+        let mut game = super::super::super::data::GameData {
+            crafting: super::super::fixture_tables([(568, vec![5557])]),
+            ..Default::default()
+        };
         game.crafting.recipes.insert(
             5557,
             super::super::data::Recipe {
@@ -447,12 +451,16 @@ mod tests {
     /// the request is refused, not left open.
     #[test]
     fn a_craft_request_at_a_positionless_doodad_is_out_of_range() {
-        let mut data = HudData::default();
-        data.character_id = 47;
-        data.pos = Vec3::new(0.0, 3.0, 0.0);
-        data.player_radius = 0.0;
-        let mut game = super::super::super::data::GameData::default();
-        game.crafting = super::super::fixture_tables([(568, vec![5557])]);
+        let mut data = HudData {
+            character_id: 47,
+            pos: Vec3::new(0.0, 3.0, 0.0),
+            player_radius: 0.0,
+            ..Default::default()
+        };
+        let game = super::super::super::data::GameData {
+            crafting: super::super::fixture_tables([(568, vec![5557])]),
+            ..Default::default()
+        };
         assert!(data.game.0.set(game).is_ok());
         assert_eq!(super::super::bench::open(&mut data, 300, 568), Some(1));
         let quote = Request::Start {

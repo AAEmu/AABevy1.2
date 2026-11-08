@@ -961,7 +961,7 @@ mod tests {
         let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         let tables = Tables::load(&conn).unwrap();
         assert!(
-            !tables.packs.get(&274).map_or(true, Vec::is_empty),
+            tables.packs.get(&274).is_some_and(|goods| !goods.is_empty()),
             "pack 274 (bait barrel) has no goods"
         );
     }
