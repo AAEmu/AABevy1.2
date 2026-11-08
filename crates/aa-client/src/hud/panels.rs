@@ -760,7 +760,9 @@ pub struct Changed {
 
 /// Use what is in global action bar slot `slot` (1 based): cast the skill, use the item. What the client already knows is
 /// refused (no target, too far, no mana ...) is not sent: the alert says why instead ([`UseFailed`]). A press that waits for
-/// the global cooldown, the cast it repeats or the answer to the last press is dropped without an alert ([`Env::held_back`]).
+/// the global cooldown, the cast it repeats or the answer to the last press is not sent ([`Env::held_back`]); it still shows the
+/// native refusal when there is one ([`Env::held_back_refusal`]: the life and buff rules, another cast, the skill's own
+/// cooldown), and a GCD-only or unanswered press stays silent.
 #[allow(clippy::too_many_arguments)]
 pub fn use_slot(slot: usize, env: &Env, flight: &InFlight, bar: &ActionBar, inventory: &Inventory, target: &Target, net: &mut MessageWriter<SkillPressed>, failed: &mut MessageWriter<UseFailed>) {
     let Some(action) = bar.get(slot) else { return };
