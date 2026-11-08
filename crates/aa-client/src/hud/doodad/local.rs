@@ -150,6 +150,8 @@ fn read_map(conn: &Connection, sql: &str) -> HashMap<u32, u32> {
 /// Runs a local func. Native `FUN_393bc260` always handles these: the skill is never sent, even
 /// when the window cannot open here (no UI runtime, no position, an empty pack). `FUN_393b7b10`
 /// first ends the interaction that is active (`FUN_393b7aa0`), which `end_interaction` mirrors.
+/// The mailbox and the farm board then become the active interaction (`View::local_active`);
+/// the store and bank are tracked by the store view.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     rt: Option<&UiRuntime>,
@@ -165,7 +167,11 @@ pub(super) fn run(
     };
     super::end_interaction(Some(rt), bridge, inventory);
     match local {
-        LocalAction::Mailbox => super::super::mail::open_at(rt, obj_id),
+        LocalAction::Mailbox => {
+            super::super::mail::open_at(rt, obj_id);
+            // `FUN_393b1040` sets interaction state 4 before `TOGGLE_MAIL`.
+            bridge.borrow_mut().doodad.local_active = Some(obj_id);
+        }
         LocalAction::FarmInfo(farm) => {
             // Without a world position the native window still opens; this port cannot place it,
             // so it stays closed rather than sending the skill.
@@ -173,8 +179,10 @@ pub(super) fn run(
                 .by_id
                 .get(&obj_id)
                 .and_then(|o| crate::ingame::units::doodad_world(o, units))
+                && super::super::farm::show_doodad(rt, farm as i32, pos)
             {
-                super::super::farm::show_doodad(rt, farm as i32, pos);
+                // `FUN_393b8700` sets interaction state 10.
+                bridge.borrow_mut().doodad.local_active = Some(obj_id);
             }
         }
         // An empty or unknown merchant pack still opens the native store window (it has no

@@ -9,8 +9,9 @@
 //! planted crops. `SCResponseCommonFarmList` is kept as the runtime list; the window's refresh asks
 //! for it with `RequestRuntimeCommonFarmDoodadInfo` -> `CSRequestCommonFarmList` (0x10b).
 //!
-//! `SCShowCommonFarm` (the OpenFarmInfo doodad func) raises `OPEN_COMMON_FARM_INFO(farmType)`, which
-//! opens the original info window; `INTERACTION_END` closes it. The farm-area map drawable of
+//! `SCShowCommonFarm` and the client-side `DoodadFuncOpenFarmInfo` func (`FUN_393b8700`, see
+//! `doodad::local`) raise `OPEN_COMMON_FARM_INFO(farmType)`, which opens the original info window;
+//! `INTERACTION_END` closes it. The farm-area map drawable of
 //! `worldmap.ShowCommonFarm` / `SetCommonFarmDrawable` and `SCIsUnitInFarm` are not drawn yet (the
 //! packet only updates the farm type state here); see `docs/aa-client-farm.md`.
 
@@ -30,8 +31,10 @@ use super::data::GameData;
 /// The original refreshes the runtime list at most this often (`FUN_39035560`, `_DAT_3999d848` =
 /// 2.0 s).
 const REFRESH_DEBOUNCE_SECS: f64 = 2.0;
-/// How far the player may walk from the farm doodad before the info window closes. The native ends
-/// the interaction with the doodad; the exact reach is not recovered (capture-pending).
+/// How far the player may walk from the farm of an `SCShowCommonFarm` before the info window
+/// closes; that packet's reach is not recovered (capture-pending). A board opened from the doodad
+/// (`FUN_393b8700`, interaction state 10) ends instead at the native interaction reach through
+/// `FUN_393b7e40`, in the doodad module.
 const FARM_LEAVE: f32 = 10.0;
 /// `FUN_390324c0` / `FUN_3983c0e0`: at most 50 growth phases are summed (`local_8 = 0x32`).
 const GROWTH_PHASE_LIMIT: u32 = 50;
@@ -62,11 +65,13 @@ struct Received {
     at: Instant,
 }
 
-/// The farm doodad whose info window is open (`SCShowCommonFarm`).
+/// The farm whose info window is open (`SCShowCommonFarm`, or the doodad's own func).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Shown {
     farm_type: i32,
     pos: Vec3,
+    /// Opened by `DoodadFuncOpenFarmInfo`: the doodad interaction ends it, not [`FARM_LEAVE`].
+    doodad: bool,
 }
 
 #[derive(Default)]
@@ -402,18 +407,36 @@ fn growth_remaining_ms(
 }
 
 /// `DoodadFuncOpenFarmInfo` (`FUN_393b8700` 774877): the client opens the info window itself for
-/// `doodad_func_open_farm_infos.farm_id`; the func's skill is not sent. The walk-away close is the
-/// same as the server packet's (`FARM_LEAVE`, capture-pending).
-pub(super) fn show_doodad(rt: &UiRuntime, farm_type: i32, pos: Vec3) {
+/// `doodad_func_open_farm_infos.farm_id`; the func's skill is not sent. The board is interaction
+/// state 10: the doodad module ends it (`FUN_393b7e40` at the interaction reach, or the next
+/// interaction) and calls [`end_doodad`]. `false` when the farm windows are not installed.
+pub(super) fn show_doodad(rt: &UiRuntime, farm_type: i32, pos: Vec3) -> bool {
     let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
-        return;
+        return false;
     };
-    state.0.borrow_mut().show = Some(Shown { farm_type, pos });
+    state.0.borrow_mut().show = Some(Shown {
+        farm_type,
+        pos,
+        doodad: true,
+    });
     aa_ui::lua::queue_ui_event(
         &rt.lua,
         "OPEN_COMMON_FARM_INFO",
         vec![Value::Integer(i64::from(farm_type))],
     );
+    true
+}
+
+/// The doodad interaction of a board [`show_doodad`] opened ended; the caller raises its
+/// `INTERACTION_END`, which closes the window.
+pub(super) fn end_doodad(rt: &UiRuntime) {
+    let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
+        return;
+    };
+    let mut v = state.0.borrow_mut();
+    if v.show.is_some_and(|show| show.doodad) {
+        v.show = None;
+    }
 }
 
 /// Folds aa-net's farm events into the runtime list and the info window.
@@ -456,6 +479,7 @@ fn sync(
                 state.0.borrow_mut().show = Some(Shown {
                     farm_type: show.farm_type,
                     pos,
+                    doodad: false,
                 });
                 // `info.alb` raises the window from `OPEN_COMMON_FARM_INFO(farmType)`.
                 aa_ui::lua::queue_ui_event(
@@ -478,11 +502,13 @@ fn sync(
             _ => {}
         }
     }
-    // `INTERACTION_END` closes the info window; walking away from the farm doodad ends it.
+    // `INTERACTION_END` closes the info window; walking away from the farm of the packet ends
+    // it. A board opened from the doodad ends with the doodad interaction (`end_doodad`).
     let away = {
         let v = state.0.borrow();
-        v.show
-            .is_some_and(|show| bridge.0.borrow().pos.distance(show.pos) > FARM_LEAVE)
+        v.show.is_some_and(|show| {
+            !show.doodad && bridge.0.borrow().pos.distance(show.pos) > FARM_LEAVE
+        })
     };
     if away {
         state.0.borrow_mut().show = None;

@@ -497,6 +497,10 @@ pub(super) struct View {
     factions: HashMap<u32, u32>,
     /// The coffer window was closed.
     coffer_close: bool,
+    /// The doodad of the local window that is the active interaction without a state of its own
+    /// elsewhere: the mailbox (`FUN_393b1040`, state 4) or the farm board (`FUN_393b8700`,
+    /// state 10). `FUN_393b7e40` ends it on walk-away, and the next interaction ends it first.
+    local_active: Option<u32>,
     /// `obj_id` -> the drawn model's prefab-local Cry bounds, for the interaction gap (the native
     /// `FUN_3989bf90` uses the doodad's real collider; the model bounds are the recovered shape).
     bounds: HashMap<u32, (Vec3, Vec3)>,
@@ -849,14 +853,15 @@ pub(super) fn left_interaction(
 
 /// Ends the interaction that is active before a new local window, the native `FUN_393b7aa0`
 /// (774053): the bench and the shown interaction list, the coffer (state 5, `FUN_394d08c0` sends
-/// the `CSCofferInteraction` close packet), and the store/bank (states 0xe/0xf/0x11, which raise
-/// `NPC_INTERACTION_END`). It then raises `INTERACTION_END` (0xd2) once when something was active.
+/// the `CSCofferInteraction` close packet), the mailbox and the farm board (states 4 and 10), and
+/// the store/bank (states 0xe/0xf/0x11, which raise `NPC_INTERACTION_END`). It then raises
+/// `INTERACTION_END` (0xd2) once when something was active.
 pub(super) fn end_interaction(
     rt: Option<&UiRuntime>,
     bridge: &Shared,
     inventory: &Inventory,
 ) -> bool {
-    let (bench, menu, coffer) = {
+    let (bench, menu, coffer, local) = {
         let mut data = bridge.borrow_mut();
         let bench = super::crafting::close_bench(&mut data);
         // Only a list that was shown (`other_interaction`) is an active interaction; a single
@@ -870,10 +875,14 @@ pub(super) fn end_interaction(
             // execute sends `CSCofferInteraction` for the flag.
             data.doodad.coffer_close = true;
         }
-        (bench, menu, coffer)
+        let local = data.doodad.local_active.take().is_some();
+        (bench, menu, coffer, local)
     };
+    if local && let Some(rt) = rt {
+        super::farm::end_doodad(rt);
+    }
     let store = rt.is_some_and(|rt| super::store::end_interaction(rt, bridge));
-    let ended = bench || menu || coffer || store;
+    let ended = bench || menu || coffer || local || store;
     if ended && let Some(rt) = rt {
         rt.fire_event("INTERACTION_END", ());
     }
@@ -2184,6 +2193,8 @@ pub(super) fn execute(
     }
     let mut commands = Vec::new();
     let mut opens: Vec<(u32, usize, bool)> = Vec::new();
+    // A mailbox or farm board the coffer or a bench replaces (`FUN_393b7b10`).
+    let mut local_ended = false;
     let auto_dismount = d.doodad.auto_dismount;
     let seat = world.mount.as_deref().and_then(|m| m.0);
     let attached = seat.is_some() || player.as_ref().and_then(|p| p.spawn.as_ref()).is_some_and(|s| s.unit.attached_to.is_some());
@@ -2285,6 +2296,10 @@ pub(super) fn execute(
                 _ => None,
             };
             if let Some(command) = navi {
+                // The coffer is interaction state 5: `FUN_393b7b10` ends a mailbox or farm board first.
+                if matches!(command, Command::Coffer(_)) {
+                    local_ended |= d.doodad.local_active.take().is_some();
+                }
                 commands.push((obj_id, command));
                 continue;
             }
@@ -2321,10 +2336,36 @@ pub(super) fn execute(
             d.doodad.coffer_close = true;
         }
         d.doodad.menu_shown = false;
+        local_ended |= d.doodad.local_active.take().is_some();
     }
     let game_slot = d.game.clone();
     let labor = d.snapshot.labor;
     drop(d);
+    // `FUN_394dc360` opens the bench through `FUN_393b7b10` (state 3): a doodad store or bank
+    // that is open ends first, with its `NPC_INTERACTION_END` (`FUN_393b7aa0`).
+    let store_ended = !opens.is_empty() && rt.as_deref().is_some_and(|rt| super::store::end_interaction(rt, &bridge.0));
+    if local_ended && let Some(rt) = rt.as_deref() {
+        super::farm::end_doodad(rt);
+        if opens.is_empty() {
+            // the coffer replaced it; a bench raises the end with its `CRAFTING_START` below
+            rt.fire_event("INTERACTION_END", ());
+        }
+    }
+    // `FUN_393b7e40` (polled every 1000 ms; checked every frame here) ends the mailbox or farm
+    // board when the doodad is gone or out of the interaction reach.
+    let walked_off = {
+        let data = bridge.0.borrow();
+        data.doodad
+            .local_active
+            .is_some_and(|id| left_interaction(&data, &doodads, &units, id))
+    };
+    if walked_off {
+        bridge.0.borrow_mut().doodad.local_active = None;
+        if let Some(rt) = rt.as_deref() {
+            super::farm::end_doodad(rt);
+            rt.fire_event("INTERACTION_END", ());
+        }
+    }
     let game = game_slot.get();
     let env = PermEnv {
         houses: env_res.houses.as_deref(),
@@ -2459,8 +2500,12 @@ pub(super) fn execute(
         // `FUN_394dc360` then fires event 0x78 with the doodad object id and the unique recipe
         // count. The open itself is local (no packet); the window script's SetDoodad(doodadId,
         // count) treats either argument nil/zero as the general recipe book.
+        // A doodad store/bank or a mailbox/farm board the bench replaced ends once, before the
+        // first `CRAFTING_START`.
+        let mut ended = store_ended || local_ended;
         for (object, count, replaced) in opens {
-            if replaced || other_interaction {
+            let first = std::mem::take(&mut ended);
+            if replaced || other_interaction || first {
                 rt.fire_event("INTERACTION_END", ());
             }
             rt.fire_event("CRAFTING_START", (object, count));

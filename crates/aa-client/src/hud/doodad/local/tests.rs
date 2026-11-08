@@ -878,3 +878,194 @@ fn dispatch_app(
     }
     app
 }
+
+/// Points the bar of an [`app`] at doodad 2075 as `template` in phase `group`, offering `action`,
+/// and requests it once (the next `execute` runs it).
+fn retarget(app: &mut App, template: u32, group: u32, action: u32) {
+    app.world_mut().resource_mut::<Doodads>().by_id.insert(
+        2075,
+        world_doodad(2075, template, group, Vec3::new(10.0, 10.0, 100.0)),
+    );
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    let mut d = bridge.0.borrow_mut();
+    d.doodad.focus = Some(Focus {
+        obj_id: 2075,
+        skills: vec![action],
+        craft_icon: None,
+        key: -3.0,
+        dist: 3.0,
+    });
+    let generation = d.dynamic_actions.shown().and_then(|s| match s.source {
+        Source::Doodad { generation, .. } => Some(generation),
+        _ => None,
+    });
+    d.dynamic_actions.replace(Some(Shown {
+        source: Source::Doodad {
+            obj_id: 2075,
+            phase: group,
+            generation: generation.unwrap_or_default(),
+        },
+        skills: vec![action],
+    }));
+    d.dynamic_actions.request(1);
+}
+
+fn set_pos(app: &App, pos: Vec3) {
+    app.world()
+        .get_non_send::<HudBridge>()
+        .unwrap()
+        .0
+        .borrow_mut()
+        .pos = pos;
+}
+
+fn mail_open(app: &App) -> bool {
+    lua(app, "return IsActivatedMailBox()")
+        .unwrap()
+        .as_boolean()
+        .unwrap_or(false)
+}
+
+/// The mailbox [`app`] with the window opened by its bar action.
+fn open_mailbox() -> Option<App> {
+    if !aa_cry::pak_available() {
+        return None;
+    }
+    let mut app = app(
+        game()?,
+        MAILBOX_GROUP,
+        MAILBOX_TEMPLATE,
+        MAILBOX_ACTION,
+        Inventory::default(),
+    );
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert!(mail_open(&app), "the mailbox window did not open");
+    Some(app)
+}
+
+/// The mailbox is interaction state 4 (`FUN_393b1040`): `FUN_393b7e40` ends it when the player
+/// walks off, and `mailbox.lua` hides the window on `INTERACTION_END`.
+#[test]
+fn walking_away_from_the_mailbox_closes_the_mail_window() {
+    let Some(mut app) = open_mailbox() else { return };
+    set_pos(&app, Vec3::new(1000.0, 1000.0, 100.0));
+    app.update();
+    assert!(!mail_open(&app), "the mail window stayed open after the walk-away");
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    assert_eq!(bridge.0.borrow().doodad.local_active, None);
+}
+
+/// A store opened after the mailbox ends the mailbox interaction first (`FUN_393b7b10`).
+#[test]
+fn a_store_after_the_mailbox_closes_the_mail_window() {
+    let Some(mut app) = open_mailbox() else { return };
+    retarget(&mut app, STORE_TEMPLATE, STORE_GROUP, 12_087);
+    app.update();
+    tick(&app);
+    assert!(!mail_open(&app), "the mail window stayed open beside the store");
+    assert_eq!(
+        lua(&app, "return IsActivatedStore()").unwrap().as_boolean(),
+        Some(true),
+        "the store window did not open"
+    );
+}
+
+/// Using the mailbox again while its window is open: the native ends state 4 first
+/// (`INTERACTION_END` hides the window), then `TOGGLE_MAIL` opens it again, so it stays visible.
+#[test]
+fn a_second_mailbox_use_keeps_the_mail_window_open() {
+    let Some(mut app) = open_mailbox() else { return };
+    retarget(&mut app, MAILBOX_TEMPLATE, MAILBOX_GROUP, MAILBOX_ACTION);
+    app.update();
+    tick(&app);
+    assert!(mail_open(&app), "the second use toggled the mail window closed");
+    assert!(sent(&mut app).is_empty());
+}
+
+/// A farm board opened from the doodad is interaction state 10 (`FUN_393b8700`): it closes at the
+/// native 2.1 m measured gap (`FUN_393b7e40`), not at the packet path's 10 m `FARM_LEAVE`.
+#[test]
+fn a_doodad_farm_board_closes_at_the_interaction_reach() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, FARM_GROUP, FARM_TEMPLATE, 16_968, Inventory::default());
+    app.world()
+        .get_non_send::<HudBridge>()
+        .unwrap()
+        .0
+        .borrow_mut()
+        .doodad
+        .bounds
+        .insert(2075, (Vec3::new(-0.5, -0.5, 0.0), Vec3::new(0.5, 0.5, 1.0)));
+    let board_open = |app: &App| {
+        let rt = app.world().get_non_send::<UiRuntime>().unwrap();
+        let ui = aa_ui::lua::ui(&rt.lua);
+        ui.tree.find("farm_info").is_some_and(|w| ui.tree.visible(w))
+    };
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert!(board_open(&app), "the farm board did not open");
+    // about 0.5 m from the model: still in reach
+    set_pos(&app, Vec3::new(10.0, 11.0, 100.0));
+    app.update();
+    assert!(board_open(&app), "the farm board closed in reach");
+    // about 2.5 m from the model: past the 2.1 m reach, well inside 10 m
+    set_pos(&app, Vec3::new(10.0, 13.0, 100.0));
+    app.update();
+    assert!(!board_open(&app), "the farm board stayed open past the interaction reach");
+}
+
+/// A bench opened while a doodad bank is open ends the bank first (`FUN_394dc360` ->
+/// `FUN_393b7b10` -> `FUN_393b7aa0`): `NPC_INTERACTION_END` and `INTERACTION_END` once each,
+/// before `CRAFTING_START`.
+#[test]
+fn a_bench_after_a_doodad_bank_ends_the_bank() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game_data) = game() else { return };
+    let mut app = app(
+        game_data,
+        BANK_GROUP,
+        BANK_TEMPLATE,
+        13_238,
+        Inventory::default(),
+    );
+    lua(
+        &app,
+        "NPC_ENDS=0; INTER_ENDS=0; ENDS_AT_CRAFT=-1;          local a=UIParent:CreateWidget('emptywidget','bankBenchProbe','UIParent');          a:RegisterEvent('NPC_INTERACTION_END'); a:RegisterEvent('INTERACTION_END'); a:RegisterEvent('CRAFTING_START');          a:SetHandler('OnEvent',function(_,event) if event == 'NPC_INTERACTION_END' then NPC_ENDS=NPC_ENDS+1 elseif event == 'INTERACTION_END' then INTER_ENDS=INTER_ENDS+1 else ENDS_AT_CRAFT=NPC_ENDS+INTER_ENDS end end)",
+    )
+    .unwrap();
+    app.update();
+    assert_eq!(
+        lua(&app, "return IsActivatedBank()").unwrap().as_boolean(),
+        Some(true),
+        "the bank window did not open"
+    );
+    retarget(
+        &mut app,
+        BANK_TEMPLATE,
+        BANK_GROUP,
+        crate::hud::doodad::CRAFT_ACTION,
+    );
+    app.update();
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(lua(&app, "return INTER_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(
+        lua(&app, "return ENDS_AT_CRAFT").unwrap().as_integer(),
+        Some(2),
+        "the bank ended after CRAFTING_START"
+    );
+    assert_eq!(
+        lua(&app, "return IsActivatedBank()").unwrap().as_boolean(),
+        Some(false),
+        "the bank window stayed open beside the bench"
+    );
+    let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+    assert!(bridge.0.borrow().store.npc.is_none());
+}

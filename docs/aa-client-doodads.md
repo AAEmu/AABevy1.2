@@ -659,7 +659,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncParentInfo` 0x43 | `FUN_393b8400` 774707 | opens the parent house's info through `FUN_393befd0` (`HOUSE_INTERACTION_START` 0x6d/109); returns 1 | missing for doodad parents (housing implements `FUN_393befd0` for house units) |
 | `DoodadFuncOpenPaper` 0x46 | `FUN_393b8450` 774731 | state 1, `OPEN_PAPER` (0x201/513) with `("page", book_page_id)` or `("book", book_id)` from `doodad_func_open_papers`; when `next_phase > 0` it sends the same `CSChangeDoodadPhasePacket` 0x0e9 (774812); returns 0 (the skill is sent) when the func has neither a page nor a book (774760) | missing (`X2Book.GetBookInfo` is a stub) |
 | `DoodadFuncRenewItem` 0x47 | `FUN_393b8610` 774823 | state 2, `RENEW_ITEM_WND_SHOW` (0x8a/138) with `(doodad_func_renew_items.skill_id, obj id)`; returns 1 | missing (`renew_item.alb` is empty) |
-| `DoodadFuncOpenFarmInfo` 0x48 | `FUN_393b8700` 774877 | state 10, `OPEN_COMMON_FARM_INFO` (0x102/258) with `farm_id`; returns 1 | **done** (`local.rs`, `farm::show_doodad`; skips the skill) |
+| `DoodadFuncOpenFarmInfo` 0x48 | `FUN_393b8700` 774877 | state 10, `OPEN_COMMON_FARM_INFO` (0x102/258) with `farm_id`; returns 1 | **done** (`local.rs`, `farm::show_doodad`; skips the skill; ends as an interaction, below) |
 | `DoodadFuncEnterSysInstance` 0x4a | `FUN_393bc260` case 0x4a | state 0x12, returns 0 (the skill is sent) | no client action |
 | `DoodadFuncBuyFish` 0x4f | `FUN_393b8870` | task-12 confirmation; returns 1 | **done** (`doodad/fish.rs`) |
 | `DoodadFuncConvertFish` 0x50 | `FUN_393b8a30` | task-13 confirmation; returns 1 | **done** (`doodad/fish.rs`) |
@@ -682,8 +682,17 @@ workbench (`CraftStart`/`CraftPack`, #94), fishing (#98), the coffer (`CSCofferI
 Navi naming/mark/donation/remove/open-bounty entries, RecoverItem and ConditionalUse still fall through to a
 plain skill send; the server owns their effect.
 
+The windows are interactions (`FUN_393b7b10` stores the state): the mailbox (4) and the farm board (10) are kept as
+`View::local_active`, the store/bank (0xf/0x11) as the store view. `FUN_393b7e40` (polled every 1000 ms) ends the active one
+through `FUN_393b7aa0` when the doodad is gone or out of the interaction reach (`left_interaction`), and any later
+interaction (a local window, a bench, the coffer) ends it first. The end raises `NPC_INTERACTION_END` for the store/bank, then
+`INTERACTION_END`, which `mailbox.lua` and `commonfarm/info.lua` answer by hiding their window; a second mailbox use therefore
+closes and reopens the window (`TOGGLE_MAIL`) instead of toggling it shut. An NPC store replaced by a doodad store or a bench
+raises its owed `NPC_INTERACTION_END` at once (`dialog::fire_npc_end`), before the new window's start event.
+
 Tests: `hud::doodad::local::tests` drives the original scripts for the mailbox, farm board, store and bank
-windows and the insert-counter refusal (AA_PAK/AA_DB, skipped without them).
+windows, their ends (walk-away, replacement, the bench after a bank), the insert-counter refusal and the mount gate before
+the local funcs (AA_PAK/AA_DB, skipped without them; the dispatch tests run without either).
 
 ## Not done / known gaps
 

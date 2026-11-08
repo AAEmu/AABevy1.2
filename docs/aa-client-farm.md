@@ -60,9 +60,12 @@ Runtime entries (`FUN_390324C0` / `FUN_39035620`) carry `name`, `currentPhaseNam
   above. The packet's `farmType` is the doodad func's `farm_id`. The client also opens the window
   itself from the func (`FUN_393b8700`: `doodad::local::LocalAction::FarmInfo`; the func's skill is
   not sent), so a board works without the server's answer.
-* `INTERACTION_END` closes the info window. This module mirrors the interaction by ending it when
-  the player walks more than 10 m from the shown farm doodad (the native interaction reach is not
-  recovered: **capture-pending**).
+* `INTERACTION_END` closes the info window. A board opened from the doodad func is interaction
+  state 10 (`FUN_393b8700`): the doodad module ends it like the other doodad interactions, when the
+  doodad is gone, when the player leaves the 2.1 m interaction reach (`FUN_393b7e40`; a doodad with
+  no drawn bounds uses the 4 m fallback, see `docs/aa-client-doodads.md`), or when another
+  interaction opens. Only the `SCShowCommonFarm` path keeps this module's own close, at 10 m from
+  the shown farm; that packet's reach is not recovered (**capture-pending**).
 * `SCResponseCommonFarmList` (0x1b1) is folded into the runtime list and raises
   `COMMON_FARM_UPDATED` (0x101); `my_farm_info.alb` refreshes its tabs from it and asks again with
   `RequestRuntimeCommonFarmDoodadInfo`.
