@@ -666,7 +666,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | `DoodadFuncCofferPerm` 0x51 | `FUN_393bc260` case 0x51 | `FUN_3983b3b0` needs a `DoodadFuncCoffer` with a positive `actual_func_id`; then state 0xd and `COFFER_INTERACTION_START` (0x243/579); returns 1, else 0 (server refusal) | **done** (template-wide coffer check + event; `X2Coffer.SetHouseCofferPermission` still has no packet) |
 | `DoodadFuncMould` 0x53 | `FUN_393bc260` case 0x53 | returns 1 (no-op) | no rows in 1.2 |
 | `DoodadFuncInsertCounter` 0x54 | `FUN_393bc260` case 0x54 | with fewer than `doodad_func_insert_counters.item_count` of `item_id`, shows `NOT_ENOUGH_ITEM` (0x1b/27) and returns 1; else returns 0 (skill sent) | **done** (`local.rs`, `missing_counter_item`) |
-| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the doodad is gone or out of reach (`FUN_394ce540`, walk-away `FUN_393b7e40`); closing the window alone leaves it until the next interaction; the server still requires an auctioneer NPC, see gaps) |
+| `DoodadFuncAuctionUi` 0x55 | `FUN_393b8b80` 775103 | state 0xe, `NPC_INTERACTION_START` (0x6b/107) with `"auction"`; returns 1 | **done** (event opens the auction window; the state ends with `NPC_INTERACTION_END` then `INTERACTION_END`, and is cleared when the doodad is gone or out of reach (`FUN_394ce540`, walk-away `FUN_393b7e40`); closing the window alone leaves it until the next interaction or the walk-away; the server still requires an auctioneer NPC, see gaps) |
 | `DoodadFuncBankUi` 0x56 | `FUN_393b8c20` 775139 | state 0xf, `NPC_INTERACTION_START("bank")`; returns 1 | **done** (`local.rs`, `store::open_doodad`) |
 | `DoodadFuncStoreUi` 0x57 | `FUN_393b8cc0` 775175 | state 0x11, `NPC_INTERACTION_START("store")`; the catalog is `doodad_func_store_uis.merchant_pack_id`; returns 1 | **done** (`local.rs`, `store::open_doodad`; `Tables::packs`) |
 | `DoodadFuncNaviOpenMailbox` 0x2c | `FUN_393bd290` action id, `FUN_393b1040` 767979 | 11400 is dispatched by the action-handler map before `FUN_393bc260` (`FUN_393ba9c0` -> handler vtable `0x399d3114` -> `FUN_393b7bc0` -> `FUN_393b1a90` -> table `0x399d2c58` -> `FUN_393b1040`), so no `CSStartSkill` is sent. `FUN_393b1040` sets state 4, raises `TOGGLE_MAIL` (0xce/206) with `(doodadObjId, true)` and calls `FUN_393ccdd0`, which sends `CSListMailPacket` 0x09a only while the three mail lists are not all loaded | **done** (`local.rs`, `mail::open_at`; its `MailCommand::List` stands in for `FUN_393ccdd0` and is queued whenever the window is hidden) |
@@ -686,10 +686,12 @@ ConditionalUse fall through to a plain skill send; the server owns their effect.
 
 The windows are interactions (`FUN_393b7b10` stores the state): the open paper (1), renew (2), mailbox (4), stamp (7),
 purchase (8), farm board (10), coffer permission (0xd) and auction (0xe) are kept as `View::local_state`, the store/bank
-(0xf/0x11) as the store view. `FUN_393b7e40` (polled every 1000 ms) ends the active one
-through `FUN_393b7aa0` when the doodad is gone or out of the interaction reach (`left_interaction`), and any later
-interaction (a local window, a bench, the coffer) ends it first. The end raises `NPC_INTERACTION_END` for the store/bank, then
-`INTERACTION_END`, which `mailbox.lua` and `commonfarm/info.lua` answer by hiding their window; a second mailbox use therefore
+(0xf/0x11) as the store view. `FUN_393b7e40` (polled every 1000 ms; `doodad::execute` checks every frame, before the
+queued purchase confirmations) ends whichever local state is active through `FUN_393b7aa0` when its doodad is gone or out of
+the interaction reach (`left_interaction`), and any later interaction (a local window, a bench, the coffer) ends it first.
+The end raises `NPC_INTERACTION_END` for the store/bank and the auction (0xe), then `INTERACTION_END`, which `mailbox.lua`,
+`commonfarm/info.lua`, `book.lua`, `ucc.lua` and `coffer_permission.lua` answer by hiding their window and `dialog_handler.lua` by cancelling an open
+purchase dialog (a purchase OK still queued for that doodad is dropped); a second mailbox use therefore
 closes and reopens the window (`TOGGLE_MAIL`) instead of toggling it shut. An NPC store replaced by a doodad store or a bench
 raises its owed `NPC_INTERACTION_END` at once (`dialog::fire_npc_end`), before the new window's start event.
 

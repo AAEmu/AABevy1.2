@@ -2243,6 +2243,25 @@ pub(super) fn execute(
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
     let target_id = env_res.target.as_ref().and_then(|t| t.obj_id).unwrap_or(0);
+    // `FUN_393b7e40` (polled every 1000 ms by `FUN_393b5f60`; checked every frame here): any active
+    // local window state (`DAT_3a17e6a0`) whose doodad is gone or out of the interaction reach ends
+    // through `FUN_393b7aa0` (`NPC_INTERACTION_END` for the auction, then `INTERACTION_END`, which
+    // `dialog_handler.lua` answers by cancelling an open purchase dialog). It runs before the
+    // queued confirmations: a purchase OK for the doodad the player walked away from is dropped.
+    let walked_off = {
+        let data = bridge.0.borrow();
+        data.doodad
+            .local_state
+            .is_some_and(|state| left_interaction(&data, &doodads, &units, state.obj_id))
+    };
+    if walked_off
+        && let Some(ended) = end_interaction(rt.as_deref(), &bridge.0, &inventory)
+    {
+        bridge.0.borrow_mut().doodad.purchases.retain(|order| {
+            let (local::PurchaseOrder::Buy { obj_id, .. } | local::PurchaseOrder::Coin { obj_id, .. }) = order;
+            *obj_id != ended.obj_id
+        });
+    }
     let mut d = bridge.0.borrow_mut();
     // Dialog confirmations queued by the scripts: a purchase OK (`FUN_393bc4e0` /
     // `FUN_393bac20`) and `X2Trial.ReportCrime` both send here.
@@ -2522,22 +2541,6 @@ pub(super) fn execute(
             )
             .unwrap_or_else(|| "not_enough_coin".to_owned());
             rt.fire_event("SYSMSG", text);
-        }
-    }
-    // `FUN_393b7e40` (polled every 1000 ms; checked every frame here) ends the mailbox or farm
-    // board when the doodad is gone or out of the interaction reach.
-    let walked_off = {
-        let data = bridge.0.borrow();
-        data.doodad
-            .local_state
-            .filter(|state| matches!(state.state, 4 | 10))
-            .is_some_and(|state| left_interaction(&data, &doodads, &units, state.obj_id))
-    };
-    if walked_off {
-        bridge.0.borrow_mut().doodad.local_state = None;
-        if let Some(rt) = rt.as_deref() {
-            super::farm::end_doodad(rt);
-            rt.fire_event("INTERACTION_END", ());
         }
     }
     let game = game_slot.get();

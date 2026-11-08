@@ -2200,3 +2200,59 @@ fn a_mounted_store_use_is_refused_before_the_local_window() {
     let bridge = app.world().get_non_send::<HudBridge>().unwrap();
     assert!(bridge.0.borrow().store.npc.is_none());
 }
+
+/// `FUN_393b7e40` ends any local window state on walk-away, not only the auction: an open
+/// purchase dialog (state 8) gets one `INTERACTION_END`, `dialog_handler.lua` cancels it, and its
+/// OK no longer sends `CSBuyItems` for the far doodad.
+#[test]
+fn walking_away_from_a_purchase_cancels_the_dialog() {
+    if !aa_cry::pak_available() {
+        return;
+    }
+    let Some(game) = game() else { return };
+    let mut app = app(game, 11_355, 4601, 17_537, Inventory::default());
+    auction_end_probe(&app);
+    lua(
+        &app,
+        "PURCHASE=nil; local original=X2DialogManager.RequestTaskDialog;         X2DialogManager.RequestTaskDialog=function(self,task,info,owner)           PURCHASE=original(self,task,info,owner); return PURCHASE end",
+    )
+    .unwrap();
+    tick(&app);
+    app.update();
+    tick(&app);
+    assert_eq!(
+        lua(&app, "return PURCHASE ~= nil and PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(true)
+    );
+    let state = |app: &App| {
+        app.world()
+            .get_non_send::<HudBridge>()
+            .unwrap()
+            .0
+            .borrow()
+            .doodad
+            .local_state
+            .map(|state| state.state)
+    };
+    assert_eq!(state(&app), Some(8));
+    assert!(sent(&mut app).is_empty());
+
+    set_pos(&app, Vec3::new(1000.0, 1000.0, 100.0));
+    app.update();
+    assert_eq!(state(&app), None, "the walk-away left the purchase state");
+    assert_eq!(lua(&app, "return INTER_ENDS").unwrap().as_integer(), Some(1));
+    assert_eq!(lua(&app, "return NPC_ENDS").unwrap().as_integer(), Some(0));
+    assert_eq!(
+        lua(&app, "return PURCHASE:IsVisible()")
+            .unwrap()
+            .as_boolean(),
+        Some(false),
+        "the purchase dialog stayed open after the walk-away"
+    );
+    lua(&app, "PURCHASE.OkProc()").unwrap();
+    app.update();
+    assert!(sent(&mut app).is_empty(), "the far purchase still sent");
+    assert_eq!(lua(&app, "return INTER_ENDS").unwrap().as_integer(), Some(1));
+}

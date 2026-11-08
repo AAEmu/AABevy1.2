@@ -7,7 +7,7 @@ use web_time::Instant;
 
 use aa_net::auction::{AuctionLot, AuctionSearch, AuctioneerIds, PAGE_SIZE, listing_fee};
 use aa_net::model::Item;
-use aa_net::state::{Doodads, Inventory, Units};
+use aa_net::state::{Inventory, Units};
 use aa_net::{AuctionCommand, AuctionEvent, Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -948,35 +948,6 @@ fn window_open(rt: &UiRuntime) -> bool {
         .unwrap_or(false)
 }
 
-/// A doodad auction (`FUN_393b8b80`, state 0xe) is cleared when the doodad is gone (0x183) or out
-/// of reach (0x184): the auctioneer resolver `FUN_394ce540` calls `FUN_393b7b50(0xe)`, and the
-/// walk-away check `FUN_393b7e40` ends any active interaction. Both run `FUN_393b7aa0`
-/// (`NPC_INTERACTION_END`, then `INTERACTION_END`). Closing the window alone leaves state 0xe set
-/// until one of those takes it.
-fn close_doodad_auction(
-    rt: &UiRuntime,
-    bridge: &Shared,
-    inventory: &Inventory,
-    doodads: Option<&Doodads>,
-    units: &Units,
-) {
-    let Some(local) = bridge
-        .borrow()
-        .doodad
-        .local_state
-        .filter(|state| state.state == 0xe)
-    else {
-        return;
-    };
-    let left = doodads.is_none_or(|doodads| {
-        super::doodad::left_interaction(&bridge.borrow(), doodads, units, local.obj_id)
-    });
-    if !left {
-        return;
-    }
-    super::doodad::end_interaction(Some(rt), bridge, inventory);
-}
-
 fn anonymous_quote(command: &AuctionCommand) -> bool {
     matches!(command, AuctionCommand::LowestPrice { auctioneer, .. } if auctioneer.obj_id == 0 && auctioneer.obj_id2 == 0)
 }
@@ -1011,7 +982,6 @@ pub(super) fn sync(
     bridge: NonSend<HudBridge>,
     inventory: Res<Inventory>,
     units: Res<Units>,
-    doodads: Option<Res<Doodads>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -1070,7 +1040,6 @@ pub(super) fn sync(
             }
         }
     }
-    close_doodad_auction(&rt, &bridge.0, &inventory, doodads.as_deref(), &units);
     let (signals, notices, unlock, commands) = {
         let mut v = state.0.borrow_mut();
         (
