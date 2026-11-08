@@ -7,7 +7,7 @@ use web_time::Instant;
 
 use aa_net::auction::{AuctionLot, AuctionSearch, AuctioneerIds, PAGE_SIZE, listing_fee};
 use aa_net::model::Item;
-use aa_net::state::{Inventory, Units};
+use aa_net::state::{Doodads, Inventory, Units};
 use aa_net::{AuctionCommand, AuctionEvent, Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -115,6 +115,9 @@ struct View {
     /// The auctioneer talked to: object id and template.
     npc: Option<(u32, u32)>,
     scope: Option<super::dialog::NpcScope>,
+    /// The doodad of an active doodad auction (`FUN_393b8b80`, interaction state 0xe): with no
+    /// auctioneer NPC, `FUN_394ce5d0` -> `FUN_394ce540` sends it as `obj_id2`.
+    doodad: Option<u32>,
     tab: u8,
     inventory: Inventory,
     results: Results,
@@ -177,10 +180,16 @@ fn sort_kind(name: &str) -> Option<u8> {
 }
 
 impl View {
+    /// `FUN_394ce5d0`: the auctioneer NPC (`FUN_394ce450`) in `obj_id`; without one, the state-0xe
+    /// doodad (`FUN_394ce540`) in `obj_id2`.
     fn ids(&self) -> AuctioneerIds {
         AuctioneerIds {
             obj_id: self.npc.map_or(0, |n| n.0),
-            obj_id2: 0,
+            obj_id2: if self.npc.is_none() {
+                self.doodad.unwrap_or(0)
+            } else {
+                0
+            },
         }
     }
 
@@ -948,6 +957,36 @@ fn window_open(rt: &UiRuntime) -> bool {
         .unwrap_or(false)
 }
 
+fn auctioneer(command: &AuctionCommand) -> AuctioneerIds {
+    match command {
+        AuctionCommand::Search { auctioneer, .. }
+        | AuctionCommand::Post { auctioneer, .. }
+        | AuctionCommand::Bid { auctioneer, .. }
+        | AuctionCommand::Cancel { auctioneer, .. }
+        | AuctionCommand::MyBids { auctioneer, .. }
+        | AuctionCommand::LowestPrice { auctioneer, .. } => *auctioneer,
+    }
+}
+
+/// The doodad of the active doodad auction (interaction state 0xe).
+fn doodad_auction(bridge: &Shared) -> Option<u32> {
+    bridge
+        .borrow()
+        .doodad
+        .local_state
+        .filter(|state| state.state == 0xe)
+        .map(|state| state.obj_id)
+}
+
+/// `DoodadFuncAuctionUi` (`FUN_393b8b80`): the doodad auction opens; its window's requests carry
+/// the doodad as `obj_id2` while no auctioneer NPC is talked to.
+pub(super) fn start_doodad(rt: &UiRuntime, obj_id: u32) {
+    if let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) {
+        state.0.borrow_mut().doodad = Some(obj_id);
+    }
+    rt.fire_event("NPC_INTERACTION_START", "auction");
+}
+
 fn anonymous_quote(command: &AuctionCommand) -> bool {
     matches!(command, AuctionCommand::LowestPrice { auctioneer, .. } if auctioneer.obj_id == 0 && auctioneer.obj_id2 == 0)
 }
@@ -977,11 +1016,12 @@ pub(super) fn start_selected(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn sync(
+pub(super) fn sync(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     inventory: Res<Inventory>,
     units: Res<Units>,
+    doodads: Option<Res<Doodads>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -1009,6 +1049,8 @@ fn sync(
                 _ => {}
             }
         }
+        // the doodad auction ends with its interaction state (the next interaction, the walk-away)
+        v.doodad = doodad_auction(&bridge.0);
         if v.searching
             .is_some_and(|at| now.saturating_duration_since(at) >= SEARCH_TIMEOUT)
         {
@@ -1060,12 +1102,43 @@ fn sync(
     for name in notices {
         notice(&rt, name);
     }
+    let mut doodad = doodad_auction(&bridge.0);
     for command in commands {
-        if !anonymous_quote(&command) && !state
-            .0
-            .borrow()
-            .scope
-            .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
+        let ids = auctioneer(&command);
+        if ids.obj_id == 0 && ids.obj_id2 != 0 {
+            // `FUN_394ce540`: the state-0xe doodad must still be there and in reach; otherwise it
+            // ends state 0xe (`FUN_393b7b50`), sets 387 (gone) or 388 (too far) and sends nothing.
+            // A request left from an auction that already ended is dropped.
+            if doodad != Some(ids.obj_id2) {
+                continue;
+            }
+            let gone = doodads
+                .as_deref()
+                .is_none_or(|d| !d.by_id.contains_key(&ids.obj_id2));
+            let far = !gone
+                && doodads.as_deref().is_some_and(|d| {
+                    super::doodad::left_interaction(&bridge.0.borrow(), d, &units, ids.obj_id2)
+                });
+            if gone || far {
+                super::doodad::end_interaction(Some(&*rt), &bridge.0, &inventory);
+                state.0.borrow_mut().doodad = None;
+                doodad = None;
+                notice(
+                    &rt,
+                    if gone {
+                        "AUC_INVALID_TARGET_AUCTIONEER"
+                    } else {
+                        "AUC_AUCTIONEER_TOO_FAR_AWAY"
+                    },
+                );
+                continue;
+            }
+        } else if !anonymous_quote(&command)
+            && !state
+                .0
+                .borrow()
+                .scope
+                .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
         {
             continue;
         }

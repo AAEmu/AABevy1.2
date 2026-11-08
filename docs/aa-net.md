@@ -542,6 +542,11 @@ for other units is event only.
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |
 
+A Charge-shaped acceptance batch is `SCCooldowns` plus the first `SCPlotEvent` with no `SCSkillStarted` / `SCSkillFired`:
+the packet appends the received 12 s own cooldown, the step stamps `last_cast` / `last_used` and the `casting` entry, and the
+step's `GlobalCooldown` effect (event 5099 -> 600 ms in the 1.2 data) stamps `plot_gcd`. The regression test is
+`a_charge_shaped_acceptance_batch_starts_the_gcd_skill_cooldown_and_cast` in `state/skills.rs`.
+
 **Combat events for visuals** (what `ingame/combat.rs` draws, see `docs/aa-client-combat.md`): for any unit a cast starts as
 `SkillStarted { tl, skill_id, caster, target, cast_ms }`, fires as `SkillFired { tl, skill_id, caster, target, delay_ms, fire_anim_id }`
 (`delay_ms` is how long the effects take to land: an arrow in flight), and every plot step is a `PlotEvent`. Damage is
@@ -1801,6 +1806,20 @@ leaving 12 bytes to be mistaken for another opcode in DD04. It now consumes and 
 all fields in `ServerMsg::DoodadPhaseChanged` and `Event::DoodadPhaseChanged`
 (`obj_id, func_group_id, time_left, puzzle_group, item_template_id`). The lane currently
 writes puzzleGroup=-1; the decoder preserves the signed wire value instead of guessing.
+
+`Command::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id }` is the client's own
+`CSChangeDoodadPhasePacket` 0x0e9 (`FUN_397ac8d0(objId, skill, nextPhase, funcId)` in the
+1.2 client): `bc objId, u32 skill, u32 nextPhase, u32 funcId`. The session sends it only in
+world with a nonzero 24-bit object id. The Rust server (AAEmu-1.2-Rust) registers opcode
+0x0e9 in `systems/npcs/doodad/packets.rs:189`; on main its handler only logs the packet (as
+the C# server did), and a server PR implementing it is in progress. The byte layout above
+is the 1.2 client writer (`game.rs` test), checked against the C# reader.
+
+`ShopCommand::BuyCoin { obj_id, func_id }` is `CSBuyCoinItemPacket` 0x0af
+(`bc objId, u32 funcId`), the coin-item confirmation of a `DoodadFuncPurchase`. The Rust
+server implements `buy_coin_item` in `systems/npcs/bridges.rs:1214`: it resolves the doodad
+func's template (`DoodadManager.GetFunc` + `GetFuncTemplate`) and runs `use_func` (the old
+C# hook only logged a warning).
 
 `Doodads` updates those four fields only on an already-known object, preserving identity,
 position, owner and plant time. Zero item/time values clear previous values. Unknown or

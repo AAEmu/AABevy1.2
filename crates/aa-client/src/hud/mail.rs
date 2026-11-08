@@ -566,9 +566,10 @@ fn failure(rt: &UiRuntime, message: &str) {
     rt.fire_event("SYSMSG", message.to_owned());
 }
 
-/// Native393b1040 opens the selected NaviOpenMailbox locally with (numeric object ID,true).
-/// Ctrl-E additionally permits inbox reading without a nearby mailbox; Send validates proximity.
-pub(super) fn toggle(rt: &UiRuntime) {
+/// Native `FUN_393b1040` (767979) opens the mailbox of the doodad it was used on:
+/// `TOGGLE_MAIL(numeric object ID, true)`. The native handler requests the list
+/// (`CSListMailPacket` via `FUN_393ccdd0`); here it is queued when the window opens.
+pub(super) fn open_at(rt: &UiRuntime, obj_id: u32) {
     let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
         return;
     };
@@ -577,11 +578,20 @@ pub(super) fn toggle(rt: &UiRuntime) {
         .load("return IsActivatedMailBox and IsActivatedMailBox() or false")
         .eval::<bool>()
         .unwrap_or(false);
-    let id = state.0.borrow().nearest;
     if !visible {
         state.0.borrow_mut().queue(MailCommand::List);
     }
-    rt.fire_event("TOGGLE_MAIL", (id, true));
+    rt.fire_event("TOGGLE_MAIL", (obj_id, true));
+}
+
+/// Ctrl-E opens the nearest `NaviOpenMailbox` doodad; inbox reading also works without one. Send
+/// validates proximity.
+pub(super) fn toggle(rt: &UiRuntime) {
+    let Some(state) = rt.lua.app_data_ref::<State>().map(|s| s.clone()) else {
+        return;
+    };
+    let id = state.0.borrow().nearest;
+    open_at(rt, id);
 }
 
 #[allow(clippy::too_many_arguments)]

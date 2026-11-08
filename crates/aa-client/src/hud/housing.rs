@@ -331,6 +331,20 @@ fn tax_item(lua: &Lua) -> bool {
     feature().unwrap_or(true)
 }
 
+/// Starts the house interaction `FUN_393befd0` opens (`DoodadFuncParentInfo`): the next
+/// [`sync`] requests the tax and raises `HOUSE_INTERACTION_START` when the house unit is in view.
+pub(super) fn open_interaction(rt: &UiRuntime, obj_id: u32) {
+    if let Some(state) = rt.lua.app_data_ref::<State>() {
+        state.0.borrow_mut().interact = Some(obj_id);
+    }
+}
+
+/// The house [`open_interaction`] queued, for the doodad parent-info test.
+#[cfg(test)]
+pub(super) fn interaction_target(rt: &UiRuntime) -> Option<u32> {
+    rt.lua.app_data_ref::<State>().and_then(|s| s.0.borrow().interact)
+}
+
 pub fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
     let state = State::default();
     lua.set_app_data(state.clone());
