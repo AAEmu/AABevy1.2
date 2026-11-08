@@ -3201,6 +3201,59 @@ mod tests {
         assert_local_tool_skill(Some(Out::Blade { dual: false }));
     }
 
+    /// The 2026-11-03 capture's Charge acceptance batch: `SCCooldowns` plus the first `SCPlotEvent` (5099) and no
+    /// `SCSkillStarted` / `SCSkillFired`. The step has no clip of its own, so the skill controller's
+    /// `all_co_sk_dashattack` (anim 174) plays at the batch, as the real client's lunge did.
+    #[test]
+    fn the_charge_acceptance_plot_step_starts_the_clip_without_a_start_or_fire() {
+        let Some(book) = SkillBook::open() else { return };
+        let Ok(rig) = shared_rig(SKELETON) else { return };
+        let Ok(cal) = Cal::shared(CAL) else { return };
+        let clips = ClipLibrary::default();
+        let Some(set) = ClipSet::load(&rig, cal, &clips) else { return };
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(clips)
+            .insert_resource(book)
+            .insert_resource(Units::default())
+            .insert_resource(aa_net::state::Doodads::default())
+            .insert_resource(Skills { obj_id: 7, ..Skills::default() })
+            .init_resource::<crate::ingame::skill_motion::Inbox>()
+            .insert_resource(Combat::default())
+            .add_message::<NetEvent>()
+            .add_systems(Update, handle_events);
+        let bones: Vec<Entity> = rig.skeleton.bones.iter().map(|_| app.world_mut().spawn((Transform::default(), GlobalTransform::default())).id()).collect();
+        let local = app
+            .world_mut()
+            .spawn((Animator::new(rig.clone(), bones), Locomotion::new(set), Motion::default(), LocalPlayer { obj_id: 7 }, Transform::default(), GlobalTransform::default(), Visibility::default()))
+            .id();
+        let step = Event::PlotEvent(PlotEvent {
+            tl: 42,
+            event_id: 5099,
+            skill_id: 11918,
+            caster_obj_id: 7,
+            target_obj_id: 9,
+            caster_pos: None,
+            target_pos: None,
+            casting_ms: 0,
+            targets: vec![9],
+        });
+        // the acceptance batch as aa-net applies it: the cooldown packet, then the first plot step
+        app.world_mut().resource_mut::<Skills>().apply(&Event::Cooldowns(aa_net::skill::SkillCooldowns {
+            skills: vec![aa_net::skill::Cooldown { id: 11918, total_ms: 12_000, remaining_ms: 12_000 }],
+            tags: vec![],
+        }));
+        app.world_mut().resource_mut::<Skills>().apply(&step.clone());
+        app.world_mut().resource_mut::<Messages<NetEvent>>().write(NetEvent(step));
+        app.update();
+        assert!(app.world().resource::<Combat>().casts.get(&42).is_some_and(|c| c.plot && c.skill == 11918), "the first plot step starts the action");
+        let current = app.world().get::<Animator>(local).and_then(|a| a.current.as_ref()).expect("a clip plays on the local player");
+        assert!(current.clip.source.as_deref().is_some_and(|s| s.contains("all_co_sk_dashattack")), "{:?}", current.clip.source);
+        let skills = app.world().resource::<Skills>();
+        assert!(skills.gcd_left(600).is_some_and(|left| left > std::time::Duration::from_millis(500)), "the batch starts the GCD");
+        assert!(skills.cooldown_left(11918, 0, 12_000).unwrap() > std::time::Duration::from_millis(11_900), "and the own cooldown");
+    }
+
     /// A remote entity with the local player's object id (a stale copy) must not take its skill events: remote observers only
     /// have that copy, but the local client's visible rig is the local entity.
     #[test]
