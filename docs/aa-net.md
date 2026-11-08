@@ -542,6 +542,11 @@ for other units is event only.
 | `SCUnitHealed` | `UnitHealed(UnitHeal { target_obj_id, heal_type, hit_type, value })` | event only |
 | `SCCombatText` | `CombatText { source, target, text_type }` | event only |
 
+A Charge-shaped acceptance batch is `SCCooldowns` plus the first `SCPlotEvent` with no `SCSkillStarted` / `SCSkillFired`:
+the packet appends the received 12 s own cooldown, the step stamps `last_cast` / `last_used` and the `casting` entry, and the
+step's `GlobalCooldown` effect (event 5099 -> 600 ms in the 1.2 data) stamps `plot_gcd`. The regression test is
+`a_charge_shaped_acceptance_batch_starts_the_gcd_skill_cooldown_and_cast` in `state/skills.rs`.
+
 **Combat events for visuals** (what `ingame/combat.rs` draws, see `docs/aa-client-combat.md`): for any unit a cast starts as
 `SkillStarted { tl, skill_id, caster, target, cast_ms }`, fires as `SkillFired { tl, skill_id, caster, target, delay_ms, fire_anim_id }`
 (`delay_ms` is how long the effects take to land: an arrow in flight), and every plot step is a `PlotEvent`. Damage is

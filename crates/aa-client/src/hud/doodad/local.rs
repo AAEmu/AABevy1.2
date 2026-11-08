@@ -245,12 +245,14 @@ pub(super) struct LocalFuncs {
 
 impl LocalFuncs {
     pub(super) fn load(conn: &Connection) -> Self {
-        let mut out = Self::default();
-        out.farms = read_map(conn, "SELECT id, farm_id FROM doodad_func_open_farm_infos");
-        out.stores = read_map(
-            conn,
-            "SELECT id, merchant_pack_id FROM doodad_func_store_uis",
-        );
+        let mut out = Self {
+            farms: read_map(conn, "SELECT id, farm_id FROM doodad_func_open_farm_infos"),
+            stores: read_map(
+                conn,
+                "SELECT id, merchant_pack_id FROM doodad_func_store_uis",
+            ),
+            ..Self::default()
+        };
         read_pairs(
             conn,
             "SELECT id, item_id, item_count FROM doodad_func_insert_counters",
