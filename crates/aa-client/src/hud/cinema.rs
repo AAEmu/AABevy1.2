@@ -346,6 +346,7 @@ pub struct CinemaPlayer {
 
 impl CinemaPlayer {
     /// The sequence in flight, for the replay tests.
+    #[cfg(test)]
     pub(crate) fn playing_name(&self) -> Option<&str> {
         self.playing.as_ref().map(|pending| pending.name.as_str())
     }
