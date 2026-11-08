@@ -39,6 +39,14 @@ const RENAME_SKILL: u32 = 16841;
 const TELEPORT_BOOK: u32 = 4045;
 /// NPC templates of the summoned gates: the entrance and the exit.
 pub(crate) const GATE_TEMPLATES: [u32; 2] = [3891, 6949];
+/// NPC templates a player goes through by touching them (the entrance only: the exit is where a jump lands).
+const TOUCH_TEMPLATES: [u32; 1] = [3891];
+/// How close (3D, metres) the player must come to a gate's position to go through it. **Approximate**: the native check
+/// compares the squared distance with a float of the gate's loaded model (`x2game` `sub_3930CFF0`), which is not in the
+/// database; it must stay below [`GATE_AHEAD`] or opening a gate would send the player through at once.
+const TOUCH_RADIUS: f32 = 1.5;
+/// The native check waits a second after each use it sends (`sub_3930CFF0`: `last + 1000 ms`).
+const TOUCH_EVERY_SECS: f64 = 1.0;
 /// Metres in front of the player the gate opens at (the server accepts up to `open_portal_effects.distance` 3 m).
 const GATE_AHEAD: f32 = 2.5;
 
@@ -373,6 +381,31 @@ pub(super) fn use_gate(data: &mut HudData, obj_id: u32, template_id: u32) -> boo
     true
 }
 
+/// Running or jumping into a summoned gate goes through it, as in the original (`x2game` `sub_3930CFF0`, every frame:
+/// the live local player within the gate's radius of an entrance gate NPC sends `CSUsePortal`, at most once a second).
+fn touch_gate(bridge: NonSend<HudBridge>, units: Res<aa_net::state::Units>, time: Res<Time>, mut last: Local<Option<f64>>) {
+    let now = time.elapsed_secs_f64();
+    if last.is_some_and(|t| now < t + TOUCH_EVERY_SECS) {
+        return;
+    }
+    let mut d = bridge.0.borrow_mut();
+    if d.player_entity.is_none() || d.death_started.get().is_some() {
+        return;
+    }
+    let Some(obj_id) = touching_gate(d.pos, units.iter()) else { return };
+    info!("portal: touched gate {obj_id}");
+    d.portal.requests.push(Req::Use { obj_id });
+    *last = Some(now);
+}
+
+/// The entrance gate the player at `pos` (game coordinates) stands in, if any.
+fn touching_gate<'a>(pos: Vec3, units: impl Iterator<Item = &'a aa_net::model::Unit>) -> Option<u32> {
+    units
+        .filter(|u| matches!(u.kind, aa_net::model::UnitKind::Npc { template_id, .. } if TOUCH_TEMPLATES.contains(&template_id)))
+        .find(|u| Vec3::new(u.pos.x, u.pos.y, u.pos.z).distance_squared(pos) <= TOUCH_RADIUS * TOUCH_RADIUS)
+        .map(|u| u.obj_id)
+}
+
 /// Folds aa-net's book into the view and raises the window's events.
 fn track(book: Res<Portals>, bridge: NonSend<HudBridge>, rt: Option<NonSend<UiRuntime>>, built: Res<super::HudBuilt>) {
     let event = {
@@ -549,7 +582,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, (reset, track).chain().before(aa_ui::UiInput).before(super::sync_hud).before(super::build_hud))
         .add_systems(
             Update,
-            (book_used, requests, notify_sub_zone.run_if(in_state(crate::Screen::InGame)))
+            (book_used, touch_gate.run_if(in_state(crate::Screen::InGame)), requests, notify_sub_zone.run_if(in_state(crate::Screen::InGame)))
                 .chain()
                 .after(super::sync_hud)
                 .after(aa_ui::UiInput),
@@ -637,5 +670,20 @@ mod tests {
         assert!(!use_gate(&mut d, 5, 1000));
         assert!(use_gate(&mut d, 5, 3891));
         assert_eq!(d.portal.requests, vec![Req::Use { obj_id: 5 }]);
+    }
+
+    #[test]
+    fn walking_into_an_entrance_gate_goes_through_it() {
+        let gate = |obj_id, template_id, x| {
+            let mut u = crate::hud::fixture_spawn().unit;
+            u.obj_id = obj_id;
+            u.kind = aa_net::model::UnitKind::Npc { template_id, owner_id: 0 };
+            u.pos = aa_net::Pos::new(x, 0.0, 0.0);
+            u
+        };
+        let units = [gate(1, 3891, 10.0), gate(2, 6949, 0.5), gate(3, 1000, 0.2)];
+        assert_eq!(touching_gate(Vec3::ZERO, units.iter()), None, "the exit and other NPCs are not touched");
+        assert_eq!(touching_gate(Vec3::new(9.0, 0.0, 0.8), units.iter()), Some(1), "jumping into it");
+        assert_eq!(touching_gate(Vec3::new(10.0 - GATE_AHEAD, 0.0, 0.0), units.iter()), None, "not where it was opened from");
     }
 }

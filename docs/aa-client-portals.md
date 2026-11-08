@@ -40,6 +40,16 @@ holds only particle effects; `Db::prefab_effects` reads them and `UnitBuild::Eff
 (nearest NPC in talk range) or a right click on a gate sends `CSUsePortal` instead of a talk, with the interface option
 "use only my portal". The server answers `SCTeleportUnit` (plus `SCLoadInstance` across instances).
 
+Running or jumping into an entrance gate goes through it too, as in the original: x2game `sub_3930CFF0` (decompiled
+`x2game12.c`, called from the client's update loop) walks the units in view and, for an NPC whose template is one
+of two constants of `.data` (`dword_39AC72FC` / `dword_39AC7300`, not read yet), sends `CSUsePortal(objId, onlyMyPortal)` when
+the squared 3D distance from the local player is within a float of the gate's loaded model (`+0x80` of the object at
+actor `+3834*4`, vtable `+188`), at most once a second (`last + 1000 ms`), only while the player is alive. It shows
+`cannot_use_portal_with_resurrection_buff` (357) and `cannot_reuse_portal_in_delay_time` (793, under 10 s since the last
+portal) but sends the packet anyway. `touch_gate` in `hud/portal.rs` does this for the entrance (3891) only, with a
+**1.5 m** radius (approximate: the model value is not in the database; it must stay under the 2.5 m the gate opens ahead
+of the player). The exit is left out because the jump lands on it.
+
 ### What a gate use looks like to the others: `SCUnitPortalUsed`
 
 The server sends `SCUnitPortalUsed` (`bc unitId`) to the players around a gate when someone goes through it (the lane
