@@ -628,6 +628,76 @@ a Reward step has `QuestActSupplySelectiveItem` and no reward is selected, and e
 in progress and not let-it-done. Nothing is sent for those. Local refusal events fire after the
 HUD state is released so the original handlers can query it and close their window.
 
+### Quest items on the tracker
+
+`quest.lua` serves the original `quest_context_notifier.alb` and `centermessage/additem.alb` calls:
+
+* `X2Quest:GetUseTypeQuestItems(qtype, checkState)` (`FUN_394a55a0`): the kind-3 `SupplyItem`
+  targets with `show_action_bar`, then the Progress `ObjItemUse` targets. With `checkState` it
+  answers nil for a quest in status 2/3/4, or for a completed non-repeatable quest (the completed
+  bit is ignored when `quest_contexts.repeatable` is set). An empty list is nil too
+  (`FUN_394a55a0` builds the table only for a non-empty list).
+* `X2Quest:GetUseTypeQuestItemsByObjIndex(qtype, objIdx)` (`FUN_394a58d0`): the supplied items
+  assigned to objective `objIdx` plus that objective's `ObjItemUse` items. The index is 1 based over
+  the not-done Progress components (the native increments before comparing); the counted act types
+  are the set `FUN_397d6640` builds for `FUN_397d5b90` (the `FUN_397d3370` types plus `ObjAggro`,
+  which `FUN_397d3370` never meets, so an aggro step is never done). A supply item is
+  assigned by `FUN_394a2930`'s first test: the item's use skill's `skill_products` (the native
+  skill list at `+0x1f8`) name one of the objective's act item ids; objective 1 takes the ones
+  unrelated to any other objective. Its second test (effect list `+0x1e8`, effect `+0x1c` type 0x18
+  sub-type 0x1b, the contains checks) is not recovered. `ObjItemGather` / `EtcItemObtain` only feed
+  that relation and are never returned (and are not use-skill filtered). An unknown template
+  answers an empty table.
+* Every item must pass `FUN_394a55a0`'s filter (also `FUN_3949e280` / `FUN_394a58d0`): the item exists
+  (`FUN_39695dc0`) and has a `use_skill_id` (`+0x98`); the skill itself is not resolved, so quest
+  1010's item 13919 and quest 1394's item 14177 count although their use skills have no `skills` row.
+  Only the supply relation (`FUN_394a2930`) resolves the skill.
+* `X2Quest:IsQuestStartItem(itemType)` (`FUN_3949c880`): the item's `items.impl_id` is 10.
+* `X2Quest:IsUseItemInActiveQuest(itemType)` (`FUN_3949e280`): the item is a `SupplyItem` or an
+  `ObjItemUse` target of an active quest, with the same use-skill filter.
+* `X2Quest:NowIsAggroComponent` (`FUN_394a53c0`) takes the first act in `FUN_397d5b90`'s counted
+  set, not the first act: the set `FUN_397d6640` builds (the `FUN_397d3370` types plus `ObjAggro`).
+* `X2Bag:FindFirstBagSlotItemByItemType` / `UseItemByType` (`FUN_3944dee0` / `FUN_3944d590`) and
+  `X2Equipment:FindEquippedItemByType` / `UseEquippedItemByType` (`FUN_3946ee10` /
+  `FUN_39470aa0`): the item button's `UpdateUsage` / `OnClick`; using it goes through the normal
+  bag / worn item use (`HUD.request("use_bag")` / `"use_equip"`). The tests drive the original
+  notifier helper (proto 47) and the original added-item message. `UseEquippedItemByType` is false,
+  and nothing is sent, when `FUN_3946e770` refuses the worn item: its `items.impl_id` is not 1, 2, 22
+  or 24 (Lua), or its use skill does not resolve (`panels::use_equipped_slot`). The skill is
+  `items.use_skill_id`: `FUN_397cf7a0`'s `item_grade_skills` choice for impl 1 / 2 / 24 and the
+  "Fists" refusal are not modelled (no tracker item in the DB has grade skills). A worn item whose
+  skill does not resolve still answers true in Lua, as the check runs after the request.
+
+### Restarting a main quest
+
+`X2Quest:QuestContextRestart(qtype)` (`FUN_3949b780` -> `FUN_3937b200`) sends `CSRestartMainQuest`
+0x0fd (one `u32` quest id). `FUN_3937b200` first ignores a quest that is not active or already
+completed (silently, without touching the throttle); `FUN_3937a8d0` then applies the 3 s throttle
+(`DAT_39ac7598`), the main-quest detail (`detail_id` 2) and at least as many free bag slots as the
+kind-3 `SupplyItem` counts it hands out again (error 5; a missing/non-main template is error 0xc
+through `QUEST_ERROR_INFO`). The server answers with a normal Started / Updated, so the journal and
+tracker follow through `sync_quests`.
+
+`FUN_3937b200` also sets the restart flag `byte_3a173744` for any active, not completed quest, before
+the throttle and the error 5 / 0xc checks, so the flag is set even when the send is refused
+(`DialogView::restart_pending`). The next Started (`FUN_3937b5b0`) raises `QUEST_CHAT_RESTART` (246)
+and clears the flag instead of running the start component's follow-up (`FUN_39378580`: its
+`DOODAD_PHASE_MSG` lines, voice and queued directing task, not modelled in Bevy). A Started of a
+hidden quest (detail 5, `FUN_397d3540`) takes the other branch and leaves the flag alone. No original
+script registers 246, so nothing visible changes yet.
+
+### Server-shown quest areas
+
+`SCShowQuestArea` 0x1af (`QuestArea` in aa-net) is a `u32` type, fixed-point Cry-space `i64` x /
+`i64` y, `f32` z and `f32` radius. `OnShowQuestArea` (`FUN_391df7b0` -> `FUN_393840b0`) appends
+`{type, position, radius}` to `DAT_3a173d80` (`FUN_393833f0` push_back, no replace). There is no
+debug-cvar gate: `FUN_393822f0` draws every frame a red (204, 49, 49, 255) sphere of that radius
+and a white `"stype: %u"` label: `FUN_3963b590(type)` reads the `spheres` table (`+0x9db4`) and only
+a found record (its first field, the id) gets a label. Bevy keeps the same append-only list (capped
+at 256) and, only with the `--quest-area-geometry` dev flag (the server never sends 0x1af),
+converts the position with `aa_world::cry_to_bevy`, draws the sphere, and puts the white label on
+the HUD layer in screen coordinates (`hud/quest_areas.rs`, scale `2^-44` from `FUN_3961de30`).
+
 ### Quest cinemas
 
 A quest component may name a cinema (`quest_components.cinema_id`, `cinemas.name`) and say whether it

@@ -684,15 +684,17 @@ end
 -- key; a right click on a bag item uses it (the bag window passes the real slot through X2Bag:SlotByIdx).
 AAUI.UseSlot = function(slotType, slotIdx, button)
   if slotType == ISLOT_ACTION then
-    HUD.request("use_action", slotIdx)
+    return HUD.request("use_action", slotIdx)
   elseif slotType == ISLOT_MODE_ACTION then
-    HUD.request("use_mode_action", slotIdx)
+    return HUD.request("use_mode_action", slotIdx)
   elseif slotType == ISLOT_PET_ACTION then
     -- the pet slot accessor's action 3 (toggle auto-use, sub_3933c750); mapping it to the right button is inferred
-    if button == "RightButton" then HUD.pet_toggle_auto(slotIdx) else HUD.request("use_pet_action", slotIdx) end
+    if button == "RightButton" then HUD.pet_toggle_auto(slotIdx); return false end
+    return HUD.request("use_pet_action", slotIdx)
   elseif slotType == ISLOT_BAG and button == "RightButton" then
-    HUD.request("use_bag", slotIdx)
+    return HUD.request("use_bag", slotIdx)
   end
+  return false
 end
 
 HUD.setup_chat = function()

@@ -96,6 +96,8 @@ pub(crate) enum Req {
     /// Quest, component, act of a talk objective.
     Talk(u32, u32, u32),
     Drop(u32),
+    /// `X2Quest:QuestContextRestart(qtype)`: reset the run of an active main quest (`CSRestartMainQuest`).
+    Restart(u32),
     /// `X2Interaction:CancelNPCInteraction()`.
     End,
     /// `X2Quest:EnterQuestDirectingMode()` / `LeaveQuestDirectingMode()`.
@@ -169,6 +171,9 @@ pub struct DialogView {
     cinema_restore: Vec<aa_ui::tree::Id>,
     /// The active quests as the scripts last saw them, and its version (`HUD.quest_version()`).
     pub quests: Vec<Quest>,
+    /// The completed-quest blocks (`SCCompletedQuests` / `SCQuestContextCompleted`), for the
+    /// native getters' completed check (`X2Quest.GetUseTypeQuestItems` with `checkState`).
+    pub completed: Vec<aa_net::quest::CompletedBlock>,
     /// The clock of each timed quest (`X2Quest:GetQuestContextLeftTime`), on the local clock:
     /// `FUN_3937b240` stores the server's `time_left_ms` as its end and the local receipt time as
     /// its start; `FUN_39379e30` returns `end - (now - start) * 1000`.
@@ -188,6 +193,12 @@ pub struct DialogView {
     pub condition: String,
     pub(crate) requests: Vec<Req>,
     pointer_talk: Option<PointerTalk>,
+    /// The last `QuestContextRestart` attempt, for the native 3 s throttle (`DAT_39ac7598`).
+    pub restart_at: Option<Instant>,
+    /// `byte_3a173744`: `FUN_3937b200` sets it for an active, not completed quest before the
+    /// throttle and the error 5 / 0xc checks; the next Started raises `QUEST_CHAT_RESTART` and
+    /// clears it (`FUN_3937b5b0`).
+    pub restart_pending: bool,
     /// The walk to a right-clicked NPC beyond the interaction reach ([`Approach`]).
     pub(super) approach: Option<Approach>,
     npc_flow: npc::Flow,
@@ -199,10 +210,20 @@ fn texts<'a>(d: &'a HudData, game: &'a GameData) -> Texts<'a> {
 }
 
 /// One quest as the scripts read it: the rows of `HUD.quest_list()` and `HUD.quest_info(qtype)`.
-fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: bool) -> mlua::Result<Table> {
+fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: bool, completed: &[aa_net::quest::CompletedBlock]) -> mlua::Result<Table> {
     let t = &game.quests;
     let row = lua.create_table()?;
     row.set("type", q.template_id)?;
+    let completed = completed.iter().any(|b| b.has(q.template_id));
+    row.set("completed", completed)?;
+    row.set("aggro", active && t.is_aggro(q.template_id))?;
+    for (key, list) in [
+        ("actionBarItems", t.supply_item_targets(game, q.template_id, true)),
+        ("supplyItems", t.supply_item_targets(game, q.template_id, false)),
+        ("useItems", t.use_item_targets(game, q.template_id)),
+    ] {
+        row.set(key, lua.create_sequence_from(list)?)?;
+    }
     let Some(def) = t.def(q.template_id) else {
         row.set("name", "")?;
         row.set("objectives", lua.create_table()?)?;
@@ -220,6 +241,7 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     row.set("livelihood", def.is_livelihood())?;
     row.set("group", def.is_group())?;
     row.set("selective", def.selective)?;
+    row.set("repeatable", def.repeatable)?;
     // the native getters' values (`quests.rs`), not the raw `let_it_done` column
     row.set("letItDone", active && t.is_let_it_done(q))?;
     row.set("overDone", active && t.is_over_done(q))?;
@@ -256,6 +278,8 @@ fn quest_table(lua: &Lua, game: &GameData, texts: &Texts, q: &Quest, active: boo
     let r = t.rewards(q.template_id);
     row.set("exp", r.exp.to_string())?;
     row.set("copper", r.copper)?;
+    row.set("aaPoint", r.aa_point)?;
+    row.set("appellation", r.appellation)?;
     for (key, v) in [("labor", r.labor), ("honor", r.honor), ("crime", r.crime), ("living", r.living)] {
         if v != 0 {
             row.set(key, v)?;
@@ -336,7 +360,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             let Some(game) = d.game.get() else { return Ok(out) };
             let texts = texts(&d, game);
             for (i, q) in d.dialog.quests.iter().enumerate() {
-                out.set(i + 1, quest_table(lua, game, &texts, q, true)?)?;
+                out.set(i + 1, quest_table(lua, game, &texts, q, true, &d.dialog.completed)?)?;
             }
             Ok(out)
         })?,
@@ -351,7 +375,25 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
                 return Ok(None);
             }
             let q = Quest { template_id: qtype, ..Quest::default() };
-            Ok(Some(quest_table(lua, game, &texts(&d, game), &q, false)?))
+            Ok(Some(quest_table(lua, game, &texts(&d, game), &q, false, &d.dialog.completed)?))
+        })?,
+    )?;
+    let b = bridge.clone();
+    hud.raw_set(
+        "quest_items_by_obj_index",
+        lua.create_function(move |lua, (qtype, index): (u32, u32)| {
+            let d = b.borrow();
+            let out = lua.create_table()?;
+            let Some(game) = d.game.get() else { return Ok(out) };
+            if game.quests.def(qtype).is_none() {
+                return Ok(out);
+            }
+            let active = d.dialog.quests.iter().find(|q| q.template_id == qtype);
+            let list = game.quests.items_by_objective(game, qtype, active, index);
+            for (i, id) in list.iter().enumerate() {
+                out.raw_set(i + 1, *id)?;
+            }
+            Ok(out)
         })?,
     )?;
     let b = bridge.clone();
@@ -465,6 +507,7 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
     })?;
     request("quest_talk", |a| Some(Req::Talk(num(&a, 0) as u32, num(&a, 1) as u32, num(&a, 2) as u32)))?;
     request("quest_drop", |a| Some(Req::Drop(num(&a, 0) as u32)))?;
+    request("quest_restart", |a| Some(Req::Restart(num(&a, 0) as u32)))?;
     request("quest_end", |_| Some(Req::End))?;
     request("quest_directing", |a| Some(Req::Directing(matches!(a.front(), Some(mlua::Value::Boolean(true))))))?;
     let b = bridge.clone();
@@ -634,6 +677,7 @@ pub fn sync_quests(rt: Option<NonSend<UiRuntime>>, bridge: NonSend<HudBridge>, f
             d.dialog.condition = c;
         }
         d.dialog.quests = quests.active.clone();
+        d.dialog.completed = quests.completed.clone();
         d.dialog.version += 1;
         d.dialog.seen = true;
         if let Some(f) = facts.get() {
@@ -1371,7 +1415,20 @@ pub fn route_quest_notices(
     let Some(rt) = rt else { return };
     for NetEvent(e) in events.read() {
         match e {
-            Event::QuestStarted(q) => start_quest_clock(&bridge.0, q, q.time_left_ms, Instant::now()),
+            Event::QuestStarted(q) => {
+                start_quest_clock(&bridge.0, q, q.time_left_ms, Instant::now());
+                // FUN_3937b5b0: after a restart attempt the Started raises QUEST_CHAT_RESTART (246)
+                // in place of the start component's follow-up (FUN_39378580, not modelled). A hidden
+                // quest (detail 5, FUN_397d3540) takes the other branch and leaves the flag set.
+                let restart = {
+                    let mut d = bridge.0.borrow_mut();
+                    let hidden = d.game.get().and_then(|g| g.quests.def(q.template_id)).is_some_and(|def| def.is_hidden());
+                    !hidden && std::mem::take(&mut d.dialog.restart_pending)
+                };
+                if restart {
+                    rt.fire_event("QUEST_CHAT_RESTART", ());
+                }
+            }
             Event::QuestUpdated(q) => {
                 // 723452: a status other than in progress calls FUN_3937b240(qtype, -1), which the
                 // next tick removes and publishes as (qtype, 0).
@@ -1465,6 +1522,7 @@ pub struct DialogWorld<'w> {
     units: Res<'w, Units>,
     quests: Res<'w, Quests>,
     doodads: Res<'w, Doodads>,
+    inventory: Option<Res<'w, Inventory>>,
 }
 
 /// `FUN_3937a130`: the original reports a refused quest request as `QUEST_ERROR_INFO(error, quest)`;
@@ -1668,6 +1726,37 @@ pub fn handle_dialog(
             }
             Req::AtNpc(..) => unreachable!("NPC request is unwrapped once"),
             Req::Drop(quest_id) => send(&mut net, Interact::QuestDrop { quest_id }),
+            Req::Restart(quest_id) => {
+                // `FUN_3937b200` first does nothing for a quest that is not active or already
+                // completed (it does not stamp the throttle); `FUN_3937a8d0` then applies the 3 s
+                // throttle, main detail, and the free bag slots for the items it hands out again
+                // (error 5). A non-main/missing template is error 0xc.
+                if world.quests.active_quest(quest_id).is_none_or(|q| q.status == status::COMPLETED) {
+                    continue;
+                }
+                // `byte_3a173744`, set even when the throttle or an error refuses the send.
+                d.dialog.restart_pending = true;
+                let now = Instant::now();
+                if d.dialog.restart_at.is_some_and(|at| now.duration_since(at) < Duration::from_secs(3)) {
+                    continue;
+                }
+                d.dialog.restart_at = Some(now);
+                let Some(game) = d.game.get() else {
+                    errors.push((quest_id, 12));
+                    continue;
+                };
+                if !game.quests.def(quest_id).is_some_and(|def| def.is_main()) {
+                    errors.push((quest_id, 12));
+                    continue;
+                }
+                let need = game.quests.supply_item_count(quest_id);
+                let free = world.inventory.as_ref().map_or(0, |i| i.free_bag_slots());
+                if need > free as i64 {
+                    errors.push((quest_id, 5));
+                    continue;
+                }
+                send(&mut net, Interact::RestartMainQuest { quest_id });
+            }
             Req::End => end_talk(&mut d, &mut net),
             Req::Directing(on) => {
                 if let Some(rt) = rt.as_deref() {
@@ -3185,6 +3274,30 @@ mod tests {
     }
 
     #[test]
+    fn the_started_after_a_restart_raises_quest_chat_restart_once() {
+        let Some((mut app, shared)) = quest_notice_app() else { return };
+        app.world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load("RESTARTS=0;local w=UIParent:CreateWidget('emptywidget','questRestartProbe','UIParent');w:Show(true);w:SetHandler('OnEvent',function() RESTARTS=RESTARTS+1 end);w:RegisterEvent('QUEST_CHAT_RESTART')")
+            .exec()
+            .unwrap();
+        let count = |app: &mut App| app.world_mut().non_send::<aa_ui::UiRuntime>().lua.load("return RESTARTS").eval::<i64>().unwrap();
+        let q = Quest { id: 77, ..timed(60_000) };
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        assert_eq!(count(&mut app), 0, "a plain Started is a fresh accept");
+        shared.borrow_mut().dialog.restart_pending = true;
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q.clone())));
+        app.update();
+        assert_eq!(count(&mut app), 1, "FUN_3937b5b0 raises 246 for the restart");
+        assert!(!shared.borrow().dialog.restart_pending, "and clears byte_3a173744");
+        app.world_mut().write_message(NetEvent(Event::QuestStarted(q)));
+        app.update();
+        assert_eq!(count(&mut app), 1);
+    }
+
+    #[test]
     fn an_updated_status_change_hides_the_clock_on_the_next_tick() {
         let Some((mut app, shared)) = quest_notice_app() else { return };
         let q = Quest { id: 77, ..timed(60_000) };
@@ -3266,5 +3379,520 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn the_original_notifier_helper_reads_the_native_use_items() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let (quest, act) = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            let Some((quest, act)) = g
+                .quests
+                .parts
+                .values()
+                .filter(|c| c.kind == kind::PROGRESS)
+                .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
+                .find(|(_, a): &(u32, &super::super::quests::ActDef)| {
+                    a.ty == "ObjItemUse" && a.target != 0 && g.item_usable(a.target)
+                })
+            else {
+                return;
+            };
+            (quest, act.clone())
+        };
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        super::super::api::install(&mut rt, &shared).unwrap();
+        shared.borrow_mut().dialog.quests = vec![Quest {
+            template_id: quest,
+            status: status::PROGRESS,
+            ..Quest::default()
+        }];
+        // `quest_context_notifier.alb` proto 47 is its local `FindQuestItemByType(qtype)`: it calls
+        // X2Quest.GetUseTypeQuestItems(qtype, true) and returns nil as {}.
+        let bytes = aa_pak::Pak::global()
+            .read("scriptsbin/x2ui/questcontext/quest_context_notifier.alb")
+            .unwrap();
+        let original = aa_lua::chunk::parse(&bytes).unwrap();
+        let proto = original.main.protos[47].clone();
+        assert_eq!(proto.num_upvalues, 0);
+        let host = aa_lua::chunk::write(
+            &aa_lua::chunk::Chunk {
+                format: aa_lua::chunk::Format::ALB,
+                main: proto,
+            },
+            aa_lua::chunk::Format::HOST,
+        )
+        .unwrap();
+        let find: mlua::Function = rt.lua.load(&host).into_function().unwrap();
+        let list: Table = find.call(quest).unwrap();
+        let ids: Vec<u32> = list
+            .sequence_values::<u32>()
+            .collect::<mlua::Result<_>>()
+            .unwrap();
+        assert!(
+            ids.contains(&act.target),
+            "quest {quest}: {ids:?} does not hold item {}",
+            act.target
+        );
+        // The notifier's item-button helper (proto 55, called by proto 56 with the 1 based pairs
+        // key) passes the key straight to GetUseTypeQuestItemsByObjIndex.
+        let proto = original.main.protos[55].clone();
+        assert_eq!(proto.num_upvalues, 2);
+        let host = aa_lua::chunk::write(
+            &aa_lua::chunk::Chunk {
+                format: aa_lua::chunk::Format::ALB,
+                main: proto,
+            },
+            aa_lua::chunk::Format::HOST,
+        )
+        .unwrap();
+        let helper: mlua::Function = rt.lua.load(&host).into_function().unwrap();
+        rt.lua.globals().set("QUEST_ITEM_HELPER", helper).unwrap();
+        let got: (String, u32, u32) = rt
+            .lua
+            .load(format!(
+                r#"
+                local button = setmetatable({{}}, {{ __index = function() return function() return 0, 0 end end }})
+                debug.setupvalue(QUEST_ITEM_HELPER, 1, function() return 0 end)
+                debug.setupvalue(QUEST_ITEM_HELPER, 2, function(self, item) BUTTON_ITEM = item; return button end)
+                X2Item = {{ GetItemInfoByType = function() return {{}} end }}
+                SetItemButtonEventHandler = function() end
+                local real = X2Quest.GetUseTypeQuestItemsByObjIndex
+                X2Quest.GetUseTypeQuestItemsByObjIndex = function(self, q, i) CALLED = {{ q, i }}; return {{ {} }} end
+                QUEST_ITEM_HELPER({{}}, {{ status = 1, questType = {} }}, 1, false)
+                X2Quest.GetUseTypeQuestItemsByObjIndex = real
+                return tostring(CALLED[2]), {} , BUTTON_ITEM
+                "#,
+                act.target, quest, act.target
+            ))
+            .eval()
+            .unwrap();
+        assert_eq!(got, ("1".to_string(), act.target, act.target), "proto 55 passes the 1 based key");
+        // A completed quest asks for no items (`checkState`).
+        {
+            let mut data = shared.borrow_mut();
+            data.dialog.completed = vec![aa_net::quest::CompletedBlock {
+                id: aa_net::quest::CompletedBlock::block_of(quest),
+                bits: 1 << (quest % 64),
+            }];
+            data.dialog.version += 1;
+        }
+        let none: Option<Table> = rt
+            .lua
+            .load(format!(
+                "return X2Quest:GetUseTypeQuestItems({quest}, true)"
+            ))
+            .eval()
+            .unwrap();
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn the_original_added_item_message_asks_the_quest_item_getters() {
+        if !aa_world::pak_available() {
+            return;
+        }
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let (start_item, use_item, use_quest) = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            let start = g
+                .items
+                .iter()
+                .find(|(_, i)| i.impl_id == 10)
+                .map(|(id, _)| *id)
+                .unwrap();
+            let Some((quest, item)) = g
+                .quests
+                .parts
+                .values()
+                .filter(|c| c.kind == kind::PROGRESS)
+                .flat_map(|c| c.acts.iter().map(move |a| (c.quest, a)))
+                .find(|(_, a): &(u32, &super::super::quests::ActDef)| {
+                    a.ty == "ObjItemUse"
+                        && a.target != 0
+                        && g.items.get(&a.target).is_some_and(|i| i.impl_id != 10)
+                })
+                .map(|(q, a)| (q, a.target))
+            else {
+                return;
+            };
+            (start, item, quest)
+        };
+        shared.borrow_mut().dialog.quests = vec![Quest {
+            template_id: use_quest,
+            status: status::PROGRESS,
+            ..Quest::default()
+        }];
+        let mut rt = aa_ui::UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        super::super::api::install(&mut rt, &shared).unwrap();
+        rt.lua
+            .load(
+                r#"
+                locale = { chatSystem = { get_item = "ITEM %s", get_quest_start_item = "QUESTSTART %s",
+                    get_use_item_in_active_quest = "USE %s" } }
+                ICON_SIZE = { DEFAULT = 32 }
+                PlayUISound = function() end
+                Script = { ReloadScript = function() return {} end }
+                local mt = { __index = function(_, k)
+                    if type(k) == 'string' and k:sub(1, 3) == 'Get' then return function() return 0 end end
+                    return function() return false end
+                end }
+                local win = setmetatable({}, mt)
+                win.itemSlot = setmetatable({}, mt)
+                win.itemName = setmetatable({}, mt)
+                win.style = setmetatable({}, mt)
+                win.gradeColor = "ffffffff"
+                win.bg = setmetatable({}, mt)
+                addedItemWindow = win
+                GOT = ""
+                "#,
+            )
+            .exec()
+            .unwrap();
+        let bytes = aa_pak::Pak::global()
+            .read("scriptsbin/x2ui/centermessage/additem.alb")
+            .unwrap();
+        let original = aa_lua::chunk::parse(&bytes).unwrap();
+        let host = aa_lua::chunk::write(
+            &aa_lua::chunk::Chunk {
+                format: aa_lua::chunk::Format::ALB,
+                main: original.main.clone(),
+            },
+            aa_lua::chunk::Format::HOST,
+        )
+        .unwrap();
+        rt.lua.load(&host).set_name("@additem.alb").exec().unwrap();
+        let (is_start, use_is_start, in_quest): (bool, bool, bool) = rt
+            .lua
+            .load(format!(
+                "return X2Quest:IsQuestStartItem({start_item}), X2Quest:IsQuestStartItem({use_item}), X2Quest:IsUseItemInActiveQuest({use_item})"
+            ))
+            .eval()
+            .unwrap();
+        assert!(
+            is_start && !use_is_start && in_quest,
+            "the native getters: {is_start} {use_is_start} {in_quest}"
+        );
+        rt.lua
+            .load(format!(
+                "CALLS, RAISED = {{}}, 0; \
+                 local start = X2Quest.IsQuestStartItem; \
+                 X2Quest.IsQuestStartItem = function(self, t) CALLS[#CALLS + 1] = {{ 'start', t }}; return start(self, t) end; \
+                 local use = X2Quest.IsUseItemInActiveQuest; \
+                 X2Quest.IsUseItemInActiveQuest = function(self, t) CALLS[#CALLS + 1] = {{ 'use', t }}; return use(self, t) end; \
+                 addedItemWindow.Raise = function() RAISED = RAISED + 1 end; \
+                 RET = ShowAddedItemMsg({{ itemType = {}, itemGrade = 1, gradeColor = 'ffffffff', name = 'X', itemName = 'X' }}, 3000); \
+                 ShowAddedItemMsg({{ itemType = {}, itemGrade = 1, gradeColor = 'ffffffff', name = 'Y', itemName = 'Y' }}, 3000)",
+                start_item, use_item
+            ))
+            .exec()
+            .unwrap();
+        let (calls, raised, ret, kind): (String, i64, bool, String) = rt
+            .lua
+            .load("local out = ''; for _, c in ipairs(CALLS) do out = out .. c[1] .. ':' .. tostring(c[2]) .. ' ' end; return out, RAISED, RET, type(ShowAddedItemMsg)")
+            .eval()
+            .unwrap();
+        assert!(
+            calls.contains(&format!("start:{start_item}")),
+            "the original message asks IsQuestStartItem: {calls} (ret {ret}, {kind})"
+        );
+        assert!(
+            calls.contains(&format!("use:{use_item}")),
+            "and IsUseItemInActiveQuest: {calls}"
+        );
+        assert_eq!(
+            raised, 2,
+            "the item window opened through the original script"
+        );
+    }
+
+    fn restart_app(shared: Shared, rt: aa_ui::UiRuntime) -> App {
+        let mut app = App::new();
+        app.add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .init_resource::<Units>()
+            .init_resource::<Quests>()
+            .init_resource::<Doodads>()
+            .init_resource::<Inventory>()
+            .init_resource::<super::super::cinema::CinemaPlayer>()
+            .insert_non_send(HudBridge(shared))
+            .insert_non_send(rt)
+            .add_systems(Update, handle_dialog);
+        app
+    }
+
+    #[test]
+    fn the_original_restart_call_sends_cs_restart_main_quest_once_per_three_seconds() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let main = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            g.quests
+                .defs
+                .iter()
+                .find(|(_, def)| def.is_main() && !def.components.is_empty())
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(format!("X2Quest:QuestContextRestart({main})"))
+            .exec()
+            .unwrap();
+        let mut app = restart_app(shared.clone(), rt);
+        let q = Quest {
+            template_id: main,
+            status: status::FAILED,
+            ..Quest::default()
+        };
+        app.insert_resource(Quests {
+            active: vec![q],
+            ..Quests::default()
+        });
+        let mut inventory = Inventory::default();
+        inventory.bag_slots = 64;
+        inventory.bag = vec![None; 64];
+        app.insert_resource(inventory);
+        app.update();
+        assert_eq!(
+            sent_requests(&mut app),
+            [Interact::RestartMainQuest { quest_id: main }]
+        );
+        assert!(shared.borrow().dialog.restart_pending, "FUN_3937b200 sets byte_3a173744");
+        shared.borrow_mut().dialog.restart_pending = false;
+        // The native throttle (`DAT_39ac7598`) holds the next try for 3 s.
+        app.world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load(format!("X2Quest:QuestContextRestart({main})"))
+            .exec()
+            .unwrap();
+        app.update();
+        assert!(sent_requests(&mut app).is_empty());
+        assert!(shared.borrow().dialog.restart_pending, "the flag is set before the throttle refuses");
+    }
+
+    #[test]
+    fn an_inactive_restart_does_not_stamp_the_three_second_throttle() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let main = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            g.quests.defs.iter().find(|(_, def)| def.is_main()).map(|(id, _)| *id).unwrap()
+        };
+        let rt = bare_runtime(&shared);
+        rt.lua.load(format!("X2Quest:QuestContextRestart({main})")).exec().unwrap();
+        let mut app = restart_app(shared, rt);
+        app.insert_resource(Quests::default());
+        let mut inventory = Inventory::default();
+        inventory.bag_slots = 64;
+        inventory.bag = vec![None; 64];
+        app.insert_resource(inventory);
+        app.update();
+        assert!(sent_requests(&mut app).is_empty(), "FUN_3937b200 is silent for an inactive quest");
+        app.world_mut().resource_mut::<Quests>().active.push(Quest { template_id: main, status: status::FAILED, ..Quest::default() });
+        app.world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load(format!("X2Quest:QuestContextRestart({main})"))
+            .exec()
+            .unwrap();
+        app.update();
+        assert_eq!(sent_requests(&mut app), [Interact::RestartMainQuest { quest_id: main }], "the refused try did not throttle");
+    }
+
+    #[test]
+    fn restart_refuses_a_quest_that_is_not_a_main_quest_with_error_twelve() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let other = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            g.quests
+                .defs
+                .iter()
+                .find(|(_, def)| !def.is_main())
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                OBSERVED = {}
+                local w = UIParent:CreateWidget('emptywidget', 'restartRefusal', 'UIParent')
+                w:SetHandler('OnEvent', function(self, event, ...) table.insert(OBSERVED, { event = event, args = { ... } }) end)
+                w:RegisterEvent('QUEST_ERROR_INFO')
+                "#,
+            )
+            .exec()
+            .unwrap();
+        rt.lua
+            .load(format!("X2Quest:QuestContextRestart({other})"))
+            .exec()
+            .unwrap();
+        let mut app = restart_app(shared, rt);
+        let q = Quest {
+            template_id: other,
+            status: status::PROGRESS,
+            ..Quest::default()
+        };
+        app.insert_resource(Quests {
+            active: vec![q],
+            ..Quests::default()
+        });
+        let mut inventory = Inventory::default();
+        inventory.bag_slots = 64;
+        inventory.bag = vec![None; 64];
+        app.insert_resource(inventory);
+        app.update();
+        assert!(sent_requests(&mut app).is_empty());
+        let (event, error, quest): (String, i64, i64) = app
+            .world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load("return OBSERVED[1].event, OBSERVED[1].args[1], OBSERVED[1].args[2]")
+            .eval()
+            .unwrap();
+        assert_eq!(
+            (event.as_str(), error, quest),
+            ("QUEST_ERROR_INFO", 12, i64::from(other))
+        );
+    }
+
+    #[test]
+    fn the_other_quest_getters_follow_the_native_functions() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                APPELLATION_INFO = { TYPE = 1, NAME = 2, BUFF_INFO = 3 }
+                HUD.quest_version = function() return 1 end
+                HUD.quest_list = function() return {
+                    { type = 11, status = 1, level = 5, aggro = true, aaPoint = 250, appellation = 88,
+                      repeatable = false, completed = false, actionBarItems = { 7 }, useItems = { 7 }, objectives = {} },
+                    { type = 12, status = 1, level = 2, aggro = false, objectives = {} },
+                    { type = 13, status = 1, level = 3, repeatable = true, completed = true,
+                      actionBarItems = { 8 }, useItems = {}, objectives = {} },
+                    { type = 14, status = 0, level = 1, objectives = {} },
+                } end
+                HUD.state = { level = 20 }
+                HUD.appellation_row = function(id)
+                    if id == 88 then return { id = id, name = 'title-88' } end
+                    return nil
+                end
+                assert(X2Quest:GetActiveQuestComparedLevel(1) == 15, 'compared level')
+                assert(X2Quest:GetActiveQuestComparedLevel(99) == 0, 'bad index is 0')
+                assert(X2Quest:NowIsAggroComponent(11) and not X2Quest:NowIsAggroComponent(12))
+                assert(X2Quest:NowIsAggroComponent(14) == nil, 'inactive quest is nil')
+                assert(X2Quest:GetQuestContextRewardAAPoint(11) == 250)
+                assert(X2Quest:GetQuestContextRewardAAPoint(12) == 0, 'no act is 0')
+                local a = X2Quest:GetQuestContextRewardAppellation(11)
+                assert(a[APPELLATION_INFO.TYPE] == 88 and a[APPELLATION_INFO.NAME] == 'title-88')
+                local empty = X2Quest:GetQuestContextRewardAppellation(12)
+                assert(empty == nil, 'no SupplyAppellation act is nil')
+                assert(type(X2Quest:GetQuestContextRewardAppellation(11)) == 'table')
+                assert(X2Quest:GetUseTypeQuestItems(13, true)[1] == 8, 'completed repeatable keeps its items')
+                assert(X2Quest:GetUseTypeQuestItems(11, true)[1] == 7)
+                assert(X2Quest:GetUseTypeQuestItems(12, true) == nil, 'an empty list is nil (FUN_394a55a0)')
+                assert(X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) ~= nil)
+                assert(#X2Quest:GetUseTypeQuestItemsByObjIndex(999, 1) == 0, 'unknown template is an empty table')
+                "#,
+            )
+            .set_name("@quest-getters-native-test")
+            .exec()
+            .unwrap();
+        // A missing appellation row leaves an empty table (the row 88 above, id 89 below).
+        rt.lua
+            .load(
+                r#"
+                HUD.quest_list = function() return {
+                    { type = 15, status = 1, level = 1, appellation = 89, objectives = {} },
+                } end
+                HUD.quest_version = function() return 2 end
+                local t = X2Quest:GetQuestContextRewardAppellation(15)
+                assert(type(t) == 'table' and next(t) == nil, 'missing row is an empty table')
+                "#,
+            )
+            .exec()
+            .unwrap();
+    }
+
+    #[test]
+    fn restart_refuses_a_main_quest_when_the_bag_cannot_take_its_items_again() {
+        let shared: Shared = std::rc::Rc::new(std::cell::RefCell::new(HudData::default()));
+        if !with_game(&shared) {
+            return;
+        }
+        let main = {
+            let d = shared.borrow();
+            let g = d.game.get().unwrap();
+            g.quests
+                .defs
+                .iter()
+                .find(|(id, def)| def.is_main() && g.quests.supply_item_count(**id) > 0)
+                .map(|(id, _)| *id)
+        };
+        let Some(main) = main else { return };
+        let rt = bare_runtime(&shared);
+        rt.lua
+            .load(
+                r#"
+                OBSERVED = {}
+                local w = UIParent:CreateWidget('emptywidget', 'restartBagFull', 'UIParent')
+                w:SetHandler('OnEvent', function(self, event, ...) table.insert(OBSERVED, { event = event, args = { ... } }) end)
+                w:RegisterEvent('QUEST_ERROR_INFO')
+                "#,
+            )
+            .exec()
+            .unwrap();
+        rt.lua
+            .load(format!("X2Quest:QuestContextRestart({main})"))
+            .exec()
+            .unwrap();
+        let mut app = restart_app(shared, rt);
+        let q = Quest {
+            template_id: main,
+            status: status::FAILED,
+            ..Quest::default()
+        };
+        app.insert_resource(Quests {
+            active: vec![q],
+            ..Quests::default()
+        });
+        app.insert_resource(Inventory::default());
+        app.update();
+        assert!(
+            sent_requests(&mut app).is_empty(),
+            "no free bag slot for the restart's items"
+        );
+        let (event, error): (String, i64) = app
+            .world_mut()
+            .non_send::<aa_ui::UiRuntime>()
+            .lua
+            .load("return OBSERVED[1].event, OBSERVED[1].args[1]")
+            .eval()
+            .unwrap();
+        assert_eq!((event.as_str(), error), ("QUEST_ERROR_INFO", 5));
     }
 }
