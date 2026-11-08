@@ -488,6 +488,11 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             let Some(linked) = game.quests.linked_objectives(qtype, &texts(&d, game)) else { return Ok(None) };
             let out = lua.create_table()?;
             out.set("ready", linked.ready_components)?;
+            if linked.ready_components > 0 {
+                out.set("alias", linked.report.alias)?;
+                out.set("npc", linked.report.npc)?;
+                out.set("doodad", linked.report.doodad)?;
+            }
             for (i, (obj, count)) in linked.entries.into_iter().enumerate() {
                 let e = lua.create_table()?;
                 e.set("obj", obj)?;
@@ -3560,7 +3565,9 @@ mod tests {
                 assert(X2Quest:GetLinkedQuestSummary(330) == 'Meet Woodcutter Gallagher in Desireen.')
                 local ready = X2Quest:GetLinkedQuestObjectives(330)
                 assert(#ready == 1 and ready[1].count == 0)
-                assert(ready[1].obj == X2Locale:LocalizeUiText(6, 'report_alias'))
+                -- 330's report act has no alias: talk_report_npc with the NPC's name (FUN_392dd910)
+                assert(ready[1].obj == 'Report to Woodcutter Gallagher', ready[1].obj)
+                assert(not ready[1].obj:find('[~', 1, true))
                 "#,
             )
             .exec()

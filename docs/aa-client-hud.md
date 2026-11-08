@@ -714,9 +714,15 @@ The getters these windows read that were still stubs now follow the natives:
   the getter returns the expanded text (for example `@NPC_NAME(614)` becomes the NPC's name).
 * `GetLinkedQuestObjectives` (`FUN_394a4fc0`) is an array of `{ obj, count }`, one row per Progress
   component with a counted act; `count` is `FUN_397d3440`'s amount. A quest with no Progress
-  components lists each Ready component with the locale's `report_alias` / `talk_report_npc` /
-  `find_report_doodad` text (category 6) and count 0; a matching locale key is required, as in the
-  native. An unknown quest answers nil. The objective text is the act alias, else the component's
+  components lists each Ready component with the first of the locale's `report_alias` /
+  `talk_report_npc` / `find_report_doodad` texts (category 6) whose `[~qst_...~]` macro resolves,
+  and count 0. The macros (`FUN_392dd880` / `FUN_392dd910` / `FUN_392dd970`) read the first
+  `ConReportNpc` act of the quest's Ready components: its alias when `use_alias` is set (else the
+  first `ConReportDoodad` act's), its NPC's name, and the first `ConReportDoodad` act's doodad
+  name; Rust resolves them and Lua substitutes them, so quest 330 lists "Report to Woodcutter
+  Gallagher". When none resolves there is no row, as in the native. The substitution is plain
+  text: the Korean `|1과;와;` particle choice after the name is not applied (approximate). An
+  unknown quest answers nil. The objective text is the act alias, else the component's
   kind-4 text, else the act description: the native formats the act through `FUN_392d9640` and
   `objective_ptn`, whose alias substitution is not recovered, so the text is approximate.
 

@@ -219,24 +219,44 @@ X2Quest.GetQuestContextBody = function(self, qtype) return "" end
 X2Quest.GetLinkedQuestSummary = function(self, qtype)
   return HUD.quest_linked_summary(tonumber(qtype) or 0)
 end
-local READY_REPORT_KEYS = { "report_alias", "talk_report_npc", "find_report_doodad" }
-local function linkedReady(count)
-  local text
-  for _, key in ipairs(READY_REPORT_KEYS) do
-    if X2Locale ~= nil and X2Locale.LocalizeUiText ~= nil then
-      local s = X2Locale:LocalizeUiText(6, key)
-      if s ~= nil and s ~= key then text = s; break end
-    end
+-- FUN_394a4fc0 tries the category-6 keys in this order and takes the first whose [~qst_...~] macro
+-- resolves (FUN_392dd880 / FUN_392dd910 / FUN_392dd970); the field holds what the macro becomes.
+local READY_REPORT_KEYS = {
+  { "report_alias", "[~qst_report_alias~]", "alias" },
+  { "talk_report_npc", "[~qst_report_npc_name~]", "npc" },
+  { "find_report_doodad", "[~qst_report_doodad_name~]", "doodad" },
+}
+local function reportText(key, macro, value)
+  if value == nil or value == "" then return nil end
+  if X2Locale == nil or X2Locale.LocalizeUiText == nil then return nil end
+  local s = X2Locale:LocalizeUiText(6, key)
+  if s == nil or s == key then return nil end
+  -- plain find / sub: the macro's brackets are not a pattern
+  local out, from = "", 1
+  while true do
+    local at = s:find(macro, from, true)
+    if at == nil then break end
+    out = out .. s:sub(from, at - 1) .. value
+    from = at + #macro
   end
+  return out .. s:sub(from)
+end
+local function linkedReady(list)
+  local text
+  for _, k in ipairs(READY_REPORT_KEYS) do
+    text = reportText(k[1], k[2], list[k[3]])
+    if text ~= nil then break end
+  end
+  -- no key resolves: the native pushes no row
   if text == nil then return {} end
   local out = {}
-  for i = 1, count do out[i] = { obj = text, count = 0 } end
+  for i = 1, tonumber(list.ready) or 0 do out[i] = { obj = text, count = 0 } end
   return out
 end
 X2Quest.GetLinkedQuestObjectives = function(self, qtype)
   local list = HUD.quest_linked_objectives(tonumber(qtype) or 0)
   if list == nil then return nil end
-  if (tonumber(list.ready) or 0) > 0 then return linkedReady(tonumber(list.ready)) end
+  if (tonumber(list.ready) or 0) > 0 then return linkedReady(list) end
   return list
 end
 -- The folder of a main quest is named after its chapter (the locale's chapter text) and the zone.

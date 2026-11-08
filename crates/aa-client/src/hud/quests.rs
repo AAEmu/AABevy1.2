@@ -290,6 +290,22 @@ pub struct LinkedObjectives {
     /// The Ready components to list when the quest has no Progress components; the text is the
     /// locale's `report_alias` / `talk_report_npc` / `find_report_doodad`.
     pub ready_components: u32,
+    /// What those locale texts' `[~qst_...~]` macros resolve to (empty with Progress components).
+    pub report: ReadyReport,
+}
+
+/// The report target the `[~qst_report_alias~]` / `[~qst_report_npc_name~]` /
+/// `[~qst_report_doodad_name~]` macros resolve to (`FUN_392dd880`, `FUN_392dd910`, `FUN_392dd970`);
+/// an empty string is a macro that does not resolve.
+#[derive(Default)]
+pub struct ReadyReport {
+    /// The alias of the first `ConReportNpc` act when it uses one, else of the first
+    /// `ConReportDoodad` act (`FUN_397d44f0`, `FUN_397d45c0`).
+    pub alias: String,
+    /// The name of the first `ConReportNpc` act's NPC (`FUN_397d4490`).
+    pub npc: String,
+    /// The name of the first `ConReportDoodad` act's doodad (`FUN_397d4560`).
+    pub doodad: String,
 }
 
 /// What the requirements read of the player.
@@ -861,14 +877,18 @@ impl QuestTables {
 
     /// `X2Quest.GetLinkedQuestObjectives` (`FUN_394a4fc0`): one `{obj, count}` row per Progress
     /// component with a counted act. A quest without Progress components lists its Ready components
-    /// instead (the caller supplies the locale's report text, count 0).
+    /// instead (the caller supplies the locale's report text from `report`, count 0).
     pub fn linked_objectives(&self, quest: u32, texts: &Texts) -> Option<LinkedObjectives> {
         if !self.defs.contains_key(&quest) {
             return None;
         }
         let mut progress = self.parts_of(quest, kind::PROGRESS).peekable();
         if progress.peek().is_none() {
-            return Some(LinkedObjectives { entries: Vec::new(), ready_components: self.parts_of(quest, kind::READY).count() as u32 });
+            return Some(LinkedObjectives {
+                entries: Vec::new(),
+                ready_components: self.parts_of(quest, kind::READY).count() as u32,
+                report: self.ready_report(quest, texts),
+            });
         }
         let mut entries = Vec::new();
         for c in progress {
@@ -882,7 +902,26 @@ impl QuestTables {
                 .unwrap_or_else(|| texts.describe(a));
             entries.push((base, Self::native_act_count(a)));
         }
-        Some(LinkedObjectives { entries, ready_components: 0 })
+        Some(LinkedObjectives { entries, ready_components: 0, report: ReadyReport::default() })
+    }
+
+    /// The first act of type `ty` among the quest's Ready components (`FUN_397d4490` and its
+    /// siblings walk the kind-6 components in order).
+    fn first_ready_act(&self, quest: u32, ty: &str) -> Option<&ActDef> {
+        self.parts_of(quest, kind::READY).flat_map(|c| &c.acts).find(|a| a.ty == ty)
+    }
+
+    /// The quest's report target for the `[~qst_report_...~]` macros (see [`ReadyReport`]).
+    fn ready_report(&self, quest: u32, texts: &Texts) -> ReadyReport {
+        let npc_act = self.first_ready_act(quest, "ConReportNpc");
+        let doodad_act = self.first_ready_act(quest, "ConReportDoodad");
+        // `alias` is already 0 when the detail's `use_alias` is not set
+        let alias_of = |a: Option<&ActDef>| a.filter(|a| a.alias != 0).and_then(|a| self.aliases.get(&a.alias)).map(|s| texts.expand(s));
+        ReadyReport {
+            alias: alias_of(npc_act).or_else(|| alias_of(doodad_act)).unwrap_or_default(),
+            npc: npc_act.and_then(|a| texts.game.npcs.get(&a.target)).map(|n| n.name.clone()).unwrap_or_default(),
+            doodad: doodad_act.and_then(|a| self.doodads.get(&a.target)).cloned().unwrap_or_default(),
+        }
     }
 
     /// `X2Quest.GetFirstObjectiveCount` (`FUN_394a4c30`): the amount of the first Progress
