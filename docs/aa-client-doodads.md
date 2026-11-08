@@ -652,7 +652,7 @@ Status in aa-client: *done* means the window/check runs through the original scr
 | Func (`actual_func_type`) | Native case | What 1.2 does | aa-client |
 |---|---|---|---|
 | `DoodadFuncQuest` 0x08 | `FUN_393bc260` case 8 | sets interaction state 9, then returns 0 (the skill, if any, is sent) | dialog/quest worker |
-| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the report text from the zone name, the target name and localized text category 0x5c, and raises `REPORT_CRIME` (0x202/514) with two strings; returns 1 | **done** (`local.rs`, `REPORT_CRIME`; the action id is the row's `skill_id`, `FUN_393b7eb0` case 0x34; the report button sends `CSReportCrime` 0x76 through `X2Trial.ReportCrime`; the text is approximate, see gaps) |
+| `DoodadFuncEvidenceItemLoot` 0x34 | `FUN_393bb090` 777166 | builds the location text from the player's position (sub-zone name, `>>`, the player's zone entry name, `>>`, a localized text of category 0x5c) and raises `REPORT_CRIME` (0x202/514) with the doodad name and that text; returns 1 | **done** (`local.rs`, `REPORT_CRIME`; the action id is the row's `skill_id`, `FUN_393b7eb0` case 0x34; the report button sends `CSReportCrime` 0x76 through `X2Trial.ReportCrime`; the category-0x5c part is missing, see gaps) |
 | `DoodadFuncStampMaker` 0x3d | `FUN_393b82a0` 774630 | state 7, `OPEN_EMBLEM_UPLOAD_UI` (0x1a4/420) with the doodad id as a string; returns 1 | **done** (event + minimal `X2Ucc`; the window opens with empty lists, uploads are stubs) |
 | `DoodadFuncBubble` 0x3f | `FUN_393b8240` 774609 | `FUN_393703b0` plays the func's `bubbles` conversation (`doodad_func_bubbles.bubble_id` is a `bubbles.id`, the index `FUN_398321e0` builds; `FUN_39375140` starts at the `bubble_chats` row with `START` and follows `next`, `FUN_393745c0` queueing each line after the previous one's show and fade); when `next_phase > 0` it sends `CSChangeDoodadPhasePacket` 0x0e9 through `FUN_397ac8d0(objId, skill, next_phase, funcId)`, not a message box; returns 1 | **done** (`local.rs` + `speech::Tables::bubble_chain`: a doodad's line as `CHAT_MSG_DOODAD` (event 14, `FUN_39374960`), an NPC's or the player's as `CHAT_MSG_QUEST`, + `Command::ChangeDoodadPhase`; doodad bubbles are not drawn yet) |
 | `DoodadFuncPurchase` 0x40 | `FUN_393b80d0` 774524 | state 8, a purchase task dialog (10 `DLG_TASK_PURCHASE` / 11 `DLG_TASK_PURCHASE_COIN`) built from `doodad_func_purchases`; returns 1 | **done** (`local.rs`, `X2DialogManager:RequestTaskDialog`; OK sends `CSBuyItems` 0x0ae / `CSBuyCoinItem` 0x0af) |
@@ -721,10 +721,12 @@ against the server reader, and `aa-net/shop.rs` the new `CSBuyCoinItemPacket` (0
   (`left_interaction`; the native measures against its own auction reach at `dword_39aefb98+672`), else
   state 0xe ends with 387/388 and nothing is sent. Whether the server accepts a doodad auctioneer is
   server-side (`auction_packets.rs::at_auctioneer` accepts only an auctioneer NPC today, AAEmu-1.2-Rust#49).
-* **Crime report text**: `FUN_393bb090` builds `<zone name> >> <target name> >> <localized text,
-  category 0x5c>` from the client's own tables. AA_DB carries neither the zone names nor that
-  localized text, so `local.rs` approximates it as `<target> >> <doodad name> >> crime <crime_kind_id>`
-  (the wording differs from the native; only the target name matches). The action id is the row's
+* **Crime report text**: `FUN_393bb090` builds the location from the player's position, never the
+  target: the sub-zone name (`sub_zones`, `FUN_3976ade0`), `>>`, the name of the player's zone entry
+  (`FUN_395779f0`), `>>`, then a localized text of category 0x5c reached through that entry's u16 key
+  (`FUN_397f2180` -> `FUN_397f23d0`). AA_DB has the zone and sub-zone names (`localized_texts`
+  `sub_zones`, `zones`), and `local.rs` sends the HUD snapshot's `sub_zone>>zone`; only the third,
+  category-0x5c part is not identified and is left out. The action id is the row's
   `skill_id` (11672 on all shipped rows, `FUN_393b7eb0` case 0x34). The report button's
   `X2Trial.ReportCrime(text)` sends `CSReportCrimePacket` 0x76 with the context `FUN_393bb090` stored
   (object, skill, next phase, func row).

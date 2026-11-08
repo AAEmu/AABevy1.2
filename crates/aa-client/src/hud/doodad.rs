@@ -2221,7 +2221,6 @@ pub(super) struct InteractionEnv<'w> {
     houses: Option<Res<'w, aa_net::Houses>>,
     world_info: Option<Res<'w, aa_world::stream::WorldInfo>>,
     seats: Option<Res<'w, crate::ingame::seating::Seats>>,
-    target: Option<Res<'w, aa_net::state::Target>>,
 }
 
 /// The uses the bar, the keys and the list asked for become packets.
@@ -2245,7 +2244,6 @@ pub(super) fn execute(
     mut errors: Option<MessageWriter<crate::hud::ShowError>>,
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
-    let target_id = env_res.target.as_ref().and_then(|t| t.obj_id).unwrap_or(0);
     // `FUN_393b7e40` (polled every 1000 ms by `FUN_393b5f60`; checked every frame here): any active
     // local window state (`DAT_3a17e6a0`) whose doodad is gone or out of the interaction reach ends
     // through `FUN_393b7aa0` (`NPC_INTERACTION_END` for the auction, then `INTERACTION_END`, which
@@ -2613,7 +2611,6 @@ pub(super) fn execute(
                     &units,
                     &inventory,
                     env_res.houses.as_deref(),
-                    target_id,
                     obj_id,
                     *skill_id,
                     local.action,

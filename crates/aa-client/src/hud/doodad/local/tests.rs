@@ -1547,6 +1547,12 @@ fn the_evidence_loot_opens_the_crime_report() {
     }
     let Some(game) = game() else { return };
     let mut app = app(game, 15_249, 5911, 11_672, Inventory::default());
+    {
+        let bridge = app.world().get_non_send::<HudBridge>().unwrap();
+        let mut d = bridge.0.borrow_mut();
+        d.snapshot.sub_zone = "Two Crowns".into();
+        d.snapshot.zone = "Marianople".into();
+    }
     event_probe(&app);
     tick(&app);
     app.update();
@@ -1566,7 +1572,8 @@ fn the_evidence_loot_opens_the_crime_report() {
                 .map(|s| s.to_string())
         })
         .unwrap_or_default();
-    assert!(text.contains("crime 3"), "{text}");
+    // FUN_393bb090: the player's sub-zone and zone entry, not the target or the crime kind
+    assert_eq!(text, "Two Crowns>>Marianople");
     assert_eq!(
         lua(
             &app,

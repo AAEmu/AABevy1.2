@@ -81,11 +81,11 @@ pub(super) struct Purchase {
 }
 
 /// A `doodad_func_evidence_item_loots` row: the action id is its `skill_id` (`FUN_393b7eb0`
-/// case 0x34 reads detail+8). `FUN_393bb090` builds the report text from the zone name, the
-/// target name and the client's localized text category 0x5c, not from the crime kind.
+/// case 0x34 reads detail+8). `FUN_393bb090` builds the report text from the player's position
+/// (sub-zone, zone entry, a localized text of category 0x5c), not from the crime kind or the
+/// target.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Evidence {
-    pub crime_kind: u32,
     pub skill: u32,
 }
 
@@ -153,13 +153,9 @@ pub(in crate::hud) enum LocalAction {
     /// The parent house's info (`FUN_393b8400` -> `FUN_393befd0`).
     ParentInfo,
     /// `REPORT_CRIME`; the action id is `doodad_func_evidence_item_loots.skill_id`. The native
-    /// text is zone name, target name and localized text category 0x5c (not the crime kind);
-    /// this port approximates it, see [`run`].
-    Evidence {
-        crime_kind: u32,
-        next_phase: i32,
-        func_id: u32,
-    },
+    /// location text is the player's sub-zone, zone entry and a localized text of category 0x5c;
+    /// this port has the first two, see [`run`].
+    Evidence { next_phase: i32, func_id: u32 },
 }
 
 /// Who says a line of a `bubbles` conversation (`FUN_39371fc0`).
@@ -308,16 +304,10 @@ impl LocalFuncs {
         );
         read_pairs(
             conn,
-            "SELECT id, crime_kind_id, skill_id FROM doodad_func_evidence_item_loots",
-            |id, a, b| {
-                if b > 0 {
-                    out.evidence.insert(
-                        id,
-                        Evidence {
-                            crime_kind: a.max(0) as u32,
-                            skill: b as u32,
-                        },
-                    );
+            "SELECT id, skill_id, 0 FROM doodad_func_evidence_item_loots",
+            |id, a, _| {
+                if a > 0 {
+                    out.evidence.insert(id, Evidence { skill: a as u32 });
                 }
             },
         );
@@ -391,8 +381,7 @@ impl LocalFuncs {
             "DoodadFuncEvidenceItemLoot" => {
                 self.evidence
                     .get(&func_id)
-                    .map(|detail| LocalAction::Evidence {
-                        crime_kind: detail.crime_kind,
+                    .map(|_| LocalAction::Evidence {
                         next_phase,
                         func_id: row_id,
                     })
@@ -484,7 +473,6 @@ pub(super) fn run(
     units: &Units,
     inventory: &Inventory,
     houses: Option<&aa_net::Houses>,
-    target_id: u32,
     obj_id: u32,
     skill_id: u32,
     local: LocalAction,
@@ -580,7 +568,6 @@ pub(super) fn run(
             }
         }
         LocalAction::Evidence {
-            crime_kind,
             next_phase,
             func_id,
         } => {
@@ -590,7 +577,7 @@ pub(super) fn run(
                 next_phase,
                 func_id,
             });
-            let (name, target) = {
+            let (name, text) = {
                 let d = bridge.borrow();
                 let game = d.game.get();
                 let name = doodads
@@ -599,19 +586,17 @@ pub(super) fn run(
                     .and_then(|o| game.and_then(|g| g.doodad.name(o.template_id)))
                     .unwrap_or("?")
                     .to_owned();
-                let target = units
-                    .get(target_id)
-                    .map(|u| u.name.clone())
-                    .unwrap_or_default();
-                (name, target)
-            };
-            // FUN_393bb090 builds `<zone> >> <target> >> <localized text category 0x5c>` from
-            // the client's own tables; AA_DB carries neither the zone names nor that text, so
-            // keep the target and approximate the rest with the doodad name and crime kind.
-            let text = if target.is_empty() {
-                format!("{name} >> crime {crime_kind}")
-            } else {
-                format!("{target} >> {name} >> crime {crime_kind}")
+                // FUN_393bb090 builds the location from the player's position, never the target:
+                // the sub-zone name (`sub_zones`, `FUN_3976ade0`), `>>`, the name of the player's
+                // zone entry (`FUN_395779f0`), `>>`, then a localized text of category 0x5c
+                // reached through that entry (`FUN_397f2180` -> `FUN_397f23d0`, not identified
+                // here, so left out). The HUD snapshot has the first two.
+                let text = [d.snapshot.sub_zone.as_str(), d.snapshot.zone.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(">>");
+                (name, text)
             };
             rt.fire_event("REPORT_CRIME", (name, text));
         }
