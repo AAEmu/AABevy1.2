@@ -48,6 +48,11 @@ pub(super) fn open_bench(data: &mut HudData, object: u32, template: u32) -> Opti
     bench::open(data, object, template).map(|count| (count, replaced))
 }
 
+/// Ends the live bench interaction (native `FUN_393b7aa0` state 5 path).
+pub(super) fn close_bench(data: &mut HudData) -> bool {
+    bench::close(data)
+}
+
 /// The live workbench identity `(object, template)`, or `None` after a close.
 #[cfg(test)]
 pub(super) fn active_bench(data: &HudData) -> Option<(u32, u32)> {

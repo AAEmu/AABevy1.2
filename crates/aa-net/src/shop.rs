@@ -38,6 +38,9 @@ pub enum ShopCommand {
     Buy {
         npc_obj_id: u32,
         doodad_obj_id: u32,
+        /// The doodad func for a `DoodadFuncPurchase` confirmation (`FUN_397ac3f0` +0x14); 0 for
+        /// a merchant/store cart. The server reads the field and ignores it.
+        func_id: u32,
         buy: Vec<BuyEntry>,
         buy_back: Vec<i32>,
         use_aa_point: bool,
@@ -55,6 +58,12 @@ pub enum ShopCommand {
     BuyPriestBuff {
         priest_buff_id: u32,
         npc_obj_id: u32,
+    },
+    /// `CSBuyCoinItemPacket`: confirm a `DoodadFuncPurchase` coin-item purchase. The doodad func
+    /// identifies the goods and the coin price (`FUN_393bac20`'s packet carries only these two).
+    BuyCoin {
+        obj_id: u32,
+        func_id: u32,
     },
 }
 
@@ -94,6 +103,9 @@ impl ShopCommand {
             }
             Self::ListSold { npc_obj_id } if *npc_obj_id == 0 => return Err("sold list has no NPC"),
             Self::BuyPriestBuff { npc_obj_id, .. } if *npc_obj_id == 0 => return Err("blessing has no priest"),
+            Self::BuyCoin { obj_id, func_id } if *obj_id == 0 || *func_id == 0 => {
+                return Err("coin purchase has no doodad func");
+            }
             _ => {}
         }
         Ok(())
@@ -105,15 +117,16 @@ impl ShopCommand {
             Self::Sell { .. } => cs::CSSellItemsPacket,
             Self::ListSold { .. } => cs::CSListSoldItemPacket,
             Self::BuyPriestBuff { .. } => cs::CSBuyPriestBuffPacket,
+            Self::BuyCoin { .. } => cs::CSBuyCoinItemPacket,
         }
     }
 
     /// Call [`Self::validate`] before encoding caller-provided carts. The session does this.
     pub fn write(&self, w: &mut Writer) {
         match self {
-            Self::Buy { npc_obj_id, doodad_obj_id, buy, buy_back, use_aa_point } => {
+            Self::Buy { npc_obj_id, doodad_obj_id, func_id, buy, buy_back, use_aa_point } => {
                 assert!(buy.len() <= 255 && buy_back.len() <= 255, "shop cart exceeds wire count");
-                w.bc(*npc_obj_id).bc(*doodad_obj_id).u32(0).u8(buy.len() as u8).u8(buy_back.len() as u8);
+                w.bc(*npc_obj_id).bc(*doodad_obj_id).u32(*func_id).u8(buy.len() as u8).u8(buy_back.len() as u8);
                 for i in buy {
                     w.u32(i.item_id).u8(i.grade).i32(i.count).u8(i.currency);
                 }
@@ -134,6 +147,9 @@ impl ShopCommand {
             }
             Self::BuyPriestBuff { priest_buff_id, npc_obj_id } => {
                 w.u32(*priest_buff_id).bc(*npc_obj_id);
+            }
+            Self::BuyCoin { obj_id, func_id } => {
+                w.bc(*obj_id).u32(*func_id);
             }
         }
     }
@@ -236,6 +252,7 @@ mod tests {
         let buy = ShopCommand::Buy {
             npc_obj_id: 0x010203,
             doodad_obj_id: 0,
+            func_id: 0x0102_0304,
             buy: vec![BuyEntry { item_id: 8001, grade: 2, count: 3, currency: 1 }],
             buy_back: vec![4],
             use_aa_point: false,
@@ -244,7 +261,7 @@ mod tests {
         assert_eq!(packet.opcode(), 0x0ae);
         assert_eq!(
             packet.encode_body(),
-            [3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0x41, 0x1f, 0, 0, 2, 3, 0, 0, 0, 1, 4, 0, 0, 0, 0]
+            [3, 2, 1, 0, 0, 0, 4, 3, 2, 1, 1, 1, 0x41, 0x1f, 0, 0, 2, 3, 0, 0, 0, 1, 4, 0, 0, 0, 0]
         );
         let packet = ClientMsg::Shop(ShopCommand::Sell {
             npc_obj_id: 0x010203,
@@ -259,6 +276,12 @@ mod tests {
         assert_eq!(packet.opcode(), 0x0b2);
         assert_eq!(packet.encode_body(), [1, 0, 0, 0, 3, 2, 1]);
         assert!(ShopCommand::BuyPriestBuff { priest_buff_id: 1, npc_obj_id: 0 }.validate().is_err());
+        // `CSBuyCoinItemPacket::read_body`: obj_id (bc), id (u32).
+        let packet = ClientMsg::Shop(ShopCommand::BuyCoin { obj_id: 0x010203, func_id: 0x04050607 });
+        assert_eq!(packet.opcode(), 0x0af);
+        assert_eq!(packet.encode_body(), [3, 2, 1, 7, 6, 5, 4]);
+        assert!(ShopCommand::BuyCoin { obj_id: 0, func_id: 1 }.validate().is_err());
+        assert!(ShopCommand::BuyCoin { obj_id: 1, func_id: 0 }.validate().is_err());
     }
 
     #[test]
@@ -266,6 +289,7 @@ mod tests {
         let buy = |count, buy_back| ShopCommand::Buy {
             npc_obj_id: 1,
             doodad_obj_id: 0,
+            func_id: 0,
             buy: vec![BuyEntry { item_id: 8001, grade: 0, count, currency: 0 }],
             buy_back,
             use_aa_point: false,

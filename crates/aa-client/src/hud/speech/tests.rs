@@ -123,6 +123,28 @@ fn effect_speech_uses_its_own_locale_entries_and_native_raw_fallback() {
     assert!(t.text(4).is_none());
 }
 
+/// `bubble_chats` by `bubble_id`: the `START` row, then along `next`; an empty translation falls
+/// back to the raw `speech`, a self-linked line is said once, and `bubble_effects` stays separate.
+#[test]
+fn a_bubble_conversation_starts_at_its_start_line_and_follows_next() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE bubble_effects (id INT, kind_id INT, speech TEXT);
+         CREATE TABLE localized_texts (idx INT, tbl_name TEXT, tbl_column_name TEXT, en_us TEXT);
+         CREATE TABLE bubble_chats (id INT, bubble_id INT, START TEXT, next INT, npc_id INT, doodad_id INT, kind_id INT, speech TEXT);
+         INSERT INTO bubble_effects VALUES (2, 1, 'Effect two');
+         INSERT INTO bubble_chats VALUES (4, 2, 'f', 0, 4212, NULL, 1, 'raw four'), (3, 2, 't', 4, NULL, 2999, 1, 'raw three'),
+             (5, 2, 'f', 0, NULL, NULL, 1, 'unlinked'), (6, 9, 't', 6, NULL, NULL, 2, 'loop');
+         INSERT INTO localized_texts VALUES (3, 'bubble_chats', 'speech', 'S-save me...'), (4, 'bubble_chats', 'speech', '');",
+    ).unwrap();
+    let t = Tables::load(&conn).unwrap();
+    let chain: Vec<_> = t.bubble_chain(2).iter().map(|c| (c.id, c.npc, c.doodad, c.text.as_str())).collect();
+    assert_eq!(chain, [(3, 0, 2999, "S-save me..."), (4, 4212, 0, "raw four")]);
+    assert_eq!(t.bubble_chain(9).len(), 1, "a line naming itself as next is said once");
+    assert!(t.bubble_chain(7).is_empty());
+    assert_eq!(t.text(2), Some("Effect two"));
+}
+
 #[test]
 fn direct_native_timing_retains_sse_fractional_fade() {
     assert_eq!(timing("A").0, 500.0);

@@ -317,6 +317,17 @@ mod tests {
             .unwrap()
             .flatten()
             .collect();
+        // `DoodadFuncEvidenceItemLoot` gives the bar its detail+8 `skill_id` (`FUN_393b7eb0` case
+        // 0x34); that is a local-func action, not the Use/FakeUse detail fallback this pins.
+        let evidence_skills: Vec<u32> = conn
+            .prepare(
+                "SELECT DISTINCT skill_id FROM doodad_func_evidence_item_loots WHERE skill_id > 0",
+            )
+            .and_then(|mut q| {
+                q.query_map([], |r| Ok(crate::hud::data::any_int(r, 0).unwrap() as u32))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
         let (mut gained_detail, mut gained_total) = (0, 0);
         for group in groups {
             let before: Vec<u32> = old
@@ -329,10 +340,11 @@ mod tests {
             {
                 gained_detail += 1;
             }
-            if new
-                .uses(group)
-                .is_some_and(|u| u.skills.iter().any(|skill| !before.contains(skill)))
-            {
+            if new.uses(group).is_some_and(|u| {
+                u.skills
+                    .iter()
+                    .any(|skill| !before.contains(skill) && !evidence_skills.contains(skill))
+            }) {
                 gained_total += 1;
             }
         }

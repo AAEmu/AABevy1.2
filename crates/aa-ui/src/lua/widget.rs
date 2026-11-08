@@ -929,6 +929,23 @@ pub(crate) fn methods(lua: &Lua, ty: &str) -> mlua::Result<Table> {
             )
         })?,
     )?;
+    // The UCC preview's tri-colour background: the toolkit draws it as a plain white image
+    // (the three colours are not applied yet), so `ucc_view.alb` can build and show its window.
+    def(
+        "CreateThreeColorDrawable",
+        method(lua, |lua, id, a| {
+            ret(
+                lua,
+                create_drawable(
+                    lua,
+                    id,
+                    DrawKind::Image,
+                    &a.s(3).unwrap_or_default(),
+                    Some("Textures/Defaults/White.dds".into()),
+                )?,
+            )
+        })?,
+    )?;
     def(
         "CreateIconImageDrawable",
         method(lua, |lua, id, a| {

@@ -190,6 +190,12 @@ pub enum ClientMsg {
     House(crate::housing::HouseCommand),
     /// `CSCreateDoodad`: plant `item_id` as the doodad template `id`.
     CreateDoodad(crate::farm::CreateDoodad),
+    /// `CSChangeDoodadPhasePacket`: a client-side doodad func advances the phase
+    /// (`FUN_397ac8d0(objId, skill, nextPhase, funcId)`), see `hud/doodad/local.rs`.
+    ChangeDoodadPhase { obj_id: u32, skill_id: u32, next_phase: u32, func_id: u32 },
+    /// `CSReportCrimePacket`: the evidence doodad context `FUN_393bb090` stored, sent by
+    /// `X2Trial.ReportCrime` (`FUN_3907bfd0`) with the player's report text.
+    ReportCrime { obj_id: u32, skill_id: u32, next_phase: i32, func_id: u32, msg: String },
     /// `CSRequestCommonFarmList`.
     RequestCommonFarmList,
     /// Opening, closing and moving items of a coffer ([`crate::coffer`]).
@@ -286,6 +292,8 @@ impl ClientMsg {
             Self::Portal { command, .. } => command.opcode(),
             Self::House(command) => command.opcode(),
             Self::CreateDoodad(_) => cs::CSCreateDoodadPacket,
+            Self::ChangeDoodadPhase { .. } => cs::CSChangeDoodadPhasePacket,
+            Self::ReportCrime { .. } => cs::CSReportCrimePacket,
             Self::RequestCommonFarmList => cs::CSRequestCommonFarmList,
             Self::Coffer(command) => command.opcode(),
         }
@@ -466,6 +474,12 @@ impl ClientMsg {
             }
             Self::House(command) => command.write(&mut w),
             Self::CreateDoodad(request) => request.write(&mut w),
+            Self::ChangeDoodadPhase { obj_id, skill_id, next_phase, func_id } => {
+                w.bc(*obj_id).u32(*skill_id).u32(*next_phase).u32(*func_id);
+            }
+            Self::ReportCrime { obj_id, skill_id, next_phase, func_id, msg } => {
+                w.bc(*obj_id).u32(*skill_id).i32(*next_phase).u32(*func_id).string(msg);
+            }
             Self::RequestCommonFarmList => {}
             Self::Coffer(command) => command.write(&mut w),
         }
@@ -2132,6 +2146,30 @@ mod tests {
         assert_eq!(ClientMsg::ResetSkills { ability: 6 }.opcode(), 0x094);
         assert_eq!(ClientMsg::SwapAbility { obj_id: 0x0102, old: 11, ability: 6 }.encode_body(), [2, 1, 0, 11, 6, 0]);
         assert_eq!(ClientMsg::SwapAbility { obj_id: 1, old: 11, ability: 6 }.opcode(), 0x096);
+        // CSChangeDoodadPhasePacket::read: obj_id (bc), then id, next phase and func id as u32
+        // (`FUN_397ac8d0(objId, skill, nextPhase, funcId)` in the 1.2 client).
+        let phase = ClientMsg::ChangeDoodadPhase { obj_id: 0x0102, skill_id: 0x0304_0506, next_phase: 0x0708_090a, func_id: 0x0b0c_0d0e };
+        assert_eq!(phase.opcode(), 0x0e9);
+        assert_eq!(phase.encode_body(), [2, 1, 0, 6, 5, 4, 3, 10, 9, 8, 7, 14, 13, 12, 11]);
+        let body = phase.encode_body();
+        let mut read = crate::wire::Reader::new(&body);
+        assert_eq!(
+            (read.bc().unwrap(), read.u32().unwrap(), read.u32().unwrap(), read.u32().unwrap()),
+            (0x0102, 0x0304_0506, 0x0708_090a, 0x0b0c_0d0e)
+        );
+        assert!(read.remaining() == 0);
+        // CSReportCrimePacket::read: obj_id (bc), skill (u32), next phase (i32), func (u32), msg.
+        let crime = ClientMsg::ReportCrime {
+            obj_id: 0x0102,
+            skill_id: 0x0304_0506,
+            next_phase: -7,
+            func_id: 0x0b0c_0d0e,
+            msg: "report".into(),
+        };
+        assert_eq!(crime.opcode(), 0x076);
+        let body = crime.encode_body();
+        assert_eq!(&body[..15], &[2, 1, 0, 6, 5, 4, 3, 0xf9, 0xff, 0xff, 0xff, 14, 13, 12, 11]);
+        assert_eq!(&body[15..], &[6, 0, b'r', b'e', b'p', b'o', b'r', b't']);
     }
 
     #[test]

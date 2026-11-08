@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use aa_net::model::{Item, ItemDetail};
 use aa_net::shop::{BuyEntry, SellEntry, Shop, ShopCommand, ShopEvent};
-use aa_net::state::{Inventory, Player, Units};
+use aa_net::state::{Doodads, Inventory, Player, Units};
 use aa_net::{Command, Event, NetCommand, NetEvent};
 use aa_ui::UiRuntime;
 use bevy::prelude::*;
@@ -28,6 +28,8 @@ pub struct Good {
 #[derive(Default)]
 pub struct Tables {
     pub merchants: HashMap<u32, Vec<Good>>,
+    /// `merchant_packs.id` -> its goods. A `DoodadFuncStoreUi` names the pack directly, not an NPC.
+    pub packs: HashMap<u32, Vec<Good>>,
     pub bankers: HashSet<u32>,
     pub auctioneers: HashSet<u32>,
     refund_multipliers: HashMap<u8, i64>,
@@ -60,6 +62,30 @@ impl Tables {
                 });
             }
         }
+        // A doodad's merchant pack need not belong to any NPC (the bait barrel's pack 274 has no
+        // `merchants` row), so the packs come from `merchant_goods` directly.
+        let mut q = conn.prepare("SELECT g.merchant_pack_id,g.item_id,g.grade_id,p.kind_id FROM merchant_packs p JOIN merchant_goods g ON g.merchant_pack_id=p.id ORDER BY g.id")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            let pack = any_int(r, 0)? as u32;
+            let item = any_int(r, 1)? as u32;
+            let currency = match any_int(r, 3)? {
+                1 | 2 => 1,
+                3 => 2,
+                4 => 3,
+                5 => 4,
+                _ => 0,
+            };
+            let good = Good {
+                item,
+                grade: any_int(r, 2)?.clamp(0, 11) as u8,
+                currency,
+            };
+            let goods = out.packs.entry(pack).or_default();
+            if !goods.iter().any(|g| g.item == item) {
+                goods.push(good);
+            }
+        }
         let mut q = conn.prepare("SELECT id,banker,auctioneer FROM npcs")?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -77,6 +103,15 @@ impl Tables {
         }
         out.services = services::Tables::load(conn)?;
         Ok(out)
+    }
+
+    /// The goods of an NPC's store or of a doodad's merchant pack.
+    pub fn catalog(&self, npc: (u32, u32), doodad: bool) -> Option<&Vec<Good>> {
+        if doodad {
+            self.packs.get(&npc.1)
+        } else {
+            self.merchants.get(&npc.1)
+        }
     }
 
     pub fn has_service(&self, npc: u32) -> bool {
@@ -124,6 +159,9 @@ enum Req {
 pub struct View {
     pub npc: Option<(u32, u32)>,
     bank: bool,
+    /// The window belongs to a doodad: the wire names `doodad_obj_id`, and the pack catalog is
+    /// `Tables::packs`.
+    pub doodad: bool,
     scope: Option<super::dialog::NpcScope>,
     requests: Vec<Req>,
     sold: Vec<Item>,
@@ -185,13 +223,12 @@ pub fn install(lua: &Lua, hud: &Table, bridge: &Shared) -> mlua::Result<()> {
             let Some(game) = d.game.get() else {
                 return Ok(out);
             };
-            let Some((_, npc)) = d.store.npc else {
+            let Some(npc) = d.store.npc else {
                 return Ok(out);
             };
             for (index, good) in game
                 .stores
-                .merchants
-                .get(&npc)
+                .catalog(npc, d.store.doodad)
                 .into_iter()
                 .flatten()
                 .enumerate()
@@ -369,21 +406,26 @@ fn sold_info(
 fn build_command(
     req: Req,
     npc: (u32, u32),
+    doodad: bool,
     game: &GameData,
     inv: &Inventory,
     sold: &[Item],
 ) -> Option<ShopCommand> {
+    // A doodad store names the doodad in `doodad_obj_id`; an NPC store names the NPC. Sell and the
+    // sold list have only the NPC field on the wire, so both use the object id the server knows.
+    let (npc_obj_id, doodad_obj_id) = if doodad { (0, npc.0) } else { (npc.0, 0) };
     Some(match req {
         Req::ListSold => ShopCommand::ListSold { npc_obj_id: npc.0 },
         Req::BuyBack(index) if index > 0 && index <= sold.len() => ShopCommand::Buy {
-            npc_obj_id: npc.0,
-            doodad_obj_id: 0,
+            npc_obj_id,
+            doodad_obj_id,
+            func_id: 0,
             buy: vec![],
             buy_back: vec![(index - 1) as i32],
             use_aa_point: false,
         },
         Req::Buy(entries) if !entries.is_empty() => {
-            let catalog = game.stores.merchants.get(&npc.1)?;
+            let catalog = game.stores.catalog(npc, doodad)?;
             let mut buy = Vec::new();
             for (index, count, currency) in entries {
                 let good = catalog.get(index.checked_sub(1)?)?;
@@ -398,8 +440,9 @@ fn build_command(
                 });
             }
             ShopCommand::Buy {
-                npc_obj_id: npc.0,
-                doodad_obj_id: 0,
+                npc_obj_id,
+                doodad_obj_id,
+                func_id: 0,
                 buy,
                 buy_back: vec![],
                 use_aa_point: false,
@@ -432,6 +475,58 @@ fn build_command(
     })
 }
 
+/// Closes the store/bank window that is open, with its native end events: `FUN_393b7aa0` raises
+/// `NPC_INTERACTION_END` (0x6c) for interaction states 0xe/0xf/0x11. `true` when one was open.
+pub(super) fn end_interaction(rt: &UiRuntime, bridge: &Shared) -> bool {
+    let mut data = bridge.borrow_mut();
+    if data.store.npc.is_none() {
+        return false;
+    }
+    let scope = data.store.scope.take();
+    let mut owed = false;
+    if let Some(scope) = scope {
+        // `close_npc` owes the end to `flush_ends`. Raise it now instead: the window that replaces
+        // the store (a doodad store, a bench) opens in this frame, and an end flushed on the next
+        // `drive_npc` pass would land after its start and hide it (`store.lua` NPC_INTERACTION_END).
+        // The `NpcEnd` packet stays in `flow.ends` for `flush_ends` to send.
+        owed = super::dialog::close_npc_now(&mut data, scope);
+    }
+    data.store.close();
+    drop(data);
+    if owed {
+        super::dialog::fire_npc_end(&rt.lua, bridge);
+    } else if scope.is_none() {
+        // A doodad store/bank has no NPC flow to flush its end.
+        rt.fire_event("NPC_INTERACTION_END", ());
+    }
+    true
+}
+
+/// A `DoodadFuncStoreUi` / `DoodadFuncBankUi`: native `FUN_393b8cc0` / `FUN_393b8c20` open the
+/// window locally with `NPC_INTERACTION_START("store" | "bank")` (one argument,
+/// `FUN_39424240(0x6b, &one_arg)`) and send no packet. A store's catalog is the func's
+/// `merchant_pack_id`, not an NPC's; a bank has no catalog.
+///
+/// Native `FUN_393b7b10` closes the active interaction (an open NPC store included) first.
+pub(super) fn open_doodad(
+    rt: &UiRuntime,
+    bridge: &Shared,
+    obj_id: u32,
+    pack: u32,
+    bank: bool,
+) -> bool {
+    if end_interaction(rt, bridge) {
+        rt.fire_event("INTERACTION_END", ());
+    }
+    {
+        let mut data = bridge.borrow_mut();
+        data.store.open((obj_id, pack), bank);
+        data.store.doodad = true;
+    }
+    rt.fire_event("NPC_INTERACTION_START", if bank { "bank" } else { "store" });
+    true
+}
+
 /// Called only by the owner for the selected, received action.
 pub(super) fn start_selected(
     rt: &UiRuntime,
@@ -462,13 +557,14 @@ pub(super) fn start_selected(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn update(
+pub(super) fn update(
     rt: Option<NonSend<UiRuntime>>,
     bridge: NonSend<HudBridge>,
     player: Res<Player>,
     units: Res<Units>,
     inventory: Res<Inventory>,
     shop: Res<Shop>,
+    doodads: Option<Res<Doodads>>,
     mut events: MessageReader<NetEvent>,
     mut net: MessageWriter<NetCommand>,
 ) {
@@ -479,9 +575,9 @@ fn update(
             rt.fire_event("STORE_TRADE_FAILED", ());
         }
     }
-    let (context, me, bank) = {
+    let (context, me, bank, doodad) = {
         let d = bridge.0.borrow();
-        (d.store.npc, d.pos, d.store.bank)
+        (d.store.npc, d.pos, d.store.bank, d.store.doodad)
     };
     let Some(npc) = context else { return };
     let visible = rt
@@ -494,24 +590,42 @@ fn update(
         })
         .and_then(|f| f.call::<bool>(()))
         .unwrap_or(false);
-    let close = !visible
-        || !units
-            .get(npc.0)
-            .is_some_and(|u| me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) <= 3.0)
-        || player.spawn.is_none()
-        || bridge.0.borrow().dialog.npc != Some(npc)
-        || !bridge
-            .0
-            .borrow()
-            .store
-            .scope
-            .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope));
+    // A doodad store follows the doodad: native `FUN_393b7e40` ends the interaction at the same
+    // measured 2.1 m surface gap as any doodad use. A fallback gap (no drawn bounds) cannot prove
+    // the player left, so it does not close (the same rule `needs_walk` uses). An NPC store keeps
+    // the talk target and its dialog.
+    let close = if doodad {
+        !visible
+            || doodads.as_deref().is_none_or(|doodads| {
+                super::doodad::left_interaction(&bridge.0.borrow(), doodads, &units, npc.0)
+            })
+    } else {
+        !visible
+            || !units
+                .get(npc.0)
+                .is_some_and(|u| me.distance(Vec3::new(u.pos.x, u.pos.y, u.pos.z)) <= 3.0)
+            || player.spawn.is_none()
+            || bridge.0.borrow().dialog.npc != Some(npc)
+            || !bridge
+                .0
+                .borrow()
+                .store
+                .scope
+                .is_some_and(|scope| super::dialog::scope_current(&bridge.0.borrow(), scope))
+    };
     if close {
+        let was_doodad = doodad;
         let mut data = bridge.0.borrow_mut();
         if let Some(scope) = data.store.scope {
             super::dialog::close_npc(&mut data, scope);
         }
         data.store.close();
+        drop(data);
+        // `FUN_393b7aa0`: the store/bank states raise NPC_INTERACTION_END before INTERACTION_END.
+        if was_doodad {
+            rt.fire_event("NPC_INTERACTION_END", ());
+            rt.fire_event("INTERACTION_END", ());
+        }
         return;
     }
     let requests = std::mem::take(&mut bridge.0.borrow_mut().store.requests);
@@ -539,7 +653,7 @@ fn update(
             let d = bridge.0.borrow();
             d.game
                 .get()
-                .and_then(|g| build_command(request, npc, g, &inventory, &shop.sold))
+                .and_then(|g| build_command(request, npc, doodad, g, &inventory, &shop.sold))
         };
         if let Some(command) = command {
             if matches!(command, ShopCommand::ListSold { .. }) {
@@ -600,6 +714,149 @@ pub fn load_script(lua: &Lua) -> mlua::Result<()> {
 mod tests {
     use super::super::data::{ItemInfo, Named};
     use super::*;
+    use aa_net::interaction::InteractEvent;
+
+    /// An NPC store opened through the real talk flow (skill list 12087), with `NPC_ENDS` counting
+    /// `NPC_INTERACTION_END` and `ENDS_AT_START` holding that count when the next
+    /// `NPC_INTERACTION_START` fires. `None` without the game files or the database.
+    fn npc_store_app() -> Result<Option<(App, Shared)>, Box<dyn std::error::Error>> {
+        if !aa_cry::pak_available() {
+            return Ok(None);
+        }
+        // The fixture loads the game data from the same database (`breath::fixture::runtime`).
+        let path = std::env::var("AA_DB").unwrap_or_else(|_| aa_anim::db::DEFAULT_DB.to_string());
+        if !std::path::Path::new(&path).is_file() {
+            return Ok(None);
+        }
+        let (rt, shared, _path, inventory) =
+            crate::hud::expansion::fixture::runtime(1280.0, 720.0)?;
+        rt.lua
+            .load(
+                "NPC_ENDS=0; ENDS_AT_START=-1; local w=UIParent:CreateWidget('emptywidget','npcStoreEndProbe','UIParent');                  w:RegisterEvent('NPC_INTERACTION_END'); w:RegisterEvent('NPC_INTERACTION_START');                  w:SetHandler('OnEvent',function(self, event) if event == 'NPC_INTERACTION_END' then NPC_ENDS=NPC_ENDS+1 else ENDS_AT_START=NPC_ENDS end end)",
+            )
+            .exec()?;
+        let spawn = crate::hud::fixture_spawn();
+        let player = Player {
+            spawn: Some(spawn.clone()),
+        };
+        let mut npc = spawn.unit.clone();
+        npc.obj_id = 0x010203;
+        npc.kind = aa_net::model::UnitKind::Npc {
+            template_id: 1024,
+            owner_id: 0,
+        };
+        npc.pos = aa_net::Pos::new(1.0, 0.0, 0.0);
+        npc.dead = false;
+        let mut units = Units::default();
+        units.by_id.insert(npc.obj_id, npc.clone());
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_non_send(HudBridge(shared.clone()))
+            .insert_non_send(rt)
+            .insert_resource(player)
+            .insert_resource(units)
+            .insert_resource(inventory)
+            .init_resource::<aa_net::state::PlayerStats>()
+            .init_resource::<aa_net::state::Quests>()
+            .init_resource::<aa_net::state::Skills>()
+            .init_resource::<aa_net::state::Buffs>()
+            .init_resource::<crate::hud::HudSuspended>()
+            .insert_resource(crate::hud::HudBuilt {
+                up: true,
+                fresh: false,
+            })
+            .add_message::<NetEvent>()
+            .add_message::<NetCommand>()
+            .add_systems(
+                Update,
+                (crate::hud::dialog::track_npc, crate::hud::dialog::drive_npc).chain(),
+            );
+        for event in [
+            Event::CharacterSelected(Box::new(spawn.state.clone())),
+            Event::PlayerSpawn(Box::new(spawn.clone())),
+            Event::EnteredWorld,
+        ] {
+            app.world_mut().write_message(NetEvent(event));
+        }
+        app.world_mut()
+            .write_message(NetEvent(Event::UnitSpawned(Box::new(npc.clone()))));
+        app.update();
+        {
+            let mut data = shared.borrow_mut();
+            data.pos = Vec3::ZERO;
+            data.panels.target = Some(crate::hud::panels::TargetSnap {
+                obj_id: npc.obj_id,
+                npc_type: Some(1024),
+                detail: "npc",
+                ..Default::default()
+            });
+            data.target_pos = Some(Vec3::X);
+            crate::hud::dialog::query_npc(&mut data, (npc.obj_id, 1024), None);
+        }
+        app.update();
+        app.update();
+        app.world_mut()
+            .write_message(NetEvent(Event::Interaction(InteractEvent::SkillList {
+                npc_obj_id: npc.obj_id,
+                obj_id: 0,
+                extra_info: 0,
+                pick_id: 0,
+                mouse_button: 2,
+                modifier_keys: 0,
+                skills: vec![12_087],
+                interactable: true,
+            })));
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert!(lua.load("return IsActivatedStore()").eval::<bool>()?);
+        assert!(shared.borrow().store.npc.is_some());
+        // Count only the end the replacement causes; the talk's own target-change end already
+        // fired when the store opened.
+        lua.load("NPC_ENDS=0; ENDS_AT_START=-1").exec()?;
+        Ok(Some((app, shared)))
+    }
+
+    /// Replacing an NPC store with a local window must not add a second
+    /// `NPC_INTERACTION_END`: `close_npc` already owes the talk's end through `flush_ends`.
+    #[test]
+    fn replacing_an_npc_store_fires_one_npc_end() -> Result<(), Box<dyn std::error::Error>> {
+        let Some((mut app, shared)) = npc_store_app()? else {
+            return Ok(());
+        };
+        {
+            let rt = app.world().non_send::<UiRuntime>();
+            let bridge = app.world().non_send::<HudBridge>();
+            assert!(end_interaction(rt, &bridge.0));
+        }
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert_eq!(lua.load("return NPC_ENDS").eval::<i64>()?, 1);
+        assert!(shared.borrow().store.npc.is_none());
+        Ok(())
+    }
+
+    /// A doodad store replacing an NPC store stays open: the NPC talk's end fires before the
+    /// doodad store's `NPC_INTERACTION_START`, not on the next `drive_npc` pass after it (where
+    /// `store.lua` would hide the window it just opened).
+    #[test]
+    fn a_doodad_store_replacing_an_npc_store_stays_open() -> Result<(), Box<dyn std::error::Error>> {
+        let Some((mut app, shared)) = npc_store_app()? else {
+            return Ok(());
+        };
+        {
+            let rt = app.world().non_send::<UiRuntime>();
+            let bridge = app.world().non_send::<HudBridge>();
+            assert!(open_doodad(rt, &bridge.0, 0x0abc, 0, false));
+        }
+        app.update();
+        app.update();
+        let lua = &app.world().non_send::<UiRuntime>().lua;
+        assert!(lua.load("return IsActivatedStore()").eval::<bool>()?);
+        assert!(shared.borrow().store.doodad);
+        assert_eq!(lua.load("return NPC_ENDS").eval::<i64>()?, 1);
+        assert_eq!(lua.load("return ENDS_AT_START").eval::<i64>()?, 1);
+        Ok(())
+    }
 
     #[test]
     fn catalog_preserves_native_currency_order_and_first_duplicate() {
@@ -666,6 +923,51 @@ mod tests {
         game
     }
 
+    /// A doodad store names the doodad in `doodad_obj_id` and reads the func's merchant pack, not an
+    /// NPC catalog.
+    #[test]
+    fn a_doodad_store_names_the_doodad_and_uses_its_pack() {
+        let mut game = fixture();
+        game.stores.packs.insert(
+            274,
+            vec![Good {
+                item: 100,
+                grade: 1,
+                currency: 0,
+            }],
+        );
+        let inv = Inventory::default();
+        let Some(ShopCommand::Buy {
+            npc_obj_id,
+            doodad_obj_id,
+            buy,
+            ..
+        }) = build_command(Req::Buy(vec![(1, 2, 0)]), (500, 274), true, &game, &inv, &[])
+        else {
+            panic!()
+        };
+        assert_eq!((npc_obj_id, doodad_obj_id), (0, 500));
+        assert_eq!(buy.len(), 1);
+        assert_eq!(buy[0].item_id, 100);
+    }
+
+    /// The bait barrel's pack 274 has no `merchants` row; its goods still load for the doodad store.
+    #[test]
+    fn a_doodad_pack_without_an_npc_loads() {
+        let Some(path) = std::env::var("AA_DB")
+            .ok()
+            .filter(|path| std::path::Path::new(path).exists())
+        else {
+            return;
+        };
+        let conn = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        let tables = Tables::load(&conn).unwrap();
+        assert!(
+            tables.packs.get(&274).is_some_and(|goods| !goods.is_empty()),
+            "pack 274 (bait barrel) has no goods"
+        );
+    }
+
     #[test]
     fn shop_uses_catalog_grade_and_actual_inventory_identity() {
         let game = fixture();
@@ -677,7 +979,7 @@ mod tests {
             ..default()
         })];
         let Some(ShopCommand::Buy { buy, .. }) =
-            build_command(Req::Buy(vec![(1, 2, 0)]), (500, 10), &game, &inv, &[])
+            build_command(Req::Buy(vec![(1, 2, 0)]), (500, 10), false, &game, &inv, &[])
         else {
             panic!()
         };
@@ -691,7 +993,7 @@ mod tests {
             }]
         );
         let Some(ShopCommand::Sell { items, .. }) =
-            build_command(Req::Sell(vec![(1, 999)]), (500, 10), &game, &inv, &[])
+            build_command(Req::Sell(vec![(1, 999)]), (500, 10), false, &game, &inv, &[])
         else {
             panic!()
         };
@@ -713,11 +1015,11 @@ mod tests {
             Req::Sell(vec![(1, 888)]),
             Req::BuyBack(1),
         ] {
-            assert!(build_command(req, (500, 10), &game, &inv, &[]).is_none());
+            assert!(build_command(req, (500, 10), false, &game, &inv, &[]).is_none());
         }
         let sold = vec![inv.bag[0].clone().unwrap()];
         let Some(ShopCommand::Buy { buy_back, .. }) =
-            build_command(Req::BuyBack(1), (500, 10), &game, &inv, &sold)
+            build_command(Req::BuyBack(1), (500, 10), false, &game, &inv, &sold)
         else {
             panic!()
         };
@@ -810,6 +1112,6 @@ mod tests {
             template_id: 100,
             ..default()
         })];
-        assert!(build_command(req, (500, 10), &fixture(), &inv, &[]).is_none());
+        assert!(build_command(req, (500, 10), false, &fixture(), &inv, &[]).is_none());
     }
 }
