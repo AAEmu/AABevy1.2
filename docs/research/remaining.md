@@ -212,16 +212,14 @@ These block client parity but are not Bevy work; they are not counted above.
 * **SG1/SG2 (2026-10-30)**: the server never refuses player moves and negative/bogus fall damage
   heals; not re-checked.
 
-## Settings milestone follow-up
+## Settings and gameplay follow-up
 
-The settings branch adds pre-login access to the original Options window
-(GAU-262), preserves the wrapping width for reused option tooltips (GAU-264),
-and clips the scrolling section backgrounds on Quality and Sound Basic
-(GAU-265). See [the login fixture](../aa-client-login.md#settings-before-login)
+The client can open the original Options window before login. Reused option
+tooltips keep their wrapping width, and the Quality and Sound Basic section
+backgrounds clip to their scroll viewports. See [the login fixture](../aa-client-login.md#settings-before-login)
 and [the toolkit notes](../aa-ui.md#options-scroll-backgrounds-and-hover-text).
 
-The gameplay follow-up adds the original default cursor (GAU-263), applies the
-mouse-sensitivity setting to turning (GAU-266), publishes quest and climbing
-quick actions (GAU-267 and GAU-270), corrects neutral presentation (GAU-268),
-repeats held spells (GAU-269), and honors the nest's climbing permission
-(GAU-271). See [the HUD notes](../aa-client-hud.md#quick-interactions-and-held-skills).
+The gameplay changes add the original default cursor, apply mouse sensitivity
+to turning, show quest and climbing quick actions, correct neutral colors,
+repeat held spells, and honor the nest's climbing permission. See
+[the HUD notes](../aa-client-hud.md#quick-interactions-and-held-skills).
