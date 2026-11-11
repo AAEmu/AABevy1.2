@@ -92,6 +92,7 @@ fn notify_release(lua: &Lua, mouse: &mut MouseState, hover: &mut Option<Id>, but
 #[derive(Default)]
 pub struct MouseState {
     pub pressed: Option<Id>,
+    pub(crate) held_click_used: bool,
     last_click: Option<(Id, f64)>,
     /// The slider being dragged (captured until the button is released).
     slider: Option<Id>,
@@ -336,6 +337,7 @@ pub fn update_buttons(
             lua::chat_input::activate(lua, id);
         }
         mouse.pressed = hover;
+        mouse.held_click_used = false;
         ui(lua).tree.touch();
         // A press on an edit box focuses it; anywhere else drops the keyboard focus.
         match hover {
@@ -412,6 +414,7 @@ pub fn update_buttons(
         mouse.slider = None;
         let dragged = mouse.drag.take().filter(|p| p.started);
         let pressed = mouse.pressed.take();
+        let held_click_used = std::mem::take(&mut mouse.held_click_used);
         ui(lua).tree.touch();
         if let Some(h) = hover.filter(|&h| !lua::widget::button_ignores_fading_input(lua, h)) {
             //39283c30 checks before OnMouseUp. A callback-created fade must not
@@ -426,6 +429,7 @@ pub fn update_buttons(
             // the release of a drag: the drop, not a click
             lua::drag::finish(lua, p.src, hover);
         } else if !sizing
+            && !held_click_used
             && let (Some(p), Some(h)) = (pressed, hover)
             && (h == p || !child_resize && ui(lua).tree.is_descendant(h, p))
         {
