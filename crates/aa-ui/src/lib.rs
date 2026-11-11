@@ -242,6 +242,35 @@ impl UiRuntime {
         lua::ui(&self.lua).keyboard.modifiers()
     }
 
+    /// A held pointer slot of the requested type, still under the pointer and not being dragged.
+    pub fn held_slot(&self, slot_type: i64) -> Option<usize> {
+        if lua::drag::holding(&self.lua) {
+            return None;
+        }
+        let u = lua::ui(&self.lua);
+        let pressed = self.mouse.pressed?;
+        let hover = u.hover?;
+        if !u.tree.is_descendant(hover, pressed) && hover != pressed {
+            return None;
+        }
+        let widget = u.tree.widget(pressed)?;
+        let slot = widget.slot.as_ref()?;
+        if widget.enabled
+            && u.tree.visible(pressed)
+            && slot.binded.as_deref() == Some("skill")
+            && let Some(lua::slot::Source::Slot(kind, index)) = slot.source
+            && kind == slot_type
+        {
+            return usize::try_from(index).ok();
+        }
+        None
+    }
+
+    /// A held slot already fired. Its release must not deliver a second click.
+    pub fn consume_held_slot_click(&mut self) {
+        self.mouse.held_click_used = true;
+    }
+
     /// Forward an OS mouse button edge as a key (`mouse3`, `mouse4`, `mouse5`): only a key capture takes it, see `lua::keyboard::button_event`.
     pub fn button_event(&self, name: &str, pressed: bool) -> bool {
         lua::keyboard::button_event(&self.lua, name, pressed)

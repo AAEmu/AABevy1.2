@@ -9704,3 +9704,18 @@ sibling and siblings skipped by a removal during the later scale walk.
 opens `ToggleOptionFrame(true)` and ticks once; it exits non-zero when the open plus the tick take
 more than 3 s. The final local debug run took 354 ms (open 231 ms, next tick 124 ms); restoring the
 per-node refit took 24.4 s. The release report's 54-77 s stall is the same cause.
+
+### Options scroll backgrounds and hover text
+
+The original Quality and Sound scripts anchor section backgrounds to scrolling
+rows while owning them on the viewport. The renderer clips those drawables
+after transforms, preserving the viewport's stationary decorations. The
+original anchored tooltip helper sets an explicit width before enabling word
+wrap. `gametooltip:SetWidth` preserves that width until the wrapping pass,
+including when a previously unwrapped tooltip is being reused.
+
+### Default ArcheAge cursor
+
+The native arrow uses group-cursor resources 128 and 129 from the same optional
+`AA_EXE` source as the repair and resize cursors. The client uses the system
+pointer when the source is missing, and respects an explicit cursor override.

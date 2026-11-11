@@ -23,7 +23,7 @@ use aa_net::state::{Player, Target, Units};
 use aa_world::{TerrainQuery, bevy_to_cry, cry_to_bevy};
 
 use super::api::HudBridge;
-use super::plates::{PlateState, relation_of};
+use super::plates::{PlateState, display_relation};
 use crate::Screen;
 
 /// Where the decal texture is in the pak.
@@ -149,7 +149,7 @@ pub fn update_ring(
     let data = bridge.0.borrow();
     let game = data.game.get();
     let own_faction = player.spawn.as_ref().map_or(0, |s| s.character().faction_id);
-    let relation = relation_of(game, own_faction, unit);
+    let relation = display_relation(game, own_faction, unit);
     let character = matches!(unit.kind, UnitKind::Character { .. });
     let (name, color) = tint(relation, character);
 

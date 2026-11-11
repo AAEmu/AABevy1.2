@@ -211,3 +211,15 @@ These block client parity but are not Bevy work; they are not counted above.
   refused (`2026-10-31-bottest.md` case 7c).
 * **SG1/SG2 (2026-10-30)**: the server never refuses player moves and negative/bogus fall damage
   heals; not re-checked.
+
+## Settings and gameplay follow-up
+
+The client can open the original Options window before login. Reused option
+tooltips keep their wrapping width, and the Quality and Sound Basic section
+backgrounds clip to their scroll viewports. See [the login fixture](../aa-client-login.md#settings-before-login)
+and [the toolkit notes](../aa-ui.md#options-scroll-backgrounds-and-hover-text).
+
+The gameplay changes add the original default cursor, apply mouse sensitivity
+to turning, show quest and climbing quick actions, correct neutral colors,
+repeat held spells, and honor the nest's climbing permission. See
+[the HUD notes](../aa-client-hud.md#quick-interactions-and-held-skills).

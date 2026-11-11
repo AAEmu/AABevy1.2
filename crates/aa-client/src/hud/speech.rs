@@ -27,7 +27,7 @@ use rusqlite::Connection;
 
 use super::api::{HudBridge, Shared};
 use super::data::{any_flag, any_int};
-use super::plates::{PlateState, head_gap, relation_of, unit_height};
+use super::plates::{PlateState, head_gap, display_relation, unit_height};
 use crate::ingame::emote::{Emotes, fill};
 
 /// The initialized unnamed native int wrapper is100; its x87 speed helper
@@ -439,7 +439,7 @@ fn refresh_info(state: NonSend<HudBridge>, units: Res<Units>, player: Res<Player
     info.clear();
     for u in units.iter() {
         let kind = if matches!(u.kind, UnitKind::Character { .. }) { "character" } else { "npc" };
-        info.insert(u.obj_id, (kind, relation_of(game, own_faction, u)));
+        info.insert(u.obj_id, (kind, display_relation(game, own_faction, u)));
     }
     info.insert(spawn.obj_id, ("character", "friendly"));
 }

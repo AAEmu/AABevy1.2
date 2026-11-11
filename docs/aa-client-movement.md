@@ -397,3 +397,6 @@ it is off at once when the close-up ends. aa-world draws it (`aa_world::depth_of
   6.00 m/s forward and -1.45 m/s down, land and slide 0.98 s, then fold in the air and fall at -10.07 m/s. Mutations fail:
   the startup sign (1.32 m), the stop phase guard (20 s budget in `Sliding`), the fold (budget in `FoldFall`) and a
   disabled slide (budget in `SlideWait`).
+
+Mouse orbit and character turning use a lower raw mouse gain and apply the
+Mouse Sensitivity setting (option 67). The same gain is used for yaw and pitch.

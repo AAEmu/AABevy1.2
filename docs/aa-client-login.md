@@ -169,3 +169,17 @@ is drawn smaller than that and had no mips: the line work flickered every second
 `LayoutConfig { use_rounding: false }`, and `art::mipmaps` gives every image of the `login` source a mip chain
 (2x2 box filter in linear light, weighted by alpha) with a trilinear sampler when it has loaded.
 `AA_PRESENT=vsync|novsync|fifo|mailbox|immediate` sets the window's present mode (the default stays uncapped).
+
+## Settings before login
+
+The cog beside Exit opens the original Options window over the login form. It
+loads the original base UI scripts on first use and uses the same settings
+store as the in-game window. The original scripts expose Screen and Sound pages before world entry. While Options is
+open, keyboard and mouse input go to the Lua UI. The cog itself uses the Bevy
+login form's styling.
+
+
+To capture the login cog, run the offline `login_selection` example with
+`--settings-page -1 --offscreen-shot data/local/login-cog.png --shot-after 4`. Add `--settings-page 2`
+for Quality or `--settings-page 3` for Sound Basic. The fixture clicks the
+cog, selects the original page and scrolls its content. Give each capture a distinct output path.

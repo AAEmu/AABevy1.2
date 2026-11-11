@@ -337,6 +337,16 @@ pub(super) fn relation_of(game: Option<&super::data::GameData>, own_faction: u32
     relation
 }
 
+/// Use the neutral palette for friendly non-player units without changing interaction rules.
+pub(super) fn display_relation(game: Option<&super::data::GameData>, own_faction: u32, unit: &aa_net::Unit) -> &'static str {
+    let relation = relation_of(game, own_faction, unit);
+    if relation == "friendly" && !matches!(unit.kind, UnitKind::Character { .. }) {
+        "neutral"
+    } else {
+        relation
+    }
+}
+
 /// What measures a unit's model: the bounds of its static meshes and the joints of its skinned ones
 /// (skinned meshes carry no bounds: aa-cry draws them without frustum culling).
 #[derive(SystemParam)]
@@ -539,7 +549,7 @@ pub fn update_plates(
             if name.is_empty() {
                 continue;
             }
-            let relation = relation_of(game, spawn.character().faction_id, u);
+            let relation = display_relation(game, spawn.character().faction_id, u);
             let faction = unit_faction(game, u);
             if !state.plates.contains_key(&w.id) {
                 debug!("hud: plate {} {:?}: faction {} (unit {}) own {} -> {}, entity {:?}", w.id, name, faction, u.faction_id, spawn.character().faction_id, relation, state.entities.get(&w.id));

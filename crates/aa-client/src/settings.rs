@@ -477,6 +477,10 @@ pub fn install_hud(lua: &Lua) -> mlua::Result<()> {
     lua.load(include_str!("settings.lua"))
         .set_name("@settings.lua")
         .exec()?;
+    install_bindings(lua)
+}
+
+pub(crate) fn install_bindings(lua: &Lua) -> mlua::Result<()> {
     let store = lua.app_data_ref::<LuaStore>().map(|s| s.0.clone()).unwrap_or_else(shared);
     bindings::install(lua, store)
 }

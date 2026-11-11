@@ -853,8 +853,13 @@ pub fn action_keys(
     skills: Res<Skills>,
     buffs: Res<Buffs>,
     mut flight: ResMut<InFlight>,
-    rt: Option<NonSend<aa_ui::UiRuntime>>,
+    mut rt: Option<NonSendMut<aa_ui::UiRuntime>>,
     mut script: ResMut<super::chat::ScriptedKeys>,
+    repeat: (
+        Option<Res<Time>>,
+        Option<Res<crate::ingame::ground_target::GroundSkills>>,
+        Local<Option<(usize, u32, bool, f32)>>,
+    ),
     mut net: MessageWriter<SkillPressed>,
     mut cast: MessageWriter<aa_net::NetCommand>,
     mut failed: MessageWriter<UseFailed>,
@@ -869,8 +874,50 @@ pub fn action_keys(
             use_slot(slot, &env, &flight, &bar, &inventory, &target, &mut net, &mut failed);
         }
     }
-    if focus.0 {
+    let (time, ground, mut held) = repeat;
+    if focus.0 || rt.as_ref().is_some_and(|rt| rt.keyboard_captured()) {
+        *held = None;
         return;
+    }
+    if let Some(time) = time {
+        let mouse = rt.as_ref().and_then(|rt| rt.held_slot(254));
+        let page = bridge.0.borrow().action_page;
+        let key = (1..=58).find(|slot| actions.pressed("action_bar_button", *slot))
+            .and_then(|slot| ActionBar::display_slot_on(page, slot as usize - 1));
+        let candidate = mouse.or(key).and_then(|slot| {
+            let action = bar.get(slot)?;
+            let skill = action.id as u32;
+            (matches!(action.kind, ActionKind::Spell | ActionKind::RidePetSpell)
+                && !ground.as_ref().and_then(|g| g.0.get(&skill)).is_some_and(|skill| {
+                    skill.mode == crate::ingame::ground_target::Mode::Ground
+                }))
+                .then_some((slot, skill, mouse.is_some()))
+        });
+        match (candidate, *held) {
+            (Some((slot, skill, pointer)), Some((old_slot, old_skill, old_pointer, next)))
+                if (slot, skill, pointer) == (old_slot, old_skill, old_pointer) =>
+            {
+                if time.elapsed_secs() >= next {
+                    *held = Some((slot, skill, pointer, time.elapsed_secs() + 0.12));
+                    let data = bridge.0.borrow();
+                    let env = Env::of(&data, Some(&skills), buffs.of(skills.obj_id), Some(&inventory));
+                    let refusal = if env.is_auto_attack(skill) { env.precheck_auto_attack(skill) } else { env.precheck(skill) };
+                    if !env.held_back(skill, &flight) && refusal.is_none() {
+                        net.write(SkillPressed {
+                            skill, item: None, target_obj_id: target.obj_id.unwrap_or(0),
+                            gcd: env.uses_gcd(skill),
+                        });
+                        if pointer && let Some(rt) = rt.as_mut() {
+                            rt.consume_held_slot_click();
+                        }
+                    }
+                }
+            }
+            (Some((slot, skill, pointer)), _) => {
+                *held = Some((slot, skill, pointer, time.elapsed_secs() + 0.3));
+            }
+            (None, _) => *held = None,
+        }
     }
     for (action, slot, button) in actions.hotkeys() {
         if button {
@@ -1210,6 +1257,44 @@ mod tests {
             .drain()
             .collect();
         assert!(matches!(&pressed[..], [skill] if skill.skill == 18132), "{pressed:?}");
+    }
+
+    #[test]
+    fn held_spell_repeats_after_delay_and_stops_on_release() {
+        let data = Rc::new(RefCell::new(crate::hud::api::HudData::default()));
+        let mut actions = crate::settings::Actions::default();
+        actions.tap_for_test_at("action_bar_button", 1);
+        let mut bar = ActionBar::default();
+        bar.slots = vec![aa_net::items::ActionSlot::default(); aa_net::items::ACTION_SLOTS];
+        bar.slots[1] = aa_net::items::ActionSlot { kind: ActionKind::Spell, id: 18132 };
+        let mut app = App::new();
+        app.insert_resource(actions)
+            .insert_resource(HudKeyboardFocus(false))
+            .insert_non_send(HudBridge(data))
+            .insert_resource(bar)
+            .init_resource::<Time>()
+            .init_resource::<Inventory>()
+            .init_resource::<Target>()
+            .init_resource::<Skills>()
+            .init_resource::<Buffs>()
+            .init_resource::<InFlight>()
+            .init_resource::<super::super::chat::ScriptedKeys>()
+            .add_message::<SkillPressed>()
+            .add_message::<aa_net::NetCommand>()
+            .add_message::<UseFailed>()
+            .add_systems(Update, action_keys);
+        let advance = |app: &mut App, ms| {
+            app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(ms));
+            app.update();
+            app.world_mut().resource_mut::<Messages<SkillPressed>>().drain().count()
+        };
+        assert_eq!(advance(&mut app, 0), 1);
+        app.world_mut().resource_mut::<crate::settings::Actions>().script_clear_taps();
+        assert_eq!(advance(&mut app, 299), 0);
+        assert_eq!(advance(&mut app, 2), 1);
+        assert_eq!(advance(&mut app, 130), 1);
+        app.insert_resource(crate::settings::Actions::default());
+        assert_eq!(advance(&mut app, 400), 0);
     }
 
     #[test]

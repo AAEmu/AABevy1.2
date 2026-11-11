@@ -10,6 +10,8 @@ pub(super) enum Source {
     },
     /// A slave unit's "Grab Machine" prompt (`FUN_393bbb80`): `template` is the slave template.
     Npc { obj_id: u32, template: u32 },
+    QuestNpc { obj_id: u32, template: u32 },
+    Climb { obj_id: u32, attached: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

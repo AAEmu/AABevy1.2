@@ -166,7 +166,16 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         let state = button_state(u, id, pressed);
         let quads_start = out.len();
         let mut physical_text = None;
-        let mut divider_ranges = Vec::new();
+        let mut drawable_clips = Vec::new();
+        let scroll_clip = w.clip.then(|| px(u.animations.widget_rect(&u.tree, id), scale));
+        let drawable_clip = |u: &Ui, d| {
+            if w.chat.as_ref().is_some_and(|c| d == c.left_line || d == c.right_line) {
+                return crate::lua::chat::tab_clip(u, d);
+            }
+            scroll_clip.filter(|_| u.tree.get(d).anchors.iter().any(|anchor| {
+                anchor.target != id && u.tree.is_descendant(anchor.target, id)
+            }))
+        };
         let mut ds: Vec<Id> = w
             .drawables
             .iter()
@@ -195,8 +204,8 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         for d in below {
             let first = out.len();
             drawable_quads(u, d, alpha, state, scale, None, &mut out);
-            if w.chat.as_ref().is_some_and(|c| d == c.left_line || d == c.right_line) {
-                divider_ranges.push((first..out.len(), d));
+            if let Some(bounds) = drawable_clip(u, d) {
+                drawable_clips.push((first..out.len(), bounds));
             }
         }
         if !overlay_pass {
@@ -306,8 +315,8 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         for d in above {
             let first = out.len();
             drawable_quads(u, d, alpha, state, scale, None, &mut out);
-            if w.chat.as_ref().is_some_and(|c| d == c.left_line || d == c.right_line) {
-                divider_ranges.push((first..out.len(), d));
+            if let Some(bounds) = drawable_clip(u, d) {
+                drawable_clips.push((first..out.len(), bounds));
             }
         }
         // A widget's scale animation carries its text, art and descendants together.
@@ -336,11 +345,11 @@ pub fn build_quads_split(u: &mut Ui, pressed: Option<Id>) -> (Vec<Quad>, usize) 
         }
         // Clip after animation transforms, in the scaled ancestors' screen rectangles.
         let ancestor_clip = u.animations.widget_clip_rect(&u.tree, id).map(|c| px(c, scale));
-        for (range, d) in divider_ranges.into_iter().rev() {
-            if let Some(c) = crate::lua::chat::tab_clip(u, d) {
-                let c = ancestor_clip.map_or(c, |old| crate::lua::chat::intersect_clip(c, old));
-                clip_range(&mut out, range, c);
-            }
+        // Original Options section backgrounds are owned by the scroll viewport but
+        // anchored to its scrolling rows. The viewport's stationary art stays untouched.
+        for (range, bounds) in drawable_clips.into_iter().rev() {
+            let bounds = ancestor_clip.map_or(bounds, |old| crate::lua::chat::intersect_clip(bounds, old));
+            clip_range(&mut out, range, bounds);
         }
         let bounds = match (crate::lua::chat::tab_clip(u, id), ancestor_clip) {
             (Some(c), Some(old)) => Some(crate::lua::chat::intersect_clip(c, old)),
@@ -1710,5 +1719,42 @@ mod batch_reuse_tests {
         // Host-owned assets remain alive: toolkit never deletes the allocation.
         assert!(world.resource::<Assets<Image>>().contains(a.id()));
         assert!(world.resource::<Assets<Image>>().contains(b.id()));
+    }
+}
+
+#[cfg(test)]
+mod scroll_drawable_tests {
+    use super::*;
+
+    #[test]
+    fn viewport_clips_art_anchored_to_scrolled_rows() -> mlua::Result<()> {
+        let pak = std::env::var_os("AA_PAK").unwrap_or_else(|| aa_pak::DEFAULT_PAK.into());
+        if !std::path::Path::new(&pak).is_file() {
+            return Ok(());
+        }
+        let rt = crate::UiRuntime::new("en_us", 1920.0, 1080.0).unwrap();
+        rt.exec("scrolled section background", r#"
+            local viewport = UIParent:CreateWidget("emptywidget", "viewport", "UIParent")
+            viewport:AddAnchor("TOPLEFT", UIParent, 100, 100)
+            viewport:SetExtent(100, 100)
+            viewport:EnableScroll(true)
+            viewport:Show(true)
+            local row = viewport:CreateChildWidget("emptywidget", "row", 0, true)
+            row:AddAnchor("TOPLEFT", viewport, 0, 0)
+            row:SetExtent(100, 100)
+            row:Show(true)
+            local stationary = viewport:CreateColorDrawable(1, 1, 1, 1, "background")
+            stationary:AddAnchor("TOPLEFT", UIParent, 100, 90)
+            stationary:SetExtent(100, 110)
+            local section = viewport:CreateColorDrawable(1, 0, 0, 1, "artwork")
+            section:AddAnchor("TOPLEFT", row, 0, 0)
+            section:AddAnchor("BOTTOMRIGHT", row, 0, 0)
+            viewport:ChangeChildAnchorByScrollValue("vert", 40)
+        "#)?;
+        let quads = build_quads(&mut crate::lua::ui(&rt.lua), None);
+        assert_eq!(quads.len(), 2);
+        assert_eq!(quads[0].pos, [100., 90., 200., 200.]);
+        assert_eq!(quads[1].pos, [100., 100., 200., 160.]);
+        Ok(())
     }
 }
