@@ -211,3 +211,11 @@ These block client parity but are not Bevy work; they are not counted above.
   refused (`2026-10-31-bottest.md` case 7c).
 * **SG1/SG2 (2026-10-30)**: the server never refuses player moves and negative/bogus fall damage
   heals; not re-checked.
+
+## Settings milestone follow-up
+
+The settings branch adds pre-login access to the original Options window
+(GAU-262), preserves the wrapping width for reused option tooltips (GAU-264),
+and clips the scrolling section backgrounds on Quality and Sound Basic
+(GAU-265). See [the login fixture](../aa-client-login.md#settings-before-login)
+and [the toolkit notes](../aa-ui.md#options-scroll-backgrounds-and-hover-text).

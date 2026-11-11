@@ -23,6 +23,7 @@ mod art;
 mod config;
 mod field;
 mod pointer;
+mod options;
 #[allow(dead_code)]
 mod fixture;
 #[cfg(test)]
@@ -158,6 +159,7 @@ pub fn plugin(app: &mut App) {
             (
                 (rebuild, art::animate.run_if(resource_exists::<Art>), keyboard, mouse, script_input, act, net_events, drive, sync, scroll_fields).chain(),
             )
+                .before(aa_ui::UiInput)
                 .run_if(in_state(Screen::Login)),
         );
 }
@@ -236,6 +238,7 @@ enum Act {
     Submit,
     Cancel,
     Exit,
+    Settings,
 }
 
 // ---- entities -----------------------------------------------------------------------------------
@@ -322,7 +325,14 @@ fn prepare(world: &mut World) {
 fn spawn_screen(mut commands: Commands, art: Option<Res<Art>>, assets: Res<AssetServer>, mut net: MessageWriter<NetCommand>) {
     // nothing of an old session stays up behind the screen
     net.write(NetCommand(Command::Disconnect));
-    let camera = commands.spawn((Name::new("login camera"), LoginEntity, Camera2d, Camera { order: 30, clear_color: ClearColorConfig::Custom(TEAL), ..default() })).id();
+    // Match the compositing space of the Lua camera that draws Options above the form.
+    let camera = commands.spawn((
+        Name::new("login camera"),
+        LoginEntity,
+        Camera2d,
+        Camera { order: 0, clear_color: ClearColorConfig::Custom(TEAL), ..default() },
+        bevy::camera::CompositingSpace::Linear,
+    )).id();
     let full = || Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() };
     let root = commands
         .spawn((
@@ -487,6 +497,7 @@ fn rebuild(
             .with_children(|n| {
                 n.spawn(text_bundle(text, "Tab: next field    Enter: connect", 19.0 * s, Color::srgba(0.70, 0.82, 0.80, 0.9)));
             });
+        options::spawn(h, s);
         h.spawn((
             ExitButton,
             Node { position_type: PositionType::Absolute, right: px(44.0 * s), bottom: px(36.0 * s), padding: UiRect::axes(px(26.0 * s), px(8.0 * s)), border: UiRect::all(px(2.0 * s)), border_radius: BorderRadius::all(px(6.0 * s)), ..default() },
@@ -502,6 +513,7 @@ fn rebuild(
 // ---- input ---------------------------------------------------------------------------------------
 
 fn keyboard(
+    runtime: Option<NonSend<aa_ui::UiRuntime>>,
     mut events: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
     mut form: ResMut<LoginForm>,
@@ -510,6 +522,9 @@ fn keyboard(
 ) {
     let mut clipboard = clipboard;
     let events: Vec<_> = events.read().collect();
+    if options::visible(runtime.as_deref()) {
+        return;
+    }
     let mut modifiers = [KeyCode::ControlLeft, KeyCode::ControlRight, KeyCode::ShiftLeft, KeyCode::ShiftRight]
         .map(|code| keys.pressed(code));
     // InputPlugin has already applied the entire batch. Recover its starting
@@ -668,6 +683,8 @@ fn script_input(time: Res<Time>, mut form: ResMut<LoginForm>, mut acts: MessageW
 
 #[allow(clippy::too_many_arguments)]
 fn act(
+    mut commands: Commands,
+    runtime: Option<NonSend<aa_ui::UiRuntime>>,
     mut acts: MessageReader<Act>,
     mut form: ResMut<LoginForm>,
     mut creds: ResMut<Credentials>,
@@ -680,6 +697,7 @@ fn act(
 ) {
     for act in acts.read().copied().collect::<Vec<_>>() {
         match act {
+            Act::Settings => commands.queue(options::open),
             Act::Exit => {
                 play(&engine, &packs, "default_left_up");
                 exit.write(AppExit::Success);
@@ -689,7 +707,7 @@ fn act(
                 form.status = Status::Idle;
             }
             Act::Submit => {
-                if form.busy() {
+                if form.busy() || options::visible(runtime.as_deref()) {
                     continue;
                 }
                 play(&engine, &packs, "default_left_up");

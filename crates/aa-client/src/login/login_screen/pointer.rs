@@ -86,12 +86,19 @@ pub(super) fn mouse(
     runs: Runs,
     connect: Query<(&ComputedNode, &UiGlobalTransform), With<ConnectButton>>,
     exit: Query<(&ComputedNode, &UiGlobalTransform), With<ExitButton>>,
+    settings: Query<(&ComputedNode, &UiGlobalTransform), With<options::Button>>,
+    runtime: Option<NonSend<aa_ui::UiRuntime>>,
     mut form: ResMut<LoginForm>,
     mut drag: Local<Option<Drag>>,
     mut acts: MessageWriter<Act>,
     sound: (Option<Res<Engine>>, Option<Res<Packs>>),
 ) {
     let Ok(window) = window.single() else { return };
+    if options::visible(runtime.as_deref()) {
+        *drag = None;
+        form.hover = Hover::None;
+        return;
+    }
     if !window.focused {
         *drag = None;
         // Winit focus loss clears keyboard state, not held mouse buttons.
@@ -121,7 +128,9 @@ pub(super) fn mouse(
     }
     if buttons.just_pressed(MouseButton::Left) && form.age >= 0.2 {
         *drag = None;
-        if over_exit {
+        if !form.busy() && settings.iter().any(|(n, t)| hit(n, t)) {
+            acts.write(Act::Settings);
+        } else if over_exit {
             acts.write(Act::Exit);
         } else if over_connect {
             acts.write(Act::Submit);
