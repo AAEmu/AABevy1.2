@@ -650,11 +650,43 @@ pub(crate) fn methods(lua: &Lua, m: &Table) -> mlua::Result<()> {
                 let this = mv.front().cloned();
                 generic.call::<()>(mv)?;
                 if let Some(id) = this.and_then(|v| super::value_id(lua, &v)) {
-                    fit(lua, id);
+                    // SetTargetAnchorTooltip sets the width before enabling wrapping.
+                    // Fitting unwrapped lines here would immediately discard that width.
+                    let explicit_width = name == "SetWidth";
+                    let wrap = ui(lua).tree.get(id).text().is_some_and(|t| t.wrap);
+                    if !explicit_width || wrap {
+                        fit(lua, id);
+                    }
                 }
                 Ok(())
             })?,
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn width_set_before_wrapping_survives_a_previous_unwrapped_tooltip() -> mlua::Result<()> {
+        let pak = std::env::var_os("AA_PAK").unwrap_or_else(|| aa_pak::DEFAULT_PAK.into());
+        if !std::path::Path::new(&pak).is_file() {
+            return Ok(());
+        }
+        let rt = crate::UiRuntime::new("en_us", 1280.0, 720.0).unwrap();
+        rt.exec("anchored tooltip reuse", r#"
+            local tip = UIParent:CreateWidget("gametooltip", "optionTip", "UIParent")
+            tip:SetAutoWordwrap(false)
+            tip:AddLine("Previous tooltip", "", 0, "left", 0, 0)
+            for i = 1, 2 do
+                tip:SetWidth(200)
+                tip:SetAutoWordwrap(true)
+                tip:ClearLines()
+                tip:AddLine(string.rep("Long settings description ", 8), "", 0, "left", 0, 0)
+                assert(tip:GetWidth() == 200)
+                assert(tip:GetLineCount() > 1)
+                tip:SetAutoWordwrap(false)
+            end
+        "#)
+    }
 }
