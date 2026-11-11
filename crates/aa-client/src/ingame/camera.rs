@@ -63,7 +63,7 @@ const FOV_DEG: f32 = 42.75;
 /// The action camera mode's `cl_fov` (group 1).
 const ACTION_FOV_DEG: f32 = 60.0;
 /// Radians per mouse count.
-const MOUSE_SENSITIVITY: f32 = 0.004;
+const MOUSE_SENSITIVITY: f32 = 0.0015;
 
 #[derive(Component)]
 pub struct OrbitCamera {
@@ -445,8 +445,12 @@ pub fn orbit_input(
     let over_ui = over_ui.is_some_and(|o| o.0);
     let dragging = !over_ui && (mouse.pressed(MouseButton::Left) || mouse.pressed(MouseButton::Right));
     if dragging {
-        orbit.yaw -= motion.delta.x * MOUSE_SENSITIVITY;
-        orbit.pitch = clamp_pitch(orbit.pitch - motion.delta.y * MOUSE_SENSITIVITY);
+        let sensitivity = crate::settings::option_number("n:67")
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .map_or(1.0, |value| value.clamp(0.1, 3.0) as f32);
+        let radians_per_pixel = MOUSE_SENSITIVITY * sensitivity;
+        orbit.yaw -= motion.delta.x * radians_per_pixel;
+        orbit.pitch = clamp_pitch(orbit.pitch - motion.delta.y * radians_per_pixel);
     }
     // the camera mode's far limit, or the driven vehicle's camera distance while it is being driven; 1.2's update holds
     // the wanted distance within it every frame, so a nearer limit brings the camera in
