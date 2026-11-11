@@ -174,6 +174,7 @@ pub(super) struct Tables {
     /// `skills.id` -> (`source_mount`, `source_mount_mate`): whether the skill may be used from a mount / a mate only
     /// (`desc +0x14B` / `+0x14C`, `FUN_393b3d50`). A skill missing here is left to the server.
     mount_flags: HashMap<u32, (bool, bool)>,
+    climb_uses: HashSet<(u32, u32)>,
     /// `(doodad_func_group_id, skill)` -> the fish-stand func and its `actual_func_id`.
     fish_funcs: HashMap<(u32, u32), fish::FishFunc>,
     /// `doodad_func_buy_fish_id` / `doodad_func_convert_fish_id` -> accepted item templates.
@@ -213,6 +214,17 @@ impl Tables {
                 &detail,
                 &local,
             );
+        }
+        // Older fixture catalogs can omit the climb flag. Their uses retain the default gate.
+        if let Ok(mut q) = conn.prepare("SELECT doodad_func_group_id, actual_func_id, forbid_on_climb FROM doodad_funcs WHERE actual_func_type = 'DoodadFuncFakeUse'") {
+            let mut rows = q.query([])?;
+            while let Some(r) = rows.next()? {
+                if !super::data::any_flag(r, 2)?
+                    && let Some(skill) = detail.skill("DoodadFuncFakeUse", super::data::any_int(r, 1)? as u32)
+                {
+                    t.climb_uses.insert((super::data::any_int(r, 0)? as u32, skill));
+                }
+            }
         }
         (t.fish_buy_items, t.fish_convert_items, t.fish_max_weights) = fish::load_items(conn);
         if let Ok(mut q) = conn.prepare("SELECT id, source_mount, source_mount_mate FROM skills") {
@@ -1149,7 +1161,12 @@ pub(super) fn install(lua: &Lua, bridge: &Shared) -> mlua::Result<()> {
             })
         })?,
     )?;
-    x2.set("IsDynamicActionSkillToggled", lua.create_function(|_, _: mlua::MultiValue| Ok(false))?)?;
+    let state = bridge.clone();
+    x2.set("IsDynamicActionSkillToggled", lua.create_function(move |_, _: mlua::MultiValue| {
+        Ok(state.borrow().dynamic_actions.shown().is_some_and(|bar| {
+            matches!(bar.source, super::dynamic_actions::Source::Climb { attached: true, .. })
+        }))
+    })?)?;
     let state = bridge.clone();
     x2.set(
         "ExecuteDynamicAction",
@@ -1338,6 +1355,15 @@ fn npc_in_front(
         .any(|u| super::pick::unit_middle_hit(ray, u, world(u)).is_some_and(|a| a < along))
 }
 
+pub(crate) fn has_climbing_use(data: &HudData, doodads: &Doodads) -> bool {
+    let Some(bar) = data.dynamic_actions.shown() else { return false };
+    let super::dynamic_actions::Source::Doodad { obj_id, phase, .. } = bar.source else { return false };
+    doodads.by_id.get(&obj_id).is_some_and(|o| o.func_group_id == phase)
+        && bar.skills.first().is_some_and(|skill| {
+            data.game.get().is_some_and(|g| g.doodad.climb_uses.contains(&(phase, *skill)))
+        })
+}
+
 /// The bar the two interaction producers ask for: the one with the lower [`super::slave::native_key`]
 /// (`FUN_3902ed20` orders the native unit/doodad set by it). A tie keeps the doodad: the native
 /// tie-break is in `FUN_393bd9e0`, which is not decoded. The returned number is the chosen
@@ -1456,7 +1482,14 @@ fn track(
         Option<Res<aa_world::stream::WorldInfo>>,
     ),
     mut out: MessageWriter<NetCommand>,
-    mut asked: Local<std::collections::HashSet<u32>>,
+    (mut asked, quest_state, ladder): (
+        Local<std::collections::HashSet<u32>>,
+        (
+            Option<Res<aa_net::state::Quests>>, Option<Res<aa_net::state::PlayerStats>>,
+            Option<Res<Inventory>>, Option<Res<aa_net::state::Skills>>, Option<Res<aa_net::state::Buffs>>,
+        ),
+        Query<(), With<crate::ingame::ladder::Ladder>>,
+    ),
 ) {
     let Some(rt) = rt else { return };
     let own = player.spawn.as_ref().map_or(0, |s| s.obj_id);
@@ -1504,7 +1537,33 @@ fn track(
             candidate.dist,
         )
     });
-    let (wanted, key_dist) = arbitrate(doodad_wanted, slave_wanted);
+    use super::dynamic_actions::{Shown, Source};
+    let (mut wanted, key_dist) = arbitrate(doodad_wanted, slave_wanted);
+    let climb = ladder_claim.as_deref().and_then(|claim| claim.0);
+    let published_climbing_use = has_climbing_use(&d, &doodads);
+    let climbing_use = !ladder.is_empty() && wanted.as_ref().is_some_and(|shown| {
+        let Source::Doodad { phase, .. } = shown.source else { return false };
+        shown.skills.first().is_some_and(|skill| {
+            d.game.get().is_some_and(|g| g.doodad.climb_uses.contains(&(phase, *skill)))
+        })
+    });
+    if let Some(obj_id) = climb.filter(|_| !climbing_use) {
+        wanted = Some(Shown { source: Source::Climb { obj_id, attached: !ladder.is_empty() }, skills: vec![11004] });
+    } else if wanted.is_none()
+        && d.loot.nearest.is_none()
+        && let (Some(spawn), (Some(quests), Some(stats), Some(inventory), Some(skills), Some(buffs))) =
+            (player.spawn.as_ref(), quest_state)
+        && d.game.get().is_some()
+    {
+        let facts = super::quests::PlayerFacts::of(spawn, &stats, &inventory, &skills, &buffs, &quests);
+        let faction = spawn.character().faction_id;
+        if let Some((obj_id, template)) =
+            super::dialog::nearest_npc(&d, d.pos, &units, own, faction, &facts, 60.0, false, &world)
+            && d.game.get().is_some_and(|g| g.quests.mark(template, &facts).is_some())
+        {
+            wanted = Some(Shown { source: Source::QuestNpc { obj_id, template }, skills: vec![13356] });
+        }
+    }
     let directing = d.dialog.directing;
     // The climb doodad owns F separately from the use bar: it blocks talk, loot and the bar
     // (`claims_key` stays the bar's own "the doodad is nearer than any NPC" claim).
@@ -1535,6 +1594,10 @@ fn track(
                 info!("slave: {obj_id} in reach, uses {skills:?}");
                 rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("npc", *obj_id));
             }
+            Some(Shown { source: Source::QuestNpc { obj_id, .. }, .. }) =>
+                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("npc", *obj_id)),
+            Some(Shown { source: Source::Climb { obj_id, .. }, .. }) =>
+                rt.fire_event("DYNAMIC_ACTION_BAR_SHOW", ("doodad", *obj_id)),
             None => rt.fire_event("DYNAMIC_ACTION_BAR_HIDE", ()),
         }
         d = bridge.0.borrow_mut();
@@ -1547,8 +1610,8 @@ fn track(
         if !typing
             && !loot
             && !directing
-            && !ladder_owns_key
-            && d.doodad.claims_key
+            && (!ladder_owns_key || (climbing_use && published_climbing_use))
+            && (d.doodad.claims_key || climbing_use)
             && actions.just_pressed(&format!("do_interaction_{n}"), 0)
         {
             d.dynamic_actions.request(n);
@@ -2241,7 +2304,10 @@ pub(super) fn execute(
     mut failed: MessageWriter<super::alerts::UseFailed>,
     time: Option<Res<Time>>,
     mut fish: Option<ResMut<fish::FishDialog>>,
-    mut errors: Option<MessageWriter<crate::hud::ShowError>>,
+    (mut errors, mut ladder_grab): (
+        Option<MessageWriter<crate::hud::ShowError>>,
+        Option<ResMut<crate::ingame::ladder::LadderGrab>>,
+    ),
 ) {
     let now = time.as_ref().map_or(0.0, |t| t.elapsed_secs());
     // `FUN_393b7e40` (polled every 1000 ms by `FUN_393b5f60`; checked every frame here): any active
@@ -2321,7 +2387,9 @@ pub(super) fn execute(
     let mut ended = false;
     let execute = match d.dynamic_actions.shown().map(|s| s.source) {
         Some(super::dynamic_actions::Source::Doodad { .. })
-        | Some(super::dynamic_actions::Source::Npc { .. }) => d.dynamic_actions.take_requested(),
+        | Some(super::dynamic_actions::Source::Npc { .. })
+        | Some(super::dynamic_actions::Source::QuestNpc { .. })
+        | Some(super::dynamic_actions::Source::Climb { .. }) => d.dynamic_actions.take_requested(),
         _ => Vec::new(),
     };
     let chosen = std::mem::take(&mut d.doodad.chosen);
@@ -2334,7 +2402,7 @@ pub(super) fn execute(
             super::dynamic_actions::Source::Doodad { obj_id, .. } => {
                 (obj_id, i64::from(pick.skill)) != (pending.obj_id, pending.action)
             }
-            super::dynamic_actions::Source::Npc { .. } => true,
+            _ => true,
         });
         let chosen_differs = menu_obj.is_some_and(|obj_id| {
             obj_id != pending.obj_id || chosen.iter().any(|id| *id != pending.action)
@@ -2400,7 +2468,7 @@ pub(super) fn execute(
                             },
                         ));
                     } else if let Gate::Refuse(code) =
-                        use_gate(state, d.game.get().and_then(|g| g.doodad.mount_flags(pick.skill)), auto_dismount)
+                        use_gate(UseState { climbing: state.climbing && !d.game.get().is_some_and(|g| g.doodad.climb_uses.contains(&(phase, pick.skill))), ..state }, d.game.get().and_then(|g| g.doodad.mount_flags(pick.skill)), auto_dismount)
                     {
                         // `FUN_393b3ec0` runs `FUN_393b3d50` before its range check: a refused use does not walk.
                         debug!("doodad: use {} refused locally ({code}) before the walk", pick.skill);
@@ -2419,6 +2487,16 @@ pub(super) fn execute(
                             now,
                         );
                     }
+                }
+            }
+            super::dynamic_actions::Source::Climb { obj_id, .. } => {
+                if let Some(grab) = ladder_grab.as_mut() {
+                    grab.0 = Some(obj_id);
+                }
+            }
+            super::dynamic_actions::Source::QuestNpc { obj_id, template } => {
+                if units.get(obj_id).is_some_and(|unit| !unit.dead) {
+                    super::dialog::talk_to(&mut d, (obj_id, template), None);
                 }
             }
             super::dynamic_actions::Source::Npc { obj_id, .. } => {
@@ -2568,6 +2646,10 @@ pub(super) fn execute(
         if let Command::UseDoodadSkill { skill_id, .. } = &command {
             // `FUN_393b3d50` comes first in both native use paths, before the skill start that checks the labor.
             let flags = game.and_then(|g| g.doodad.mount_flags(*skill_id));
+            let allowed = game.zip(doodads.by_id.get(&obj_id)).is_some_and(|(g, o)| {
+                g.doodad.climb_uses.contains(&(o.func_group_id, *skill_id))
+            });
+            let state = UseState { climbing: state.climbing && !allowed, ..state };
             match use_gate(state, flags, auto_dismount) {
                 Gate::Pass => {}
                 Gate::Refuse(code) => {
@@ -3307,6 +3389,14 @@ mod tests {
             eprintln!("skip: no client database at {path}");
         }
         conn
+    }
+
+    #[test]
+    fn climb_time_nest_uses_the_catalog_climbing_flag() {
+        let Some(conn) = real_db() else { return };
+        let tables = Tables::load(&conn).unwrap();
+        assert!(tables.climb_uses.contains(&(2556, 12885)));
+        assert!(!tables.climb_uses.contains(&(2556, 11004)));
     }
 
     #[test]

@@ -1084,7 +1084,7 @@ fn plan_npc_click(
 /// The NPC nearest to the player in reach that can be talked to (alive, not hostile); with `wanted`,
 /// only one that has something for the player. `range` is the surface gap limit.
 #[allow(clippy::too_many_arguments)]
-fn nearest_npc(
+pub(super) fn nearest_npc(
     d: &HudData,
     me: Vec3,
     units: &Units,
@@ -1342,9 +1342,12 @@ pub fn talk_input(
 }
 
 fn dispatch_talk(shared: &Shared, npc: (u32, u32), target: Option<u32>) {
-    let mut data = shared.borrow_mut();
-    if super::portal::use_gate(&mut data, npc.0, npc.1) { return; }
-    query_npc(&mut data, npc, target);
+    talk_to(&mut shared.borrow_mut(), npc, target);
+}
+
+pub(super) fn talk_to(data: &mut HudData, npc: (u32, u32), target: Option<u32>) {
+    if super::portal::use_gate(data, npc.0, npc.1) { return; }
+    query_npc(data, npc, target);
 }
 
 /// Starts the walk to an NPC that was right clicked beyond the interaction reach. A mount walk and a doodad

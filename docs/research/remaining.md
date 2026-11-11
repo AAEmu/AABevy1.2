@@ -219,3 +219,9 @@ The settings branch adds pre-login access to the original Options window
 and clips the scrolling section backgrounds on Quality and Sound Basic
 (GAU-265). See [the login fixture](../aa-client-login.md#settings-before-login)
 and [the toolkit notes](../aa-ui.md#options-scroll-backgrounds-and-hover-text).
+
+The gameplay follow-up adds the original default cursor (GAU-263), applies the
+mouse-sensitivity setting to turning (GAU-266), publishes quest and climbing
+quick actions (GAU-267 and GAU-270), corrects neutral presentation (GAU-268),
+repeats held spells (GAU-269), and honors the nest's climbing permission
+(GAU-271). See [the HUD notes](../aa-client-hud.md#quick-interactions-and-held-skills).

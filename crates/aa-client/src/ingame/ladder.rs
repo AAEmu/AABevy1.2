@@ -766,6 +766,7 @@ pub fn control_ladder(
     mut out: MessageWriter<NetCommand>,
     mut state: ResMut<SendState>,
     mut input_state: ResMut<PlayerInput>,
+    hud: Option<NonSend<crate::hud::api::HudBridge>>,
 ) {
     let Ok((
         entity,
@@ -1068,7 +1069,11 @@ pub fn control_ladder(
         );
         return;
     }
-    if used {
+    let requested_release = world.grab.0.take() == Some(ladder.obj_id);
+    let interact_instead = hud.as_ref().is_some_and(|bridge| {
+        crate::hud::doodad::has_climbing_use(&bridge.0.borrow(), &doodads)
+    });
+    if requested_release || (used && !interact_instead) {
         release(
             &mut commands,
             entity,

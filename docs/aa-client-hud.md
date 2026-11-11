@@ -3736,3 +3736,16 @@ Approximate / capture-pending:
 * The hanging refusal also requires `*(doodad+128) == dword_39AC785C` natively (not identified); any ladder grab refuses.
 * A spawn attached without a `LocalMount` counts as a mate.
 * Local NPC interactions (`Command::Interact`, `hud/api.rs`) are not on this path and are unchanged.
+
+### Quick interactions and held skills
+
+The shared quick-action bar shows nearby quest talk and the climb toggle when
+they own the interaction key. While attached, a displayed doodad action whose
+fake-use function permits climbing takes priority over releasing the ladder.
+Climb Time's nest uses this path. Climbing permissions come from the doodad
+function catalog, while death, glider, labor, and other existing gates still apply.
+
+Holding a bound action-bar key or its mouse slot repeats spells through the
+normal cast and cooldown checks. Ground-placement skills still use explicit
+aim and confirm input. Friendly non-player nameplates use the neutral palette,
+and hostile units keep their hostile color.
