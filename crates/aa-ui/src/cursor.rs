@@ -100,7 +100,7 @@ fn source_path(exe: Option<std::ffi::OsString>, pak: Option<std::ffi::OsString>)
 #[derive(Default)]
 pub(crate) struct CursorCache {
     source: Option<PathBuf>,
-    icons: HashMap<Option<ResizeCursor>, Option<[CursorIcon; 2]>>,
+    icons: HashMap<(bool, Option<ResizeCursor>), Option<[CursorIcon; 2]>>,
     previous: Option<(Entity, Option<CursorIcon>)>,
     applied: Option<CursorIcon>,
 }
@@ -124,16 +124,20 @@ pub(crate) fn sync(
     let Ok((window, current)) = windows.single() else {
         return;
     };
-    if !request.repair && request.resize.is_none() {
-        if let Some((old_window, previous)) = cache.previous.take()
-            && old_window == window
-            && current == cache.applied.as_ref()
-        {
-            if let Some(previous) = previous {
-                commands.entity(window).insert(previous);
-            } else {
-                commands.entity(window).remove::<CursorIcon>();
-            }
+    let ordinary = !request.repair && request.resize.is_none();
+    let explicit = |icon: &CursorIcon| {
+        !matches!(icon, CursorIcon::System(bevy::window::SystemCursorIcon::Default))
+    };
+    if ordinary && current != cache.applied.as_ref() && current.is_some_and(explicit) {
+        cache.previous = None;
+        cache.applied = None;
+        return;
+    }
+    if ordinary && cache.previous.as_ref().is_some_and(|(old_window, icon)| {
+        *old_window == window && icon.as_ref().is_some_and(explicit)
+    }) {
+        if let Some((_, Some(previous))) = cache.previous.take() {
+            commands.entity(window).insert(previous);
         }
         cache.applied = None;
         return;
@@ -142,8 +146,9 @@ pub(crate) fn sync(
         cache.source = Some(source.0.clone());
         cache.icons.clear();
     }
-    if !cache.icons.contains_key(&request.resize) {
-        match load_pair(&source.0, request.resize) {
+    let key = (request.repair && request.resize.is_none(), request.resize);
+    if !cache.icons.contains_key(&key) {
+        match load_pair(&source.0, key.0, key.1) {
             Ok(pair) => {
                 let icons = pair.map(|(image, hotspot)| {
                     CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
@@ -152,15 +157,15 @@ pub(crate) fn sync(
                         ..default()
                     }))
                 });
-                cache.icons.insert(request.resize, Some(icons));
+                cache.icons.insert(key, Some(icons));
             }
             Err(error) => {
                 warn!("aa-ui: native cursor {}: {error:#}", source.0.display());
-                cache.icons.insert(request.resize, None);
+                cache.icons.insert(key, None);
             }
         }
     }
-    let Some(icons) = cache.icons.get(&request.resize).and_then(Option::as_ref) else {
+    let Some(icons) = cache.icons.get(&key).and_then(Option::as_ref) else {
         if let Some((old_window, previous)) = cache.previous.take()
             && old_window == window
             && current == cache.applied.as_ref()
@@ -191,15 +196,20 @@ pub fn load_repair_image(executable: &Path, large: bool) -> Result<(Image, (u16,
     repair_image(&bytes, large)
 }
 
-fn load_pair(executable: &Path, resize: Option<ResizeCursor>) -> Result<[(Image, (u16, u16)); 2]> {
+fn load_pair(executable: &Path, repair: bool, resize: Option<ResizeCursor>) -> Result<[(Image, (u16, u16)); 2]> {
     let bytes = std::fs::read(executable).with_context(|| executable.display().to_string())?;
     if let Some(resize) = resize {
         Ok([
             resize_image(&bytes, resize, false)?,
             resize_image(&bytes, resize, true)?,
         ])
-    } else {
+    } else if repair {
         Ok([repair_image(&bytes, false)?, repair_image(&bytes, true)?])
+    } else {
+        Ok([
+            native_image(&bytes, 128, 32, 32, (0, 0))?,
+            native_image(&bytes, 129, 64, 32, (0, 0))?,
+        ])
     }
 }
 
@@ -377,6 +387,24 @@ mod tests {
         app::{App, Update},
         window::{SystemCursorIcon, Window},
     };
+
+    #[test]
+    fn native_pointer_switches_to_repair_and_back() {
+        let source = CursorSource::default();
+        let pak = std::env::var_os("AA_PAK").unwrap_or_else(|| aa_pak::DEFAULT_PAK.into());
+        if !source.0.is_file() || !Path::new(&pak).is_file() {
+            return;
+        }
+        let (mut app, window) = app(None);
+        app.update();
+        let pointer = custom(&app, window).handle.clone();
+        request(&app, true, false);
+        app.update();
+        assert_ne!(custom(&app, window).handle, pointer);
+        request(&app, false, false);
+        app.update();
+        assert_eq!(custom(&app, window).handle, pointer);
+    }
 
     #[test]
     fn explicit_exe_wins_and_unresolvable_pak_falls_back() {

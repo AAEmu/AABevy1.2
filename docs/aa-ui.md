@@ -9713,3 +9713,9 @@ after transforms, preserving the viewport's stationary decorations. The
 original anchored tooltip helper sets an explicit width before enabling word
 wrap. `gametooltip:SetWidth` preserves that width until the wrapping pass,
 including when a previously unwrapped tooltip is being reused.
+
+### Default ArcheAge cursor
+
+The native arrow uses group-cursor resources 128 and 129 from the same optional
+`AA_EXE` source as the repair and resize cursors. The client uses the system
+pointer when the source is missing, and respects an explicit cursor override.
